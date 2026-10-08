@@ -1,0 +1,63 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "uprail-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "X_CLIENT_ID": "YOUR_X_CLIENT_ID",
+    "NEAR_API_BASE": "https://api.fastnear.com",
+    "SOLVER_RELAY_URL": "https://solver-relay.near.org",
+    "ESCROW_ACCOUNT_ID": "escrow.uprail.near",
+    "PAYMENT_EXPIRY_DAYS": "30",
+    "WEBAUTHN_RP_ID": "uprail.app",
+    "WEBAUTHN_RP_NAME": "UPRAIL",
+    "WEBAUTHN_ORIGIN": "https://uprail.app"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ESCROW",
+        "class_name": "EscrowDO"
+      },
+      {
+        "name": "NEAR_CONTAINER",
+        "class_name": "NearContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["EscrowDO"]
+    }
+  ],
+  "containers": {
+    "app": [
+      {
+        "name": "near-service",
+        "instances": 1,
+        "configuration": {
+          "image": "./go-near-service/Dockerfile"
+        }
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "uprail-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "00000000000000000000000000000000"
+    }
+  ]
+}

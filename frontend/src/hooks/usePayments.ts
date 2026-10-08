@@ -1,0 +1,122 @@
+import { useState, useEffect, useCallback } from 'react';
+import { Token, PaymentQuote, PaymentIntent } from '../types';
+import { api, SUPPORTED_TOKENS } from '../lib/api';
+
+export function usePayments() {
+  const [tokens, setTokens] = useState<Token[]>(SUPPORTED_TOKENS);
+  const [selectedToken, setSelectedToken] = useState<Token>(SUPPORTED_TOKENS[0]);
+  const [quote, setQuote] = useState<PaymentQuote | null>(null);
+  const [isQuoting, setIsQuoting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
+  const [history, setHistory] = useState<PaymentIntent[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // Load tokens
+  useEffect(() => {
+    let mounted = true;
+    api.getTokens().then((toks) => {
+      if (mounted && toks.length > 0) {
+        setTokens(toks);
+        setSelectedToken(toks[0]);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Update quote
+  const updateQuote = useCallback(
+    async (tokenId: string, amount: string) => {
+      if (!amount || parseFloat(amount) <= 0) {
+        setQuote(null);
+        return;
+      }
+      try {
+        setIsQuoting(true);
+        const q = await api.getQuote(tokenId, amount);
+        setQuote(q);
+      } catch (err) {
+        console.error('Quote calculation error:', err);
+      } finally {
+        setIsQuoting(false);
+      }
+    },
+    []
+  );
+
+  // Send confidential payment
+  const sendPayment = async (
+    recipientHandle: string,
+    amount: string,
+    memo?: string
+  ): Promise<PaymentIntent> => {
+    try {
+      setIsSubmitting(true);
+      setError(null);
+
+      const cleanHandle = recipientHandle.replace(/^@/, '').trim().toLowerCase();
+      if (!cleanHandle) {
+        throw new Error('Please enter a valid X handle');
+      }
+      if (!amount || parseFloat(amount) <= 0) {
+        throw new Error('Please enter a valid amount to send');
+      }
+
+      const payment = await api.createPayment({
+        recipientHandle: cleanHandle,
+        tokenId: selectedToken.id,
+        amount,
+        memo,
+      });
+
+      setCreatedPayment(payment);
+      // Refresh history
+      loadHistory();
+      return payment;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to send payment';
+      setError(msg);
+      throw err;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Load history
+  const loadHistory = useCallback(async () => {
+    try {
+      setIsLoadingHistory(true);
+      const items = await api.getPaymentHistory();
+      setHistory(items);
+    } catch (err) {
+      console.error('Failed to load payment history:', err);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  const resetCreatedPayment = () => {
+    setCreatedPayment(null);
+  };
+
+  return {
+    tokens,
+    selectedToken,
+    setSelectedToken,
+    quote,
+    isQuoting,
+    isSubmitting,
+    error,
+    createdPayment,
+    history,
+    isLoadingHistory,
+    updateQuote,
+    sendPayment,
+    loadHistory,
+    resetCreatedPayment,
+    clearError: () => setError(null),
+  };
+}
