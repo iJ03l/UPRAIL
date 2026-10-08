@@ -42,13 +42,13 @@ export const AmountInput: React.FC<AmountInputProps> = ({
   return (
     <div className="w-full space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+        <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
           Amount
         </label>
         {selectedToken.balance && (
-          <div className="flex items-center space-x-1.5 text-xs text-slate-400">
+          <div className="flex items-center space-x-1.5 text-xs text-stone-500">
             <span>Available:</span>
-            <span className="font-semibold text-slate-200">
+            <span className="font-bold text-stone-900 font-mono">
               {selectedToken.balance} {selectedToken.symbol}
             </span>
           </div>
@@ -56,8 +56,8 @@ export const AmountInput: React.FC<AmountInputProps> = ({
       </div>
 
       {/* Input container */}
-      <div className="rounded-2xl bg-dark-surface border border-dark-border p-3.5 focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500/20 transition-all">
-        <div className="flex items-center justify-between">
+      <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 focus-within:border-black focus-within:ring-1 focus-within:ring-black/10 focus-within:bg-white transition-all shadow-xs">
+        <div className="flex items-center justify-between gap-3">
           <input
             type="text"
             inputMode="decimal"
@@ -65,7 +65,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
             onChange={handleInputChange}
             disabled={disabled}
             placeholder="0.00"
-            className="w-full bg-transparent text-2xl sm:text-3xl font-extrabold text-white placeholder-slate-600 focus:outline-none"
+            className="w-full bg-transparent text-2xl sm:text-3xl font-extrabold text-stone-950 placeholder-stone-300 focus:outline-none"
           />
 
           <AssetPicker
@@ -77,8 +77,8 @@ export const AmountInput: React.FC<AmountInputProps> = ({
         </div>
 
         {/* Sub-row: USD value and Quick % buttons */}
-        <div className="flex items-center justify-between mt-3 pt-2 border-t border-dark-border/40">
-          <span className="text-xs font-medium text-slate-400">
+        <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-stone-200/80">
+          <span className="text-xs font-mono text-stone-500">
             ≈ ${Number(estimatedUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
           </span>
 
@@ -89,7 +89,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
                 type="button"
                 onClick={() => handleQuickPercent(pct)}
                 disabled={disabled}
-                className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-dark-card hover:bg-slate-700/80 text-slate-300 border border-dark-border transition-colors disabled:opacity-40"
+                className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg bg-stone-200/70 hover:bg-stone-300 text-stone-700 transition-colors disabled:opacity-40"
               >
                 {pct === 100 ? 'MAX' : `${pct}%`}
               </button>

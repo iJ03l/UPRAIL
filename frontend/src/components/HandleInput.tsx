@@ -8,7 +8,7 @@ interface HandleInputProps {
   placeholder?: string;
 }
 
-const FREQUENT_HANDLES = ['alice', 'bob_builder', 'vitalik', 'satoshi'];
+const FREQUENT_HANDLES = ['illia', 'mert', 'alex'];
 
 export const HandleInput: React.FC<HandleInputProps> = ({
   value,
@@ -39,26 +39,26 @@ export const HandleInput: React.FC<HandleInputProps> = ({
   return (
     <div className="w-full space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+        <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
           Recipient
         </label>
         {isValidHandle && (
-          <span className="text-xs text-brand-400 flex items-center space-x-1 font-medium">
+          <span className="text-xs text-stone-900 flex items-center space-x-1 font-medium">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Valid X handle</span>
+            <span>Valid 𝕏 handle</span>
           </span>
         )}
       </div>
 
       <div
-        className={`relative flex items-center rounded-xl bg-dark-surface border transition-all duration-200 ${
+        className={`relative flex items-center rounded-2xl bg-stone-50 border transition-all duration-200 ${
           isFocused
-            ? 'border-brand-500 shadow-glow-brand ring-1 ring-brand-500/20'
-            : 'border-dark-border hover:border-slate-700'
+            ? 'border-stone-900 ring-1 ring-stone-900 bg-white'
+            : 'border-stone-200 hover:border-stone-300'
         } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         {/* At Prefix */}
-        <div className="pl-4 pr-1 text-brand-400 font-mono font-bold flex items-center pointer-events-none select-none">
+        <div className="pl-4 pr-1 text-stone-700 font-mono font-bold flex items-center pointer-events-none select-none">
           <AtSign className="w-5 h-5" />
         </div>
 
@@ -73,7 +73,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
           placeholder={placeholder}
           spellCheck={false}
           autoComplete="off"
-          className="w-full bg-transparent py-3.5 pr-10 text-white placeholder-slate-500 font-medium text-base focus:outline-none"
+          className="w-full bg-transparent py-3.5 pr-10 text-stone-900 placeholder-stone-400 font-medium text-base focus:outline-none"
         />
 
         {/* Clear or Valid Indicator */}
@@ -82,29 +82,29 @@ export const HandleInput: React.FC<HandleInputProps> = ({
             type="button"
             onClick={() => onChange('')}
             disabled={disabled}
-            className="absolute right-3.5 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="absolute right-3.5 p-1 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         ) : (
-          <div className="absolute right-3.5 text-slate-600 pointer-events-none">
+          <div className="absolute right-3.5 text-stone-400 pointer-events-none">
             <User className="w-4 h-4" />
           </div>
         )}
       </div>
 
-      {/* Quick suggest tags */}
+      {/* Quick suggest tags with illia, mert, alex */}
       {!value && (
-        <div className="flex items-center space-x-1.5 pt-1 overflow-x-auto no-scrollbar">
-          <span className="text-[11px] text-slate-500 pr-1">Suggestions:</span>
+        <div className="flex items-center space-x-2 pt-1 overflow-x-auto no-scrollbar">
+          <span className="text-[11px] text-stone-400 pr-1">Try:</span>
           {FREQUENT_HANDLES.map((h) => (
             <button
               key={h}
               type="button"
               onClick={() => onChange(h)}
-              className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60 transition-colors flex items-center space-x-0.5"
+              className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 hover:text-black text-xs font-mono transition-colors border border-stone-200"
             >
-              <span>@{h}</span>
+              @{h}
             </button>
           ))}
         </div>

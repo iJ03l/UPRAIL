@@ -4,7 +4,13 @@ import { FIGURE_SPRITE_PNG } from './figureSpriteBase64';
 const LOW_W = 48;
 const LOW_H = 80;
 
-export const QuantusInteractiveCanvas: React.FC = () => {
+interface QuantusInteractiveCanvasProps {
+  fullScreenRoam?: boolean;
+}
+
+export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> = ({
+  fullScreenRoam,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -50,41 +56,75 @@ export const QuantusInteractiveCanvas: React.FC = () => {
     };
     window.addEventListener('resize', handleResize);
 
-    // Mouse coordinates (for pixel grid excitation & sprite curiosity)
-    const mouse = { x: width * 0.5, y: height * 0.5, active: false };
+    const isFullScreen = fullScreenRoam ?? (typeof window !== 'undefined' && window.location.pathname !== '/');
 
-    // Adventurous autonomous entity coordinates
+    // Mouse coordinates
+    const mouse = { x: width * 0.75, y: 280, active: false };
+
+    // Entity state: Starts centered on app/dashboard, or in hero right-hand blank space on landing
+    const startX = isFullScreen ? width * 0.5 : width * 0.75;
+    const startY = isFullScreen ? height * 0.4 : 280;
+
     const entity = {
-      x: width * 0.75,
-      y: height * 0.35,
-      targetX: width * 0.75,
-      targetY: height * 0.35,
+      x: startX,
+      y: startY,
+      targetX: startX,
+      targetY: startY,
       vx: 0,
       vy: 0,
       facingLeft: false,
       wanderTimer: 0,
-      roamSpeed: 0.025,
-      isFleeing: false,
+      roamSpeed: 0.022,
     };
 
-    let lastScrollY = window.scrollY;
+    let scrollY = window.scrollY;
 
-    const pickNewRoamTarget = () => {
-      // Pick an adventurous point on screen, favoring interesting margins and open space
-      const margin = 100;
+    const getHeroBounds = () => {
+      const isDesktop = width >= 768;
+      const minX = isDesktop ? width * 0.58 : width * 0.40;
+      const maxX = width * 0.90;
+      const minY = isDesktop ? 150 : 300;
+      const maxY = isDesktop ? Math.min(height * 0.68, 520) : Math.min(height * 0.75, 580);
+      return { minX, maxX, minY, maxY };
+    };
+
+    const pickHeroRoamTarget = () => {
+      const { minX, maxX, minY, maxY } = getHeroBounds();
+      entity.targetX = minX + Math.random() * (maxX - minX);
+      entity.targetY = minY + Math.random() * (maxY - minY);
+      entity.roamSpeed = 0.016 + Math.random() * 0.018;
+    };
+
+    const pickScrolledRoamTarget = () => {
+      // When scrolled down, entity explores downward across the page
+      const margin = 80;
       entity.targetX = margin + Math.random() * (width - margin * 2);
-      entity.targetY = 80 + Math.random() * (height - 200);
-      entity.roamSpeed = 0.015 + Math.random() * 0.02;
+      // Place target based on current viewport height
+      entity.targetY = 140 + Math.random() * (height - 260);
+      entity.roamSpeed = 0.024 + Math.random() * 0.02;
     };
 
-    pickNewRoamTarget();
+    const pickFullScreenRoamTarget = () => {
+      // Full screen roaming across entire dashboard viewport
+      const marginX = Math.min(width * 0.08, 90);
+      const marginY = Math.min(height * 0.08, 80);
+      entity.targetX = marginX + Math.random() * (width - marginX * 2);
+      entity.targetY = marginY + Math.random() * (height - marginY * 2);
+      entity.roamSpeed = 0.016 + Math.random() * 0.02;
+    };
+
+    if (isFullScreen) {
+      pickFullScreenRoamTarget();
+    } else {
+      pickHeroRoamTarget();
+    }
 
     const handlePointerMove = (e: PointerEvent) => {
       mouse.x = e.clientX;
       mouse.y = e.clientY;
       mouse.active = true;
 
-      // Excite Quantus dithered grid blocks near cursor
+      // Excite Quantus pixel blocks near cursor
       const gx = Math.floor(e.clientX / GRID_SIZE);
       const gy = Math.floor(e.clientY / GRID_SIZE);
       const radius = 3;
@@ -96,7 +136,7 @@ export const QuantusInteractiveCanvas: React.FC = () => {
             const dist = Math.hypot(dx, dy);
             if (dist <= radius) {
               const idx = cy * cols + cx;
-              const boost = (1 - dist / radius) * 0.7;
+              const boost = (1 - dist / radius) * 0.65;
               gridEnergies[idx] = Math.min(1.0, gridEnergies[idx] + boost);
               gridTypes[idx] = Math.random() > 0.4 ? 0 : 1;
             }
@@ -104,35 +144,46 @@ export const QuantusInteractiveCanvas: React.FC = () => {
         }
       }
 
-      // If mouse gets very close to the entity, it playfully dashes away or explores
+      // If mouse comes near the entity:
       const distToEntity = Math.hypot(e.clientX - entity.x, e.clientY - entity.y);
-      if (distToEntity < 130) {
-        // Playfully dart to a new adventure quadrant
-        const angle = Math.atan2(entity.y - e.clientY, entity.x - e.clientX);
-        entity.targetX = Math.max(80, Math.min(width - 80, entity.x + Math.cos(angle) * 220));
-        entity.targetY = Math.max(80, Math.min(height - 180, entity.y + Math.sin(angle) * 220));
-        entity.roamSpeed = 0.045; // swift adventurous dodge
+      if (distToEntity < 120) {
+        if (isFullScreen) {
+          const angle = Math.atan2(entity.y - e.clientY, entity.x - e.clientX);
+          entity.targetX = Math.max(70, Math.min(width - 70, entity.x + Math.cos(angle) * 220));
+          entity.targetY = Math.max(80, Math.min(height - 120, entity.y + Math.sin(angle) * 220));
+          entity.roamSpeed = 0.042;
+        } else if (scrollY < 60) {
+          // In hero: playfully dodge, but stay strictly within right-hand blank space
+          pickHeroRoamTarget();
+        } else {
+          // When scrolled: dart away to new open space
+          const angle = Math.atan2(entity.y - e.clientY, entity.x - e.clientX);
+          entity.targetX = Math.max(80, Math.min(width - 80, entity.x + Math.cos(angle) * 180));
+          entity.targetY = Math.max(80, Math.min(height - 180, entity.y + Math.sin(angle) * 180));
+          entity.roamSpeed = 0.04;
+        }
       }
     };
 
     const handleScroll = () => {
-      const curY = window.scrollY;
-      const scrollDiff = curY - lastScrollY;
-      lastScrollY = curY;
+      scrollY = window.scrollY;
 
-      // Adventurous entity responds to scroll momentum: floats along with the wave!
-      entity.y -= scrollDiff * 0.15;
-      entity.targetY -= scrollDiff * 0.25;
+      if (scrollY >= 60) {
+        // Only move down / explore when scrolled down!
+        // As scrollY increases, shift targetY downwards
+        const scrollFactor = (scrollY - 60) * 0.12;
+        entity.targetY = (280 + scrollFactor) % (height - 180) + 100;
+        entity.roamSpeed = 0.03;
+      } else {
+        // Back at top hero: smoothly return to right-hand blank zone
+        pickHeroRoamTarget();
+      }
 
-      // Wrap or clamp within window view
-      if (entity.y < 60) entity.y = height - 120;
-      if (entity.y > height - 60) entity.y = 80;
-
-      // Light up horizontal Quantus dither line on scroll
+      // Light up horizontal Quantus dither wave on scroll
       const row = Math.floor(Math.random() * rows);
       for (let cx = 0; cx < cols; cx++) {
         const idx = row * cols + cx;
-        gridEnergies[idx] = Math.min(0.85, gridEnergies[idx] + 0.3);
+        gridEnergies[idx] = Math.min(0.85, gridEnergies[idx] + 0.28);
         gridTypes[idx] = 0;
       }
     };
@@ -146,34 +197,64 @@ export const QuantusInteractiveCanvas: React.FC = () => {
     const tick = () => {
       time += 0.03;
 
-      // Periodic autonomous wander decision
+      // Periodic autonomous wander
       entity.wanderTimer += 1;
-      if (entity.wanderTimer > 180 + Math.random() * 120) {
+      if (entity.wanderTimer > 150 + Math.random() * 80) {
         entity.wanderTimer = 0;
-        pickNewRoamTarget();
+        if (isFullScreen) {
+          pickFullScreenRoamTarget();
+        } else if (scrollY < 60) {
+          pickHeroRoamTarget();
+        } else {
+          pickScrolledRoamTarget();
+        }
       }
 
-      // Smooth floating ease toward roam target
+      // If at hero level (scrollY < 60) and not fullscreen, strictly enforce right-hand blank space restriction
+      if (!isFullScreen && scrollY < 60) {
+        const { minX, maxX, minY, maxY } = getHeroBounds();
+        entity.targetX = Math.max(minX, Math.min(maxX, entity.targetX));
+        entity.targetY = Math.max(minY, Math.min(maxY, entity.targetY));
+      } else if (isFullScreen) {
+        const marginX = 60;
+        const marginY = 60;
+        entity.targetX = Math.max(marginX, Math.min(width - marginX, entity.targetX));
+        entity.targetY = Math.max(marginY, Math.min(height - marginY, entity.targetY));
+      }
+
+      // Smooth floating ease toward target
       const dx = entity.targetX - entity.x;
       const dy = entity.targetY - entity.y;
       entity.vx = dx * entity.roamSpeed;
       entity.vy = dy * entity.roamSpeed;
 
-      // Add gentle cosmic floating bob
-      const floatBob = Math.sin(time * 1.8) * 0.8;
-      const floatDrift = Math.cos(time * 1.2) * 0.5;
+      // Gentle floating bob
+      const floatBob = Math.sin(time * 1.8) * 0.6;
+      const floatDrift = Math.cos(time * 1.2) * 0.35;
 
       entity.x += entity.vx + floatDrift;
       entity.y += entity.vy + floatBob;
 
-      if (Math.abs(entity.vx) > 0.3) {
+      // Hard clamp while roaming
+      if (!isFullScreen && scrollY < 60) {
+        const { minX, maxX, minY, maxY } = getHeroBounds();
+        entity.x = Math.max(minX, Math.min(maxX, entity.x));
+        entity.y = Math.max(minY, Math.min(maxY, entity.y));
+      } else if (isFullScreen) {
+        const marginX = 50;
+        const marginY = 50;
+        entity.x = Math.max(marginX, Math.min(width - marginX, entity.x));
+        entity.y = Math.max(marginY, Math.min(height - marginY, entity.y));
+      }
+
+      if (Math.abs(entity.vx) > 0.2) {
         entity.facingLeft = entity.vx < 0;
       }
 
       ctx.clearRect(0, 0, width, height);
 
       // -------------------------------------------------------------
-      // 1. Quantus Dithered Background Matrix Pass
+      // 1. Quantus Dithered Grid Matrix Pass
       // -------------------------------------------------------------
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
@@ -181,7 +262,7 @@ export const QuantusInteractiveCanvas: React.FC = () => {
           let energy = gridEnergies[idx];
 
           if (energy > 0.01) {
-            gridEnergies[idx] = energy * 0.94; // smooth fade
+            gridEnergies[idx] = energy * 0.94;
             const bx = c * GRID_SIZE;
             const by = r * GRID_SIZE;
             const size = GRID_SIZE - 2;
@@ -195,11 +276,10 @@ export const QuantusInteractiveCanvas: React.FC = () => {
             }
             ctx.fillRect(bx, by, size, size);
           } else {
-            // Subtle quiet technical grid dots
             if ((c + r) % 4 === 0) {
               const bx = c * GRID_SIZE + GRID_SIZE / 2;
               const by = r * GRID_SIZE + GRID_SIZE / 2;
-              ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.028)';
               ctx.fillRect(bx, by, 1.5, 1.5);
             }
           }
@@ -207,7 +287,7 @@ export const QuantusInteractiveCanvas: React.FC = () => {
       }
 
       // -------------------------------------------------------------
-      // 2. Adventurous Background Entity (Real Figure Sprite)
+      // 2. The Figure Sprite (Restricted to blank space on hero, moving on scroll)
       // -------------------------------------------------------------
       if (spriteReady) {
         const isMobile = width < 768;
@@ -218,7 +298,7 @@ export const QuantusInteractiveCanvas: React.FC = () => {
         const drawX = entity.x - dw / 2;
         const drawY = entity.y - dh / 2;
 
-        // Subtle soft shadow on white floor under the roaming entity
+        // Soft floor shadow
         ctx.save();
         ctx.fillStyle = 'rgba(6, 46, 12, 0.09)';
         ctx.beginPath();
@@ -226,7 +306,7 @@ export const QuantusInteractiveCanvas: React.FC = () => {
         ctx.fill();
         ctx.restore();
 
-        // Glow Pass: 1 screen pixel larger, soft green glow
+        // Glow pass
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         ctx.globalAlpha = 0.28;
@@ -242,7 +322,7 @@ export const QuantusInteractiveCanvas: React.FC = () => {
         }
         ctx.restore();
 
-        // Sharp Pass: Crisp nearest-neighbor square pixels
+        // Sharp nearest-neighbor pass
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         ctx.globalAlpha = 0.95;

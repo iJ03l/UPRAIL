@@ -22,16 +22,15 @@ export const TextReveal: React.FC<TextRevealProps> = ({
       const rect = containerRef.current.getBoundingClientRect();
       const windowHeight = window.innerHeight;
 
-      // Start revealing as container scrolls up from bottom
-      const start = windowHeight * 0.9;
-      const end = windowHeight * 0.15;
+      // Container starts illuminating when it reaches the bottom half of the screen
+      // and completes full illumination as it passes the top third
+      const revealStart = windowHeight * 0.85;
+      const revealEnd = windowHeight * 0.20;
 
-      const progress = Math.min(
-        1,
-        Math.max(0, (start - rect.top) / (start - end))
-      );
+      const currentProgress = (revealStart - rect.top) / (revealStart - revealEnd);
+      const clamped = Math.min(1, Math.max(0, currentProgress));
 
-      setScrollProgress(progress);
+      setScrollProgress(clamped);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -45,11 +44,11 @@ export const TextReveal: React.FC<TextRevealProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`w-full flex flex-wrap gap-x-3 sm:gap-x-5 md:gap-x-6 gap-y-2 sm:gap-y-4 ${className}`}
+      className={`w-full flex flex-wrap gap-x-3 sm:gap-x-6 md:gap-x-8 gap-y-2 sm:gap-y-4 lg:gap-y-6 ${className}`}
     >
       {words.map((word, index) => {
         // Individual word threshold
-        const wordThreshold = (index / totalWords);
+        const wordThreshold = index / totalWords;
         const isRevealed = scrollProgress >= wordThreshold;
         const isAccent = accentWords.some((a) =>
           word.toLowerCase().includes(a.toLowerCase())
@@ -58,10 +57,10 @@ export const TextReveal: React.FC<TextRevealProps> = ({
         return (
           <span
             key={index}
-            className={`transition-all duration-200 inline-block tracking-tight ${
+            className={`transition-all duration-300 inline-block tracking-tighter ${
               isRevealed
                 ? isAccent
-                  ? 'text-[#E05326] font-black underline decoration-[#E05326]/40 decoration-4 underline-offset-8 drop-shadow-[0_2px_12px_rgba(224,83,38,0.25)]'
+                  ? 'text-[#E05326] font-black underline decoration-[#E05326]/40 decoration-4 sm:decoration-8 underline-offset-8 drop-shadow-[0_2px_12px_rgba(224,83,38,0.25)] scale-[1.02]'
                   : 'text-stone-950 font-black'
                 : 'text-stone-300 font-bold opacity-30 select-none'
             }`}

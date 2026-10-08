@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   Fingerprint,
-  ShieldCheck,
   CheckCircle2,
   AlertCircle,
   ArrowRight,
+  ArrowLeft,
   Search,
   Wallet,
   Check,
+  Shield,
 } from 'lucide-react';
 import { useClaimFlow } from '../hooks/useClaimFlow';
 import { PasskeyPrompt } from '../components/PasskeyPrompt';
@@ -46,7 +47,6 @@ export const ClaimPage: React.FC = () => {
     e.preventDefault();
     clearError();
     if (!inputCode.trim()) return;
-    // Extract code if user pasted a full URL
     let code = inputCode.trim();
     if (code.includes('payment=')) {
       code = code.split('payment=')[1].split('&')[0];
@@ -82,34 +82,39 @@ export const ClaimPage: React.FC = () => {
   );
 
   return (
-    <div className="max-w-xl mx-auto px-4 py-8 sm:py-12">
+    <div className="w-full space-y-6">
+      {/* Back Link */}
+      <Link
+        to="/app"
+        className="inline-flex items-center space-x-1.5 text-xs font-mono text-stone-500 hover:text-black transition-colors"
+      >
+        <ArrowLeft className="w-3.5 h-3.5" />
+        <span>Back to Home</span>
+      </Link>
+
       {/* Page Header */}
       <div className="text-center space-y-2 mb-8">
-        <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-[#E05326]/10 border border-[#E05326]/30 text-[#E05326] text-xs font-mono font-medium mb-1">
-          <Fingerprint className="w-3.5 h-3.5" />
-          <span>Device Passkey Claim</span>
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight">
-          Claim <span className="text-gradient-burnt">Confidential Payment</span>
+        <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
+          Claim <span className="text-black">Private Payment</span>
         </h1>
-        <p className="text-sm text-[#C3B9B2] max-w-md mx-auto">
-          Sign with Touch ID, Face ID, or your device passcode on app.uprail.world. Zero wallet app or seed phrase required.
+        <p className="text-sm text-stone-600 max-w-md mx-auto">
+          Unlock your payment with Touch ID, Face ID, or your device passcode. No wallet app or seed phrase required.
         </p>
       </div>
 
       {/* Error Alert */}
       {error && (
-        <div className="mb-6 p-4 rounded-2xl bg-red-950/60 border border-red-500/40 text-red-300 text-xs flex items-center space-x-2.5 animate-fade-in">
-          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+        <div className="mb-6 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center space-x-2.5 animate-fade-in">
+          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
       {/* Search / Claim code input if no payment loaded */}
       {!payment && !isLoading && (
-        <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl mb-8">
+        <div className="rounded-3xl p-6 sm:p-8 shadow-xs bg-white border border-stone-200 mb-8">
           <form onSubmit={handleManualSearch} className="space-y-4">
-            <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 block">
+            <label className="text-xs font-bold uppercase tracking-wider text-stone-600 block">
               Enter Claim Code or Link
             </label>
             <div className="relative flex items-center">
@@ -118,27 +123,14 @@ export const ClaimPage: React.FC = () => {
                 value={inputCode}
                 onChange={(e) => setInputCode(e.target.value)}
                 placeholder="e.g. up_98a712f or paste claim link"
-                className="w-full bg-dark-surface rounded-2xl pl-4 pr-12 py-3.5 text-sm text-white placeholder-slate-500 border border-dark-border focus:outline-none focus:border-brand-500 font-mono"
+                className="w-full bg-stone-50 rounded-2xl pl-4 pr-12 py-3.5 text-sm text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black focus:bg-white font-mono"
               />
               <button
                 type="submit"
                 disabled={!inputCode.trim()}
-                className="absolute right-2 p-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-dark-bg disabled:opacity-40 transition-colors"
+                className="absolute right-2 p-2 rounded-xl bg-black hover:bg-stone-800 text-white disabled:opacity-40 transition-colors cursor-pointer"
               >
                 <Search className="w-4 h-4 font-bold" />
-              </button>
-            </div>
-            <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
-              <span>Have a demo link?</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setInputCode('up_98a712f');
-                  fetchPayment('up_98a712f');
-                }}
-                className="text-brand-400 hover:underline font-semibold"
-              >
-                Load Demo Payment (up_98a712f)
               </button>
             </div>
           </form>
@@ -147,56 +139,55 @@ export const ClaimPage: React.FC = () => {
 
       {/* Loading Skeleton */}
       {isLoading && (
-        <div className="glass-card rounded-3xl p-8 text-center space-y-4 animate-pulse">
-          <div className="w-16 h-16 bg-slate-800 rounded-full mx-auto" />
-          <div className="h-6 w-48 bg-slate-800 rounded mx-auto" />
-          <div className="h-4 w-32 bg-slate-800 rounded mx-auto" />
+        <div className="rounded-3xl p-8 bg-white border border-stone-200 text-center space-y-4 animate-pulse mb-8">
+          <div className="w-16 h-16 bg-stone-200 rounded-full mx-auto" />
+          <div className="h-6 w-48 bg-stone-200 rounded mx-auto" />
+          <div className="h-4 w-32 bg-stone-200 rounded mx-auto" />
         </div>
       )}
 
-      {/* Payment Active Card */}
+      {/* Active Payment Card */}
       {payment && (
-        <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden mb-8">
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand-500 via-emerald-400 to-near-cyan" />
+        <div className="rounded-3xl p-6 sm:p-8 shadow-xs bg-white border border-stone-200 relative mb-8">
 
           {/* Claimed Celebration Banner */}
           {payment.status === 'claimed' ? (
             <div className="text-center space-y-4 py-4 animate-fade-in">
-              <div className="w-20 h-20 rounded-3xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-glow-brand">
-                <CheckCircle2 className="w-10 h-10" />
+              <div className="w-18 h-18 rounded-3xl bg-stone-100 border border-stone-300 text-stone-900 flex items-center justify-center mx-auto shadow-xs">
+                <CheckCircle2 className="w-9 h-9" />
               </div>
 
               <div>
-                <h3 className="text-2xl font-black text-white">Payment Claimed!</h3>
-                <p className="text-xs text-emerald-400 font-medium mt-1">
-                  Confidential funds shielded in your device passkey vault
+                <h3 className="text-2xl font-black text-stone-950 font-display">Payment Claimed!</h3>
+                <p className="text-xs text-stone-600 font-bold mt-1">
+                  Confidential funds safely unlocked on your device
                 </p>
               </div>
 
               {/* Amount Display */}
-              <div className="py-4 px-6 rounded-2xl bg-dark-surface/90 border border-dark-border inline-block min-w-[240px]">
-                <div className="text-3xl font-extrabold text-white">
+              <div className="py-4 px-6 rounded-2xl bg-stone-50 border border-stone-200 inline-block min-w-[240px]">
+                <div className="text-3xl font-extrabold text-stone-950 font-display">
                   {payment.amount} {payment.token.symbol}
                 </div>
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-stone-500 font-mono mt-0.5">
                   ≈ ${payment.amountUsd.toFixed(2)} USD
                 </div>
               </div>
 
               {/* Transaction details */}
-              <div className="text-left bg-dark-surface/60 rounded-2xl p-4 border border-dark-border/40 text-xs space-y-2">
-                <div className="flex justify-between text-slate-400">
+              <div className="text-left bg-stone-50 rounded-2xl p-4 border border-stone-200 text-xs space-y-2 font-mono">
+                <div className="flex justify-between text-stone-600">
                   <span>Recipient:</span>
-                  <span className="text-brand-400 font-semibold">@{payment.recipientHandle}</span>
+                  <span className="text-stone-900 font-bold">@{payment.recipientHandle}</span>
                 </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>Sender:</span>
-                  <span className="text-slate-300 font-mono">@{payment.senderHandle}</span>
+                <div className="flex justify-between text-stone-600">
+                  <span>Sent by:</span>
+                  <span className="text-stone-900 font-bold">@{payment.senderHandle}</span>
                 </div>
                 {payment.claimTxHash && (
-                  <div className="flex justify-between text-slate-400 pt-1 border-t border-dark-border/40">
+                  <div className="flex justify-between text-stone-600 pt-1 border-t border-stone-200">
                     <span>NEAR Intent Claim:</span>
-                    <span className="text-emerald-400 font-mono text-[11px] truncate max-w-[180px]">
+                    <span className="text-stone-900 font-bold truncate max-w-[180px]">
                       {payment.claimTxHash}
                     </span>
                   </div>
@@ -207,14 +198,14 @@ export const ClaimPage: React.FC = () => {
               <div className="pt-2 flex items-center gap-3">
                 <button
                   onClick={() => setShowWithdrawModal(true)}
-                  className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center space-x-2 transition-colors"
+                  className="flex-1 py-3 px-4 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-900 font-bold text-xs flex items-center justify-center space-x-2 transition-colors border border-stone-200 cursor-pointer"
                 >
-                  <Wallet className="w-4 h-4 text-brand-400" />
+                  <Wallet className="w-4 h-4 text-stone-900" />
                   <span>Withdraw to Address</span>
                 </button>
                 <Link
-                  to="/"
-                  className="flex-1 py-3 px-4 rounded-xl bg-brand-500 hover:bg-brand-600 text-dark-bg font-extrabold text-xs flex items-center justify-center space-x-2 transition-colors"
+                  to="/app"
+                  className="flex-1 py-3 px-4 rounded-xl bg-black hover:bg-stone-800 text-white font-extrabold text-xs flex items-center justify-center space-x-2 transition-colors cursor-pointer"
                 >
                   <span>Send a Payment</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -226,48 +217,48 @@ export const ClaimPage: React.FC = () => {
             <div className="space-y-6">
               {/* Ready Header */}
               <div className="flex items-center justify-between">
-                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-stone-100 border border-stone-300 text-stone-900 text-xs font-bold">
+                  <span className="w-2 h-2 rounded-full bg-stone-900 animate-pulse" />
                   <span>Payment Ready to Claim</span>
                 </div>
-                <span className="text-xs text-slate-500">
-                  Expires in 7 days
+                <span className="text-xs font-mono text-stone-400">
+                  30-day auto-refund escrow
                 </span>
               </div>
 
               {/* Token & Big Amount */}
-              <div className="p-6 rounded-2xl bg-dark-surface/90 border border-dark-border text-center space-y-2">
+              <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200 text-center space-y-2">
                 <img
                   src={payment.token.iconUrl}
                   alt={payment.token.symbol}
-                  className="w-14 h-14 rounded-full mx-auto bg-slate-800 p-1 border border-slate-700"
+                  className="w-14 h-14 rounded-full mx-auto bg-white p-1 border border-stone-200 shadow-sm"
                 />
-                <div className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+                <div className="text-3xl sm:text-4xl font-extrabold text-stone-950 font-display tracking-tight">
                   {payment.amount} {payment.token.symbol}
                 </div>
-                <div className="text-sm font-semibold text-slate-400">
+                <div className="text-sm font-semibold text-stone-500 font-mono">
                   ≈ ${payment.amountUsd.toFixed(2)} USD
                 </div>
               </div>
 
               {/* Sender & Memo Information */}
-              <div className="space-y-3 bg-dark-surface/50 rounded-2xl p-4 border border-dark-border/40 text-xs">
-                <div className="flex justify-between items-center text-slate-400">
+              <div className="space-y-3 bg-stone-50 rounded-2xl p-4 border border-stone-200 text-xs">
+                <div className="flex justify-between items-center text-stone-600">
                   <span>Intended Recipient</span>
-                  <span className="font-bold text-brand-400 text-sm">
+                  <span className="font-bold text-stone-900 text-sm font-mono">
                     @{payment.recipientHandle}
                   </span>
                 </div>
-                <div className="flex justify-between items-center text-slate-400">
+                <div className="flex justify-between items-center text-stone-600">
                   <span>Sent by</span>
-                  <span className="text-slate-200 font-mono">
+                  <span className="text-stone-900 font-bold font-mono">
                     @{payment.senderHandle}
                   </span>
                 </div>
                 {payment.memo && (
-                  <div className="pt-2 border-t border-dark-border/40 text-slate-300">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">
-                      Note from sender:
+                  <div className="pt-2 border-t border-stone-200 text-stone-800">
+                    <span className="text-[10px] uppercase font-bold text-stone-400 block mb-0.5">
+                      Private Note:
                     </span>
                     "{payment.memo}"
                   </div>
@@ -275,11 +266,11 @@ export const ClaimPage: React.FC = () => {
               </div>
 
               {/* Recipient Notice */}
-              <div className="flex items-start space-x-2.5 p-3.5 rounded-2xl bg-[#E05326]/10 border border-[#E05326]/30 text-xs text-[#FFAB76]">
-                <Fingerprint className="w-4 h-4 text-[#E05326] flex-shrink-0 mt-0.5" />
+              <div className="flex items-start space-x-2.5 p-3.5 rounded-2xl bg-stone-100 border border-stone-200 text-xs text-stone-700">
+                <Fingerprint className="w-4 h-4 text-stone-900 flex-shrink-0 mt-0.5" />
                 <p>
                   Claim with your device passkey (Touch ID, Face ID, or PIN).
-                  No seed phrases, no private key management.
+                  No seed phrases, zero private keys to manage.
                 </p>
               </div>
 
@@ -287,16 +278,16 @@ export const ClaimPage: React.FC = () => {
               <button
                 onClick={() => setShowPasskeyModal(true)}
                 disabled={isClaiming}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-[#E05326] to-[#FF6B35] text-white font-display font-black text-base flex items-center justify-center space-x-2 shadow-xl shadow-[#E05326]/30 hover:shadow-[0_0_35px_rgba(224,83,38,0.6)] hover:opacity-95 transition-all transform hover:-translate-y-0.5 cursor-pointer disabled:opacity-60"
+                className="w-full py-4 px-6 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-sm uppercase tracking-wider flex items-center justify-center space-x-2 shadow-xs transition-all cursor-pointer disabled:opacity-60"
               >
                 {isClaiming ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Verifying Passkey Biometrics...</span>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Verifying Touch ID / Face ID...</span>
                   </>
                 ) : (
                   <>
-                    <Fingerprint className="w-5 h-5" />
+                    <Fingerprint className="w-4 h-4" />
                     <span>Claim with Device Passkey</span>
                     <ArrowRight className="w-4 h-4 ml-1" />
                   </>
@@ -308,46 +299,46 @@ export const ClaimPage: React.FC = () => {
       )}
 
       {/* Device Shielded Vault Balances Card */}
-      <div className="glass-card rounded-3xl p-6 sm:p-7 shadow-xl">
-        <div className="flex items-center justify-between mb-4">
+      <div className="rounded-3xl p-6 sm:p-7 shadow-lg bg-white border border-stone-200">
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center space-x-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-base font-extrabold text-white">Your Shielded Device Vault</h3>
+            <Shield className="w-5 h-5 text-stone-900" />
+            <h3 className="text-base font-bold text-stone-950 font-display">Your Shielded Device Vault</h3>
           </div>
-          <span className="text-xs font-mono font-bold text-emerald-400">
+          <span className="text-xs font-mono font-bold text-stone-900">
             ${totalShieldedUsd.toFixed(2)} USD
           </span>
         </div>
-        <p className="text-xs text-slate-400 mb-4">
-          Protected by your device-bound NIST P-256 passkey. Only this device can sign transfers.
+        <p className="text-xs text-stone-500 mb-4">
+          Secured by your hardware-bound passkey. Only this device can authorize withdrawals.
         </p>
 
         <div className="space-y-2">
           {shieldedBalances.map((bal) => (
             <div
               key={bal.token.id}
-              className="flex items-center justify-between p-3 rounded-2xl bg-dark-surface border border-dark-border"
+              className="flex items-center justify-between p-3 rounded-2xl bg-stone-50 border border-stone-200"
             >
               <div className="flex items-center space-x-2.5">
                 <img
                   src={bal.token.iconUrl}
                   alt={bal.token.symbol}
-                  className="w-7 h-7 rounded-full bg-slate-800"
+                  className="w-7 h-7 rounded-full bg-white border border-stone-200"
                 />
                 <div>
-                  <span className="text-xs font-bold text-white block">
+                  <span className="text-xs font-bold text-stone-900 block font-mono">
                     {bal.token.symbol}
                   </span>
-                  <span className="text-[11px] text-slate-400">
+                  <span className="text-[10px] text-stone-400">
                     {bal.token.name}
                   </span>
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-xs font-bold text-white block">
+                <span className="text-xs font-bold text-stone-900 block font-mono">
                   {bal.amount} {bal.token.symbol}
                 </span>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[10px] text-stone-500 font-mono">
                   ≈ ${bal.amountUsd.toFixed(2)}
                 </span>
               </div>
@@ -370,30 +361,30 @@ export const ClaimPage: React.FC = () => {
 
       {/* Withdraw Modal */}
       {showWithdrawModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-          <div className="relative w-full max-w-md rounded-3xl bg-dark-card border border-dark-border p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-white mb-2">Withdraw from Shielded Vault</h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Send your shielded tokens to any external NEAR or exchange account.
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-stone-950 mb-1 font-display">Withdraw to Wallet</h3>
+            <p className="text-xs text-stone-500 mb-4">
+              Send your shielded tokens to any external NEAR or exchange address.
             </p>
 
             {withdrawSuccess ? (
-              <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs flex items-center space-x-2 mb-4">
-                <Check className="w-4 h-4 text-emerald-400" />
-                <span>Withdrawal intent submitted successfully!</span>
+              <div className="p-4 rounded-2xl bg-stone-100 border border-stone-300 text-stone-900 text-xs flex items-center space-x-2 mb-4">
+                <Check className="w-4 h-4 text-stone-900" />
+                <span>Withdrawal submitted successfully!</span>
               </div>
             ) : (
               <form onSubmit={handleWithdraw} className="space-y-4">
                 <div>
-                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1">
-                    Destination Account / Address
+                  <label className="text-xs font-bold uppercase tracking-wider text-stone-600 block mb-1">
+                    Destination Address
                   </label>
                   <input
                     type="text"
                     value={withdrawAddress}
                     onChange={(e) => setWithdrawAddress(e.target.value)}
-                    placeholder="e.g. alice.near or 0x..."
-                    className="w-full bg-dark-surface rounded-xl px-4 py-3 text-xs text-white placeholder-slate-500 border border-dark-border focus:outline-none focus:border-brand-500 font-mono"
+                    placeholder="e.g. illia.near or 0x..."
+                    className="w-full bg-stone-50 rounded-xl px-4 py-3 text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono"
                     required
                   />
                 </div>
@@ -401,13 +392,13 @@ export const ClaimPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setShowWithdrawModal(false)}
-                    className="flex-1 py-3 text-xs text-slate-400 hover:text-white"
+                    className="flex-1 py-3 text-xs text-stone-500 hover:text-stone-900 font-bold"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3 rounded-xl bg-brand-500 hover:bg-brand-600 text-dark-bg font-extrabold text-xs transition-colors"
+                    className="flex-1 py-3 rounded-xl bg-black hover:bg-stone-800 text-white font-extrabold text-xs transition-colors cursor-pointer"
                   >
                     Confirm Withdrawal
                   </button>

@@ -1,65 +1,17 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Navbar } from './components/Navbar';
 import { LandingPage } from './pages/LandingPage';
+import { AppHome } from './pages/AppHome';
 import { SendPage } from './pages/SendPage';
+import { ReceivePage } from './pages/ReceivePage';
 import { ClaimPage } from './pages/ClaimPage';
 import { HistoryPage } from './pages/HistoryPage';
-import { useXAuth } from './hooks/useXAuth';
-import { Shield, ExternalLink } from 'lucide-react';
+import { LoginPage } from './pages/LoginPage';
+import { AppLayout } from './components/AppLayout';
 
 const isSubdomainApp = () => {
   if (typeof window === 'undefined') return false;
   return window.location.hostname.startsWith('app.');
-};
-
-// Layout for app routes
-const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, login, logout } = useXAuth();
-
-  return (
-    <div className="min-h-screen bg-[#0A0807] text-[#F5F2EF] flex flex-col font-sans selection:bg-[#E05326] selection:text-white">
-      <Navbar user={user} onLogin={login} onLogout={logout} />
-
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
-        {children}
-      </main>
-
-      <footer className="w-full border-t border-[#2C221D] bg-[#0A0807] py-6 sm:py-8 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#8A7E76]">
-          <div className="flex items-center space-x-2">
-            <span className="font-display font-bold text-white">UPRAIL</span>
-            <span>•</span>
-            <span className="flex items-center text-[#C3B9B2]">
-              <Shield className="w-3.5 h-3.5 text-[#E05326] mr-1.5 inline" />
-              Confidential Value Railway • app.uprail.world
-            </span>
-          </div>
-
-          <div className="flex items-center space-x-6">
-            <a
-              href="https://docs.near-intents.org"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-white transition-colors flex items-center"
-            >
-              NEAR Intents
-              <ExternalLink className="w-3 h-3 ml-1" />
-            </a>
-            <a
-              href="https://uprail.world"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-white transition-colors"
-            >
-              uprail.world
-            </a>
-            <span className="font-mono text-[#E05326]">v1.0.0-GA</span>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
 };
 
 export const App: React.FC = () => {
@@ -68,13 +20,13 @@ export const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Landing Page on uprail.world (or / if not on app. subdomain) */}
+        {/* Landing Page on uprail.world, or App Home on app.uprail.world */}
         <Route
           path="/"
           element={
             isAppDomain ? (
               <AppLayout>
-                <SendPage />
+                <AppHome />
               </AppLayout>
             ) : (
               <LandingPage />
@@ -82,15 +34,25 @@ export const App: React.FC = () => {
           }
         />
 
-        {/* Functional App Routes on app.uprail.world or /app */}
+        {/* Dedicated App Dashboard */}
         <Route
           path="/app"
           element={
             <AppLayout>
-              <SendPage />
+              <AppHome />
             </AppLayout>
           }
         />
+        <Route
+          path="/app/home"
+          element={
+            <AppLayout>
+              <AppHome />
+            </AppLayout>
+          }
+        />
+
+        {/* Dedicated Send Page (𝕏 Handle & Wallet via Intents) */}
         <Route
           path="/app/send"
           element={
@@ -99,6 +61,20 @@ export const App: React.FC = () => {
             </AppLayout>
           }
         />
+        <Route path="/send" element={<Navigate to="/app/send" replace />} />
+
+        {/* Dedicated Receive Page (Cross-chain Intents) */}
+        <Route
+          path="/app/receive"
+          element={
+            <AppLayout>
+              <ReceivePage />
+            </AppLayout>
+          }
+        />
+        <Route path="/receive" element={<Navigate to="/app/receive" replace />} />
+
+        {/* Dedicated Claim Page (Hardware Biometrics) */}
         <Route
           path="/app/claim"
           element={
@@ -115,24 +91,7 @@ export const App: React.FC = () => {
             </AppLayout>
           }
         />
-        <Route
-          path="/app/history"
-          element={
-            <AppLayout>
-              <HistoryPage />
-            </AppLayout>
-          }
-        />
-
-        {/* Direct shortcuts */}
-        <Route
-          path="/claim"
-          element={
-            <AppLayout>
-              <ClaimPage />
-            </AppLayout>
-          }
-        />
+        <Route path="/claim" element={<Navigate to="/app/claim" replace />} />
         <Route
           path="/claim/:id"
           element={
@@ -141,14 +100,20 @@ export const App: React.FC = () => {
             </AppLayout>
           }
         />
+
+        {/* Dedicated History Page (Simple clean list) */}
         <Route
-          path="/history"
+          path="/app/history"
           element={
             <AppLayout>
               <HistoryPage />
             </AppLayout>
           }
         />
+        <Route path="/history" element={<Navigate to="/app/history" replace />} />
+
+        {/* Dedicated Login Page (Not a modal) */}
+        <Route path="/login" element={<LoginPage />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

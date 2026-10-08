@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Search, Check, Shield } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronDown, Search, X, Check } from 'lucide-react';
 import { Token } from '../types';
 
 interface AssetPickerProps {
@@ -17,18 +17,17 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outer click
+  // Close on Escape key
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    if (isOpen) {
+      document.addEventListener('keydown', handleKeyDown);
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
 
   const filteredTokens = tokens.filter(
     (t) =>
@@ -37,117 +36,159 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
   );
 
   return (
-    <div className="relative" ref={dropdownRef}>
-      {/* Trigger Button */}
+    <>
+      {/* Trigger Button (Compact pill inside the amount row) */}
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center space-x-2.5 px-3 py-2 rounded-xl bg-dark-card hover:bg-dark-cardHover border border-dark-border text-left transition-all duration-150 focus:outline-none focus:ring-1 focus:ring-brand-500/50 disabled:opacity-50"
+        onClick={() => setIsOpen(true)}
+        className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-left transition-colors focus:outline-none focus:border-black disabled:opacity-50 shadow-xs cursor-pointer select-none"
+        title="Change Token"
       >
         <img
           src={selectedToken.iconUrl}
           alt={selectedToken.symbol}
-          className="w-6 h-6 rounded-full bg-slate-800 object-cover"
+          className="w-5 h-5 rounded-full bg-stone-100 object-cover border border-stone-200 flex-shrink-0"
           onError={(e) => {
             (e.target as HTMLImageElement).src =
               'https://raw.githubusercontent.com/feathericons/feather/master/icons/circle.svg';
           }}
         />
-        <div className="flex flex-col">
-          <span className="text-sm font-bold text-white tracking-wide">
-            {selectedToken.symbol}
-          </span>
-        </div>
-        <ChevronDown
-          className={`w-4 h-4 text-slate-400 ml-1 transition-transform duration-200 ${
-            isOpen ? 'rotate-180' : ''
-          }`}
-        />
+        <span className="text-xs sm:text-sm font-bold text-stone-950 font-mono tracking-tight">
+          {selectedToken.symbol}
+        </span>
+        <ChevronDown className="w-3.5 h-3.5 text-stone-400 ml-0.5 flex-shrink-0" />
       </button>
 
-      {/* Modal / Dropdown list */}
+      {/* 
+        Token Selection Modal (Rendered outside the input box, fixed overlay)
+        Displays full list cleanly without clipping or bounding box constraints
+      */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-dark-card border border-dark-border shadow-2xl p-2.5 z-50 animate-fade-in">
-          {/* Search */}
-          <div className="relative mb-2">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search assets..."
-              className="w-full bg-dark-surface rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 border border-dark-border focus:outline-none focus:border-brand-500"
-              autoFocus
-            />
-          </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 selection:bg-black selection:text-white">
+          {/* Backdrop */}
+          <div
+            onClick={() => setIsOpen(false)}
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity cursor-pointer z-[100]"
+            aria-hidden="true"
+          />
 
-          <div className="max-h-60 overflow-y-auto space-y-1">
-            {filteredTokens.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center py-4">No tokens found</p>
-            ) : (
-              filteredTokens.map((token) => {
-                const isSelected = token.id === selectedToken.id;
-                return (
-                  <button
-                    key={token.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectToken(token);
-                      setIsOpen(false);
-                      setSearch('');
-                    }}
-                    className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-colors text-left ${
-                      isSelected
-                        ? 'bg-brand-500/10 border border-brand-500/30'
-                        : 'hover:bg-slate-800/60 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <img
-                        src={token.iconUrl}
-                        alt={token.symbol}
-                        className="w-7 h-7 rounded-full bg-slate-800 object-cover"
-                      />
-                      <div>
-                        <div className="flex items-center space-x-1.5">
-                          <span className="text-sm font-bold text-white">
-                            {token.symbol}
-                          </span>
-                          {token.badge && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/20 flex items-center">
-                              <Shield className="w-2.5 h-2.5 mr-0.5 inline" />
-                              {token.badge}
-                            </span>
+          {/* Modal Panel (Completely outside the input container) */}
+          <div className="relative w-full max-w-sm bg-white rounded-3xl border border-stone-200 shadow-2xl p-5 z-[101] animate-fade-in space-y-4 font-sans">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+              <div>
+                <h3 className="font-display font-extrabold text-base text-stone-950">
+                  Select Asset
+                </h3>
+                <p className="text-[11px] font-mono text-stone-400">
+                  Confidential & cross-chain tokens
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="p-1.5 rounded-xl text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-stone-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name or symbol..."
+                autoFocus
+                className="w-full bg-stone-50 rounded-xl pl-9 pr-3 py-2.5 text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono transition-colors"
+              />
+            </div>
+
+            {/* Full Token List */}
+            <div className="max-h-72 overflow-y-auto space-y-1.5 pr-0.5">
+              {filteredTokens.length === 0 ? (
+                <p className="text-xs text-stone-400 text-center py-6 font-mono">
+                  No assets match "{search}"
+                </p>
+              ) : (
+                filteredTokens.map((token) => {
+                  const isSelected = token.id === selectedToken.id;
+                  return (
+                    <button
+                      key={token.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectToken(token);
+                        setIsOpen(false);
+                        setSearch('');
+                      }}
+                      className={`w-full flex items-center justify-between p-3 rounded-2xl transition-colors text-left cursor-pointer ${
+                        isSelected
+                          ? 'bg-stone-100 border border-stone-300'
+                          : 'hover:bg-stone-50 text-stone-800 border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <img
+                          src={token.iconUrl}
+                          alt={token.symbol}
+                          className="w-8 h-8 rounded-full bg-stone-100 object-cover border border-stone-200 flex-shrink-0"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              'https://raw.githubusercontent.com/feathericons/feather/master/icons/circle.svg';
+                          }}
+                        />
+                        <div>
+                          <div className="text-xs font-bold text-stone-950 flex items-center space-x-1.5 font-mono">
+                            <span>{token.symbol}</span>
+                            {token.badge && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-stone-200/70 text-stone-700 font-mono font-medium">
+                                {token.badge}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-stone-500 font-sans">
+                            {token.name}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 text-right font-mono">
+                        <div>
+                          <div className="text-xs font-bold text-stone-950">
+                            ${token.priceUsd.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </div>
+                          {token.balance && (
+                            <div className="text-[10px] text-stone-400">
+                              Bal: {token.balance}
+                            </div>
                           )}
                         </div>
-                        <span className="text-xs text-slate-400 block">
-                          {token.name}
-                        </span>
+                        {isSelected && (
+                          <Check className="w-4 h-4 text-stone-900 flex-shrink-0 ml-1" />
+                        )}
                       </div>
-                    </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
 
-                    <div className="text-right">
-                      <span className="text-xs font-semibold text-white block">
-                        ${token.priceUsd.toLocaleString()}
-                      </span>
-                      {token.balance && (
-                        <span className="text-[11px] text-slate-400">
-                          {token.balance} {token.symbol}
-                        </span>
-                      )}
-                    </div>
-
-                    {isSelected && (
-                      <Check className="w-4 h-4 text-brand-400 ml-1.5 flex-shrink-0" />
-                    )}
-                  </button>
-                );
-              })
-            )}
+            {/* Footer summary */}
+            <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-[10px] font-mono text-stone-400">
+              <span>{tokens.length} Assets Available</span>
+              <span>NEAR Intents Powered</span>
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };

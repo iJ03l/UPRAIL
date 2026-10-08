@@ -17,7 +17,7 @@ export const SurveillanceDilemma: React.FC = () => {
       {/* Section Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-stone-200 pb-4 gap-4">
         <div>
-          <span className="text-xs font-mono uppercase tracking-widest text-[#E05326] font-bold block mb-1">
+          <span className="text-xs font-mono uppercase tracking-widest text-stone-900 font-bold block mb-1">
             // The Architectural Dilemma
           </span>
           <h2 className="text-3xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight">
@@ -31,7 +31,7 @@ export const SurveillanceDilemma: React.FC = () => {
             onClick={() => setActiveTab('both')}
             className={`px-3 py-1.5 rounded-xl transition-all ${
               activeTab === 'both'
-                ? 'bg-white text-black font-bold shadow-sm'
+                ? 'bg-white text-black font-bold shadow-xs'
                 : 'text-stone-500 hover:text-black'
             }`}
           >
@@ -41,7 +41,7 @@ export const SurveillanceDilemma: React.FC = () => {
             onClick={() => setActiveTab('fishbowl')}
             className={`px-3 py-1.5 rounded-xl transition-all ${
               activeTab === 'fishbowl'
-                ? 'bg-red-600 text-white font-bold shadow-sm'
+                ? 'bg-stone-800 text-white font-bold shadow-xs'
                 : 'text-stone-500 hover:text-black'
             }`}
           >
@@ -51,7 +51,7 @@ export const SurveillanceDilemma: React.FC = () => {
             onClick={() => setActiveTab('shard')}
             className={`px-3 py-1.5 rounded-xl transition-all ${
               activeTab === 'shard'
-                ? 'bg-[#E05326] text-white font-bold shadow-sm'
+                ? 'bg-black text-white font-bold shadow-xs'
                 : 'text-stone-500 hover:text-black'
             }`}
           >
@@ -109,7 +109,7 @@ export const SurveillanceDilemma: React.FC = () => {
                 </div>
 
                 <div className="p-2 rounded-lg bg-red-50/70 border border-red-100 flex items-start space-x-2">
-                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
                   <div>
                     <span className="font-bold text-stone-900">Wallet Scraper:</span> Total holdings revealed.
                     <span className="block text-[10px] text-stone-400">Target net worth broadcasted to bots and phishing syndicates.</span>
@@ -129,10 +129,10 @@ export const SurveillanceDilemma: React.FC = () => {
 
         {/* Card 2: The UPRAIL Shielded Shard */}
         {(activeTab === 'both' || activeTab === 'shard') && (
-          <div className="rounded-3xl border-2 border-[#E05326] bg-white p-6 sm:p-8 space-y-6 relative overflow-hidden transition-all shadow-xl shadow-[#E05326]/5">
+          <div className="rounded-3xl border border-stone-200 bg-white p-6 sm:p-8 space-y-6 relative overflow-hidden transition-all shadow-xs">
             <div className="flex items-center justify-between border-b border-stone-200 pb-4">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-xl bg-[#E05326]/10 text-[#E05326] flex items-center justify-center font-bold">
+                <div className="w-8 h-8 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center font-bold">
                   <Lock className="w-4 h-4" />
                 </div>
                 <div>
@@ -144,8 +144,8 @@ export const SurveillanceDilemma: React.FC = () => {
                   </span>
                 </div>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-[#39FF14]/20 border border-[#39FF14] text-[#062E0C] flex items-center space-x-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#39FF14] animate-pulse" />
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-stone-100 border border-stone-200 text-stone-900 flex items-center space-x-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
                 <span>SHIELDED BY CODE</span>
               </span>
             </div>
@@ -158,15 +158,15 @@ export const SurveillanceDilemma: React.FC = () => {
             <div className="rounded-2xl bg-stone-900 text-stone-100 p-4 font-mono text-xs space-y-2.5 shadow-inner">
               <div className="text-[10px] uppercase tracking-wider text-stone-400 flex items-center justify-between pb-1 border-b border-stone-800">
                 <span className="flex items-center space-x-1.5">
-                  <Shield className="w-3.5 h-3.5 text-[#39FF14]" />
+                  <Shield className="w-3.5 h-3.5 text-stone-300" />
                   <span>Confidential Enclave Pipeline</span>
                 </span>
-                <span className="text-[#39FF14] font-bold">100% SECURE</span>
+                <span className="text-white font-bold">100% SECURE</span>
               </div>
 
               <div className="space-y-1.5 text-[11px] leading-relaxed text-stone-300">
                 <div className="p-2 rounded-lg bg-stone-800/80 border border-stone-700 flex items-start space-x-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#39FF14] flex-shrink-0 mt-0.5" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-stone-300 flex-shrink-0 mt-0.5" />
                   <div>
                     <span className="font-bold text-white">Blind Transfer:</span> 0 mempool leak.
                     <span className="block text-[10px] text-stone-400">Public balance visible on block explorers: $0.00.</span>
@@ -174,7 +174,7 @@ export const SurveillanceDilemma: React.FC = () => {
                 </div>
 
                 <div className="p-2 rounded-lg bg-stone-800/80 border border-stone-700 flex items-start space-x-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#39FF14] flex-shrink-0 mt-0.5" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-stone-300 flex-shrink-0 mt-0.5" />
                   <div>
                     <span className="font-bold text-white">Zero-Knowledge Identity:</span> Numeric Snowflake binding.
                     <span className="block text-[10px] text-stone-400">No public address directory. Handles change; funds stay safe.</span>
@@ -182,7 +182,7 @@ export const SurveillanceDilemma: React.FC = () => {
                 </div>
 
                 <div className="p-2 rounded-lg bg-stone-800/80 border border-stone-700 flex items-start space-x-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#39FF14] flex-shrink-0 mt-0.5" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-stone-300 flex-shrink-0 mt-0.5" />
                   <div>
                     <span className="font-bold text-white">Biometric Release:</span> One-touch Touch ID / Face ID.
                     <span className="block text-[10px] text-stone-400">Hardware-isolated P-256 key. Unclaimed funds auto-refund after 30 days.</span>

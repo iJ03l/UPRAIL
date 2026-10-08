@@ -51,13 +51,13 @@ export const RailCanvas: React.FC = () => {
     const particles: Particle[] = [];
     const particleCount = 75;
 
-    // Palette: Burnt Orange, Radiant Flame, Pure White, Cinder
+    // Palette: Monochrome shades of black, stone, and optic white
     const colors = [
-      '#E05326', // Hero burnt orange
-      '#FF7D54', // Radiant flame
-      '#FFFFFF', // Optic pure white
-      '#FFAB76', // Warm amber
-      '#C8461C', // Deep terracotta
+      '#000000',
+      '#262626',
+      '#525252',
+      '#737373',
+      '#A3A3A3',
     ];
 
     for (let i = 0; i < particleCount; i++) {

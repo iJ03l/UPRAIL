@@ -84,57 +84,69 @@ function initializeLocalStorage() {
       {
         id: 'up_98a712f',
         claimCode: 'up_98a712f',
-        senderHandle: 'cryptowhale',
-        senderName: 'Whale Alert',
-        recipientHandle: 'alice',
+        senderHandle: 'mert',
+        senderName: 'Mert Mumtaz',
+        recipientHandle: 'illia',
         token: SUPPORTED_TOKENS[0], // USDC
-        amount: '50.00',
-        amountUsd: 50.0,
+        amount: '500.00',
+        amountUsd: 500.0,
         fee: '0.01',
         feeUsd: 0.01,
-        memo: 'Coffee & design work feedback! ☕',
+        memo: 'Solana ⇄ NEAR intent swap test ⚡',
         status: 'ready',
-        depositAddress: 'uprail-escrow-v1.near',
+        depositAddress: 'escrow.uprail.near',
         depositTxHash: '9y3dD2Y4cE67bZ8eF9a0',
         claimLink: `${window.location.origin}/claim?payment=up_98a712f`,
-        createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+        createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
         expiresAt: new Date(Date.now() + 86400000 * 6).toISOString(),
       },
       {
         id: 'up_41c099b',
         claimCode: 'up_41c099b',
-        senderHandle: 'cryptowhale',
-        senderName: 'Whale Alert',
-        recipientHandle: 'bob_builder',
+        senderHandle: 'alex',
+        senderName: 'Alex Skidanov',
+        recipientHandle: 'illia',
         token: SUPPORTED_TOKENS[2], // NEAR
-        amount: '12.5',
-        amountUsd: 73.12,
+        amount: '75.0',
+        amountUsd: 438.75,
         fee: '0.005',
         feeUsd: 0.03,
-        memo: 'NEAR Confidential Intents bounty payout',
+        memo: 'Bounty payout via confidential shard',
         status: 'claimed',
-        depositAddress: 'uprail-escrow-v1.near',
+        depositAddress: 'escrow.uprail.near',
         depositTxHash: '3w1aK8e2mN05rQ7yP4d1',
         claimTxHash: '8b4xT7s1eV92zK3mH5p8',
         claimLink: `${window.location.origin}/claim?payment=up_41c099b`,
-        createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+        createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
         expiresAt: new Date(Date.now() + 86400000 * 5).toISOString(),
-        claimedAt: new Date(Date.now() - 86400000 * 1).toISOString(),
+        claimedAt: new Date(Date.now() - 3600000 * 8).toISOString(),
+      },
+      {
+        id: 'up_12e987c',
+        claimCode: 'up_12e987c',
+        senderHandle: 'illia',
+        senderName: 'Illia Polosukhin',
+        recipientHandle: 'mert',
+        token: SUPPORTED_TOKENS[0], // USDC
+        amount: '250.00',
+        amountUsd: 250.0,
+        fee: '0.01',
+        feeUsd: 0.01,
+        memo: 'Cross-chain confidential liquidity',
+        status: 'claimed',
+        depositAddress: 'escrow.uprail.near',
+        depositTxHash: '4x9kM1p7qR22yZ5eA3b8',
+        claimTxHash: '1a7vW3e9kP54bH8mN2c1',
+        claimLink: `${window.location.origin}/claim?payment=up_12e987c`,
+        createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+        expiresAt: new Date(Date.now() + 86400000 * 4).toISOString(),
+        claimedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
       },
     ];
     localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(demoPayments));
   }
 
-  if (!localStorage.getItem(STORAGE_KEYS.USER)) {
-    const demoUser: XUser = {
-      id: '12345678',
-      handle: 'cryptowhale',
-      name: 'Crypto Whale',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      isVerified: true,
-    };
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(demoUser));
-  }
+  // Note: We do not force auto-seed a logged in user so LoginPage functions as the proper initial entry point.
 }
 
 initializeLocalStorage();

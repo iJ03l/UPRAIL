@@ -60,7 +60,7 @@ export const webauthn = {
    * Register a new hardware passkey (Touch ID, Face ID, Windows Hello, YubiKey)
    * using NIST P-256 (ES256) signature algorithm.
    */
-  async registerPasskey(handle: string): Promise<{ success: boolean; credentialId: string; simulated?: boolean }> {
+  async registerPasskey(handle: string = 'user'): Promise<{ success: boolean; credentialId: string; simulated?: boolean }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
     const options = await api.getPasskeyRegisterOptions(cleanHandle);
 
@@ -121,7 +121,7 @@ export const webauthn = {
    * Authenticate / Sign with the device passkey (Touch ID, Face ID, PIN)
    * to claim confidential payments.
    */
-  async authenticatePasskey(handle: string): Promise<{ success: boolean; credentialId: string; authPayload: unknown }> {
+  async authenticatePasskey(handle: string = 'user'): Promise<{ success: boolean; credentialId: string; authPayload: unknown }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
     const options = await api.getPasskeyAuthOptions(cleanHandle);
 

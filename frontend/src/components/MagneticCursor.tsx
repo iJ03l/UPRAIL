@@ -69,8 +69,8 @@ export const MagneticCursor: React.FC = () => {
         <div
           className={`rounded-full transition-all duration-200 ${
             isHoveringClickable
-              ? 'w-16 h-16 border-2 border-[#E05326] bg-[#E05326]/15 backdrop-blur-[2px] shadow-[0_0_25px_rgba(224,83,38,0.5)] scale-110'
-              : 'w-10 h-10 border border-[#E05326]/50 bg-[#E05326]/5 shadow-[0_0_15px_rgba(224,83,38,0.3)]'
+              ? 'w-16 h-16 border-2 border-black/80 bg-black/10 backdrop-blur-[2px] scale-110'
+              : 'w-10 h-10 border border-black/40 bg-black/5'
           }`}
         />
       </div>

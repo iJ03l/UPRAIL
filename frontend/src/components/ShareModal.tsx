@@ -38,29 +38,29 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-md rounded-3xl bg-dark-card border border-dark-border shadow-2xl p-6 sm:p-7 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl p-6 sm:p-7 overflow-hidden">
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="absolute top-5 right-5 p-1 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Header Icon */}
         <div className="flex justify-center mb-4">
-          <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-glow-brand">
+          <div className="w-14 h-14 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center text-stone-900 shadow-sm">
             <Sparkles className="w-7 h-7" />
           </div>
         </div>
 
         {/* Title */}
         <div className="text-center space-y-1 mb-5">
-          <h3 className="text-xl font-black text-white">Payment Ready!</h3>
-          <p className="text-xs text-slate-400">
+          <h3 className="text-xl font-extrabold text-stone-950 font-display">Payment Ready!</h3>
+          <p className="text-xs text-stone-600">
             Share the claim link with{' '}
-            <span className="text-brand-400 font-semibold">
+            <span className="text-stone-900 font-bold font-mono">
               @{payment.recipientHandle}
             </span>{' '}
             to collect their funds.
@@ -68,30 +68,30 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         </div>
 
         {/* Payment Summary Pill */}
-        <div className="mb-5 p-3 rounded-2xl bg-dark-surface border border-dark-border flex items-center justify-between">
+        <div className="mb-5 p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
             <img
               src={payment.token.iconUrl}
               alt={payment.token.symbol}
-              className="w-8 h-8 rounded-full bg-slate-800"
+              className="w-8 h-8 rounded-full bg-white border border-stone-200"
             />
             <div>
-              <span className="text-sm font-extrabold text-white">
+              <span className="text-sm font-extrabold text-stone-950 font-mono">
                 {payment.amount} {payment.token.symbol}
               </span>
-              <span className="text-xs text-slate-400 block">
+              <span className="text-xs text-stone-500 block font-mono">
                 ≈ ${payment.amountUsd.toFixed(2)} USD
               </span>
             </div>
           </div>
-          <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 font-semibold">
-            Confidential Escrow
+          <span className="text-xs px-2.5 py-1 rounded-full bg-stone-100 text-stone-900 border border-stone-200 font-bold">
+            Private Escrow
           </span>
         </div>
 
         {/* Claim Link Input */}
         <div className="space-y-1.5 mb-4">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <label className="text-[11px] font-bold uppercase tracking-wider text-stone-600">
             Secure Claim Link
           </label>
           <div className="flex items-center space-x-2">
@@ -99,11 +99,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               type="text"
               readOnly
               value={payment.claimLink}
-              className="flex-1 bg-dark-surface rounded-xl px-3 py-2.5 text-xs text-slate-300 font-mono border border-dark-border focus:outline-none select-all"
+              className="flex-1 bg-stone-50 rounded-xl px-3 py-2.5 text-xs text-stone-800 font-mono border border-stone-200 focus:outline-none select-all"
             />
             <button
               onClick={handleCopy}
-              className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-dark-bg text-xs font-bold transition-colors"
+              className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
             >
               {copied ? (
                 <>
@@ -126,29 +126,28 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             href={twitterIntentUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl bg-slate-100 hover:bg-white text-dark-bg font-extrabold text-xs transition-colors shadow-sm"
+            className="w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl bg-black hover:bg-stone-800 text-white font-extrabold text-xs transition-colors shadow-sm"
           >
             <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
             </svg>
-            <span>Notify @{payment.recipientHandle} on X</span>
+            <span>Notify @{payment.recipientHandle} on 𝕏</span>
             <ExternalLink className="w-3.5 h-3.5 ml-1 opacity-70" />
           </a>
 
           <button
             onClick={() => setShowQr(!showQr)}
-            className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-4 rounded-xl bg-dark-surface hover:bg-slate-800 text-slate-300 text-xs font-medium border border-dark-border transition-colors"
+            className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-4 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold border border-stone-200 transition-colors cursor-pointer"
           >
-            <QrCode className="w-3.5 h-3.5 text-slate-400" />
+            <QrCode className="w-3.5 h-3.5 text-stone-500" />
             <span>{showQr ? 'Hide QR Code' : 'Show Claim QR Code'}</span>
           </button>
         </div>
 
         {/* QR Code view */}
         {showQr && (
-          <div className="p-4 rounded-2xl bg-white flex flex-col items-center justify-center mb-4 animate-fade-in">
-            {/* SVG placeholder QR code styling */}
-            <div className="w-36 h-36 bg-slate-100 rounded-lg flex items-center justify-center border border-slate-300 p-2">
+          <div className="p-4 rounded-2xl bg-white border border-stone-200 flex flex-col items-center justify-center mb-4 animate-fade-in">
+            <div className="w-36 h-36 bg-stone-50 rounded-lg flex items-center justify-center border border-stone-200 p-2">
               <img
                 src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
                   payment.claimLink
@@ -157,24 +156,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 className="w-full h-full object-contain"
               />
             </div>
-            <span className="text-[10px] text-slate-600 font-medium mt-2">
-              Scan with mobile camera to claim
+            <span className="text-[10px] text-stone-500 font-mono mt-2">
+              Scan with phone camera to claim
             </span>
           </div>
         )}
 
         {/* Privacy Note */}
-        <div className="flex items-start space-x-2 p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/20 text-[11px] text-emerald-300">
-          <Shield className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start space-x-2 p-3 rounded-2xl bg-stone-50 border border-stone-200 text-[11px] text-stone-700">
+          <Shield className="w-4 h-4 text-stone-900 flex-shrink-0 mt-0.5" />
           <p>
-            <strong>Zero risk of theft:</strong> Even if this link is seen by others, only the device passkey registered to <span className="font-semibold text-white">@{payment.recipientHandle}</span> can unlock the shielded intent.
+            <strong>Zero risk:</strong> Even if this link is shared publicly, only the device passkey belonging to <span className="font-bold text-stone-900 font-mono">@{payment.recipientHandle}</span> can unlock the funds.
           </p>
         </div>
 
         {/* Done Button */}
         <button
           onClick={onClose}
-          className="mt-4 w-full py-2.5 text-xs font-medium text-slate-400 hover:text-white transition-colors"
+          className="mt-4 w-full py-2.5 text-xs font-bold text-stone-500 hover:text-stone-900 transition-colors cursor-pointer"
         >
           Done
         </button>
