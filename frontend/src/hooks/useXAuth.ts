@@ -25,13 +25,11 @@ export function useXAuth() {
     checkSession();
   }, [checkSession]);
 
-  const login = async (demoHandle?: string) => {
+  const login = async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const loggedUser = await api.loginWithX(demoHandle);
-      setUser(loggedUser);
-      return loggedUser;
+      await api.loginWithX();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
       setError(msg);

@@ -4,6 +4,7 @@ export interface XUser {
   name: string;
   avatarUrl: string;
   isVerified?: boolean;
+  nearAccount?: string | null;
 }
 
 export interface AuthSession {
@@ -30,7 +31,8 @@ export type PaymentStatus =
   | 'ready'      // Escrow confirmed, awaiting recipient passkey claim
   | 'claimed'    // Successfully claimed by recipient device passkey
   | 'expired'    // Claim window expired, refundable to sender
-  | 'refunded';  // Escrow returned to sender
+  | 'refunded'   // Escrow returned to sender
+  | 'cancelled'; // Cancelled by sender
 
 export interface PaymentIntent {
   id: string;
@@ -101,7 +103,7 @@ export interface ClaimPaymentRequest {
 
 export interface ClaimPaymentResult {
   success: boolean;
-  payment: PaymentIntent;
+  payment?: PaymentIntent;
   shieldedTxHash: string;
   message: string;
 }

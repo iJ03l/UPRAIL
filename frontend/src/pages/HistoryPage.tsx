@@ -132,7 +132,7 @@ export const HistoryPage: React.FC = () => {
         ) : (
           <div className="divide-y divide-stone-100">
             {filteredHistory.map((tx) => {
-              const isSent = tx.senderHandle === (user?.handle || 'cryptowhale');
+              const isSent = Boolean(user?.handle && tx.senderHandle && tx.senderHandle.toLowerCase() === user.handle.toLowerCase());
               return (
                 <div
                   key={tx.id}

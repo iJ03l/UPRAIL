@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
+import { api } from '../lib/api';
+import { ShieldedBalance } from '../types';
 
 const RECEIVE_CHAINS = [
   { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', icon: '⟠' },
@@ -34,6 +36,7 @@ export const AppHome: React.FC = () => {
     isLoadingHistory,
   } = usePayments();
 
+  const [shieldedBalances, setShieldedBalances] = useState<ShieldedBalance[]>([]);
   const [hideBalance, setHideBalance] = useState<boolean>(false);
   const [selectedChain, setSelectedChain] = useState(RECEIVE_CHAINS[0]);
   const [copiedAddress, setCopiedAddress] = useState(false);
@@ -42,6 +45,13 @@ export const AppHome: React.FC = () => {
 
   useEffect(() => {
     loadHistory();
+    let mounted = true;
+    api.getShieldedBalances().then((b) => {
+      if (mounted) setShieldedBalances(b || []);
+    });
+    return () => {
+      mounted = false;
+    };
   }, [loadHistory]);
 
   const intentDepositAddress =
@@ -63,7 +73,7 @@ export const AppHome: React.FC = () => {
     setTimeout(() => setCopiedTxId(null), 2000);
   };
 
-  const totalBalanceUsd = 1420.50;
+  const totalBalanceUsd = shieldedBalances.reduce((acc, b) => acc + (b.amountUsd || 0), 0);
 
   return (
     <div className="w-full">
@@ -106,15 +116,20 @@ export const AppHome: React.FC = () => {
 
             {/* Asset breakdown pills */}
             <div className="flex flex-wrap gap-2 pt-2 border-t border-stone-100">
-              <span className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700">
-                1,000 USDC
-              </span>
-              <span className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700">
-                75 NEAR
-              </span>
-              <span className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700">
-                0.12 ETH
-              </span>
+              {shieldedBalances.length > 0 ? (
+                shieldedBalances.map((b) => (
+                  <span
+                    key={b.token.id}
+                    className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700"
+                  >
+                    {b.amount} {b.token.symbol}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs font-mono text-stone-400 py-0.5">
+                  No shielded deposits yet
+                </span>
+              )}
             </div>
           </div>
 
@@ -306,7 +321,7 @@ export const AppHome: React.FC = () => {
                 </div>
               ) : (
                 history.map((tx) => {
-                  const isSent = tx.senderHandle === (user?.handle || 'cryptowhale');
+                  const isSent = Boolean(user?.handle && tx.senderHandle && tx.senderHandle.toLowerCase() === user.handle.toLowerCase());
                   return (
                     <div
                       key={tx.id}

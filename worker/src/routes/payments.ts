@@ -20,6 +20,13 @@ import {
 } from '../types';
 import * as nearProxy from '../services/nearProxy';
 import { requireAuth } from '../middleware/session';
+import {
+  getDb,
+  insertPayment,
+  getPaymentById,
+  getUserPayments,
+  updatePaymentStatus,
+} from '../db/postgres';
 
 export const paymentsRouter = new Hono<AppContext>();
 
@@ -74,6 +81,70 @@ async function callEscrowDO(
   }
   return await response.json();
 }
+
+/**
+ * GET /api/tokens
+ * Returns supported assets for confidential transfers
+ */
+paymentsRouter.get('/tokens', async (c) => {
+  return c.json([
+    {
+      id: 'usdc',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      iconUrl: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=035',
+      decimals: 6,
+      priceUsd: 1.0,
+      nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+      badge: 'Confidential',
+      balance: '0.00',
+    },
+    {
+      id: 'usdt',
+      symbol: 'USDT',
+      name: 'Tether USD',
+      iconUrl: 'https://cryptologos.cc/logos/tether-usdt-logo.svg?v=035',
+      decimals: 6,
+      priceUsd: 1.0,
+      nearContractId: 'usdt.tether-token.near',
+      badge: 'Confidential',
+      balance: '0.00',
+    },
+    {
+      id: 'near',
+      symbol: 'NEAR',
+      name: 'NEAR Protocol',
+      iconUrl: 'https://cryptologos.cc/logos/near-protocol-near-logo.svg?v=035',
+      decimals: 24,
+      priceUsd: 5.85,
+      nearContractId: 'wrap.near',
+      badge: 'Native Shield',
+      balance: '0.00',
+    },
+    {
+      id: 'eth',
+      symbol: 'ETH',
+      name: 'Ethereum',
+      iconUrl: 'https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=035',
+      decimals: 18,
+      priceUsd: 3450.0,
+      nearContractId: 'aurora',
+      badge: 'Cross-chain',
+      balance: '0.00',
+    },
+    {
+      id: 'btc',
+      symbol: 'BTC',
+      name: 'Bitcoin',
+      iconUrl: 'https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=035',
+      decimals: 8,
+      priceUsd: 68500.0,
+      nearContractId: 'btc.near',
+      badge: 'Cross-chain',
+      balance: '0.00',
+    },
+  ]);
+});
 
 /**
  * POST /api/resolve
@@ -232,41 +303,54 @@ paymentsRouter.post('/send', async (c) => {
       updated_at: now,
     };
 
-    // 1. Insert into D1 database
-    await c.env.DB.prepare(
+    // 1. Insert into PostgreSQL and D1 database
+    const sql = getDb(c.env);
+    if (sql) {
+      try {
+        await insertPayment(sql, payment);
+      } catch (pgErr) {
+        console.warn('Postgres insertPayment failed, falling back to D1:', pgErr);
+      }
+    }
+
+    try {
+      await c.env.DB.prepare(
+        `
+        INSERT INTO payments (
+          id,
+          sender_x_id,
+          sender_x_handle,
+          recipient_handle,
+          asset,
+          amount,
+          status,
+          deposit_address,
+          intent_hash,
+          claim_tx_hash,
+          refund_tx_hash,
+          created_at,
+          expires_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
       `
-      INSERT INTO payments (
-        id,
-        sender_x_id,
-        sender_x_handle,
-        recipient_handle,
-        asset,
-        amount,
-        status,
-        deposit_address,
-        intent_hash,
-        claim_tx_hash,
-        refund_tx_hash,
-        created_at,
-        expires_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
-    `
-    )
-      .bind(
-        payment.id,
-        payment.sender_x_id,
-        payment.sender_x_handle,
-        payment.recipient_handle,
-        payment.asset,
-        payment.amount,
-        payment.status,
-        payment.deposit_address,
-        payment.created_at,
-        payment.expires_at,
-        payment.updated_at
       )
-      .run();
+        .bind(
+          payment.id,
+          payment.sender_x_id,
+          payment.sender_x_handle,
+          payment.recipient_handle,
+          payment.asset,
+          payment.amount,
+          payment.status,
+          payment.deposit_address,
+          payment.created_at,
+          payment.expires_at,
+          payment.updated_at
+        )
+        .run();
+    } catch (d1Err) {
+      console.warn('D1 insert payment failed:', d1Err);
+    }
 
     // 2. Initialize EscrowDO instance
     await callEscrowDO(c.env, paymentId, 'init', payment);
@@ -297,12 +381,25 @@ paymentsRouter.post('/send', async (c) => {
 
 /**
  * GET /api/payments
- * Lists sender's payment history from D1 (requires session)
+ * Lists sender's payment history from Postgres/D1 (requires session)
  */
 paymentsRouter.get('/payments', requireAuth(), async (c) => {
   try {
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
+
+    const sql = getDb(c.env);
+    if (sql) {
+      try {
+        const pgPayments = await getUserPayments(sql, session.x_id, userHandle);
+        if (pgPayments && pgPayments.length > 0) {
+          return c.json({ payments: pgPayments });
+        }
+      } catch (pgErr) {
+        console.warn('Postgres getUserPayments error, fallback to D1:', pgErr);
+      }
+    }
+
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
@@ -314,7 +411,7 @@ paymentsRouter.get('/payments', requireAuth(), async (c) => {
       .bind(session.x_id, userHandle)
       .all<Payment>();
 
-    return c.json({ payments: results });
+    return c.json({ payments: results || [] });
   } catch (err: any) {
     console.error('List payments error:', err);
     return c.json<ErrorResponse>(
@@ -334,9 +431,22 @@ paymentsRouter.get('/payments', requireAuth(), async (c) => {
 paymentsRouter.get('/payments/:id', async (c) => {
   try {
     const id = c.req.param('id');
-    const payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
-      .bind(id)
-      .first<Payment>();
+    let payment: Payment | null = null;
+
+    const sql = getDb(c.env);
+    if (sql) {
+      try {
+        payment = await getPaymentById(sql, id);
+      } catch (pgErr) {
+        console.warn('Postgres getPaymentById error, fallback to D1:', pgErr);
+      }
+    }
+
+    if (!payment) {
+      payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
+        .bind(id)
+        .first<Payment>();
+    }
 
     if (!payment) {
       return c.json<ErrorResponse>(
@@ -355,7 +465,7 @@ paymentsRouter.get('/payments/:id', async (c) => {
         payment.updated_at = liveStatus.updated_at;
       }
     } catch {
-      // Ignore DO fetch error and fallback to D1 state
+      // Ignore DO fetch error and fallback to DB state
     }
 
     const session = c.get('session');
@@ -403,9 +513,21 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
     const id = c.req.param('id');
     const session = c.get('session')!;
 
-    const payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
-      .bind(id)
-      .first<Payment>();
+    let payment: Payment | null = null;
+    const sql = getDb(c.env);
+    if (sql) {
+      try {
+        payment = await getPaymentById(sql, id);
+      } catch (pgErr) {
+        console.warn('Postgres getPaymentById in cancel error:', pgErr);
+      }
+    }
+
+    if (!payment) {
+      payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
+        .bind(id)
+        .first<Payment>();
+    }
 
     if (!payment) {
       return c.json<ErrorResponse>(
@@ -442,13 +564,25 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
       senderXId: session.x_id,
     });
 
-    // Update D1 record status
+    // Update Postgres and D1 records status
+    if (sql) {
+      try {
+        await updatePaymentStatus(sql, id, PaymentStatus.CANCELLED);
+      } catch (pgErr) {
+        console.warn('Postgres updatePaymentStatus failed in cancel:', pgErr);
+      }
+    }
+
     const now = Date.now();
-    await c.env.DB.prepare(
-      'UPDATE payments SET status = ?, updated_at = ? WHERE id = ?'
-    )
-      .bind(PaymentStatus.CANCELLED, now, id)
-      .run();
+    try {
+      await c.env.DB.prepare(
+        'UPDATE payments SET status = ?, updated_at = ? WHERE id = ?'
+      )
+        .bind(PaymentStatus.CANCELLED, now, id)
+        .run();
+    } catch (d1Err) {
+      console.warn('D1 update payment status failed in cancel:', d1Err);
+    }
 
     return c.json({
       success: true,

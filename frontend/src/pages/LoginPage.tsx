@@ -31,14 +31,9 @@ export const LoginPage: React.FC = () => {
       setIsXLoading(true);
       setError(null);
       await loginWithX();
-      setIsSuccess(true);
-      setTimeout(() => {
-        navigate('/app');
-      }, 350);
     } catch (err: any) {
       console.error('X login error:', err);
       setError(err?.message || 'Failed to authenticate with 𝕏. Please try again.');
-    } finally {
       setIsXLoading(false);
     }
   };
@@ -48,24 +43,20 @@ export const LoginPage: React.FC = () => {
       setIsPasskeyLoading(true);
       setError(null);
 
-      // Passkey hardware unlock: check registered passkeys or prompt secure enclave
-      const registered = webauthn.getRegisteredPasskeys();
-      const activeHandle = registered.length > 0 ? registered[0].handle : 'user';
-
-      if (registered.length > 0) {
-        await webauthn.authenticatePasskey(activeHandle);
-      } else {
-        await webauthn.registerPasskey(activeHandle);
+      const result = await webauthn.loginWithPasskey();
+      if (result.success) {
+        setIsSuccess(true);
+        setTimeout(() => {
+          navigate('/app');
+        }, 350);
       }
-
-      await loginWithX(activeHandle);
-      setIsSuccess(true);
-      setTimeout(() => {
-        navigate('/app');
-      }, 350);
     } catch (err: any) {
       console.error('Passkey authentication error:', err);
-      setError(err?.message || 'Passkey verification was cancelled.');
+      if (err?.name === 'NotAllowedError') {
+        setError('Passkey verification was cancelled on your device.');
+      } else {
+        setError(err?.message || 'Passkey authentication failed. Please sign in with 𝕏 first.');
+      }
     } finally {
       setIsPasskeyLoading(false);
     }

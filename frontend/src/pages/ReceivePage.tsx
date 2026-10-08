@@ -8,27 +8,27 @@ import {
   Shield,
   Info,
 } from 'lucide-react';
+import { useXAuth } from '../hooks/useXAuth';
 
 const RECEIVE_CHAINS = [
+  { id: 'near', name: 'NEAR', symbol: 'NEAR', icon: 'Ⓝ', explorer: 'Nearblocks' },
   { id: 'ethereum', name: 'Ethereum', symbol: 'ETH', icon: '⟠', explorer: 'Etherscan' },
   { id: 'solana', name: 'Solana', symbol: 'SOL', icon: '◎', explorer: 'Solscan' },
   { id: 'base', name: 'Base', symbol: 'BASE', icon: '🔵', explorer: 'Basescan' },
-  { id: 'near', name: 'NEAR', symbol: 'NEAR', icon: 'Ⓝ', explorer: 'Nearblocks' },
   { id: 'arbitrum', name: 'Arbitrum', symbol: 'ARB', icon: '🔷', explorer: 'Arbiscan' },
   { id: 'robinhood', name: 'Robinhood', symbol: 'HOOD', icon: '🪶', explorer: 'Robinhood Crypto' },
 ];
 
 export const ReceivePage: React.FC = () => {
+  const { user } = useXAuth();
   const [selectedChain, setSelectedChain] = useState(RECEIVE_CHAINS[0]);
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(true);
 
   const intentAddress =
-    selectedChain.id === 'solana'
-      ? 'UPRaiL7xK9nB5tE2wM1pQ4v8yJ3zD6sF0a'
-      : selectedChain.id === 'near'
-      ? 'escrow.uprail.near'
-      : '0x71a2B89eC0d4E95F63B72eF10a12c345E6789a1b';
+    selectedChain.id === 'near'
+      ? user?.nearAccount || 'escrow.uprail.near'
+      : 'escrow.uprail.near';
 
   const handleCopy = () => {
     navigator.clipboard.writeText(intentAddress);

@@ -8,8 +8,6 @@ interface HandleInputProps {
   placeholder?: string;
 }
 
-const FREQUENT_HANDLES = ['illia', 'mert', 'alex'];
-
 export const HandleInput: React.FC<HandleInputProps> = ({
   value,
   onChange,
@@ -92,23 +90,6 @@ export const HandleInput: React.FC<HandleInputProps> = ({
           </div>
         )}
       </div>
-
-      {/* Quick suggest tags with illia, mert, alex */}
-      {!value && (
-        <div className="flex items-center space-x-2 pt-1 overflow-x-auto no-scrollbar">
-          <span className="text-[11px] text-stone-400 pr-1">Try:</span>
-          {FREQUENT_HANDLES.map((h) => (
-            <button
-              key={h}
-              type="button"
-              onClick={() => onChange(h)}
-              className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 hover:text-black text-xs font-mono transition-colors border border-stone-200"
-            >
-              @{h}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 };

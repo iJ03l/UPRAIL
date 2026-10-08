@@ -100,15 +100,18 @@ export async function verifyRegistration(params: {
  * Generate WebAuthn authentication assertion options
  */
 export async function generateAuthenticationOptions(params: {
-  credentialIds: string[];
+  credentialIds?: string[];
   rpId: string;
 }) {
   return await simpleGenerateAuthOptions({
     rpID: params.rpId || 'uprail.app',
-    allowCredentials: params.credentialIds.map((id) => ({
-      id,
-      type: 'public-key' as const,
-    })),
+    allowCredentials:
+      params.credentialIds && params.credentialIds.length > 0
+        ? params.credentialIds.map((id) => ({
+            id,
+            type: 'public-key' as const,
+          }))
+        : undefined,
     userVerification: 'preferred',
   });
 }

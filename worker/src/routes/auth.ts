@@ -7,6 +7,8 @@ import { Hono } from 'hono';
 import type { AppContext, ErrorResponse } from '../types';
 import { generatePKCE, exchangeCode, getMe } from '../services/xApi';
 import { createSession, destroySession } from '../middleware/session';
+import { getDb, upsertXIdentity, getXIdentity } from '../db/postgres';
+import * as webauthnService from '../services/webauthn';
 
 export const authRouter = new Hono<AppContext>();
 
@@ -118,38 +120,52 @@ authRouter.get('/callback', async (c) => {
     const xUser = await getMe(tokens.access_token);
     const now = Date.now();
 
-    // Check if user already exists in D1
-    const existing = await c.env.DB.prepare(
-      'SELECT x_id, x_handle, x_name, near_account FROM x_identities WHERE x_id = ?'
-    )
-      .bind(xUser.id)
-      .first<{
-        x_id: string;
-        x_handle: string;
-        x_name: string;
-        near_account: string | null;
-      }>();
-
+    // 1. Try PostgreSQL first, with fallback to D1
     let nearAccount: string | null = null;
+    let identityPersisted = false;
 
-    if (existing) {
-      nearAccount = existing.near_account;
-      // Update profile
-      await c.env.DB.prepare(
-        'UPDATE x_identities SET x_handle = ?, x_name = ?, updated_at = ? WHERE x_id = ?'
-      )
-        .bind(xUser.username.toLowerCase(), xUser.name, now, xUser.id)
-        .run();
-    } else {
-      // Insert new identity
-      await c.env.DB.prepare(
-        'INSERT INTO x_identities (x_id, x_handle, x_name, near_account, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)'
-      )
-        .bind(xUser.id, xUser.username.toLowerCase(), xUser.name, now, now)
-        .run();
+    try {
+      const sql = getDb(c.env);
+      const identity = await upsertXIdentity(sql, {
+        x_id: xUser.id,
+        x_handle: xUser.username.toLowerCase(),
+        x_name: xUser.name,
+      });
+      nearAccount = identity.near_account || null;
+      identityPersisted = true;
+    } catch (pgErr) {
+      console.warn('Postgres identity upsert failed, using D1:', pgErr);
     }
 
-    // Establish KV session and set HttpOnly cookie
+    if (!identityPersisted && c.env.DB) {
+      const existing = await c.env.DB.prepare(
+        'SELECT x_id, x_handle, x_name, near_account FROM x_identities WHERE x_id = ?'
+      )
+        .bind(xUser.id)
+        .first<{
+          x_id: string;
+          x_handle: string;
+          x_name: string;
+          near_account: string | null;
+        }>();
+
+      if (existing) {
+        nearAccount = existing.near_account;
+        await c.env.DB.prepare(
+          'UPDATE x_identities SET x_handle = ?, x_name = ?, updated_at = ? WHERE x_id = ?'
+        )
+          .bind(xUser.username.toLowerCase(), xUser.name, now, xUser.id)
+          .run();
+      } else {
+        await c.env.DB.prepare(
+          'INSERT INTO x_identities (x_id, x_handle, x_name, near_account, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)'
+        )
+          .bind(xUser.id, xUser.username.toLowerCase(), xUser.name, now, now)
+          .run();
+      }
+    }
+
+    // Establish KV + Postgres session and set HttpOnly cookie
     await createSession(c, {
       x_id: xUser.id,
       x_handle: xUser.username.toLowerCase(),
@@ -176,20 +192,30 @@ authRouter.get('/callback', async (c) => {
 });
 
 /**
- * GET /auth/x/session
+ * GET /auth/x/session and GET /auth/x/status
  * Return currently authenticated session profile
  */
-authRouter.get('/session', async (c) => {
+const getSessionHandler = async (c: any) => {
   const session = c.get('session');
   if (!session) {
     return c.json({
       authenticated: false,
+      user: null,
       session: null,
     });
   }
 
+  const user = {
+    id: session.x_id,
+    handle: session.x_handle,
+    name: session.x_name,
+    avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
+    nearAccount: session.near_account,
+  };
+
   return c.json({
     authenticated: true,
+    user,
     session: {
       xId: session.x_id,
       xHandle: session.x_handle,
@@ -198,11 +224,14 @@ authRouter.get('/session', async (c) => {
       expiresAt: session.expires_at,
     },
   });
-});
+};
+
+authRouter.get('/session', getSessionHandler);
+authRouter.get('/status', getSessionHandler);
 
 /**
  * POST /auth/x/logout
- * Destroys session from KV and clears cookie
+ * Destroys session from KV + Postgres and clears cookie
  */
 authRouter.post('/logout', async (c) => {
   try {
@@ -217,5 +246,151 @@ authRouter.post('/logout', async (c) => {
       },
       500
     );
+  }
+});
+
+/**
+ * GET /auth/passkey/login-options
+ * Generates WebAuthn authentication options for passkey sign-in
+ */
+authRouter.get('/passkey/login-options', async (c) => {
+  try {
+    const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
+    const options = await webauthnService.generateAuthenticationOptions({ rpId });
+
+    // Store challenge in KV for single-use verification (5 min TTL)
+    await c.env.CACHE.put(`webauthn_auth:${options.challenge}`, 'pending', {
+      expirationTtl: 300,
+    });
+
+    return c.json(options);
+  } catch (err: any) {
+    console.error('Passkey login options error:', err);
+    return c.json<ErrorResponse>(
+      { error: 'Failed to generate passkey login options', code: 'WEBAUTHN_OPTIONS_ERROR' },
+      500
+    );
+  }
+});
+
+/**
+ * POST /auth/passkey/login-verify
+ * Verifies WebAuthn assertion signature and logs in the user
+ */
+authRouter.post('/passkey/login-verify', async (c) => {
+  try {
+    const body = await c.req.json<{ assertion: any }>().catch(() => null);
+    if (!body || !body.assertion) {
+      return c.json<ErrorResponse>({ error: 'Missing assertion payload', code: 'INVALID_REQUEST' }, 400);
+    }
+
+    const assertion = body.assertion;
+    let challenge: string | null = null;
+
+    if (assertion.response?.clientDataJSON) {
+      try {
+        const clientDataStr = atob(assertion.response.clientDataJSON.replace(/-/g, '+').replace(/_/g, '/'));
+        const clientData = JSON.parse(clientDataStr);
+        challenge = clientData.challenge;
+      } catch {
+        challenge = null;
+      }
+    }
+
+    if (!challenge) {
+      return c.json<ErrorResponse>({ error: 'Missing challenge in assertion', code: 'INVALID_CHALLENGE' }, 400);
+    }
+
+    const storedChallenge = await c.env.CACHE.get(`webauthn_auth:${challenge}`);
+    if (!storedChallenge) {
+      return c.json<ErrorResponse>({ error: 'Challenge expired or invalid', code: 'CHALLENGE_EXPIRED' }, 400);
+    }
+    await c.env.CACHE.delete(`webauthn_auth:${challenge}`);
+
+    // Look up passkey credential from Postgres (or D1)
+    let passkeyRow: { x_id: string; public_key: string; counter: number } | null = null;
+    try {
+      const sql = getDb(c.env);
+      const [row] = await sql<any[]>`
+        SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ${assertion.id}
+      `;
+      if (row) passkeyRow = row;
+    } catch {
+      if (c.env.DB) {
+        passkeyRow = await c.env.DB.prepare(
+          'SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ?'
+        )
+          .bind(assertion.id)
+          .first<any>();
+      }
+    }
+
+    if (!passkeyRow) {
+      return c.json<ErrorResponse>(
+        { error: 'Passkey not recognized. Please sign in with X first to register your passkey.', code: 'CREDENTIAL_NOT_FOUND' },
+        404
+      );
+    }
+
+    const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
+    const expectedOrigin = c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+
+    const verification = await webauthnService.verifyAuthentication({
+      assertion,
+      expectedChallenge: challenge,
+      expectedOrigin,
+      expectedRPID: rpId,
+      credential: {
+        id: assertion.id,
+        publicKey: passkeyRow.public_key,
+        counter: Number(passkeyRow.counter) || 0,
+      },
+    });
+
+    if (!verification.verified) {
+      return c.json<ErrorResponse>({ error: 'Passkey verification failed', code: 'VERIFICATION_FAILED' }, 401);
+    }
+
+    // Fetch user profile from Postgres / D1
+    let userProfile: { x_id: string; x_handle: string; x_name: string; near_account?: string | null } | null = null;
+    try {
+      const sql = getDb(c.env);
+      const identity = await getXIdentity(sql, passkeyRow.x_id);
+      if (identity) userProfile = identity;
+    } catch {
+      if (c.env.DB) {
+        userProfile = await c.env.DB.prepare(
+          'SELECT x_id, x_handle, x_name, near_account FROM x_identities WHERE x_id = ?'
+        )
+          .bind(passkeyRow.x_id)
+          .first<any>();
+      }
+    }
+
+    if (!userProfile) {
+      return c.json<ErrorResponse>({ error: 'User profile not found', code: 'USER_NOT_FOUND' }, 404);
+    }
+
+    // Create session and set cookie
+    const session = await createSession(c, {
+      x_id: userProfile.x_id,
+      x_handle: userProfile.x_handle,
+      x_name: userProfile.x_name,
+      near_account: userProfile.near_account,
+    });
+
+    return c.json({
+      success: true,
+      user: {
+        id: session.x_id,
+        handle: session.x_handle,
+        name: session.x_name,
+        avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
+        nearAccount: session.near_account,
+      },
+    });
+  } catch (err: any) {
+    console.error('Passkey login verify error:', err);
+    return c.json<ErrorResponse>({ error: err.message || 'Passkey login failed', code: 'LOGIN_FAILED' }, 500);
   }
 });

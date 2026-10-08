@@ -84,7 +84,9 @@ export function useClaimFlow(initialCode?: string) {
         assertion.authPayload
       );
 
-      setPayment(result.payment);
+      if (result.payment) {
+        setPayment(result.payment);
+      }
       setClaimResult(result);
       setClaimSuccess(true);
 

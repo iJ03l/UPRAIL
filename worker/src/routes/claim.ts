@@ -19,6 +19,14 @@ import { requireAuth } from '../middleware/session';
 import { updateSession } from '../middleware/session';
 import * as webauthn from '../services/webauthn';
 import * as nearProxy from '../services/nearProxy';
+import {
+  getDb,
+  savePasskey,
+  updateIdentityNearAccount,
+  saveAuthChallenge,
+  consumeAuthChallenge,
+  getPendingPaymentsForRecipient,
+} from '../db/postgres';
 
 export const claimRouter = new Hono<AppContext>();
 
@@ -31,6 +39,18 @@ claimRouter.get('/pending', requireAuth(), async (c) => {
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
 
+    const sql = getDb(c.env);
+    if (sql) {
+      try {
+        const pgPending = await getPendingPaymentsForRecipient(sql, userHandle);
+        if (pgPending && pgPending.length > 0) {
+          return c.json({ payments: pgPending });
+        }
+      } catch (pgErr) {
+        console.warn('Postgres getPendingPaymentsForRecipient error, fallback to D1:', pgErr);
+      }
+    }
+
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
@@ -42,7 +62,7 @@ claimRouter.get('/pending', requireAuth(), async (c) => {
       .bind(userHandle)
       .all<Payment>();
 
-    return c.json({ payments: results });
+    return c.json({ payments: results || [] });
   } catch (err: any) {
     console.error('Fetch pending payments error:', err);
     return c.json<ErrorResponse>(
@@ -69,10 +89,14 @@ claimRouter.get('/register-options', requireAuth(), async (c) => {
       rpName,
     });
 
-    // Store challenge in KV for verification (5 min TTL)
+    // Store challenge in KV and Postgres for single-use verification (5 min TTL)
     await c.env.CACHE.put(`webauthn_reg:${session.x_id}`, options.challenge, {
       expirationTtl: 300,
     });
+    try {
+      const sql = getDb(c.env);
+      await saveAuthChallenge(sql, session.x_id, options.challenge, 'registration', 300);
+    } catch {}
 
     return c.json(options);
   } catch (err: any) {
@@ -102,7 +126,14 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     }
 
     // Retrieve expected challenge strictly from server cache (fail-closed, single-use)
-    const expectedChallenge = await c.env.CACHE.get(`webauthn_reg:${session.x_id}`);
+    let expectedChallenge = await c.env.CACHE.get(`webauthn_reg:${session.x_id}`);
+    if (!expectedChallenge) {
+      try {
+        const sql = getDb(c.env);
+        expectedChallenge = await consumeAuthChallenge(sql, session.x_id, 'registration');
+      } catch {}
+    }
+
     if (!expectedChallenge) {
       return c.json<ErrorResponse>(
         {
@@ -137,47 +168,63 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     const now = Date.now();
     const passkeyId = crypto.randomUUID();
 
-    // 1. Store passkey in D1
-    await c.env.DB.prepare(
+    // 1. Store passkey in PostgreSQL first
+    try {
+      const sql = getDb(c.env);
+      await savePasskey(sql, {
+        x_id: session.x_id,
+        credential_id: verification.credentialId,
+        public_key: verification.publicKeyHex,
+        counter: verification.counter,
+        transports: body.attestation.response?.transports || [],
+      });
+      await updateIdentityNearAccount(sql, session.x_id, nearAccount);
+    } catch (pgErr) {
+      console.warn('Postgres passkey save failed, using D1:', pgErr);
+    }
+
+    // 2. Also persist to D1 if D1 binding is present
+    if (c.env.DB) {
+      await c.env.DB.prepare(
+        `
+        INSERT INTO passkeys (
+          id,
+          x_id,
+          credential_id,
+          public_key,
+          counter,
+          transports,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(credential_id) DO UPDATE SET
+          public_key = excluded.public_key,
+          counter = excluded.counter
       `
-      INSERT INTO passkeys (
-        id,
-        x_id,
-        credential_id,
-        public_key,
-        counter,
-        transports,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(credential_id) DO UPDATE SET
-        public_key = excluded.public_key,
-        counter = excluded.counter
-    `
-    )
-      .bind(
-        passkeyId,
-        session.x_id,
-        verification.credentialId,
-        verification.publicKeyHex,
-        verification.counter,
-        JSON.stringify(body.attestation.response?.transports || []),
-        now
       )
-      .run();
+        .bind(
+          passkeyId,
+          session.x_id,
+          verification.credentialId,
+          verification.publicKeyHex,
+          verification.counter,
+          JSON.stringify(body.attestation.response?.transports || []),
+          now
+        )
+        .run();
 
-    // 2. Update x_identities table in D1
-    await c.env.DB.prepare(
+      await c.env.DB.prepare(
+        `
+        UPDATE x_identities
+        SET near_account = ?,
+            updated_at = ?
+        WHERE x_id = ?
       `
-      UPDATE x_identities
-      SET near_account = ?,
-          updated_at = ?
-      WHERE x_id = ?
-    `
-    )
-      .bind(nearAccount, now, session.x_id)
-      .run();
+      )
+        .bind(nearAccount, now, session.x_id)
+        .run();
+    }
 
-    // 3. Update active session in KV
+    // 3. Update active session in KV + Postgres
     await updateSession(c, {
       near_account: nearAccount,
     });

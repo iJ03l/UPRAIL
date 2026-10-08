@@ -5,6 +5,7 @@ import {
   platformAuthenticatorIsAvailable,
 } from '@simplewebauthn/browser';
 import { api } from './api';
+import { XUser } from '../types';
 
 export interface WebAuthnSupportStatus {
   supported: boolean;
@@ -41,10 +42,11 @@ export const webauthn = {
   /**
    * Check if a passkey has been saved locally for this handle.
    */
-  hasLocalPasskey(handle: string): boolean {
+  hasLocalPasskey(handle?: string): boolean {
     const list: StoredPasskeyInfo[] = JSON.parse(
       localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
     );
+    if (!handle) return list.length > 0;
     const clean = handle.replace(/^@/, '').toLowerCase();
     return list.some((p) => p.handle.toLowerCase() === clean);
   },
@@ -57,110 +59,88 @@ export const webauthn = {
   },
 
   /**
+   * 1-Click Sign In with hardware WebAuthn Passkey (Touch ID, Face ID, Windows Hello, YubiKey)
+   */
+  async loginWithPasskey(): Promise<{ success: boolean; user: XUser }> {
+    const isSupported = browserSupportsWebAuthn();
+    if (!isSupported) {
+      throw new Error('WebAuthn Passkeys are not supported on this browser or platform.');
+    }
+
+    // 1. Fetch challenge and options from backend
+    const options = await api.getPasskeyLoginOptions();
+
+    // 2. Perform native browser WebAuthn ceremony
+    const assertion = await startAuthentication(options);
+
+    // 3. Verify assertion signature on backend and receive session
+    const res = await api.verifyPasskeyLogin(assertion);
+    return res;
+  },
+
+  /**
    * Register a new hardware passkey (Touch ID, Face ID, Windows Hello, YubiKey)
    * using NIST P-256 (ES256) signature algorithm.
    */
-  async registerPasskey(handle: string = 'user'): Promise<{ success: boolean; credentialId: string; simulated?: boolean }> {
+  async registerPasskey(handle: string): Promise<{ success: boolean; credentialId: string }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
-    const options = await api.getPasskeyRegisterOptions(cleanHandle);
-
     const isSupported = browserSupportsWebAuthn();
-
-    // Real WebAuthn flow if supported
-    if (isSupported && window.isSecureContext) {
-      try {
-        const attResp = await startRegistration(options);
-        
-        // Save passkey record locally
-        const passkeyInfo: StoredPasskeyInfo = {
-          credentialId: attResp.id,
-          handle: cleanHandle,
-          createdAt: new Date().toISOString(),
-          algorithm: 'ES256 (NIST P-256)',
-          deviceLabel: navigator.platform || 'Device Biometric Key',
-        };
-
-        const existing: StoredPasskeyInfo[] = JSON.parse(
-          localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
-        );
-        existing.push(passkeyInfo);
-        localStorage.setItem(PASSKEY_STORAGE_KEY, JSON.stringify(existing));
-
-        return { success: true, credentialId: attResp.id };
-      } catch (err: unknown) {
-        const error = err as Error;
-        console.warn('Real WebAuthn registration cancelled or failed, providing graceful fallback:', error);
-        
-        // If user cancelled, rethrow so UI can display cancellation
-        if (error.name === 'NotAllowedError') {
-          throw new Error('Passkey creation was cancelled on your device.');
-        }
-        // If technical error in unsupported environment, fallback to simulated passkey
-      }
+    if (!isSupported) {
+      throw new Error('WebAuthn is not supported on this browser.');
     }
 
-    // Graceful simulated passkey for dev/testing/unsupported contexts
-    const mockId = `p256_${Math.random().toString(36).substring(2, 16)}_${Date.now()}`;
+    const options = await api.getPasskeyRegisterOptions(cleanHandle);
+    const attResp = await startRegistration(options);
+
+    // Register with backend
+    const res = await fetch('/api/claim/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ attestation: attResp }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to register passkey with server');
+    }
+
+    // Save passkey record locally
     const passkeyInfo: StoredPasskeyInfo = {
-      credentialId: mockId,
+      credentialId: attResp.id,
       handle: cleanHandle,
       createdAt: new Date().toISOString(),
-      algorithm: 'ES256 (NIST P-256 Shielded)',
-      deviceLabel: 'Device Secure Enclave (Simulated)',
+      algorithm: 'ES256 (NIST P-256)',
+      deviceLabel: navigator.platform || 'Device Biometric Key',
     };
+
     const existing: StoredPasskeyInfo[] = JSON.parse(
       localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
     );
     existing.push(passkeyInfo);
     localStorage.setItem(PASSKEY_STORAGE_KEY, JSON.stringify(existing));
 
-    return { success: true, credentialId: mockId, simulated: true };
+    return { success: true, credentialId: attResp.id };
   },
 
   /**
    * Authenticate / Sign with the device passkey (Touch ID, Face ID, PIN)
    * to claim confidential payments.
    */
-  async authenticatePasskey(handle: string = 'user'): Promise<{ success: boolean; credentialId: string; authPayload: unknown }> {
+  async authenticatePasskey(handle: string): Promise<{ success: boolean; credentialId: string; authPayload: unknown }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
-    const options = await api.getPasskeyAuthOptions(cleanHandle);
-
     const isSupported = browserSupportsWebAuthn();
-
-    if (isSupported && window.isSecureContext && this.hasLocalPasskey(cleanHandle)) {
-      try {
-        const asseResp = await startAuthentication(options);
-        return {
-          success: true,
-          credentialId: asseResp.id,
-          authPayload: asseResp,
-        };
-      } catch (err: unknown) {
-        const error = err as Error;
-        console.warn('WebAuthn authentication failed or cancelled:', error);
-        if (error.name === 'NotAllowedError') {
-          throw new Error('Device verification was cancelled.');
-        }
-      }
+    if (!isSupported) {
+      throw new Error('WebAuthn is not supported on this browser.');
     }
 
-    // Fallback/Simulated assertion for demo or non-biometric environments
-    const simulatedAuth = {
-      id: `p256_assert_${Math.random().toString(36).substring(2, 10)}`,
-      rawId: btoa(`passkey_${cleanHandle}`),
-      response: {
-        authenticatorData: 'shielded_near_authenticator_data_p256',
-        clientDataJSON: btoa(JSON.stringify({ type: 'webauthn.get', challenge: options.challenge })),
-        signature: 'intent_p256_signature_claim_ok',
-        userHandle: btoa(cleanHandle),
-      },
-      type: 'public-key',
-    };
+    const options = await api.getPasskeyAuthOptions(cleanHandle);
+    const asseResp = await startAuthentication(options);
 
     return {
       success: true,
-      credentialId: simulatedAuth.id,
-      authPayload: simulatedAuth,
+      credentialId: asseResp.id,
+      authPayload: asseResp,
     };
   },
 };

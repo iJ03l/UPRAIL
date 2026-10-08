@@ -10,7 +10,7 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-// Built-in supported tokens for NEAR Confidential Intents
+// Built-in supported tokens for NEAR Confidential Intents (clean initial state: 0.00)
 export const SUPPORTED_TOKENS: Token[] = [
   {
     id: 'usdc',
@@ -21,7 +21,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     priceUsd: 1.0,
     nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
     badge: 'Confidential',
-    balance: '450.00',
+    balance: '0.00',
   },
   {
     id: 'usdt',
@@ -32,7 +32,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     priceUsd: 1.0,
     nearContractId: 'usdt.tether-token.near',
     badge: 'Confidential',
-    balance: '120.50',
+    balance: '0.00',
   },
   {
     id: 'near',
@@ -43,7 +43,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     priceUsd: 5.85,
     nearContractId: 'wrap.near',
     badge: 'Native Shield',
-    balance: '35.40',
+    balance: '0.00',
   },
   {
     id: 'eth',
@@ -54,7 +54,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     priceUsd: 3450.0,
     nearContractId: 'aurora',
     badge: 'Cross-chain',
-    balance: '0.85',
+    balance: '0.00',
   },
   {
     id: 'btc',
@@ -65,11 +65,10 @@ export const SUPPORTED_TOKENS: Token[] = [
     priceUsd: 68500.0,
     nearContractId: 'btc.near',
     badge: 'Cross-chain',
-    balance: '0.045',
+    balance: '0.00',
   },
 ];
 
-// LocalStorage helpers for mock/offline resilience
 const STORAGE_KEYS = {
   USER: 'uprail_x_user',
   PAYMENTS: 'uprail_payments',
@@ -77,131 +76,78 @@ const STORAGE_KEYS = {
   PASSKEYS: 'uprail_passkeys',
 };
 
-// Seed sample payments if empty
-function initializeLocalStorage() {
-  if (!localStorage.getItem(STORAGE_KEYS.PAYMENTS)) {
-    const demoPayments: PaymentIntent[] = [
-      {
-        id: 'up_98a712f',
-        claimCode: 'up_98a712f',
-        senderHandle: 'mert',
-        senderName: 'Mert Mumtaz',
-        recipientHandle: 'illia',
-        token: SUPPORTED_TOKENS[0], // USDC
-        amount: '500.00',
-        amountUsd: 500.0,
-        fee: '0.01',
-        feeUsd: 0.01,
-        memo: 'Solana ⇄ NEAR intent swap test ⚡',
-        status: 'ready',
-        depositAddress: 'escrow.uprail.near',
-        depositTxHash: '9y3dD2Y4cE67bZ8eF9a0',
-        claimLink: `${window.location.origin}/claim?payment=up_98a712f`,
-        createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-        expiresAt: new Date(Date.now() + 86400000 * 6).toISOString(),
-      },
-      {
-        id: 'up_41c099b',
-        claimCode: 'up_41c099b',
-        senderHandle: 'alex',
-        senderName: 'Alex Skidanov',
-        recipientHandle: 'illia',
-        token: SUPPORTED_TOKENS[2], // NEAR
-        amount: '75.0',
-        amountUsd: 438.75,
-        fee: '0.005',
-        feeUsd: 0.03,
-        memo: 'Bounty payout via confidential shard',
-        status: 'claimed',
-        depositAddress: 'escrow.uprail.near',
-        depositTxHash: '3w1aK8e2mN05rQ7yP4d1',
-        claimTxHash: '8b4xT7s1eV92zK3mH5p8',
-        claimLink: `${window.location.origin}/claim?payment=up_41c099b`,
-        createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
-        expiresAt: new Date(Date.now() + 86400000 * 5).toISOString(),
-        claimedAt: new Date(Date.now() - 3600000 * 8).toISOString(),
-      },
-      {
-        id: 'up_12e987c',
-        claimCode: 'up_12e987c',
-        senderHandle: 'illia',
-        senderName: 'Illia Polosukhin',
-        recipientHandle: 'mert',
-        token: SUPPORTED_TOKENS[0], // USDC
-        amount: '250.00',
-        amountUsd: 250.0,
-        fee: '0.01',
-        feeUsd: 0.01,
-        memo: 'Cross-chain confidential liquidity',
-        status: 'claimed',
-        depositAddress: 'escrow.uprail.near',
-        depositTxHash: '4x9kM1p7qR22yZ5eA3b8',
-        claimTxHash: '1a7vW3e9kP54bH8mN2c1',
-        claimLink: `${window.location.origin}/claim?payment=up_12e987c`,
-        createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
-        expiresAt: new Date(Date.now() + 86400000 * 4).toISOString(),
-        claimedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-      },
-    ];
-    localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(demoPayments));
-  }
-
-  // Note: We do not force auto-seed a logged in user so LoginPage functions as the proper initial entry point.
-}
-
-initializeLocalStorage();
-
 export const api = {
   // Auth endpoints
   async getAuthStatus(): Promise<{ user: XUser | null }> {
     try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/auth/x/status`, { credentials: 'include' });
-        if (res.ok) return await res.json();
+      const url = API_BASE ? `${API_BASE}/auth/status` : '/auth/status';
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.authenticated && data?.user) {
+          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+          return { user: data.user };
+        }
       }
     } catch (e) {
-      console.warn('Backend /auth/x/status unavailable, fallback to local state', e);
+      console.warn('Backend /auth/status unavailable', e);
     }
-    const stored = localStorage.getItem(STORAGE_KEYS.USER);
-    return { user: stored ? JSON.parse(stored) : null };
+    localStorage.removeItem(STORAGE_KEYS.USER);
+    return { user: null };
   },
 
-  async loginWithX(demoHandle?: string): Promise<XUser> {
-    if (API_BASE && !demoHandle) {
-      window.location.href = `${API_BASE}/auth/x/login`;
-      return new Promise(() => {}); // redirecting
-    }
-    // Simulation / demo mode
-    const handle = demoHandle || 'cryptowhale';
-    const user: XUser = {
-      id: String(Math.floor(Math.random() * 9000000 + 1000000)),
-      handle: handle.replace(/^@/, '').toLowerCase(),
-      name: handle.charAt(0).toUpperCase() + handle.slice(1),
-      avatarUrl: `https://images.unsplash.com/photo-${1534528741775 + Math.floor(Math.random() * 1000)}?w=150&auto=format&fit=crop&q=80`,
-      isVerified: true,
-    };
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
-    return user;
+  async loginWithX(): Promise<never> {
+    const url = API_BASE ? `${API_BASE}/auth/x/login` : '/auth/x/login';
+    window.location.href = url;
+    return new Promise<never>(() => {});
   },
 
   async logout(): Promise<void> {
     try {
-      if (API_BASE) {
-        await fetch(`${API_BASE}/auth/x/logout`, { method: 'POST', credentials: 'include' });
-      }
+      const url = API_BASE ? `${API_BASE}/auth/logout` : '/auth/logout';
+      await fetch(url, { method: 'POST', credentials: 'include' });
     } catch (e) {
       console.warn('Backend logout failed', e);
     }
     localStorage.removeItem(STORAGE_KEYS.USER);
   },
 
+  // Passkey Login Endpoints
+  async getPasskeyLoginOptions() {
+    const url = API_BASE ? `${API_BASE}/auth/passkey/login-options` : '/auth/passkey/login-options';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to get passkey login options');
+    }
+    return await res.json();
+  },
+
+  async verifyPasskeyLogin(assertion: unknown): Promise<{ success: boolean; user: XUser }> {
+    const url = API_BASE ? `${API_BASE}/auth/passkey/login-verify` : '/auth/passkey/login-verify';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ assertion }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Passkey verification failed');
+    }
+    const data = await res.json();
+    if (data?.user) {
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+    }
+    return data;
+  },
+
   // Token list
   async getTokens(): Promise<Token[]> {
     try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/api/tokens`);
-        if (res.ok) return await res.json();
-      }
+      const url = API_BASE ? `${API_BASE}/api/tokens` : '/api/tokens';
+      const res = await fetch(url);
+      if (res.ok) return await res.json();
     } catch (e) {
       console.warn('Backend /api/tokens unavailable, returning supported tokens', e);
     }
@@ -230,102 +176,135 @@ export const api = {
       protocolFeeUsd,
       totalAmount,
       totalUsd,
-      depositAddress: 'uprail-escrow-v1.near',
+      depositAddress: 'escrow.uprail.near',
       estimatedTimeSeconds: 2,
     };
   },
 
   // Create payment intent
   async createPayment(params: CreatePaymentRequest): Promise<PaymentIntent> {
-    try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/api/payments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(params),
-        });
-        if (res.ok) return await res.json();
-      }
-    } catch (e) {
-      console.warn('Backend createPayment error, saving locally', e);
-    }
+    const url = API_BASE ? `${API_BASE}/api/send` : '/api/send';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        recipientHandle: params.recipientHandle,
+        asset: params.tokenId,
+        amount: params.amount,
+        quoteSignature: 'near_intent_quote_sig',
+        depositAddress: 'escrow.uprail.near',
+      }),
+    });
 
     const token = SUPPORTED_TOKENS.find((t) => t.id === params.tokenId) || SUPPORTED_TOKENS[0];
-    const user = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || '{"handle":"anonymous"}');
-    const claimCode = `up_${Math.random().toString(36).substring(2, 9)}`;
-    const cleanRecipient = params.recipientHandle.replace(/^@/, '').trim().toLowerCase();
     const numAmount = parseFloat(params.amount) || 0;
 
-    const newPayment: PaymentIntent = {
-      id: claimCode,
-      claimCode,
-      senderHandle: user.handle,
-      senderName: user.name || user.handle,
-      recipientHandle: cleanRecipient,
-      token,
-      amount: params.amount,
-      amountUsd: numAmount * token.priceUsd,
-      fee: '0.01',
-      feeUsd: 0.01 * token.priceUsd,
-      memo: params.memo || '',
-      status: 'ready',
-      depositAddress: 'uprail-escrow-v1.near',
-      depositTxHash: `0x${Math.random().toString(16).substring(2, 18)}`,
-      shieldedTxHash: `intent_near_${Math.random().toString(36).substring(2, 14)}`,
-      claimLink: `${window.location.origin}/claim?payment=${claimCode}`,
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 86400000 * 7).toISOString(), // 7 days expiration
-    };
+    if (res.ok) {
+      const backendData = await res.json();
+      return {
+        id: backendData.paymentId,
+        claimCode: backendData.paymentId,
+        senderHandle: '',
+        recipientHandle: params.recipientHandle.replace(/^@/, '').toLowerCase(),
+        token,
+        amount: params.amount,
+        amountUsd: numAmount * token.priceUsd,
+        fee: '0.01',
+        feeUsd: 0.01 * token.priceUsd,
+        memo: params.memo || '',
+        status: 'ready',
+        depositAddress: backendData.depositAddress || 'escrow.uprail.near',
+        claimLink: backendData.shareLink || `${window.location.origin}/claim/${backendData.paymentId}`,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(backendData.expiresAt || Date.now() + 86400000 * 30).toISOString(),
+      };
+    }
 
-    const existing: PaymentIntent[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYMENTS) || '[]');
-    existing.unshift(newPayment);
-    localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(existing));
-
-    return newPayment;
+    const errorJson = await res.json().catch(() => ({}));
+    throw new Error(errorJson.error || 'Failed to create payment intent');
   },
 
   // Get payment by ID / code
   async getPaymentByCode(code: string): Promise<PaymentIntent | null> {
     try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/api/payments/claim/${encodeURIComponent(code)}`);
-        if (res.ok) return await res.json();
+      const cleanCode = code.trim();
+      const url = API_BASE ? `${API_BASE}/api/payments/${encodeURIComponent(cleanCode)}` : `/api/payments/${encodeURIComponent(cleanCode)}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const p = data.payment;
+        if (!p) return null;
+        const token = SUPPORTED_TOKENS.find((t) => t.id.toLowerCase() === (p.asset || 'usdc').toLowerCase()) || SUPPORTED_TOKENS[0];
+        const numAmount = parseFloat(p.amount) || 0;
+        return {
+          id: p.id,
+          claimCode: p.id,
+          senderHandle: p.sender_x_handle || '',
+          senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
+          recipientHandle: p.recipient_handle || '',
+          token,
+          amount: p.amount,
+          amountUsd: numAmount * token.priceUsd,
+          fee: '0.01',
+          feeUsd: 0.01 * token.priceUsd,
+          memo: '',
+          status: p.status === 'CLAIMED' ? 'claimed' : p.status === 'CANCELLED' ? 'cancelled' : 'ready',
+          depositAddress: p.deposit_address || 'escrow.uprail.near',
+          claimLink: `https://uprail.app/claim/${p.id}`,
+          createdAt: new Date(p.created_at).toISOString(),
+          expiresAt: new Date(p.expires_at).toISOString(),
+        };
       }
     } catch (e) {
       console.warn('Backend getPaymentByCode error', e);
     }
-
-    const existing: PaymentIntent[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYMENTS) || '[]');
-    const cleanCode = code.trim().toLowerCase();
-    return existing.find((p) => p.claimCode.toLowerCase() === cleanCode || p.id.toLowerCase() === cleanCode) || null;
+    return null;
   },
 
   // Get user payments (sent & received)
   async getPaymentHistory(): Promise<PaymentIntent[]> {
     try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/api/payments/history`, { credentials: 'include' });
-        if (res.ok) return await res.json();
+      const url = API_BASE ? `${API_BASE}/api/payments` : '/api/payments';
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const paymentsList = data.payments || [];
+        return paymentsList.map((p: any) => {
+          const token = SUPPORTED_TOKENS.find((t) => t.id.toLowerCase() === (p.asset || 'usdc').toLowerCase()) || SUPPORTED_TOKENS[0];
+          const numAmount = parseFloat(p.amount) || 0;
+          return {
+            id: p.id,
+            claimCode: p.id,
+            senderHandle: p.sender_x_handle || '',
+            senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
+            recipientHandle: p.recipient_handle || '',
+            token,
+            amount: p.amount,
+            amountUsd: numAmount * token.priceUsd,
+            fee: '0.01',
+            feeUsd: 0.01 * token.priceUsd,
+            memo: '',
+            status: p.status === 'CLAIMED' ? 'claimed' : p.status === 'CANCELLED' ? 'cancelled' : 'ready',
+            depositAddress: p.deposit_address || 'escrow.uprail.near',
+            claimLink: `https://uprail.app/claim/${p.id}`,
+            createdAt: new Date(p.created_at).toISOString(),
+            expiresAt: new Date(p.expires_at).toISOString(),
+          };
+        });
       }
     } catch (e) {
       console.warn('Backend getPaymentHistory error', e);
     }
-
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYMENTS) || '[]');
+    return [];
   },
 
   // Passkey Registration Options
   async getPasskeyRegisterOptions(handle: string) {
     try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/api/passkey/register-options`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ handle }),
-        });
-        if (res.ok) return await res.json();
-      }
+      const url = API_BASE ? `${API_BASE}/api/claim/register-options` : '/api/claim/register-options';
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) return await res.json();
     } catch (e) {
       console.warn('Backend passkey register-options error', e);
     }
@@ -354,21 +333,15 @@ export const api = {
     };
   },
 
-  // Passkey Auth Options (for claiming)
-  async getPasskeyAuthOptions(handle: string) {
+  // Passkey Auth Options (for claiming or verification)
+  async getPasskeyAuthOptions(_handle?: string) {
     try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/api/passkey/auth-options`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ handle }),
-        });
-        if (res.ok) return await res.json();
-      }
+      const url = API_BASE ? `${API_BASE}/auth/passkey/login-options` : '/auth/passkey/login-options';
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) return await res.json();
     } catch (e) {
       console.warn('Backend passkey auth-options error', e);
     }
-
     return {
       challenge: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))),
       timeout: 60000,
@@ -378,92 +351,46 @@ export const api = {
   },
 
   // Claim Payment with Passkey verification
-  async claimPayment(claimCode: string, recipientHandle: string, passkeyAuthPayload: unknown): Promise<ClaimPaymentResult> {
-    try {
-      if (API_BASE) {
-        const res = await fetch(`${API_BASE}/api/payments/claim`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ claimCode, recipientHandle, passkeyAuth: passkeyAuthPayload }),
-        });
-        if (res.ok) return await res.json();
-      }
-    } catch (e) {
-      console.warn('Backend claimPayment error', e);
-    }
+  async claimPayment(claimCode: string, _recipientHandle: string, passkeyAuthPayload: unknown): Promise<ClaimPaymentResult> {
+    const url = API_BASE ? `${API_BASE}/api/claim/execute` : '/api/claim/execute';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        paymentIds: [claimCode],
+        passkeySignature: JSON.stringify(passkeyAuthPayload),
+      }),
+    });
 
-    // Update in local mock storage
-    const payments: PaymentIntent[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PAYMENTS) || '[]');
-    const idx = payments.findIndex((p) => p.claimCode === claimCode || p.id === claimCode);
-
-    if (idx === -1) {
-      throw new Error('Payment not found or already claimed.');
-    }
-
-    if (payments[idx].status === 'claimed') {
+    if (res.ok) {
+      const data = await res.json();
+      const firstResult = data.results?.[0];
       return {
-        success: true,
-        payment: payments[idx],
-        shieldedTxHash: payments[idx].claimTxHash || 'already_claimed',
-        message: 'This payment was already claimed.',
+        success: firstResult?.status === 'CLAIMED',
+        shieldedTxHash: firstResult?.txHash || 'intent_claim_tx',
+        message: 'Payment successfully settled into your confidential NEAR vault!',
       };
     }
 
-    const claimTxHash = `intent_claim_p256_${Math.random().toString(36).substring(2, 12)}`;
-    payments[idx].status = 'claimed';
-    payments[idx].claimedAt = new Date().toISOString();
-    payments[idx].claimTxHash = claimTxHash;
-    payments[idx].claimedByPasskeyId = `p256_${Math.random().toString(36).substring(2, 10)}`;
-
-    localStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(payments));
-
-    // Update shielded balance for user
-    const currentShielded: ShieldedBalance[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.SHIELDED) || '[]');
-    const tok = payments[idx].token;
-    const existingTokIdx = currentShielded.findIndex((b) => b.token.id === tok.id);
-    const addedAmount = parseFloat(payments[idx].amount) || 0;
-
-    if (existingTokIdx >= 0) {
-      const newAmt = (parseFloat(currentShielded[existingTokIdx].amount) + addedAmount).toFixed(2);
-      currentShielded[existingTokIdx].amount = newAmt;
-      currentShielded[existingTokIdx].amountUsd = parseFloat(newAmt) * tok.priceUsd;
-    } else {
-      currentShielded.push({
-        token: tok,
-        amount: payments[idx].amount,
-        amountUsd: payments[idx].amountUsd,
-      });
-    }
-    localStorage.setItem(STORAGE_KEYS.SHIELDED, JSON.stringify(currentShielded));
-
-    return {
-      success: true,
-      payment: payments[idx],
-      shieldedTxHash: claimTxHash,
-      message: 'Payment successfully shielded to your passkey device vault!',
-    };
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to claim payment');
   },
 
   // Shielded balances
   async getShieldedBalances(): Promise<ShieldedBalance[]> {
-    const stored = localStorage.getItem(STORAGE_KEYS.SHIELDED);
-    if (stored) {
-      return JSON.parse(stored);
+    try {
+      const url = API_BASE ? `${API_BASE}/api/claim/balance` : '/api/claim/balance';
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.balances && Array.isArray(data.balances)) {
+          return data.balances;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend getShieldedBalances error', e);
     }
-    // Default initial shielded balance
-    const defaults: ShieldedBalance[] = [
-      {
-        token: SUPPORTED_TOKENS[0], // USDC
-        amount: '125.00',
-        amountUsd: 125.0,
-      },
-      {
-        token: SUPPORTED_TOKENS[2], // NEAR
-        amount: '4.50',
-        amountUsd: 26.32,
-      },
-    ];
-    localStorage.setItem(STORAGE_KEYS.SHIELDED, JSON.stringify(defaults));
-    return defaults;
+    return [];
   },
 };

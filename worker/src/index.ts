@@ -28,8 +28,9 @@ app.use('*', sessionMiddleware());
 // 1. Health checks
 app.route('/health', healthRouter);
 
-// 2. X OAuth 2.0 PKCE authentication flow
+// 2. X OAuth 2.0 PKCE & Passkey authentication flow
 app.route('/auth/x', authRouter);
+app.route('/auth', authRouter);
 
 // 3. API Routes (payments and claim flows)
 const apiRouter = new Hono<AppContext>();
