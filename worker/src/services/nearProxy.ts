@@ -48,6 +48,17 @@ export function getNearContainer(env: Env) {
   return env.NEAR_CONTAINER.get(id);
 }
 
+function internalHeaders(env: Env, additional?: Record<string, string>): HeadersInit {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...additional,
+  };
+  if (env.INTERNAL_SERVICE_KEY) {
+    headers['X-Internal-Secret'] = env.INTERNAL_SERVICE_KEY;
+  }
+  return headers;
+}
+
 /**
  * Request a 1Click confidential quote with "advanced" confidentiality
  */
@@ -64,7 +75,7 @@ export async function quote(
 
   const request = new Request('http://container/quote', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       recipientHandle: params.recipientHandle,
       asset: params.asset,
@@ -91,7 +102,7 @@ export async function transfer(env: Env, params: TransferParams): Promise<TxResu
 
   const request = new Request('http://container/transfer', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       recipientNearAccount: params.recipientNearAccount,
       asset: params.asset,
@@ -121,7 +132,7 @@ export async function refund(env: Env, params: RefundParams): Promise<TxResult> 
 
   const request = new Request('http://container/refund', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       senderNearAccount: params.senderNearAccount,
       asset: params.asset,
@@ -154,7 +165,7 @@ export async function createAccount(
 
   const request = new Request('http://container/create-account', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       publicKeyHex: params.publicKeyHex,
       xHandle: params.xHandle,
@@ -188,7 +199,7 @@ export async function getBalance(
 
   const request = new Request(url.toString(), {
     method: 'GET',
-    headers: { 'Accept': 'application/json' },
+    headers: internalHeaders(env, { 'Accept': 'application/json' }),
   });
 
   const response = await container.fetch(request);

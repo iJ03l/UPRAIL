@@ -70,4 +70,38 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const body = await res.json();
     assert.equal(body.code, 'NOT_FOUND');
   });
+
+  it('POST /api/payments/:id/cancel requires authentication (anti-BAC)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/payments/test_id/cancel', {
+      method: 'POST',
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('GET /api/claim/pending requires authentication (anti-BAC)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/claim/pending');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/claim/register requires authentication (anti-BAC)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/claim/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ attestation: {} }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('GET /api/payments requires authentication (anti-IDOR)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/payments');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
 });

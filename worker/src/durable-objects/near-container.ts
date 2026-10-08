@@ -40,10 +40,17 @@ export class NearContainer extends DurableObject<Env> {
 
       // 2. Fallback to container port 8080 via localhost loopback or internal address
       const url = new URL(request.url);
-      const targetUrl = new URL(url.pathname + url.search, 'http://127.0.0.1:8080');
+      let pathname = url.pathname;
+      if (!pathname.startsWith('/internal') && pathname !== '/') {
+        pathname = `/internal${pathname}`;
+      }
+      const targetUrl = new URL(pathname + url.search, 'http://127.0.0.1:8080');
 
       const headers = new Headers(request.headers);
       headers.set('Host', '127.0.0.1:8080');
+      if (this.env.INTERNAL_SERVICE_KEY) {
+        headers.set('X-Internal-Secret', this.env.INTERNAL_SERVICE_KEY);
+      }
 
       const fetchOptions: RequestInit = {
         method: request.method,

@@ -179,8 +179,8 @@ export class EscrowDO extends DurableObject<Env> {
       throw new Error('Payment escrow not found');
     }
 
-    if (senderXId && state.sender_x_id && state.sender_x_id !== senderXId) {
-      throw new Error('Only the sender may cancel this payment');
+    if (!senderXId || (state.sender_x_id && state.sender_x_id !== senderXId)) {
+      throw new Error('Forbidden: Only the authenticated sender may cancel this payment');
     }
 
     if (state.status !== PaymentStatus.PENDING && state.status !== PaymentStatus.DEPOSIT_WAITING) {

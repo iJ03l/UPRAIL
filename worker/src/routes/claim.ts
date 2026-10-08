@@ -101,16 +101,20 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       );
     }
 
-    // Retrieve expected challenge
-    const storedChallenge = await c.env.CACHE.get(`webauthn_reg:${session.x_id}`);
-    const expectedChallenge = body.challenge || storedChallenge;
-
+    // Retrieve expected challenge strictly from server cache (fail-closed, single-use)
+    const expectedChallenge = await c.env.CACHE.get(`webauthn_reg:${session.x_id}`);
     if (!expectedChallenge) {
       return c.json<ErrorResponse>(
-        { error: 'WebAuthn challenge expired or missing', code: 'CHALLENGE_EXPIRED' },
+        {
+          error: 'WebAuthn challenge expired, missing, or already consumed',
+          code: 'CHALLENGE_EXPIRED',
+        },
         400
       );
     }
+
+    // Immediately delete challenge to prevent concurrent or subsequent replay attacks
+    await c.env.CACHE.delete(`webauthn_reg:${session.x_id}`);
 
     const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.app';
     const expectedOrigin = c.env.WEBAUTHN_ORIGIN || 'https://uprail.app';
@@ -122,9 +126,6 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       expectedOrigin,
       expectedRPID: rpId,
     });
-
-    // Clean up stored challenge
-    await c.env.CACHE.delete(`webauthn_reg:${session.x_id}`);
 
     // Call Go Container to create confidential NEAR account
     const nearResult = await nearProxy.createAccount(c.env, {

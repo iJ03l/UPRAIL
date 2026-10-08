@@ -10,6 +10,7 @@ import {
   ErrorResponse,
   Payment,
   PaymentStatus,
+  PublicPaymentPreview,
   QuoteRequest,
   QuoteResponse,
   ResolveRequest,
@@ -301,15 +302,16 @@ paymentsRouter.post('/send', async (c) => {
 paymentsRouter.get('/payments', requireAuth(), async (c) => {
   try {
     const session = c.get('session')!;
+    const userHandle = session.x_handle.toLowerCase();
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
-      WHERE sender_x_id = ?
+      WHERE sender_x_id = ? OR LOWER(recipient_handle) = ?
       ORDER BY created_at DESC
       LIMIT 50
     `
     )
-      .bind(session.x_id)
+      .bind(session.x_id, userHandle)
       .all<Payment>();
 
     return c.json({ payments: results });
@@ -324,7 +326,10 @@ paymentsRouter.get('/payments', requireAuth(), async (c) => {
 
 /**
  * GET /api/payments/:id
- * Retrieve details for a single payment by ID
+ * Retrieve details for a single payment by ID.
+ * Strict Object-Level Access Control (IDOR defense):
+ * - If caller is the sender or recipient: full payment metadata is returned.
+ * - If caller is unauthenticated or third party: sanitized public preview is returned.
  */
 paymentsRouter.get('/payments/:id', async (c) => {
   try {
@@ -353,7 +358,30 @@ paymentsRouter.get('/payments/:id', async (c) => {
       // Ignore DO fetch error and fallback to D1 state
     }
 
-    return c.json({ payment });
+    const session = c.get('session');
+    const isSender = Boolean(session && payment.sender_x_id && payment.sender_x_id === session.x_id);
+    const isRecipient = Boolean(
+      session &&
+        payment.recipient_handle &&
+        session.x_handle.toLowerCase() === payment.recipient_handle.toLowerCase()
+    );
+
+    if (isSender || isRecipient) {
+      return c.json({ payment, isAuthorizedParty: true });
+    }
+
+    // Public / unauthenticated preview: sanitize sensitive fields to prevent IDOR data leakage
+    const publicPreview: PublicPaymentPreview = {
+      id: payment.id,
+      recipient_handle: payment.recipient_handle,
+      asset: payment.asset,
+      amount: payment.amount,
+      status: payment.status,
+      created_at: payment.created_at,
+      expires_at: payment.expires_at,
+    };
+
+    return c.json({ payment: publicPreview, isPublicPreview: true });
   } catch (err: any) {
     console.error('Get payment detail error:', err);
     return c.json<ErrorResponse>(
@@ -365,12 +393,15 @@ paymentsRouter.get('/payments/:id', async (c) => {
 
 /**
  * POST /api/payments/:id/cancel
- * Cancel payment if status is PENDING or DEPOSIT_WAITING
+ * Cancel payment if status is PENDING or DEPOSIT_WAITING.
+ * Strict Object-Level Access Control (IDOR & BAC defense):
+ * - MUST be authenticated via requireAuth()
+ * - Caller MUST be the verified sender (sender_x_id === session.x_id)
  */
-paymentsRouter.post('/payments/:id/cancel', async (c) => {
+paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
   try {
     const id = c.req.param('id');
-    const session = c.get('session');
+    const session = c.get('session')!;
 
     const payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
       .bind(id)
@@ -383,9 +414,13 @@ paymentsRouter.post('/payments/:id/cancel', async (c) => {
       );
     }
 
-    if (session && payment.sender_x_id && payment.sender_x_id !== session.x_id) {
+    // Fail-closed authorization: only the original authenticated sender may cancel
+    if (!payment.sender_x_id || payment.sender_x_id !== session.x_id) {
       return c.json<ErrorResponse>(
-        { error: 'Unauthorized to cancel this payment', code: 'UNAUTHORIZED' },
+        {
+          error: 'Forbidden: Only the authenticated sender of this intent may cancel it',
+          code: 'FORBIDDEN',
+        },
         403
       );
     }
@@ -404,8 +439,16 @@ paymentsRouter.post('/payments/:id/cancel', async (c) => {
     }
 
     const updated = await callEscrowDO(c.env, id, 'cancel', {
-      senderXId: session?.x_id,
+      senderXId: session.x_id,
     });
+
+    // Update D1 record status
+    const now = Date.now();
+    await c.env.DB.prepare(
+      'UPDATE payments SET status = ?, updated_at = ? WHERE id = ?'
+    )
+      .bind(PaymentStatus.CANCELLED, now, id)
+      .run();
 
     return c.json({
       success: true,

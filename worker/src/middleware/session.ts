@@ -126,7 +126,7 @@ export async function destroySession(c: Context<AppContext>): Promise<void> {
 export const requireAuth = (): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
     const session = c.get('session');
-    if (!session) {
+    if (!session || !session.x_id) {
       return c.json(
         {
           error: 'Authentication required. Please log in with X.',

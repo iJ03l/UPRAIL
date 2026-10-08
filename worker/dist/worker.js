@@ -3163,7 +3163,7 @@ async function destroySession(c) {
 var requireAuth = () => {
   return async (c, next) => {
     const session = c.get("session");
-    if (!session) {
+    if (!session || !session.x_id) {
       return c.json(
         {
           error: "Authentication required. Please log in with X.",
@@ -3486,11 +3486,21 @@ function getNearContainer(env) {
   const id = env.NEAR_CONTAINER.idFromName("near-service-singleton");
   return env.NEAR_CONTAINER.get(id);
 }
+function internalHeaders(env, additional) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...additional
+  };
+  if (env.INTERNAL_SERVICE_KEY) {
+    headers["X-Internal-Secret"] = env.INTERNAL_SERVICE_KEY;
+  }
+  return headers;
+}
 async function quote(env, params) {
   const container = getNearContainer(env);
   const request = new Request("http://container/quote", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       recipientHandle: params.recipientHandle,
       asset: params.asset,
@@ -3509,7 +3519,7 @@ async function transfer(env, params) {
   const container = getNearContainer(env);
   const request = new Request("http://container/transfer", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       recipientNearAccount: params.recipientNearAccount,
       asset: params.asset,
@@ -3531,7 +3541,7 @@ async function refund(env, params) {
   const container = getNearContainer(env);
   const request = new Request("http://container/refund", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       senderNearAccount: params.senderNearAccount,
       asset: params.asset,
@@ -3553,7 +3563,7 @@ async function createAccount(env, params) {
   const container = getNearContainer(env);
   const request = new Request("http://container/create-account", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: internalHeaders(env),
     body: JSON.stringify({
       publicKeyHex: params.publicKeyHex,
       xHandle: params.xHandle
@@ -3575,7 +3585,7 @@ async function getBalance(env, params) {
   }
   const request = new Request(url.toString(), {
     method: "GET",
-    headers: { "Accept": "application/json" }
+    headers: internalHeaders(env, { "Accept": "application/json" })
   });
   const response = await container.fetch(request);
   if (!response.ok) {
@@ -3800,14 +3810,15 @@ paymentsRouter.post("/send", async (c) => {
 paymentsRouter.get("/payments", requireAuth(), async (c) => {
   try {
     const session = c.get("session");
+    const userHandle = session.x_handle.toLowerCase();
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
-      WHERE sender_x_id = ?
+      WHERE sender_x_id = ? OR LOWER(recipient_handle) = ?
       ORDER BY created_at DESC
       LIMIT 50
     `
-    ).bind(session.x_id).all();
+    ).bind(session.x_id, userHandle).all();
     return c.json({ payments: results });
   } catch (err) {
     console.error("List payments error:", err);
@@ -3837,7 +3848,24 @@ paymentsRouter.get("/payments/:id", async (c) => {
       }
     } catch {
     }
-    return c.json({ payment });
+    const session = c.get("session");
+    const isSender = Boolean(session && payment.sender_x_id && payment.sender_x_id === session.x_id);
+    const isRecipient = Boolean(
+      session && payment.recipient_handle && session.x_handle.toLowerCase() === payment.recipient_handle.toLowerCase()
+    );
+    if (isSender || isRecipient) {
+      return c.json({ payment, isAuthorizedParty: true });
+    }
+    const publicPreview = {
+      id: payment.id,
+      recipient_handle: payment.recipient_handle,
+      asset: payment.asset,
+      amount: payment.amount,
+      status: payment.status,
+      created_at: payment.created_at,
+      expires_at: payment.expires_at
+    };
+    return c.json({ payment: publicPreview, isPublicPreview: true });
   } catch (err) {
     console.error("Get payment detail error:", err);
     return c.json(
@@ -3846,7 +3874,7 @@ paymentsRouter.get("/payments/:id", async (c) => {
     );
   }
 });
-paymentsRouter.post("/payments/:id/cancel", async (c) => {
+paymentsRouter.post("/payments/:id/cancel", requireAuth(), async (c) => {
   try {
     const id = c.req.param("id");
     const session = c.get("session");
@@ -3857,9 +3885,12 @@ paymentsRouter.post("/payments/:id/cancel", async (c) => {
         404
       );
     }
-    if (session && payment.sender_x_id && payment.sender_x_id !== session.x_id) {
+    if (!payment.sender_x_id || payment.sender_x_id !== session.x_id) {
       return c.json(
-        { error: "Unauthorized to cancel this payment", code: "UNAUTHORIZED" },
+        {
+          error: "Forbidden: Only the authenticated sender of this intent may cancel it",
+          code: "FORBIDDEN"
+        },
         403
       );
     }
@@ -3873,8 +3904,12 @@ paymentsRouter.post("/payments/:id/cancel", async (c) => {
       );
     }
     const updated = await callEscrowDO(c.env, id, "cancel", {
-      senderXId: session?.x_id
+      senderXId: session.x_id
     });
+    const now = Date.now();
+    await c.env.DB.prepare(
+      "UPDATE payments SET status = ?, updated_at = ? WHERE id = ?"
+    ).bind("CANCELLED" /* CANCELLED */, now, id).run();
     return c.json({
       success: true,
       paymentId: id,
@@ -21337,14 +21372,17 @@ claimRouter.post("/register", requireAuth(), async (c) => {
         400
       );
     }
-    const storedChallenge = await c.env.CACHE.get(`webauthn_reg:${session.x_id}`);
-    const expectedChallenge = body.challenge || storedChallenge;
+    const expectedChallenge = await c.env.CACHE.get(`webauthn_reg:${session.x_id}`);
     if (!expectedChallenge) {
       return c.json(
-        { error: "WebAuthn challenge expired or missing", code: "CHALLENGE_EXPIRED" },
+        {
+          error: "WebAuthn challenge expired, missing, or already consumed",
+          code: "CHALLENGE_EXPIRED"
+        },
         400
       );
     }
+    await c.env.CACHE.delete(`webauthn_reg:${session.x_id}`);
     const rpId = c.env.WEBAUTHN_RP_ID || "uprail.app";
     const expectedOrigin = c.env.WEBAUTHN_ORIGIN || "https://uprail.app";
     const verification = await verifyRegistration({
@@ -21353,7 +21391,6 @@ claimRouter.post("/register", requireAuth(), async (c) => {
       expectedOrigin,
       expectedRPID: rpId
     });
-    await c.env.CACHE.delete(`webauthn_reg:${session.x_id}`);
     const nearResult = await createAccount(c.env, {
       publicKeyHex: verification.publicKeyHex,
       xHandle: session.x_handle
@@ -21687,8 +21724,8 @@ var EscrowDO = class extends DurableObject {
     if (!state) {
       throw new Error("Payment escrow not found");
     }
-    if (senderXId && state.sender_x_id && state.sender_x_id !== senderXId) {
-      throw new Error("Only the sender may cancel this payment");
+    if (!senderXId || state.sender_x_id && state.sender_x_id !== senderXId) {
+      throw new Error("Forbidden: Only the authenticated sender may cancel this payment");
     }
     if (state.status !== "PENDING" /* PENDING */ && state.status !== "DEPOSIT_WAITING" /* DEPOSIT_WAITING */) {
       throw new Error(`Cannot cancel payment in status: ${state.status}`);
@@ -21949,9 +21986,16 @@ var NearContainer = class extends DurableObject2 {
         }
       }
       const url = new URL(request.url);
-      const targetUrl = new URL(url.pathname + url.search, "http://127.0.0.1:8080");
+      let pathname = url.pathname;
+      if (!pathname.startsWith("/internal") && pathname !== "/") {
+        pathname = `/internal${pathname}`;
+      }
+      const targetUrl = new URL(pathname + url.search, "http://127.0.0.1:8080");
       const headers = new Headers(request.headers);
       headers.set("Host", "127.0.0.1:8080");
+      if (this.env.INTERNAL_SERVICE_KEY) {
+        headers.set("X-Internal-Secret", this.env.INTERNAL_SERVICE_KEY);
+      }
       const fetchOptions = {
         method: request.method,
         headers

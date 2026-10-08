@@ -19,6 +19,7 @@ const (
 type Config struct {
 	EscrowPrivateKey string        `json:"-"` // Never serialized or logged
 	PartnerAPIKey    string        `json:"-"`
+	InternalSecret   string        `json:"-"` // Inter-service auth secret
 	APIBase          string        `json:"api_base"`
 	SolverRelayURL   string        `json:"solver_relay_url"`
 	EscrowAccountID  string        `json:"escrow_account_id"`
@@ -32,6 +33,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		EscrowPrivateKey: strings.TrimSpace(os.Getenv("ESCROW_PRIVATE_KEY")),
 		PartnerAPIKey:    strings.TrimSpace(os.Getenv("NEAR_PARTNER_API_KEY")),
+		InternalSecret:   strings.TrimSpace(os.Getenv("INTERNAL_SERVICE_KEY")),
 		APIBase:          strings.TrimSpace(os.Getenv("NEAR_API_BASE")),
 		SolverRelayURL:   strings.TrimSpace(os.Getenv("SOLVER_RELAY_URL")),
 		EscrowAccountID:  strings.TrimSpace(os.Getenv("ESCROW_ACCOUNT_ID")),

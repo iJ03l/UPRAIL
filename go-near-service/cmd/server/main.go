@@ -85,6 +85,7 @@ func main() {
 		RefundService:   refundService,
 		AccountService:  accountService,
 		AuthService:     authService,
+		InternalSecret:  cfg.InternalSecret,
 	}
 	handler.RegisterRoutes(r, deps)
 

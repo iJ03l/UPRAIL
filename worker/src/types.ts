@@ -33,6 +33,17 @@ export interface Env {
   X_CLIENT_SECRET?: string;
   ESCROW_PRIVATE_KEY?: string;
   SESSION_SECRET?: string;
+  INTERNAL_SERVICE_KEY?: string;
+}
+
+export interface PublicPaymentPreview {
+  id: string;
+  recipient_handle: string;
+  asset: string;
+  amount: string;
+  status: PaymentStatus;
+  created_at: number;
+  expires_at: number;
 }
 
 export interface Payment {
