@@ -16,7 +16,8 @@
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",
-    "WEBAUTHN_ORIGIN": "https://app.uprail.world"
+    "WEBAUTHN_ORIGIN": "https://app.uprail.world",
+    "DATABASE_URL": "postgres://postgres@localhost:5432/uprail"
   },
   "durable_objects": {
     "bindings": [

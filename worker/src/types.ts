@@ -34,6 +34,7 @@ export interface Env {
   ESCROW_PRIVATE_KEY?: string;
   SESSION_SECRET?: string;
   INTERNAL_SERVICE_KEY?: string;
+  DATABASE_URL?: string;
 }
 
 export interface PublicPaymentPreview {
