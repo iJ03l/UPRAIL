@@ -2902,7 +2902,7 @@ var corsMiddleware = () => {
     const configuredOrigin = c.env.WEBAUTHN_ORIGIN || "https://uprail.app";
     let allowedOrigin = "";
     if (origin) {
-      if (origin === configuredOrigin || origin === "https://uprail.app" || origin.endsWith(".uprail.app") || origin === "http://localhost:3000" || origin === "http://localhost:5173" || origin === "http://127.0.0.1:3000" || origin === "http://127.0.0.1:5173") {
+      if (origin === configuredOrigin || origin === "https://uprail.world" || origin === "https://app.uprail.world" || origin.endsWith(".uprail.world") || origin === "https://uprail.app" || origin.endsWith(".uprail.app") || origin === "http://localhost:3000" || origin === "http://localhost:5173" || origin === "http://127.0.0.1:3000" || origin === "http://127.0.0.1:5173") {
         allowedOrigin = origin;
       }
     }

@@ -16,6 +16,9 @@ export const corsMiddleware = (): MiddlewareHandler<AppContext> => {
       // Check if origin matches UPRAIL domain or configured origin or local development
       if (
         origin === configuredOrigin ||
+        origin === 'https://uprail.world' ||
+        origin === 'https://app.uprail.world' ||
+        origin.endsWith('.uprail.world') ||
         origin === 'https://uprail.app' ||
         origin.endsWith('.uprail.app') ||
         origin === 'http://localhost:3000' ||

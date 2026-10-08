@@ -76,15 +76,15 @@ export const SendPage: React.FC = () => {
     <div className="max-w-xl mx-auto px-4 py-8 sm:py-12">
       {/* Page Title & Intro */}
       <div className="text-center space-y-2 mb-8">
-        <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-semibold mb-1">
+        <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-[#E05326]/10 border border-[#E05326]/30 text-[#E05326] text-xs font-mono font-medium mb-1">
           <Shield className="w-3.5 h-3.5" />
           <span>NEAR Confidential Intents</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-          Send to any <span className="text-gradient-brand">X Handle</span>
+        <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight">
+          Send to any <span className="text-gradient-burnt">𝕏 Handle</span>
         </h1>
-        <p className="text-sm text-slate-400 max-w-md mx-auto">
-          Confidential transfers claimed with device passkeys. No wallet addresses, no seed phrases, no friction.
+        <p className="text-sm text-[#C3B9B2] max-w-md mx-auto">
+          Confidential transfers claimed with device passkeys on app.uprail.world. Zero mempools, no public balance leak.
         </p>
       </div>
 
@@ -116,24 +116,24 @@ export const SendPage: React.FC = () => {
 
       {/* Sender State Notice if anonymous */}
       {!user && (
-        <div className="mb-6 p-3.5 rounded-2xl bg-dark-card border border-dark-border text-xs flex items-center justify-between">
-          <div className="flex items-center space-x-2 text-slate-300">
-            <Lock className="w-4 h-4 text-slate-400" />
+        <div className="mb-6 p-3.5 rounded-2xl bg-[#140F0D] border border-[#2C221D] text-xs flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-[#C3B9B2]">
+            <Lock className="w-4 h-4 text-[#E05326]" />
             <span>Sending as anonymous confidential sender</span>
           </div>
           <button
             onClick={() => login()}
-            className="text-xs font-bold text-brand-400 hover:text-brand-300 underline"
+            className="text-xs font-bold text-[#E05326] hover:text-[#FF7D54] underline"
           >
-            Sign in with X
+            Sign in with 𝕏
           </button>
         </div>
       )}
 
       {/* Primary Payment Card */}
-      <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
-        {/* Subtle accent line */}
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand-500 via-emerald-400 to-near-cyan" />
+      <div className="glass-card rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden border border-[#2C221D]">
+        {/* Subtle burnt orange accent line */}
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#E05326] via-[#FF6B35] to-[#FFFFFF]" />
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Recipient Handle Input */}
@@ -157,10 +157,10 @@ export const SendPage: React.FC = () => {
           {/* Optional Memo / Message */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              <label className="text-xs font-mono font-semibold uppercase tracking-wider text-[#A69C95]">
                 Confidential Memo (Optional)
               </label>
-              <span className="text-[11px] text-slate-500">Encrypted</span>
+              <span className="text-[11px] font-mono text-[#E05326]">Encrypted</span>
             </div>
             <input
               type="text"
@@ -169,33 +169,33 @@ export const SendPage: React.FC = () => {
               disabled={isSubmitting}
               placeholder="e.g. Design review payment ☕"
               maxLength={120}
-              className="w-full rounded-xl bg-dark-surface border border-dark-border px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition-colors"
+              className="w-full rounded-2xl bg-[#0E0B09] border border-[#2C221D] px-4 py-3 text-sm text-white placeholder-stone-600 focus:outline-none focus:border-[#E05326] transition-colors"
             />
           </div>
 
           {/* Quote & Fee Breakdown */}
           {quote && parseFloat(amount) > 0 && (
-            <div className="rounded-2xl bg-dark-surface/80 border border-dark-border/60 p-4 space-y-2.5 text-xs animate-fade-in">
-              <div className="flex items-center justify-between text-slate-400">
+            <div className="rounded-2xl bg-[#0E0B09] border border-[#2C221D] p-4 space-y-2.5 text-xs animate-fade-in">
+              <div className="flex items-center justify-between text-[#A69C95]">
                 <span>Protocol Fee</span>
                 <span className="text-emerald-400 font-medium">Free (0%)</span>
               </div>
-              <div className="flex items-center justify-between text-slate-400">
+              <div className="flex items-center justify-between text-[#A69C95]">
                 <span>Network Execution</span>
-                <span className="text-slate-300 font-mono">
+                <span className="text-white font-mono">
                   {quote.networkFee} {quote.token.symbol} (${quote.networkFeeUsd.toFixed(2)})
                 </span>
               </div>
-              <div className="flex items-center justify-between text-slate-400">
+              <div className="flex items-center justify-between text-[#A69C95]">
                 <span>Settlement Speed</span>
-                <span className="text-slate-300 flex items-center">
-                  <Zap className="w-3 h-3 text-amber-400 mr-1" />
+                <span className="text-[#FFAB76] flex items-center font-mono">
+                  <Zap className="w-3 h-3 text-[#E05326] mr-1" />
                   Instant (~2 sec)
                 </span>
               </div>
-              <div className="pt-2 border-t border-dark-border flex items-center justify-between font-bold text-white text-sm">
+              <div className="pt-2 border-t border-[#2C221D] flex items-center justify-between font-bold text-white text-sm">
                 <span>Total Escrow Amount</span>
-                <span className="text-brand-300 font-mono">
+                <span className="text-[#E05326] font-mono">
                   {quote.totalAmount} {quote.token.symbol} (${quote.totalUsd.toFixed(2)})
                 </span>
               </div>
@@ -206,15 +206,15 @@ export const SendPage: React.FC = () => {
           <button
             type="submit"
             disabled={!isFormValid}
-            className={`w-full py-4 px-6 rounded-2xl font-black text-base flex items-center justify-center space-x-2 transition-all duration-200 shadow-xl ${
+            className={`w-full py-4 px-6 rounded-2xl font-display font-extrabold text-base flex items-center justify-center space-x-2 transition-all duration-200 shadow-xl ${
               isFormValid
-                ? 'bg-gradient-to-r from-brand-500 via-emerald-400 to-near-cyan text-dark-bg hover:opacity-95 shadow-brand-500/25 cursor-pointer transform hover:-translate-y-0.5'
-                : 'bg-dark-surface text-slate-600 border border-dark-border cursor-not-allowed'
+                ? 'bg-gradient-to-r from-[#E05326] to-[#FF6B35] text-white hover:shadow-[0_0_35px_rgba(224,83,38,0.6)] cursor-pointer transform hover:-translate-y-0.5'
+                : 'bg-[#181310] text-stone-600 border border-[#2C221D] cursor-not-allowed'
             }`}
           >
             {isSubmitting ? (
               <>
-                <div className="w-5 h-5 border-2 border-dark-bg border-t-transparent rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 <span>Creating Shielded Intent...</span>
               </>
             ) : (
@@ -230,30 +230,16 @@ export const SendPage: React.FC = () => {
             )}
           </button>
         </form>
-
-        {/* Feature Highlights */}
-        <div className="mt-8 pt-6 border-t border-dark-border/50 grid grid-cols-3 gap-2 text-center">
-          <div className="space-y-1">
-            <span className="text-xs font-bold text-white block">Device Passkey</span>
-            <span className="text-[11px] text-slate-400">Biometric claim</span>
-          </div>
-          <div className="space-y-1">
-            <span className="text-xs font-bold text-white block">Unlinkable</span>
-            <span className="text-[11px] text-slate-400">Shielded transfers</span>
-          </div>
-          <div className="space-y-1">
-            <span className="text-xs font-bold text-white block">No Friction</span>
-            <span className="text-[11px] text-slate-400">Zero wallet setup</span>
-          </div>
-        </div>
       </div>
 
-      {/* Share Modal Trigger */}
-      <ShareModal
-        isOpen={showShareModal}
-        onClose={() => setShowShareModal(false)}
-        payment={createdPayment}
-      />
+      {/* Share Modal Dialog */}
+      {createdPayment && (
+        <ShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          payment={createdPayment}
+        />
+      )}
     </div>
   );
 };

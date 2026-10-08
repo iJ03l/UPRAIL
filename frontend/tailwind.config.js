@@ -8,26 +8,48 @@ export default {
   theme: {
     extend: {
       colors: {
-        brand: {
-          50: '#ecfdf5',
-          100: '#d1fae5',
-          200: '#a7f3d0',
-          300: '#6ee7b7',
-          400: '#34d399',
-          500: '#10b981', // Emerald / Rail Green
-          600: '#059669',
-          700: '#047857',
-          800: '#065f46',
-          900: '#064e3b',
-          950: '#022c22',
+        // Hero Burnt Orange Palette
+        burnt: {
+          50: '#FFF6F2',
+          100: '#FFE9E0',
+          200: '#FFD1C2',
+          300: '#FFAF94',
+          400: '#FF7D54',
+          500: '#E05326', // Hero Primary Burnt Orange
+          600: '#C8461C',
+          700: '#A43412',
+          800: '#7E2910',
+          900: '#521A0A',
+          950: '#2A0C04',
         },
+        flame: {
+          300: '#FFAB76',
+          400: '#FF8A50',
+          500: '#FF5722',
+          600: '#E64A19',
+        },
+        // Deep obsidian with warm terracotta warmth
         dark: {
-          bg: '#0a0d14',
-          surface: '#111726',
-          card: '#161e31',
-          cardHover: '#1c263e',
-          border: '#243048',
-          borderMuted: '#1d273b',
+          bg: '#0A0807',
+          surface: '#120E0C',
+          card: '#181310',
+          cardHover: '#221B17',
+          border: '#2C221D',
+          borderMuted: '#1E1713',
+          borderActive: '#E05326',
+        },
+        brand: {
+          50: '#FFF6F2',
+          100: '#FFE9E0',
+          200: '#FFD1C2',
+          300: '#FFAF94',
+          400: '#FF7D54',
+          500: '#E05326',
+          600: '#C8461C',
+          700: '#A43412',
+          800: '#7E2910',
+          900: '#521A0A',
+          950: '#2A0C04',
         },
         near: {
           green: '#00EC97',
@@ -36,33 +58,52 @@ export default {
         }
       },
       fontFamily: {
-        sans: [
-          'Inter',
+        // Rare bespoke display font: Clash Display / Syne
+        display: [
+          '"Clash Display"',
+          'Syne',
           '-apple-system',
           'BlinkMacSystemFont',
-          'Segoe UI',
-          'Roboto',
+          'sans-serif',
+        ],
+        // Editorial grotesque: Cabinet Grotesk / Space Grotesk
+        sans: [
+          '"Cabinet Grotesk"',
+          '"Space Grotesk"',
+          '-apple-system',
+          'BlinkMacSystemFont',
           'sans-serif',
         ],
         mono: [
-          'JetBrains Mono',
-          'Fira Code',
+          '"JetBrains Mono"',
           'monospace',
         ],
       },
       boxShadow: {
-        'glow-brand': '0 0 25px -5px rgba(16, 185, 129, 0.25)',
-        'glow-cyan': '0 0 25px -5px rgba(0, 193, 222, 0.25)',
-        'glow-subtle': '0 4px 20px -2px rgba(0, 0, 0, 0.5)',
+        'glow-burnt': '0 0 35px -5px rgba(224, 83, 38, 0.45)',
+        'glow-flame': '0 0 60px 0px rgba(255, 107, 53, 0.35)',
+        'glow-white': '0 0 30px -5px rgba(255, 255, 255, 0.3)',
+        'glow-subtle': '0 8px 32px 0 rgba(0, 0, 0, 0.7)',
+        'inner-burnt': 'inset 0 0 20px 0 rgba(224, 83, 38, 0.2)',
       },
       animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'fade-in': 'fadeIn 0.2s ease-in-out',
+        'pulse-slow': 'pulse 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'rail-flow': 'railFlow 20s linear infinite',
+        'fade-in': 'fadeIn 0.3s ease-out',
+        'float-slow': 'floatSlow 6s ease-in-out infinite',
       },
       keyframes: {
         fadeIn: {
-          '0%': { opacity: '0', transform: 'translateY(4px)' },
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        railFlow: {
+          '0%': { backgroundPosition: '0% 0%' },
+          '100%': { backgroundPosition: '200% 200%' },
+        },
+        floatSlow: {
+          '0%, 100%': { transform: 'translateY(0px)' },
+          '50%': { transform: 'translateY(-10px)' },
         },
       },
     },

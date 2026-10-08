@@ -85,15 +85,15 @@ export const ClaimPage: React.FC = () => {
     <div className="max-w-xl mx-auto px-4 py-8 sm:py-12">
       {/* Page Header */}
       <div className="text-center space-y-2 mb-8">
-        <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold mb-1">
+        <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-[#E05326]/10 border border-[#E05326]/30 text-[#E05326] text-xs font-mono font-medium mb-1">
           <Fingerprint className="w-3.5 h-3.5" />
           <span>Device Passkey Claim</span>
         </div>
-        <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-          Claim <span className="text-gradient-brand">Confidential Payment</span>
+        <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight">
+          Claim <span className="text-gradient-burnt">Confidential Payment</span>
         </h1>
-        <p className="text-sm text-slate-400 max-w-md mx-auto">
-          Sign with Touch ID, Face ID, or your device passcode. No wallet app or seed phrase required.
+        <p className="text-sm text-[#C3B9B2] max-w-md mx-auto">
+          Sign with Touch ID, Face ID, or your device passcode on app.uprail.world. Zero wallet app or seed phrase required.
         </p>
       </div>
 
@@ -275,8 +275,8 @@ export const ClaimPage: React.FC = () => {
               </div>
 
               {/* Recipient Notice */}
-              <div className="flex items-start space-x-2.5 p-3.5 rounded-2xl bg-brand-500/10 border border-brand-500/20 text-xs text-brand-300">
-                <Fingerprint className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+              <div className="flex items-start space-x-2.5 p-3.5 rounded-2xl bg-[#E05326]/10 border border-[#E05326]/30 text-xs text-[#FFAB76]">
+                <Fingerprint className="w-4 h-4 text-[#E05326] flex-shrink-0 mt-0.5" />
                 <p>
                   Claim with your device passkey (Touch ID, Face ID, or PIN).
                   No seed phrases, no private key management.
@@ -287,11 +287,11 @@ export const ClaimPage: React.FC = () => {
               <button
                 onClick={() => setShowPasskeyModal(true)}
                 disabled={isClaiming}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-brand-500 via-emerald-400 to-near-cyan text-dark-bg font-black text-base flex items-center justify-center space-x-2 shadow-xl shadow-brand-500/25 hover:opacity-95 transition-all transform hover:-translate-y-0.5 cursor-pointer disabled:opacity-60"
+                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-[#E05326] to-[#FF6B35] text-white font-display font-black text-base flex items-center justify-center space-x-2 shadow-xl shadow-[#E05326]/30 hover:shadow-[0_0_35px_rgba(224,83,38,0.6)] hover:opacity-95 transition-all transform hover:-translate-y-0.5 cursor-pointer disabled:opacity-60"
               >
                 {isClaiming ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-dark-bg border-t-transparent rounded-full animate-spin" />
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <span>Verifying Passkey Biometrics...</span>
                   </>
                 ) : (

@@ -39,12 +39,12 @@ export const HistoryPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white flex items-center gap-2.5">
-            <History className="w-7 h-7 text-brand-400" />
+          <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-white flex items-center gap-2.5">
+            <History className="w-7 h-7 text-[#E05326]" />
             Payment History
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Track all outgoing confidential intents and their real-time escrow/claim status
+          <p className="text-sm text-[#C3B9B2] mt-1">
+            Track all outgoing confidential intents on app.uprail.world and their real-time escrow/claim status
           </p>
         </div>
 
