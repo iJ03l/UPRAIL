@@ -5,7 +5,7 @@ import {
   Fingerprint,
   ExternalLink,
 } from 'lucide-react';
-import { NeonSpriteCanvas } from '../components/NeonSpriteCanvas';
+import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { InteractiveRailSimulator } from '../components/InteractiveRailSimulator';
 import { TextReveal } from '../components/TextReveal';
 import { AuthModal } from '../components/AuthModal';
@@ -14,62 +14,58 @@ export const LandingPage: React.FC = () => {
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   return (
-    <div className="relative min-h-screen bg-white text-stone-900 overflow-hidden selection:bg-[#E05326] selection:text-white">
-      {/* Faceless Neon-Green Humanoid Sprite (nearest-neighbor scaled, tracks cursor) */}
-      <NeonSpriteCanvas />
+    <div className="relative min-h-screen bg-white text-stone-900 overflow-hidden selection:bg-[#E05326] selection:text-white font-sans">
+      {/* 
+        Quantus Interactive Background: 
+        1. Dynamic pixelated matrix that lights up on mouse movement & scroll
+        2. Real figure pixel sprite trailing behind cursor based on velocity vector
+      */}
+      <QuantusInteractiveCanvas />
 
-      {/* Subtle fine architectural grid pattern on white */}
-      <div
-        className="fixed inset-0 pointer-events-none z-0 opacity-[0.035]"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, #000000 1px, transparent 1px), linear-gradient(to bottom, #000000 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-        }}
-      />
-
-      {/* Clean Editorial Floating Header */}
-      <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-white/85 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+      {/* Quantus-Style Technical Header */}
+      <header className="sticky top-0 z-40 w-full border-b border-stone-200/90 bg-white/90 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
           {/* Brand Emblem */}
           <Link to="/" className="flex items-center space-x-3 group">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#E05326] via-[#FF6B35] to-[#39FF14] p-[2px] shadow-lg shadow-[#E05326]/20 group-hover:scale-105 transition-transform duration-300">
-              <div className="w-full h-full bg-white rounded-2xl flex items-center justify-center">
-                <span className="font-display font-black text-black text-lg tracking-tight">UP</span>
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-[#E05326] via-[#FF6B35] to-[#39FF14] p-[1.5px] shadow-sm group-hover:scale-105 transition-transform duration-200">
+              <div className="w-full h-full bg-white rounded-xl flex items-center justify-center">
+                <span className="font-display font-black text-black text-base sm:text-lg tracking-tight">UP</span>
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="font-display font-extrabold text-xl tracking-tight text-stone-950 flex items-center">
+              <span className="font-display font-extrabold text-lg sm:text-xl tracking-tight text-stone-950 flex items-center">
                 UPRAIL
-                <span className="ml-2 px-2 py-0.5 text-[10px] font-mono font-bold bg-[#E05326]/10 text-[#E05326] border border-[#E05326]/25 rounded-md">
-                  WORLD
+                <span className="ml-2 px-1.5 py-0.5 text-[9px] font-mono font-bold bg-[#E05326]/10 text-[#E05326] border border-[#E05326]/20 rounded">
+                  MAINNET
                 </span>
               </span>
-              <span className="text-[11px] font-sans text-stone-500 -mt-1 hidden sm:inline">
-                The Confidential Value Railway for 𝕏
+              <span className="text-[10px] font-mono text-stone-400 -mt-0.5 hidden sm:inline uppercase tracking-widest">
+                uprail.world // confidential
               </span>
             </div>
           </Link>
 
-          {/* Navigation Links & Action */}
-          <div className="flex items-center space-x-4 sm:space-x-6">
-            <a
-              href="#simulator"
-              className="text-xs font-mono font-medium text-stone-600 hover:text-black transition-colors hidden md:inline"
-            >
-              Interactive Simulator
+          {/* Navigation Links in Quantus Minimal Monospace */}
+          <nav className="hidden md:flex items-center space-x-6 text-xs font-mono uppercase tracking-wider text-stone-600">
+            <a href="#problem" className="hover:text-black transition-colors">
+              [01 // The Vulnerability]
             </a>
-            <a
-              href="#how-it-works"
-              className="text-xs font-mono font-medium text-stone-600 hover:text-black transition-colors hidden md:inline"
-            >
-              How It Works
+            <a href="#simulator" className="hover:text-black transition-colors">
+              [02 // Intent Simulator]
             </a>
+            <a href="#matrix" className="hover:text-black transition-colors">
+              [03 // Matrix]
+            </a>
+            <a href="#specs" className="hover:text-black transition-colors">
+              [04 // Architecture]
+            </a>
+          </nav>
 
-            {/* Launch App Button -> app.uprail.world / /app */}
+          {/* CTA: Enter App */}
+          <div className="flex items-center space-x-3">
             <Link
               to="/app"
-              className="relative group px-5 py-2.5 rounded-xl bg-black text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-[#E05326] transition-all shadow-[0_4px_16px_rgba(0,0,0,0.15)] hover:shadow-[0_4px_25px_rgba(224,83,38,0.4)] flex items-center space-x-2"
+              className="relative group px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-black text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-[#E05326] transition-all shadow-[0_4px_14px_rgba(0,0,0,0.12)] hover:shadow-[0_4px_22px_rgba(224,83,38,0.35)] flex items-center space-x-2"
             >
               <span>Launch App</span>
               <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
@@ -79,30 +75,28 @@ export const LandingPage: React.FC = () => {
       </header>
 
       {/* Main Landing Flow */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 sm:pt-24 pb-28 space-y-32">
+      <main className="relative z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 sm:pt-20 pb-28 space-y-28 sm:space-y-36">
         {/* Hero Section */}
-        <section className="relative text-center max-w-4xl mx-auto space-y-8 pt-4 sm:pt-8">
-          {/* Status Badge */}
-          <div className="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-stone-100 border border-stone-200 shadow-sm">
-            <span className="w-2 h-2 rounded-full bg-[#39FF14] border border-[#052E08] animate-pulse" />
-            <span className="text-xs font-mono text-stone-700">
-              Steer cursor to guide the Confidential Entity • NEAR Intents GA
-            </span>
+        <section className="relative text-center max-w-4xl mx-auto space-y-6 pt-2 sm:pt-6">
+          {/* Quantus-style system prompt banner */}
+          <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-stone-100 border border-stone-200/80 text-xs font-mono text-stone-700 shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-[#39FF14] border border-[#062E0C] animate-pulse" />
+            <span>CONFIDENTIAL ENTITY ACTIVE • STEER CURSOR TO GUIDE</span>
           </div>
 
-          {/* Monumental Headline in Rare Fonts */}
-          <h1 className="text-4xl sm:text-6xl md:text-7xl font-display font-extrabold tracking-tight leading-[1.05] text-stone-950">
-            MONEY ON <span className="font-sans text-black underline decoration-[#E05326] decoration-4 underline-offset-8">𝕏</span>,
+          {/* Huge Display Heading */}
+          <h1 className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl font-display font-extrabold tracking-tight leading-[1.02] text-stone-950">
+            Money on <span className="underline decoration-[#E05326] decoration-4 underline-offset-8">𝕏</span>.
             <br />
             <span className="bg-gradient-to-r from-[#E05326] via-[#FF6B35] to-[#C8461C] bg-clip-text text-transparent">
-              SHIELDED BY CODE.
+              Zero public leak.
             </span>
           </h1>
 
-          {/* Subheadline */}
+          {/* Subtitle */}
           <p className="text-base sm:text-xl text-stone-600 max-w-2xl mx-auto leading-relaxed font-sans">
-            Pay any X handle from any blockchain. No public balance tracking. No seed phrases.
-            Claimed instantly with device passkeys on <span className="text-black font-mono font-bold">app.uprail.world</span>.
+            Send confidential cross-chain payments to any X handle on NEAR Confidential Intents.
+            Recipient claims instantly with biometric passkeys on <span className="font-mono text-black font-semibold">app.uprail.world</span>.
           </p>
 
           {/* Action CTAs */}
@@ -125,48 +119,162 @@ export const LandingPage: React.FC = () => {
             </button>
           </div>
 
-          {/* Trust Metrics Cards */}
-          <div className="pt-12 grid grid-cols-2 md:grid-cols-4 gap-4 text-left">
-            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 shadow-sm">
-              <div className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Privacy Engine</div>
-              <div className="text-lg font-display font-bold text-stone-900 mt-0.5">TEE Private Shard</div>
-              <div className="text-[11px] text-[#E05326] font-mono mt-0.5">Zero public ledger leak</div>
+          {/* Quantus-Style Tabular Stats Row */}
+          <div className="pt-10 grid grid-cols-2 md:grid-cols-4 border border-stone-200 rounded-2xl bg-stone-50/70 overflow-hidden divide-y md:divide-y-0 md:divide-x divide-stone-200 text-left shadow-sm">
+            <div className="p-4 sm:p-5">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-stone-400 block mb-1">
+                Execution Model
+              </span>
+              <span className="text-xl sm:text-2xl font-mono font-bold text-stone-900 block leading-tight">
+                TEE Enclave
+              </span>
+              <span className="text-[11px] font-mono text-[#E05326] mt-0.5 block">
+                Private Shard Shielder
+              </span>
             </div>
-            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 shadow-sm">
-              <div className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Authentication</div>
-              <div className="text-lg font-display font-bold text-stone-900 mt-0.5">P-256 Passkey</div>
-              <div className="text-[11px] text-stone-700 font-mono mt-0.5">Touch ID / Face ID</div>
+
+            <div className="p-4 sm:p-5">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-stone-400 block mb-1">
+                Recipient Auth
+              </span>
+              <span className="text-xl sm:text-2xl font-mono font-bold text-stone-900 block leading-tight">
+                P-256 Passkey
+              </span>
+              <span className="text-[11px] font-mono text-stone-600 mt-0.5 block">
+                WebAuthn ES256 (-7)
+              </span>
             </div>
-            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 shadow-sm">
-              <div className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Inbound Chains</div>
-              <div className="text-lg font-display font-bold text-stone-900 mt-0.5">Multichain Ingest</div>
-              <div className="text-[11px] text-[#E05326] font-mono mt-0.5">ETH • ARB • SOL • NEAR</div>
+
+            <div className="p-4 sm:p-5">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-stone-400 block mb-1">
+                Inbound Settlement
+              </span>
+              <span className="text-xl sm:text-2xl font-mono font-bold text-stone-900 block leading-tight">
+                ~2.1s
+              </span>
+              <span className="text-[11px] font-mono text-[#E05326] mt-0.5 block">
+                1Click Swap Engine
+              </span>
             </div>
-            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 shadow-sm">
-              <div className="text-[11px] font-mono text-stone-500 uppercase tracking-wider">Escrow Safety</div>
-              <div className="text-lg font-display font-bold text-stone-900 mt-0.5">30-Day Timeout</div>
-              <div className="text-[11px] text-stone-700 font-mono mt-0.5">Automatic alarm refund</div>
+
+            <div className="p-4 sm:p-5">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-stone-400 block mb-1">
+                Escrow Protection
+              </span>
+              <span className="text-xl sm:text-2xl font-mono font-bold text-stone-900 block leading-tight">
+                30 Days
+              </span>
+              <span className="text-[11px] font-mono text-emerald-600 mt-0.5 block">
+                Auto Alarm Refund
+              </span>
             </div>
           </div>
         </section>
 
-        {/* The Interactive Element: Confidential Rail Simulator */}
-        <section className="scroll-mt-24" id="simulator">
-          <div className="mb-4 text-center">
-            <span className="text-xs font-mono uppercase tracking-widest text-[#E05326] font-semibold">
-              Live Interactive Prototype
+        {/* Quantus-Style Problem / Vulnerability Section */}
+        <section id="problem" className="scroll-mt-24 space-y-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-stone-200 pb-4 gap-2">
+            <div>
+              <span className="text-xs font-mono uppercase tracking-widest text-[#E05326] font-bold">
+                [01 // The Surveillance Dilemma]
+              </span>
+              <h2 className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 mt-1">
+                $2.8 Trillion in Crypto. Zero Social Privacy.
+              </h2>
+            </div>
+            <p className="text-xs font-mono text-stone-500 max-w-sm">
+              Linking a public wallet address to a social identity invites permanent scraping, phishing, and physical targeting.
+            </p>
+          </div>
+
+          {/* Quantus Chain Comparison Matrix */}
+          <div id="matrix" className="border border-stone-200 rounded-3xl bg-white overflow-hidden shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-stone-200 text-left">
+              {/* Bitcoin */}
+              <div className="p-6 sm:p-8 space-y-3 bg-stone-50/50">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs uppercase tracking-wider text-stone-400">Network</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-800">
+                    VULNERABLE
+                  </span>
+                </div>
+                <div className="text-xl font-display font-bold text-stone-900">Bitcoin</div>
+                <div className="font-mono text-xs text-stone-500">ECDSA-256 (secp256k1)</div>
+                <p className="text-xs text-stone-600 leading-relaxed pt-2 border-t border-stone-200">
+                  Every Satoshi sent to a public handle links your entire UTXO graph and future balance.
+                </p>
+              </div>
+
+              {/* Ethereum */}
+              <div className="p-6 sm:p-8 space-y-3 bg-stone-50/50">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs uppercase tracking-wider text-stone-400">Network</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-800">
+                    VULNERABLE
+                  </span>
+                </div>
+                <div className="text-xl font-display font-bold text-stone-900">Ethereum</div>
+                <div className="font-mono text-xs text-stone-500">Public Mempools</div>
+                <p className="text-xs text-stone-600 leading-relaxed pt-2 border-t border-stone-200">
+                  MEV bots front-run transfers; Etherscan indexes every social handle payment permanently.
+                </p>
+              </div>
+
+              {/* Solana */}
+              <div className="p-6 sm:p-8 space-y-3 bg-stone-50/50">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs uppercase tracking-wider text-stone-400">Network</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-800">
+                    VULNERABLE
+                  </span>
+                </div>
+                <div className="text-xl font-display font-bold text-stone-900">Solana</div>
+                <div className="font-mono text-xs text-stone-500">Public Account History</div>
+                <p className="text-xs text-stone-600 leading-relaxed pt-2 border-t border-stone-200">
+                  Wallet scrapers instantly associate Twitter handles with live token balances and net worth.
+                </p>
+              </div>
+
+              {/* UPRAIL */}
+              <div className="p-6 sm:p-8 space-y-3 bg-[#E05326]/5 relative">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs uppercase tracking-wider text-[#E05326] font-bold">UPRAIL</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#39FF14]/20 border border-[#39FF14] text-[#062E0C]">
+                    SHIELDED
+                  </span>
+                </div>
+                <div className="text-xl font-display font-bold text-stone-950">NEAR Confidential</div>
+                <div className="font-mono text-xs text-[#E05326] font-bold">TEE Private Shard + P-256</div>
+                <p className="text-xs text-stone-800 leading-relaxed pt-2 border-t border-[#E05326]/20 font-medium">
+                  Balances, transfers, and recipients are strictly encrypted. Only your biometric passkey holds the spend key.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Live Interactive Prototype Element: Confidential Rail Simulator */}
+        <section id="simulator" className="scroll-mt-24 space-y-4">
+          <div className="flex items-center justify-between border-b border-stone-200 pb-3">
+            <div>
+              <span className="text-xs font-mono uppercase tracking-widest text-[#E05326] font-bold">
+                [02 // Interactive Prototype]
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950">
+                Pulse The Confidential Intent
+              </h2>
+            </div>
+            <span className="text-xs font-mono text-stone-400 hidden sm:inline">
+              LIVE SIMULATION // 1CLICK
             </span>
-            <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950 mt-1">
-              Simulate a Confidential Transfer
-            </h2>
           </div>
           <InteractiveRailSimulator />
         </section>
 
-        {/* Scroll-Triggered Text Reveal Section */}
-        <section className="max-w-4xl mx-auto py-12 text-center space-y-6">
+        {/* Quantus-Style Scroll Manifesto Text Reveal */}
+        <section className="max-w-4xl mx-auto py-8 text-center space-y-6">
           <div className="text-xs font-mono uppercase tracking-widest text-[#E05326] font-bold">
-            The Confidential Rail Manifesto
+            [03 // The Confidential Philosophy]
           </div>
           <TextReveal
             className="text-2xl sm:text-4xl md:text-5xl font-display font-bold tracking-tight leading-tight justify-center"
@@ -176,147 +284,86 @@ export const LandingPage: React.FC = () => {
           </TextReveal>
         </section>
 
-        {/* How It Works - 3 Step Cards */}
-        <section id="how-it-works" className="space-y-12 scroll-mt-24">
-          <div className="text-center space-y-3">
-            <h2 className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950">
-              How The Railway Operates
-            </h2>
-            <p className="text-sm text-stone-600 max-w-lg mx-auto">
-              Three cryptographic steps turn any X username into an unbreakable confidential vault.
-            </p>
+        {/* Architecture Spec Sheet (Quantus Technical Style) */}
+        <section id="specs" className="scroll-mt-24 space-y-6">
+          <div className="border-b border-stone-200 pb-3 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-mono uppercase tracking-widest text-[#E05326] font-bold">
+                [04 // Protocol Specifications]
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950">
+                Cryptographic Blueprint
+              </h2>
+            </div>
+            <span className="text-xs font-mono text-stone-400 hidden sm:inline">
+              NEP-413 // WEBAUTHN P-256
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Step 1 */}
-            <div className="p-8 rounded-3xl bg-stone-50 border border-stone-200 shadow-sm relative overflow-hidden group hover:border-[#E05326] transition-all">
-              <div className="w-12 h-12 rounded-2xl bg-[#E05326]/10 text-[#E05326] flex items-center justify-center font-mono font-bold text-lg mb-6 border border-[#E05326]/20">
+            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50 space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-[#E05326]/10 text-[#E05326] flex items-center justify-center font-mono font-bold text-sm">
                 01
               </div>
-              <h3 className="text-xl font-display font-bold text-stone-900 mb-3">
-                Deposit to Escrow
+              <h3 className="text-lg font-display font-bold text-stone-900">
+                Confidential Escrow DO
               </h3>
               <p className="text-xs text-stone-600 leading-relaxed">
-                Sender addresses the payment to <span className="text-stone-950 font-mono font-bold">@handle</span>. Funds flow via 1Click Swap into a private escrow DO. The recipient's true address is not yet exposed because it doesn't need to exist yet.
+                Cloudflare Durable Object state machine running SQLite and 30-day hardware alarms. Syncs claim proofs to NEAR private shard via ed25519 signer.
               </p>
-              <div className="mt-6 pt-4 border-t border-stone-200 font-mono text-[11px] text-[#E05326]">
-                POST /v0/quote (confidentiality: advanced)
+              <div className="font-mono text-[11px] text-[#E05326] pt-2 border-t border-stone-200">
+                Standard: NEP-413 (Ed25519)
               </div>
             </div>
 
-            {/* Step 2 */}
-            <div className="p-8 rounded-3xl bg-stone-50 border border-stone-200 shadow-sm relative overflow-hidden group hover:border-[#E05326] transition-all">
-              <div className="w-12 h-12 rounded-2xl bg-[#E05326]/10 text-[#E05326] flex items-center justify-center font-mono font-bold text-lg mb-6 border border-[#E05326]/20">
+            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50 space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-[#E05326]/10 text-[#E05326] flex items-center justify-center font-mono font-bold text-sm">
                 02
               </div>
-              <h3 className="text-xl font-display font-bold text-stone-900 mb-3">
-                Identity Binding
+              <h3 className="text-lg font-display font-bold text-stone-900">
+                Stable Snowflake Binding
               </h3>
               <p className="text-xs text-stone-600 leading-relaxed">
-                The recipient opens <span className="text-stone-950 font-mono font-bold">app.uprail.world</span> and authenticates with X OAuth 2.0 PKCE. Their stable numeric Snowflake ID is mapped to their pending deposits.
+                X OAuth 2.0 PKCE binds the recipient's permanent numeric user ID. Usernames can change or recycle; funds always map to the true identity.
               </p>
-              <div className="mt-6 pt-4 border-t border-stone-200 font-mono text-[11px] text-[#E05326]">
-                Snowflake ID mapping • Zero public directory
+              <div className="font-mono text-[11px] text-[#E05326] pt-2 border-t border-stone-200">
+                Identity: X API v2 PKCE
               </div>
             </div>
 
-            {/* Step 3 */}
-            <div className="p-8 rounded-3xl bg-stone-50 border border-stone-200 shadow-sm relative overflow-hidden group hover:border-[#E05326] transition-all">
-              <div className="w-12 h-12 rounded-2xl bg-black text-white flex items-center justify-center font-mono font-bold text-lg mb-6 shadow-md">
+            <div className="p-6 rounded-2xl border border-stone-200 bg-stone-50 space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center font-mono font-bold text-sm shadow-md">
                 03
               </div>
-              <h3 className="text-xl font-display font-bold text-stone-900 mb-3">
-                Biometric Passkey Claim
+              <h3 className="text-lg font-display font-bold text-stone-900">
+                Hardware Passkey Signer
               </h3>
               <p className="text-xs text-stone-600 leading-relaxed">
-                A WebAuthn P-256 passkey is generated directly on their phone or laptop. The escrow executes a confidential intent transfer into their passkey account. Only their biometric signature can spend it.
+                WebAuthn P-256 private keys generated inside the user's Secure Enclave. Partner APIs cannot access balances; only hardware signatures can unlock.
               </p>
-              <div className="mt-6 pt-4 border-t border-stone-200 font-mono text-[11px] text-stone-900 font-bold">
-                Hardware-isolated P-256 (ES256, Alg -7)
+              <div className="font-mono text-[11px] text-stone-900 font-bold pt-2 border-t border-stone-200">
+                Cipher: ES256 (NIST P-256, -7)
               </div>
             </div>
           </div>
         </section>
 
-        {/* Public vs UPRAIL Comparison Matrix */}
-        <section className="p-8 sm:p-12 rounded-3xl bg-stone-50 border border-stone-200 shadow-sm space-y-8">
-          <div className="text-center space-y-2">
-            <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950">
-              Public Explorer vs. The Confidential Rail
-            </h2>
-            <p className="text-xs text-stone-500">
-              Why sending money to social accounts requires hardware-isolated zero-knowledge confidentiality.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
-            {/* Public Chains */}
-            <div className="p-6 rounded-2xl bg-white border border-red-200 space-y-4 shadow-sm">
-              <div className="flex items-center space-x-2 text-red-600 font-mono text-xs font-bold uppercase">
-                <span className="w-2 h-2 rounded-full bg-red-500" />
-                <span>Standard Public Chains (Venmo/Solana/Etherscan)</span>
-              </div>
-              <ul className="space-y-3 text-xs text-stone-600">
-                <li className="flex items-start space-x-2">
-                  <span className="text-red-500 font-bold">✕</span>
-                  <span>Anyone who knows your @handle can see your exact wallet balance.</span>
-                </li>
-                <li className="flex items-start space-x-2">
-                  <span className="text-red-500 font-bold">✕</span>
-                  <span>Every transaction is permanently public in blockchain explorers.</span>
-                </li>
-                <li className="flex items-start space-x-2">
-                  <span className="text-red-500 font-bold">✕</span>
-                  <span>Recipients must generate 12-word seed phrases before receiving funds.</span>
-                </li>
-                <li className="flex items-start space-x-2">
-                  <span className="text-red-500 font-bold">✕</span>
-                  <span>Unclaimed funds sent to inactive handles are lost forever.</span>
-                </li>
-              </ul>
-            </div>
-
-            {/* UPRAIL */}
-            <div className="p-6 rounded-2xl bg-white border-2 border-[#E05326] space-y-4 shadow-md">
-              <div className="flex items-center space-x-2 text-[#E05326] font-mono text-xs font-bold uppercase">
-                <span className="w-2 h-2 rounded-full bg-[#E05326] animate-pulse" />
-                <span>UPRAIL Confidential Railway</span>
-              </div>
-              <ul className="space-y-3 text-xs text-stone-900 font-medium">
-                <li className="flex items-start space-x-2">
-                  <span className="text-[#E05326] font-bold">✓</span>
-                  <span>Balances, history, and recipients are strictly encrypted on a private TEE shard.</span>
-                </li>
-                <li className="flex items-start space-x-2">
-                  <span className="text-[#E05326] font-bold">✓</span>
-                  <span>Partner APIs cannot view user balances—only the user's signature can authenticate.</span>
-                </li>
-                <li className="flex items-start space-x-2">
-                  <span className="text-[#E05326] font-bold">✓</span>
-                  <span>Zero seed phrases: One-touch hardware passkey creation (Face ID / Touch ID).</span>
-                </li>
-                <li className="flex items-start space-x-2">
-                  <span className="text-[#E05326] font-bold">✓</span>
-                  <span>Automatic 30-day Durable Object alarm refunds if recipient never claims.</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        {/* Final CTA Banner */}
-        <section className="text-center py-16 px-6 rounded-3xl bg-stone-950 text-white border border-stone-800 relative overflow-hidden shadow-2xl">
+        {/* Quantus-Style Call To Action Terminal Banner */}
+        <section className="p-8 sm:p-14 rounded-3xl bg-stone-950 text-white border border-stone-800 shadow-2xl relative overflow-hidden text-center">
           <div className="relative z-10 max-w-2xl mx-auto space-y-6">
+            <span className="px-3 py-1 rounded-full bg-[#E05326]/20 border border-[#E05326]/40 text-[#E05326] text-xs font-mono font-bold uppercase tracking-wider">
+              Launch Production Environment
+            </span>
             <h2 className="text-3xl sm:text-5xl font-display font-extrabold text-white tracking-tight">
               Ready to Send Discretion?
             </h2>
-            <p className="text-sm text-stone-300">
-              Launch the production application on <span className="text-white font-mono font-bold">app.uprail.world</span> to initiate confidential payments or claim funds waiting for your X handle.
+            <p className="text-sm text-stone-400">
+              Access the confidential payment rail on <span className="text-white font-mono font-bold">app.uprail.world</span> to initiate transfers or claim pending balances with your passkey.
             </p>
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link
                 to="/app"
-                className="inline-flex items-center space-x-3 px-8 py-4 rounded-2xl bg-[#E05326] text-white font-display font-extrabold text-sm uppercase tracking-wider hover:bg-[#FF6B35] hover:scale-105 transition-all shadow-[0_10px_30px_rgba(224,83,38,0.5)]"
+                className="w-full sm:w-auto inline-flex items-center justify-center space-x-3 px-8 py-4 rounded-2xl bg-[#E05326] text-white font-display font-extrabold text-sm uppercase tracking-wider hover:bg-[#FF6B35] hover:scale-105 transition-all shadow-[0_10px_30px_rgba(224,83,38,0.5)]"
               >
                 <span>Launch app.uprail.world</span>
                 <ArrowRight className="w-4 h-4" />
@@ -326,15 +373,15 @@ export const LandingPage: React.FC = () => {
         </section>
       </main>
 
-      {/* Footer */}
-      <footer className="w-full border-t border-stone-200 bg-white py-10 relative z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-stone-500">
+      {/* Quantus-Style Technical Footer */}
+      <footer className="w-full border-t border-stone-200 bg-white py-12 relative z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-6 text-xs font-mono text-stone-500">
           <div className="flex items-center space-x-3">
             <span className="font-display font-bold text-stone-950 text-sm">UPRAIL.WORLD</span>
-            <span>•</span>
-            <span>Confidential Intents Railway</span>
-            <span>•</span>
-            <span className="font-mono text-[#E05326] font-bold">app.uprail.world</span>
+            <span>//</span>
+            <span>NEAR Confidential Intents</span>
+            <span>//</span>
+            <span className="text-[#E05326] font-bold">app.uprail.world</span>
           </div>
 
           <div className="flex items-center space-x-6">
@@ -356,7 +403,7 @@ export const LandingPage: React.FC = () => {
               NEAR Confidential Shard
             </a>
             <Link to="/app" className="hover:text-black transition-colors font-bold text-[#E05326]">
-              Enter App →
+              Launch App →
             </Link>
           </div>
         </div>
