@@ -34,13 +34,12 @@ export const QuantusInteractiveCanvas: React.FC = () => {
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
-    // Dynamic Pixel Grid parameters (Quantus pixelated aesthetic)
-    const GRID_SIZE = 24; // size of pixel blocks
+    // Quantus Pixel Grid parameters
+    const GRID_SIZE = 26;
     let cols = Math.ceil(width / GRID_SIZE);
     let rows = Math.ceil(height / GRID_SIZE);
-    // Grid cell activations: stores intensity [0..1] and hue ('orange' | 'green')
     const gridEnergies = new Float32Array(cols * rows);
-    const gridTypes = new Uint8Array(cols * rows); // 0 = orange, 1 = green
+    const gridTypes = new Uint8Array(cols * rows); // 0 = burnt orange, 1 = neon green
 
     const handleResize = () => {
       if (!canvas) return;
@@ -51,21 +50,41 @@ export const QuantusInteractiveCanvas: React.FC = () => {
     };
     window.addEventListener('resize', handleResize);
 
-    // Mouse & Velocity Tracking
-    const pos = { x: width / 2, y: height / 2 };
-    const target = { x: pos.x, y: pos.y };
-    let vx = 0;
-    let vy = 0;
-    let lastDirX = 0;
-    let lastDirY = 1; // default facing down
+    // Mouse coordinates (for pixel grid excitation & sprite curiosity)
+    const mouse = { x: width * 0.5, y: height * 0.5, active: false };
+
+    // Adventurous autonomous entity coordinates
+    const entity = {
+      x: width * 0.75,
+      y: height * 0.35,
+      targetX: width * 0.75,
+      targetY: height * 0.35,
+      vx: 0,
+      vy: 0,
+      facingLeft: false,
+      wanderTimer: 0,
+      roamSpeed: 0.025,
+      isFleeing: false,
+    };
+
     let lastScrollY = window.scrollY;
-    let scrollVelocity = 0;
+
+    const pickNewRoamTarget = () => {
+      // Pick an adventurous point on screen, favoring interesting margins and open space
+      const margin = 100;
+      entity.targetX = margin + Math.random() * (width - margin * 2);
+      entity.targetY = 80 + Math.random() * (height - 200);
+      entity.roamSpeed = 0.015 + Math.random() * 0.02;
+    };
+
+    pickNewRoamTarget();
 
     const handlePointerMove = (e: PointerEvent) => {
-      target.x = e.clientX;
-      target.y = e.clientY;
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+      mouse.active = true;
 
-      // Excite grid cells near cursor (Quantus interactive matrix)
+      // Excite Quantus dithered grid blocks near cursor
       const gx = Math.floor(e.clientX / GRID_SIZE);
       const gy = Math.floor(e.clientY / GRID_SIZE);
       const radius = 3;
@@ -77,25 +96,43 @@ export const QuantusInteractiveCanvas: React.FC = () => {
             const dist = Math.hypot(dx, dy);
             if (dist <= radius) {
               const idx = cy * cols + cx;
-              const boost = (1 - dist / radius) * 0.75;
+              const boost = (1 - dist / radius) * 0.7;
               gridEnergies[idx] = Math.min(1.0, gridEnergies[idx] + boost);
-              gridTypes[idx] = Math.random() > 0.4 ? 0 : 1; // 0 = burnt orange, 1 = neon green
+              gridTypes[idx] = Math.random() > 0.4 ? 0 : 1;
             }
           }
         }
+      }
+
+      // If mouse gets very close to the entity, it playfully dashes away or explores
+      const distToEntity = Math.hypot(e.clientX - entity.x, e.clientY - entity.y);
+      if (distToEntity < 130) {
+        // Playfully dart to a new adventure quadrant
+        const angle = Math.atan2(entity.y - e.clientY, entity.x - e.clientX);
+        entity.targetX = Math.max(80, Math.min(width - 80, entity.x + Math.cos(angle) * 220));
+        entity.targetY = Math.max(80, Math.min(height - 180, entity.y + Math.sin(angle) * 220));
+        entity.roamSpeed = 0.045; // swift adventurous dodge
       }
     };
 
     const handleScroll = () => {
       const curY = window.scrollY;
-      scrollVelocity = (curY - lastScrollY);
+      const scrollDiff = curY - lastScrollY;
       lastScrollY = curY;
 
-      // Scroll excites a horizontal swath of the pixel grid
-      const excitedRow = Math.floor(Math.random() * rows);
+      // Adventurous entity responds to scroll momentum: floats along with the wave!
+      entity.y -= scrollDiff * 0.15;
+      entity.targetY -= scrollDiff * 0.25;
+
+      // Wrap or clamp within window view
+      if (entity.y < 60) entity.y = height - 120;
+      if (entity.y > height - 60) entity.y = 80;
+
+      // Light up horizontal Quantus dither line on scroll
+      const row = Math.floor(Math.random() * rows);
       for (let cx = 0; cx < cols; cx++) {
-        const idx = excitedRow * cols + cx;
-        gridEnergies[idx] = Math.min(0.9, gridEnergies[idx] + 0.35);
+        const idx = row * cols + cx;
+        gridEnergies[idx] = Math.min(0.85, gridEnergies[idx] + 0.3);
         gridTypes[idx] = 0;
       }
     };
@@ -108,51 +145,61 @@ export const QuantusInteractiveCanvas: React.FC = () => {
 
     const tick = () => {
       time += 0.03;
-      scrollVelocity *= 0.92;
 
-      // Velocity easing: pos follows target
-      vx = target.x - pos.x;
-      vy = target.y - pos.y;
-      pos.x += vx * 0.08;
-      pos.y += vy * 0.08;
+      // Periodic autonomous wander decision
+      entity.wanderTimer += 1;
+      if (entity.wanderTimer > 180 + Math.random() * 120) {
+        entity.wanderTimer = 0;
+        pickNewRoamTarget();
+      }
 
-      const len = Math.hypot(vx, vy);
-      if (len > 0.4) {
-        lastDirX = vx / len;
-        lastDirY = vy / len;
+      // Smooth floating ease toward roam target
+      const dx = entity.targetX - entity.x;
+      const dy = entity.targetY - entity.y;
+      entity.vx = dx * entity.roamSpeed;
+      entity.vy = dy * entity.roamSpeed;
+
+      // Add gentle cosmic floating bob
+      const floatBob = Math.sin(time * 1.8) * 0.8;
+      const floatDrift = Math.cos(time * 1.2) * 0.5;
+
+      entity.x += entity.vx + floatDrift;
+      entity.y += entity.vy + floatBob;
+
+      if (Math.abs(entity.vx) > 0.3) {
+        entity.facingLeft = entity.vx < 0;
       }
 
       ctx.clearRect(0, 0, width, height);
 
       // -------------------------------------------------------------
-      // 1. Quantus Pixelated Background Matrix Pass
+      // 1. Quantus Dithered Background Matrix Pass
       // -------------------------------------------------------------
-      // Render subtle pixel blocks on white background
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const idx = r * cols + c;
           let energy = gridEnergies[idx];
 
           if (energy > 0.01) {
-            gridEnergies[idx] = energy * 0.94; // fade decay
+            gridEnergies[idx] = energy * 0.94; // smooth fade
             const bx = c * GRID_SIZE;
             const by = r * GRID_SIZE;
             const size = GRID_SIZE - 2;
 
             if (gridTypes[idx] === 0) {
-              // Burnt Orange flare block (#E05326 / #FF6B35)
-              ctx.fillStyle = `rgba(224, 83, 38, ${energy * 0.28})`;
+              // Burnt Orange flare block (#E05326)
+              ctx.fillStyle = `rgba(224, 83, 38, ${energy * 0.22})`;
             } else {
               // Electric Green block (#39FF14)
-              ctx.fillStyle = `rgba(57, 255, 20, ${energy * 0.32})`;
+              ctx.fillStyle = `rgba(57, 255, 20, ${energy * 0.26})`;
             }
             ctx.fillRect(bx, by, size, size);
           } else {
-            // Very faint ambient grid point
+            // Subtle quiet technical grid dots
             if ((c + r) % 4 === 0) {
               const bx = c * GRID_SIZE + GRID_SIZE / 2;
               const by = r * GRID_SIZE + GRID_SIZE / 2;
-              ctx.fillStyle = 'rgba(0, 0, 0, 0.035)';
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
               ctx.fillRect(bx, by, 1.5, 1.5);
             }
           }
@@ -160,45 +207,34 @@ export const QuantusInteractiveCanvas: React.FC = () => {
       }
 
       // -------------------------------------------------------------
-      // 2. Trailing Pixel Figure (from real uploaded image)
+      // 2. Adventurous Background Entity (Real Figure Sprite)
       // -------------------------------------------------------------
       if (spriteReady) {
         const isMobile = width < 768;
-        const SCALE = isMobile ? 5 : 7;
-        const behind = isMobile ? 52 : 72; // pixels behind the pointer
-        const headOffset = isMobile ? 24 : 36; // head below the cursor
-
-        // The sprite anchor is the top of the head, and that point sits behind the pointer
-        const spriteHeadX = pos.x - lastDirX * behind;
-        const spriteHeadY = pos.y - lastDirY * behind + headOffset;
-
+        const SCALE = isMobile ? 4.5 : 6.0;
         const dw = LOW_W * SCALE;
         const dh = LOW_H * SCALE;
 
-        // Anchor is top-center of head: (LOW_W/2 * SCALE, 0)
-        // Sprite drawing top-left coordinate:
-        const drawX = spriteHeadX - dw / 2;
-        const drawY = spriteHeadY;
+        const drawX = entity.x - dw / 2;
+        const drawY = entity.y - dh / 2;
 
-        const isFacingLeft = lastDirX < 0 || vx < -0.5;
-
-        // A. Subtle floor shadow under trailing figure on white ground
+        // Subtle soft shadow on white floor under the roaming entity
         ctx.save();
-        ctx.fillStyle = 'rgba(6, 46, 12, 0.12)';
+        ctx.fillStyle = 'rgba(6, 46, 12, 0.09)';
         ctx.beginPath();
-        ctx.ellipse(spriteHeadX, spriteHeadY + dh - 10, dw * 0.32, 10, 0, 0, Math.PI * 2);
+        ctx.ellipse(entity.x, entity.y + dh / 2 - 8, dw * 0.34, 10, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
 
-        // B. Soft Glow Pass: 1 screen pixel larger, ~0.3 alpha behind sharp pass
+        // Glow Pass: 1 screen pixel larger, soft green glow
         ctx.save();
         ctx.imageSmoothingEnabled = false;
-        ctx.globalAlpha = 0.32;
+        ctx.globalAlpha = 0.28;
         ctx.shadowColor = '#39ff14';
-        ctx.shadowBlur = 18;
+        ctx.shadowBlur = 22;
 
-        if (isFacingLeft) {
-          ctx.translate(spriteHeadX, drawY);
+        if (entity.facingLeft) {
+          ctx.translate(entity.x, drawY);
           ctx.scale(-1, 1);
           ctx.drawImage(offscreen, -dw / 2 - 1, -1, dw + 2, dh + 2);
         } else {
@@ -206,13 +242,13 @@ export const QuantusInteractiveCanvas: React.FC = () => {
         }
         ctx.restore();
 
-        // C. Sharp Pass: nearest-neighbor scaled 6-8x with crisp square blocks
+        // Sharp Pass: Crisp nearest-neighbor square pixels
         ctx.save();
         ctx.imageSmoothingEnabled = false;
-        ctx.globalAlpha = 1.0;
+        ctx.globalAlpha = 0.95;
 
-        if (isFacingLeft) {
-          ctx.translate(spriteHeadX, drawY);
+        if (entity.facingLeft) {
+          ctx.translate(entity.x, drawY);
           ctx.scale(-1, 1);
           ctx.drawImage(offscreen, -dw / 2, 0, dw, dh);
         } else {
@@ -237,7 +273,7 @@ export const QuantusInteractiveCanvas: React.FC = () => {
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 pointer-events-none z-10"
+      className="fixed inset-0 pointer-events-none z-0"
       style={{ imageRendering: 'pixelated' }}
     />
   );
