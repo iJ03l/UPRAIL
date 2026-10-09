@@ -104,7 +104,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       </header>
 
       {/* Main Content Area */}
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-7 flex-1">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-10 py-8 sm:py-12 md:py-14 flex-1">
         {children}
       </main>
 

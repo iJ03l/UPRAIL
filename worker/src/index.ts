@@ -33,6 +33,47 @@ app.use('*', corsMiddleware());
 app.use('*', rateLimit({ limit: 60, prefix: 'global' }));
 app.use('*', sessionMiddleware());
 
+// Enforce strict separation: /app is strictly forbidden on apex uprail.world
+app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+  const host = url.hostname.toLowerCase();
+  if (
+    (host === 'uprail.world' || host === 'www.uprail.world') &&
+    (url.pathname === '/app' || url.pathname.startsWith('/app/'))
+  ) {
+    return c.html(
+      `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>403 Forbidden — UPRAIL</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0c0a09; color: #f5f5f4; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; text-align: center; }
+    .card { max-width: 440px; background: #1c1917; border: 1px solid #292524; padding: 36px 32px; border-radius: 24px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+    .tag { display: inline-block; padding: 4px 12px; border-radius: 9999px; background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #f87171; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 20px; font-family: monospace; letter-spacing: 0.05em; }
+    h1 { font-size: 26px; margin: 0 0 12px; font-weight: 800; letter-spacing: -0.02em; }
+    p { font-size: 14px; color: #a8a29e; line-height: 1.6; margin: 0 0 24px; }
+    .domain { background: #0c0a09; border: 1px solid #292524; padding: 12px; border-radius: 12px; font-family: monospace; color: #E05326; font-weight: bold; margin-bottom: 24px; font-size: 14px; }
+    a { display: inline-flex; align-items: center; justify-content: center; width: 100%; box-sizing: border-box; padding: 14px 24px; background: #ffffff; color: #000000; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; text-decoration: none; border-radius: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="tag">403 Forbidden</div>
+    <h1>Application Restricted</h1>
+    <p>/app is strictly forbidden on uprail.world.<br>The application is hosted on the dedicated secure subdomain:</p>
+    <div class="domain">https://app.uprail.world</div>
+    <a href="https://app.uprail.world">Launch app.uprail.world &rarr;</a>
+  </div>
+</body>
+</html>`,
+      403
+    );
+  }
+  await next();
+});
+
 // Mount Route Groups
 // 1. Health checks
 app.route('/health', healthRouter);

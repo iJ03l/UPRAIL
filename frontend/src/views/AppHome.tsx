@@ -142,7 +142,7 @@ export const AppHome: React.FC = () => {
           )}
 
           {/* Balance Hero Card — live from onchain intent account */}
-          <div className="rounded-3xl p-6 sm:p-7 bg-white border border-stone-200 shadow-xs space-y-4 relative">
+          <div className="rounded-3xl p-7 sm:p-9 md:p-10 bg-white border border-stone-200 shadow-xs space-y-6 relative">
             <div className="flex items-center justify-between">
               <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5">
                 <Shield className="w-3.5 h-3.5 text-stone-900" />

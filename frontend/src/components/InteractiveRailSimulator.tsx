@@ -316,13 +316,15 @@ export const InteractiveRailSimulator: React.FC = () => {
             <span className="text-xs text-stone-500 font-mono">
               Ready to send live assets to @{cleanHandle}?
             </span>
-            <Link
-              to="/app"
+            <a
+              href="https://app.uprail.world"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-black text-white text-xs font-display font-bold hover:bg-[#E05326] transition-colors shadow-sm"
             >
               <span>Execute on app.uprail.world</span>
               <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+            </a>
           </div>
         </div>
       </div>
