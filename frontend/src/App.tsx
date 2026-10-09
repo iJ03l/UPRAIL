@@ -7,6 +7,7 @@ import { ReceivePage } from './views/ReceivePage';
 import { ClaimPage } from './views/ClaimPage';
 import { HistoryPage } from './views/HistoryPage';
 import { LoginPage } from './views/LoginPage';
+import { ParkingPage } from './views/ParkingPage';
 import { AppLayout } from './components/AppLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ArrowRight, ShieldAlert } from 'lucide-react';
@@ -193,6 +194,10 @@ export const App: React.FC = () => {
 
         {/* Dedicated Login Page */}
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Comical First-Time User Parking Page */}
+        <Route path="/parking" element={<ParkingPage />} />
+        <Route path="/app/parking" element={<Navigate to="/parking" replace />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to={isAppDomain ? '/app' : '/'} replace />} />

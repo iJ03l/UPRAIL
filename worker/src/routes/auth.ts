@@ -302,12 +302,23 @@ const getSessionHandler = async (c: any) => {
     } catch {}
   }
 
+  let hasPasskey = !!session.near_account;
+  if (!hasPasskey && c.env.DB) {
+    try {
+      const pk = await c.env.DB.prepare('SELECT id FROM passkeys WHERE x_id = ?')
+        .bind(session.x_id)
+        .first();
+      if (pk) hasPasskey = true;
+    } catch {}
+  }
+
   const user = {
     id: session.x_id,
     handle: session.x_handle,
     name: session.x_name,
     avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
     nearAccount: session.near_account,
+    hasPasskey,
     isActivated: !!isActivated,
     personalInviteCode: personalInviteCode || null,
   };
@@ -320,6 +331,7 @@ const getSessionHandler = async (c: any) => {
       xHandle: session.x_handle,
       xName: session.x_name,
       nearAccount: session.near_account,
+      hasPasskey,
       expiresAt: session.expires_at,
       isActivated: !!isActivated,
       personalInviteCode: personalInviteCode || null,

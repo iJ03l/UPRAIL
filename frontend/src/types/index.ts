@@ -5,6 +5,7 @@ export interface XUser {
   avatarUrl: string;
   isVerified?: boolean;
   nearAccount?: string | null;
+  hasPasskey?: boolean;
   isActivated?: boolean;
   personalInviteCode?: string | null;
 }

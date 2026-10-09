@@ -5,7 +5,7 @@
 
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse, RedeemInviteRequest } from '../types';
-import { requireAuth } from '../middleware/session';
+import { requireAuth, updateSession } from '../middleware/session';
 import {
   getUserInvite,
   validateInviteCode,
@@ -112,6 +112,11 @@ invitesRouter.post('/redeem', requireAuth(), async (c) => {
     const result = await redeemInvite(c.env, body.code, {
       x_id: session.x_id,
       x_handle: session.x_handle,
+    });
+
+    await updateSession(c, {
+      is_activated: true,
+      personal_invite_code: result.personalInviteCode,
     });
 
     return c.json(result);

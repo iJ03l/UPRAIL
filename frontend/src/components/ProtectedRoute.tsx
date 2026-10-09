@@ -10,14 +10,12 @@ interface ProtectedRouteProps {
 }
 
 /**
- * ProtectedRoute — Strict Authentication Gate
+ * ProtectedRoute — Strict Multi-Stage Authentication & Access Gate
  *
- * Ensures NO ONE can access any dashboard page without an active,
- * authenticated 𝕏 session.
- *
- * - While validating session: shows minimal branded splash
- * - If unauthenticated: immediately redirects to /login with return path
- * - If authenticated: renders protected dashboard children
+ * 1. Unauthenticated: Redirects to /login (Step 1: Connect with 𝕏)
+ * 2. 𝕏 connected but No Passkey: Redirects to /login (Step 2: Create Passkey)
+ * 3. Passkey setup but Unactivated (First-time user): Redirects to /parking
+ * 4. Activated user: Renders children (/app)
  */
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { user, isLoading } = useXAuth();
@@ -31,14 +29,13 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         </div>
         <div className="flex items-center space-x-2 text-stone-500 font-mono text-xs">
           <Loader2 className="w-4 h-4 animate-spin text-stone-900" />
-          <span>Verifying 𝕏 authentication...</span>
+          <span>Verifying access clearance...</span>
         </div>
       </div>
     );
   }
 
   if (!user) {
-    // Preserve attempted destination to redirect back after login
     return (
       <Navigate
         to={`/login?return_to=${encodeURIComponent(location.pathname + location.search)}`}
@@ -46,6 +43,16 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
         state={{ from: location }}
       />
     );
+  }
+
+  // If user does not have a passkey setup yet, direct them to complete Passkey setup
+  if (user.hasPasskey === false) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // If first-time user who hasn't redeemed an invite code, direct to comical parking page
+  if (user.isActivated === false) {
+    return <Navigate to="/parking" replace />;
   }
 
   return <>{children}</>;
