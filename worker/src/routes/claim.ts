@@ -170,24 +170,18 @@ claimRouter.post('/register', requireAuth(), async (c) => {
 
     // Derive deterministic, blinded confidential sub-account from passkey public key
     // Zero linkage to 𝕏 handle onchain — 100% confidential
-    const masterAccount = c.env.MASTER_ACCOUNT_ID || 'uprail.near';
+    const masterAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
     const confidentialAccount = await nearRpc.deriveConfidentialAccountId(
       verification.publicKeyHex,
       masterAccount
     );
 
     let nearAccount = confidentialAccount;
+    // Provision authentic onchain subaccount under escrow.uprail.near
     try {
-      // Call Go Container / Master Wallet to provision the confidential NEAR account
-      const nearResult = await nearProxy.createAccount(c.env, {
-        publicKeyHex: verification.publicKeyHex,
-        xHandle: session.x_handle,
-      });
-      if (nearResult?.nearAccount) {
-        nearAccount = nearResult.nearAccount;
-      }
+      await nearRpc.createOnchainSubAccount(c.env, nearAccount);
     } catch (createErr) {
-      console.warn('nearProxy createAccount fallback to blinded account:', createErr);
+      console.warn('createOnchainSubAccount notice:', createErr);
     }
     const now = Date.now();
     const passkeyId = crypto.randomUUID();

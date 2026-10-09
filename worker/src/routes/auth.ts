@@ -354,24 +354,24 @@ const getSessionHandler = async (c: any) => {
 
   let isActivated = session.is_activated;
   let personalInviteCode = session.personal_invite_code;
+  let nearAccount = session.near_account;
 
-  if (isActivated === undefined || !personalInviteCode) {
+  if (c.env.DB) {
     try {
-      if (c.env.DB) {
-        const idRow = (await c.env.DB.prepare(
-          'SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
-        )
-          .bind(session.x_id)
-          .first()) as { is_activated: number | null; personal_invite_code: string | null } | null;
-        if (idRow) {
-          isActivated = idRow.is_activated === 1;
-          personalInviteCode = idRow.personal_invite_code || null;
-        }
+      const idRow = (await c.env.DB.prepare(
+        'SELECT is_activated, personal_invite_code, near_account FROM x_identities WHERE x_id = ?'
+      )
+        .bind(session.x_id)
+        .first()) as { is_activated: number | null; personal_invite_code: string | null; near_account: string | null } | null;
+      if (idRow) {
+        if (idRow.is_activated !== null) isActivated = idRow.is_activated === 1;
+        if (idRow.personal_invite_code) personalInviteCode = idRow.personal_invite_code;
+        if (idRow.near_account) nearAccount = idRow.near_account;
       }
     } catch {}
   }
 
-  let hasPasskey = !!session.near_account;
+  let hasPasskey = !!nearAccount;
   if (!hasPasskey && c.env.DB) {
     try {
       const pk = await c.env.DB.prepare('SELECT id FROM passkeys WHERE x_id = ?')
@@ -386,7 +386,7 @@ const getSessionHandler = async (c: any) => {
     handle: session.x_handle,
     name: session.x_name,
     avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
-    nearAccount: session.near_account,
+    nearAccount,
     hasPasskey,
     isActivated: !!isActivated,
     personalInviteCode: personalInviteCode || null,
@@ -399,7 +399,7 @@ const getSessionHandler = async (c: any) => {
       xId: session.x_id,
       xHandle: session.x_handle,
       xName: session.x_name,
-      nearAccount: session.near_account,
+      nearAccount,
       hasPasskey,
       expiresAt: session.expires_at,
       isActivated: !!isActivated,

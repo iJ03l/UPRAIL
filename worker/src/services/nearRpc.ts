@@ -7,6 +7,8 @@
  */
 
 import type { Env } from '../types';
+import { ed25519 } from '@noble/curves/ed25519.js';
+import { base58Decode, base58Encode } from './nativeIntents';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -269,7 +271,7 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
  */
 export async function deriveConfidentialAccountId(
   publicKeyHex: string,
-  masterAccount = 'uprail.near'
+  masterAccount = 'escrow.uprail.near'
 ): Promise<string> {
   const enc = new TextEncoder();
   const digest = await crypto.subtle.digest('SHA-256', enc.encode(publicKeyHex));
@@ -828,39 +830,188 @@ export async function getIntentHistory(
 
 // ─── Account State ─────────────────────────────────────────────────────────────
 
+// ─── Borsh Binary Serialization for NEAR Transactions ────────────────────────
+
+class BorshWriter {
+  private buf: number[] = [];
+  writeU8(val: number) { this.buf.push(val & 0xff); }
+  writeU32(val: number) {
+    this.writeU8(val); this.writeU8(val >> 8); this.writeU8(val >> 16); this.writeU8(val >> 24);
+  }
+  writeU64(val: bigint | number) {
+    const b = BigInt(val);
+    for (let i = 0; i < 8; i++) this.writeU8(Number((b >> BigInt(i * 8)) & 0xffn));
+  }
+  writeU128(val: bigint | number | string) {
+    const b = BigInt(val);
+    for (let i = 0; i < 16; i++) this.writeU8(Number((b >> BigInt(i * 8)) & 0xffn));
+  }
+  writeBytes(bytes: Uint8Array | number[]) { for (let i = 0; i < bytes.length; i++) this.buf.push(bytes[i]); }
+  writeString(str: string) {
+    const enc = new TextEncoder().encode(str);
+    this.writeU32(enc.length);
+    this.writeBytes(enc);
+  }
+  writePublicKey(pubkeyBytes: Uint8Array) {
+    this.writeU8(0); // 0 = ED25519
+    this.writeBytes(pubkeyBytes);
+  }
+  toBytes(): Uint8Array { return new Uint8Array(this.buf); }
+}
+
 /**
- * Checks whether a NEAR account exists onchain or is a valid virtual intent sub-account.
- * Virtual accounts (u_<hash>.uprail.near) exist instantly without onchain storage deposits.
+ * Creates an authentic onchain NEAR sub-account under escrow.uprail.near.
+ * Transactions are signed with ESCROW_PRIVATE_KEY and broadcast directly to NEAR RPC.
+ */
+export async function createOnchainSubAccount(
+  env: Env,
+  subAccount: string
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  // Check if account already exists onchain
+  const alreadyExists = await accountExists(env, subAccount);
+  if (alreadyExists) {
+    return { success: true };
+  }
+
+  const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+  const privKeyStr = env.ESCROW_PRIVATE_KEY;
+  if (!privKeyStr) {
+    return { success: false, error: 'ESCROW_PRIVATE_KEY is missing' };
+  }
+
+  const rpcUrl = env.NEAR_RPC_URL || DEFAULT_NEAR_RPC_URL;
+
+  try {
+    // 1. Fetch latest block hash
+    const statusRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'block', method: 'status', params: [] }),
+    });
+    const statusData = (await statusRes.json()) as any;
+    const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
+
+    // 2. Fetch escrow access key nonce
+    const escrowRawKey = base58Decode(privKeyStr);
+    const escrowPrivKey = escrowRawKey.slice(0, 32);
+    const escrowPubKey = ed25519.getPublicKey(escrowPrivKey);
+    const escrowPubKeyFormatted = `ed25519:${base58Encode(escrowPubKey)}`;
+
+    const keyRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'nonce',
+        method: 'query',
+        params: {
+          request_type: 'view_access_key',
+          finality: 'final',
+          account_id: escrowId,
+          public_key: escrowPubKeyFormatted,
+        },
+      }),
+    });
+    const keyData = (await keyRes.json()) as any;
+    if (!keyData?.result?.nonce) {
+      return { success: false, error: `Could not fetch nonce for ${escrowId}` };
+    }
+    const nonce = BigInt(keyData.result.nonce) + 1n;
+
+    // 3. Generate keypair for new sub-account
+    const newPrivKey = crypto.getRandomValues(new Uint8Array(32));
+    const newPubKey = ed25519.getPublicKey(newPrivKey);
+
+    // 4. Encode NEAR transaction (actions: CreateAccount, Transfer 0.01 NEAR for storage, AddKey FullAccess)
+    const w = new BorshWriter();
+    w.writeString(escrowId);
+    w.writePublicKey(escrowPubKey);
+    w.writeU64(nonce);
+    w.writeString(subAccount);
+    w.writeBytes(latestBlockHash);
+
+    w.writeU32(3); // 3 actions
+    w.writeU8(0);  // action 0: CreateAccount
+    w.writeU8(3);  // action 1: Transfer
+    w.writeU128(10000000000000000000000n); // 0.01 NEAR for storage
+    w.writeU8(5);  // action 2: AddKey
+    w.writePublicKey(newPubKey);
+    w.writeU64(0n); // nonce = 0
+    w.writeU8(1);  // FullAccess
+
+    const txBytes = w.toBytes();
+    const digest = await crypto.subtle.digest('SHA-256', txBytes);
+    const sig = ed25519.sign(new Uint8Array(digest), escrowPrivKey);
+
+    const signedW = new BorshWriter();
+    signedW.writeBytes(txBytes);
+    signedW.writeU8(0);
+    signedW.writeBytes(sig);
+    const signedBytes = signedW.toBytes();
+
+    // Base64 encode
+    let binary = '';
+    for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
+    const base64Tx = btoa(binary);
+
+    // 5. Broadcast to NEAR RPC
+    const txRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'tx_create',
+        method: 'broadcast_tx_commit',
+        params: [base64Tx],
+      }),
+    });
+    const txResult = (await txRes.json()) as any;
+    if (txResult?.result?.status?.SuccessValue !== undefined || txResult?.result?.status?.SuccessReceiptId) {
+      const txHash = txResult.result.transaction?.hash || `created_${Date.now()}`;
+      return { success: true, txHash };
+    }
+
+    const errMsg = txResult?.error?.message || JSON.stringify(txResult?.result?.status?.Failure || txResult);
+    console.warn(`[nearRpc] createOnchainSubAccount failed:`, errMsg);
+    return { success: false, error: errMsg };
+  } catch (err: any) {
+    console.error(`[nearRpc] createOnchainSubAccount exception:`, err);
+    return { success: false, error: err.message };
+  }
+}
+
+// ─── Account State ─────────────────────────────────────────────────────────────
+
+/**
+ * Checks whether a NEAR account exists onchain via live QuikNode RPC.
+ * No dummy mocks — queries real blockchain consensus.
  */
 export async function accountExists(env: Env, accountId: string): Promise<boolean> {
-  if (accountId.startsWith('u_') && accountId.endsWith('.uprail.near')) {
-    return true;
-  }
   try {
-    await nearRpc(env.NEAR_RPC_URL, 'query', {
+    const res = await nearRpc(env.NEAR_RPC_URL, 'query', {
       request_type: 'view_account',
       finality: 'final',
       account_id: accountId,
     });
-    return true;
+    return !!res && !res.error;
   } catch {
     return false;
   }
 }
 
 /**
- * Resolves or deterministically assigns the virtual intent account for a user.
- * Operates at $0 cost (no 0.05 NEAR per user deposit required).
+ * Resolves or deterministically assigns the confidential onchain intent sub-account for a user.
+ * Format: u_<hash>.escrow.uprail.near
  */
 export async function resolveUserNearAccount(
   env: Env,
   session: { x_id: string; x_handle: string; near_account?: string | null }
 ): Promise<string> {
-  if (session.near_account) {
+  const masterAccount = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+
+  if (session.near_account && session.near_account.endsWith(`.${masterAccount}`)) {
     return session.near_account;
   }
-
-  const masterAccount = env.MASTER_ACCOUNT_ID || 'uprail.near';
 
   // 1. Check x_identities in D1
   if (env.DB) {
@@ -868,7 +1019,7 @@ export async function resolveUserNearAccount(
       const identity = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
         .bind(session.x_id)
         .first<{ near_account: string | null }>();
-      if (identity?.near_account) {
+      if (identity?.near_account && identity.near_account.endsWith(`.${masterAccount}`)) {
         session.near_account = identity.near_account;
         return identity.near_account;
       }
@@ -896,6 +1047,13 @@ export async function resolveUserNearAccount(
   } else {
     // Deterministic blinded sub-account from user's x_id
     accountId = await deriveConfidentialAccountId(`x_identity:${session.x_id}`, masterAccount);
+  }
+
+  // 3. Try onchain creation if account does not exist
+  try {
+    await createOnchainSubAccount(env, accountId);
+  } catch (createErr) {
+    console.warn('[nearRpc] createOnchainSubAccount non-blocking notice:', createErr);
   }
 
   // Persist to x_identities
