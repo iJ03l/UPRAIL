@@ -132,10 +132,11 @@ export async function fetchOnchainBalances(): Promise<OnchainBalancesResponse | 
 
 /**
  * Fetches the deposit address for a specific chain for the authenticated user.
- * IMPORTANT: These addresses are ephemeral — always fetch fresh, never cache.
+ * Ephemeral addresses are fetched live and cached at the edge. Pass refresh=true to regenerate.
  */
-export async function fetchDepositAddress(chain: string): Promise<DepositAddress | null> {
-  const res = await fetch(url(`/api/onchain/deposit-address?chain=${encodeURIComponent(chain)}`), {
+export async function fetchDepositAddress(chain: string, refresh = false): Promise<DepositAddress | null> {
+  const query = refresh ? `chain=${encodeURIComponent(chain)}&refresh=true` : `chain=${encodeURIComponent(chain)}`;
+  const res = await fetch(url(`/api/onchain/deposit-address?${query}`), {
     credentials: 'include',
   });
   if (res.status === 400 || res.status === 404) return null;
@@ -148,8 +149,9 @@ export async function fetchDepositAddress(chain: string): Promise<DepositAddress
  * Fetches deposit addresses for ALL chains for the authenticated user.
  * Returns a list sorted by chain name.
  */
-export async function fetchAllDepositAddresses(): Promise<DepositAddress[]> {
-  const res = await fetch(url('/api/onchain/deposit-address'), {
+export async function fetchAllDepositAddresses(refresh = false): Promise<DepositAddress[]> {
+  const query = refresh ? '?refresh=true' : '';
+  const res = await fetch(url(`/api/onchain/deposit-address${query}`), {
     credentials: 'include',
   });
   if (res.status === 400) return [];

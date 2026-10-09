@@ -277,30 +277,11 @@ export const ParkingPage: React.FC = () => {
               </button>
 
               {/* Clean Description on How to Get It */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/80 space-y-2 text-stone-600 font-sans text-xs">
-                <div className="font-bold text-stone-900 flex items-center space-x-1.5 text-xs">
-                  <HelpCircle className="w-3.5 h-3.5 text-stone-600" />
-                  <span>How to get a Ref Code</span>
-                </div>
-                <ul className="space-y-1.5 text-[11px] leading-relaxed text-stone-500 pl-4 list-disc">
-                  <li>
-                    <strong className="text-stone-700">From an active member:</strong> Every activated user receives 1 personal ref code to invite a peer.
-                  </li>
-                  <li>
-                    <strong className="text-stone-700">Receive a confidential payment:</strong> Anyone who sends funds to your 𝕏 handle automatically activates your account upon claim.
-                  </li>
-                  <li>
-                    <strong className="text-stone-700">Early Access drop:</strong> First sign-ups can use code <code className="font-mono font-bold text-stone-900 bg-stone-200/70 px-1 py-0.5 rounded">UPRAIL</code> or request an access pass from{' '}
-                    <a
-                      href="https://x.com/UPRAILapp"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-stone-900 font-semibold underline underline-offset-2"
-                    >
-                      @UPRAILapp
-                    </a>.
-                  </li>
-                </ul>
+              <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200/80 flex items-center space-x-2.5 text-stone-600 font-sans text-xs">
+                <HelpCircle className="w-4 h-4 text-stone-400 flex-shrink-0" />
+                <p className="text-[11px] leading-relaxed text-stone-500">
+                  <strong className="text-stone-800">Need a ref code?</strong> Ask an active member. Each registered user receives 1 personal code to invite a peer.
+                </p>
               </div>
             </form>
           )}

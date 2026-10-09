@@ -133,12 +133,13 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
 onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
   const session = c.get('session')!;
   const chain = c.req.query('chain');
+  const bypassCache = c.req.query('refresh') === 'true';
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
   try {
     if (chain) {
       // Single chain
-      const address = await nearRpc.getDepositAddress(c.env, nearAccount, chain);
+      const address = await nearRpc.getDepositAddress(c.env, nearAccount, chain, bypassCache);
       if (!address) {
         return c.json<ErrorResponse>(
           { error: `No deposit address available for chain: ${chain}`, code: 'NO_DEPOSIT_ADDRESS' },
@@ -148,7 +149,7 @@ onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
       return c.json({ address, nearAccount, source: 'onchain', fetchedAt: Date.now() });
     } else {
       // All chains
-      const addresses = await nearRpc.getAllDepositAddresses(c.env, nearAccount);
+      const addresses = await nearRpc.getAllDepositAddresses(c.env, nearAccount, bypassCache);
       return c.json({ addresses, nearAccount, source: 'onchain', fetchedAt: Date.now() });
     }
   } catch (err: any) {

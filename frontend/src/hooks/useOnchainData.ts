@@ -199,7 +199,7 @@ export function useOnchainData(): UseOnchainDataResult {
   // ── Refresh deposit address for a single chain (always fresh) ─────────────
   const refreshDepositAddress = useCallback(async (chain: string): Promise<DepositAddress | null> => {
     try {
-      const fresh = await fetchDepositAddress(chain);
+      const fresh = await fetchDepositAddress(chain, true);
       if (fresh) {
         setDepositAddresses((prev) => {
           const filtered = prev.filter((a) => a.chain !== chain);

@@ -24,7 +24,6 @@ import { useOnchainData } from '../hooks/useOnchainData';
 import { api } from '../lib/api';
 import type { PaymentIntent } from '../types';
 import type { DepositAddress } from '../lib/onchainApi';
-import { XAuthBanner } from '../components/XAuthBanner';
 
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
@@ -131,15 +130,6 @@ export const AppHome: React.FC = () => {
 
         {/* ── LEFT COLUMN: Balance, Quick Actions, Receive via Intents ── */}
         <div className="lg:col-span-7 space-y-6">
-
-          {/* 𝕏 Authentication Notice (if unauthenticated) */}
-          {!user && (
-            <XAuthBanner
-              title="Connect 𝕏 to Activate Your Vault"
-              description="Your confidential intent vault is bound to your verified 𝕏 handle. Connect with 𝕏 to query live onchain balances, send private payments, and claim incoming transfers."
-              actionText="Connect 𝕏"
-            />
-          )}
 
           {/* Balance Hero Card — live from onchain intent account */}
           <div className="rounded-3xl p-7 sm:p-9 md:p-10 bg-white border border-stone-200 shadow-xs space-y-6 relative">

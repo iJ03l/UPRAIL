@@ -9,8 +9,6 @@ import {
   Sparkles,
   ExternalLink,
   ShieldCheck,
-  Send,
-  Clock,
   UserCheck,
 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -67,20 +65,29 @@ export const InviteModal: React.FC<InviteModalProps> = ({
   };
 
   const handleCopyLink = () => {
-    if (!inviteData?.inviteLink) return;
-    navigator.clipboard.writeText(inviteData.inviteLink);
+    if (!inviteData?.inviteCode) return;
+    const origin =
+      typeof window !== 'undefined' ? window.location.origin : 'https://app.uprail.world';
+    const link = `${origin}/login?invite=${inviteData.inviteCode}`;
+    navigator.clipboard.writeText(link);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in font-sans">
-      <div className="relative w-full max-w-lg rounded-3xl bg-white border border-stone-200 shadow-2xl p-6 sm:p-7 overflow-hidden space-y-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md animate-fade-in select-none">
+      <div
+        className="fixed inset-0"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      <div className="relative z-10 w-full max-w-lg bg-white border border-stone-200 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-6">
         {/* Close Button */}
         <button
           onClick={onClose}
           className="absolute top-5 right-5 p-1 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
-          aria-label="Close invite modal"
+          aria-label="Close modal"
         >
           <X className="w-5 h-5" />
         </button>
@@ -92,13 +99,13 @@ export const InviteModal: React.FC<InviteModalProps> = ({
           </div>
           <div>
             <h3 className="text-xl font-black font-display text-stone-950 tracking-tight flex items-center gap-2">
-              <span>Your Invite Code</span>
+              <span>Your Ref Code</span>
               <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-800 border border-stone-200">
                 1 Allotted
               </span>
             </h3>
             <p className="text-xs text-stone-500 font-mono">
-              Share access with a friend and see who claimed it.
+              Share your 6-letter referral code to grant access to a peer.
             </p>
           </div>
         </div>
@@ -121,11 +128,11 @@ export const InviteModal: React.FC<InviteModalProps> = ({
         {/* Content */}
         {!isLoading && inviteData && (
           <div className="space-y-5">
-            {/* 1 Personal Invite Card */}
+            {/* 1 Personal Ref Code Card */}
             <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-500">
-                  Personal Invite Code
+                  Personal Ref Code
                 </span>
                 {inviteData.status === 'ACTIVE' ? (
                   <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-900 text-white text-[10px] font-mono font-bold">
@@ -174,68 +181,14 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                 <div className="p-3 rounded-xl bg-white border border-stone-200 text-xs text-stone-700 flex items-center space-x-2">
                   <ShieldCheck className="w-4 h-4 text-stone-900 flex-shrink-0" />
                   <div>
-                    Used by <span className="font-mono font-bold text-stone-900">@{inviteData.claimedBy.handle}</span> on {new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()}
+                    Claimed by <span className="font-mono font-bold text-stone-900">@{inviteData.claimedBy.handle}</span> on {new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()}
                   </div>
                 </div>
               ) : (
                 <p className="text-[11px] text-stone-500 font-mono">
-                  Your friend will enter this 6-letter code during sign in to unlock access.
+                  Your colleague will enter this 6-letter code during sign-up to unlock access.
                 </p>
               )}
-            </div>
-
-            {/* Preloaded Payment Invites Section */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-500">
-                  Preloaded Payment Invites
-                </span>
-                <span className="text-[10px] text-stone-400 font-mono">
-                  Generated via sends
-                </span>
-              </div>
-
-              {inviteData.paymentInvites && inviteData.paymentInvites.length > 0 ? (
-                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                  {inviteData.paymentInvites.map((pi) => (
-                    <div
-                      key={pi.code}
-                      className="p-3 rounded-xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs font-mono"
-                    >
-                      <div className="flex items-center space-x-2">
-                        <Send className="w-3.5 h-3.5 text-stone-500" />
-                        <span className="text-stone-700">Sent to @{pi.recipientHandle}</span>
-                        <span className="font-bold text-stone-950 px-1.5 py-0.5 rounded bg-white border border-stone-200">
-                          {pi.code}
-                        </span>
-                      </div>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          pi.status === 'USED'
-                            ? 'bg-stone-200 text-stone-700'
-                            : 'bg-stone-900 text-white'
-                        }`}
-                      >
-                        {pi.status === 'USED' ? 'Claimed' : 'Active'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs text-stone-500 text-center font-mono">
-                  No payment invites yet. Sending money automatically generates a claim link with an invite code attached!
-                </div>
-              )}
-            </div>
-
-            {/* Protocol Rule Explanatory Banner */}
-            <div className="p-3 rounded-2xl bg-stone-100 border border-stone-200 text-[11px] text-stone-600 space-y-1">
-              <div className="font-bold text-stone-900 flex items-center space-x-1">
-                <span>The UPRAIL Invite Rule</span>
-              </div>
-              <p>
-                Every user gets exactly <strong>1 personal invite code</strong>. The only other way to onboard someone is by sending them confidential funds — their claim link automatically preloads an invite code so they can onboard immediately.
-              </p>
             </div>
           </div>
         )}
