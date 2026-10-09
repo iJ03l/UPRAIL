@@ -31,6 +31,7 @@ import {
   consumeAuthChallenge,
   getPendingPaymentsForRecipient,
 } from '../db/postgres';
+import { storeChallenge, consumeChallenge } from '../services/challengeService';
 
 export const claimRouter = new Hono<AppContext>();
 
@@ -93,9 +94,13 @@ claimRouter.get('/register-options', requireAuth(), async (c) => {
       rpName,
     });
 
-    // Store challenge in KV and Postgres for single-use verification (5 min TTL)
-    await c.env.CACHE.put(`webauthn_reg:${session.x_id}`, options.challenge, {
-      expirationTtl: 300,
+    // Store challenge via challengeService (zero KV writes)
+    await storeChallenge(c.env, {
+      key: `webauthn_reg:${session.x_id}`,
+      challenge: options.challenge,
+      xId: session.x_id,
+      purpose: 'registration',
+      ttlSeconds: 300,
     });
     try {
       const sql = getDb(c.env);
@@ -129,8 +134,12 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       );
     }
 
-    // Retrieve expected challenge strictly from server cache (fail-closed, single-use)
-    let expectedChallenge = await c.env.CACHE.get(`webauthn_reg:${session.x_id}`);
+    // Retrieve expected challenge strictly from server cache (fail-closed, single-use, zero KV writes)
+    let expectedChallenge = await consumeChallenge(c.env, {
+      key: `webauthn_reg:${session.x_id}`,
+      purpose: 'registration',
+    });
+
     if (!expectedChallenge) {
       try {
         const sql = getDb(c.env);
@@ -147,9 +156,6 @@ claimRouter.post('/register', requireAuth(), async (c) => {
         400
       );
     }
-
-    // Immediately delete challenge to prevent concurrent or subsequent replay attacks
-    await c.env.CACHE.delete(`webauthn_reg:${session.x_id}`);
 
     const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.app';
     const expectedOrigin = c.env.WEBAUTHN_ORIGIN || 'https://uprail.app';

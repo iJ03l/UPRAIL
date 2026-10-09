@@ -1,5 +1,6 @@
 /**
- * Per-IP rate limiting middleware using Cloudflare KV for UP (UPRAIL.app)
+ * In-memory rate limiting middleware for UP (UPRAIL.app)
+ * Zero Cloudflare KV calls — eliminates KV write limits and 429 quota errors.
  */
 
 import { MiddlewareHandler } from 'hono';
@@ -10,11 +11,47 @@ export interface RateLimitOptions {
   prefix?: string; // route-specific prefix
 }
 
+interface WindowRecord {
+  count: number;
+  resetAt: number;
+}
+
+// In-memory rate limiting map per worker isolate
+const rateLimitMap = new Map<string, WindowRecord>();
+
+// Clean expired records periodically
+function pruneExpiredRecords() {
+  const now = Date.now();
+  for (const [key, record] of rateLimitMap.entries()) {
+    if (record.resetAt <= now) {
+      rateLimitMap.delete(key);
+    }
+  }
+}
+
 export const rateLimit = (options?: RateLimitOptions): MiddlewareHandler<AppContext> => {
   const limit = options?.limit ?? 60;
   const prefix = options?.prefix ?? 'default';
 
   return async (c, next) => {
+    const pathname = c.req.path.toLowerCase();
+
+    // Bypass rate limiting for static assets to avoid eating request quota
+    if (
+      pathname.startsWith('/assets/') ||
+      pathname.endsWith('.js') ||
+      pathname.endsWith('.css') ||
+      pathname.endsWith('.png') ||
+      pathname.endsWith('.svg') ||
+      pathname.endsWith('.ico') ||
+      pathname.endsWith('.jpg') ||
+      pathname.endsWith('.woff') ||
+      pathname.endsWith('.woff2') ||
+      pathname.endsWith('.map')
+    ) {
+      return await next();
+    }
+
     // Extract client IP address
     const ip =
       c.req.header('cf-connecting-ip') ||
@@ -22,38 +59,39 @@ export const rateLimit = (options?: RateLimitOptions): MiddlewareHandler<AppCont
       c.req.header('x-forwarded-for')?.split(',')[0].trim() ||
       '127.0.0.1';
 
-    // 1-minute fixed window
-    const currentMinute = Math.floor(Date.now() / 60000);
-    const key = `rl:${prefix}:${ip}:${currentMinute}`;
+    const now = Date.now();
+    const key = `rl:${prefix}:${ip}`;
 
-    try {
-      const rawCount = await c.env.CACHE.get(key);
-      const count = rawCount ? parseInt(rawCount, 10) : 0;
+    let record = rateLimitMap.get(key);
 
-      if (count >= limit) {
-        c.header('Retry-After', '60');
-        c.header('X-RateLimit-Limit', limit.toString());
-        c.header('X-RateLimit-Remaining', '0');
+    if (!record || record.resetAt <= now) {
+      record = { count: 1, resetAt: now + 60000 };
+      rateLimitMap.set(key, record);
+    } else {
+      record.count += 1;
+    }
 
-        return c.json(
-          {
-            error: 'Too many requests. Rate limit exceeded.',
-            code: 'RATE_LIMITED',
-          },
-          429
-        );
-      }
+    // Prune map if large
+    if (rateLimitMap.size > 2000) {
+      pruneExpiredRecords();
+    }
 
-      // Increment count and store with 120s TTL
-      await c.env.CACHE.put(key, (count + 1).toString(), {
-        expirationTtl: 120,
-      });
+    const remaining = Math.max(0, limit - record.count);
 
-      c.header('X-RateLimit-Limit', limit.toString());
-      c.header('X-RateLimit-Remaining', (limit - (count + 1)).toString());
-    } catch (err) {
-      console.error('Rate limiting error:', err);
-      // Fail-open on KV error to prevent blocking legitimate traffic
+    c.header('X-RateLimit-Limit', limit.toString());
+    c.header('X-RateLimit-Remaining', remaining.toString());
+
+    if (record.count > limit) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((record.resetAt - now) / 1000));
+      c.header('Retry-After', retryAfterSeconds.toString());
+
+      return c.json(
+        {
+          error: 'Too many requests. Rate limit exceeded.',
+          code: 'RATE_LIMITED',
+        },
+        429
+      );
     }
 
     return await next();

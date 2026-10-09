@@ -93,3 +93,16 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 
 CREATE INDEX IF NOT EXISTS idx_withdrawals_x_id ON withdrawals(x_id);
 CREATE INDEX IF NOT EXISTS idx_withdrawals_created ON withdrawals(created_at);
+
+-- Auth Challenges: Single-use WebAuthn and OAuth challenges (replaces KV writes)
+CREATE TABLE IF NOT EXISTS auth_challenges (
+  id TEXT PRIMARY KEY,
+  x_id TEXT NOT NULL,
+  challenge TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_challenges_x_id ON auth_challenges(x_id);
+CREATE INDEX IF NOT EXISTS idx_challenges_lookup ON auth_challenges(challenge, purpose);
+

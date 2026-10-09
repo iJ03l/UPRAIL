@@ -1,38 +1,64 @@
 /**
- * KV-backed session middleware for UP (UPRAIL.app)
+ * Stateless HMAC-SHA256 signed session middleware for UP (UPRAIL.app)
+ * Eliminates KV writes and database hits on every request.
+ * Tamper-proof, cryptographically verified at the edge.
  */
 
 import { Context, MiddlewareHandler } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext, Session } from '../types';
+import { signPayload, verifyAndUnpack } from '../utils/crypto';
 
 export const SESSION_COOKIE_NAME = 'uprail_session';
-export const SESSION_TTL_SECONDS = 86400; // 24 hours
+export const SESSION_TTL_SECONDS = 86400 * 7; // 7 days
+
+function getSecret(c: Context<AppContext>): string {
+  return c.env.SESSION_SECRET || 'uprail_master_signed_session_edge_2026';
+}
 
 export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
-    const sessionId = getCookie(c, SESSION_COOKIE_NAME);
+    const rawCookie = getCookie(c, SESSION_COOKIE_NAME);
 
-    if (sessionId) {
-      try {
-        const rawSession = await c.env.CACHE.get(`session:${sessionId}`);
-        if (rawSession) {
-          const session = JSON.parse(rawSession) as Session;
-          if (session.expires_at > Date.now()) {
-            c.set('session', session);
-          } else {
-            // Expired in data
-            await c.env.CACHE.delete(`session:${sessionId}`);
-            const reqUrl = new URL(c.req.url);
-            deleteCookie(c, SESSION_COOKIE_NAME, {
-              path: '/',
-              secure: reqUrl.protocol === 'https:',
-              sameSite: 'Lax',
-            });
+    if (rawCookie) {
+      const secret = getSecret(c);
+
+      // 1. Signed cookie format (base64url.base64url)
+      if (rawCookie.includes('.')) {
+        try {
+          const payloadStr = await verifyAndUnpack(rawCookie, secret);
+          if (payloadStr) {
+            const session = JSON.parse(payloadStr) as Session;
+            if (session.expires_at > Date.now()) {
+              c.set('session', session);
+            } else {
+              // Expired
+              const reqUrl = new URL(c.req.url);
+              deleteCookie(c, SESSION_COOKIE_NAME, {
+                path: '/',
+                secure: reqUrl.protocol === 'https:',
+                sameSite: 'Lax',
+              });
+            }
           }
+        } catch (err) {
+          console.error('Session signature unpack error:', err);
         }
-      } catch (err) {
-        console.error('Failed to load session from KV:', err);
+      } else {
+        // 2. Legacy raw sessionId fallback (read-only KV check, NO writes)
+        try {
+          if (c.env.CACHE) {
+            const rawSession = await c.env.CACHE.get(`session:${rawCookie}`);
+            if (rawSession) {
+              const session = JSON.parse(rawSession) as Session;
+              if (session.expires_at > Date.now()) {
+                c.set('session', session);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Legacy session read error:', err);
+        }
       }
     }
 
@@ -41,7 +67,8 @@ export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
 };
 
 /**
- * Creates a new session, writes it to KV, and sets the secure HttpOnly cookie
+ * Creates a new session, signs it with HMAC-SHA256, and sets the secure HttpOnly cookie.
+ * 0 KV writes, 0 database writes.
  */
 export async function createSession(
   c: Context<AppContext>,
@@ -70,14 +97,13 @@ export async function createSession(
     expires_at: expiresAt,
   };
 
-  await c.env.CACHE.put(`session:${sessionId}`, JSON.stringify(session), {
-    expirationTtl: SESSION_TTL_SECONDS,
-  });
+  const secret = getSecret(c);
+  const signedToken = await signPayload(JSON.stringify(session), secret);
 
   const reqUrl = new URL(c.req.url);
   const isSecure = reqUrl.protocol === 'https:';
 
-  setCookie(c, SESSION_COOKIE_NAME, sessionId, {
+  setCookie(c, SESSION_COOKIE_NAME, signedToken, {
     path: '/',
     httpOnly: true,
     secure: isSecure,
@@ -90,7 +116,8 @@ export async function createSession(
 }
 
 /**
- * Updates an active session in KV
+ * Updates an active session, signs the updated payload, and sets the cookie.
+ * 0 KV writes.
  */
 export async function updateSession(
   c: Context<AppContext>,
@@ -104,9 +131,19 @@ export async function updateSession(
     ...updates,
   };
 
-  const remainingTtl = Math.max(1, Math.floor((updated.expires_at - Date.now()) / 1000));
-  await c.env.CACHE.put(`session:${current.session_id}`, JSON.stringify(updated), {
-    expirationTtl: remainingTtl,
+  const secret = getSecret(c);
+  const signedToken = await signPayload(JSON.stringify(updated), secret);
+
+  const reqUrl = new URL(c.req.url);
+  const isSecure = reqUrl.protocol === 'https:';
+  const remainingSeconds = Math.max(1, Math.floor((updated.expires_at - Date.now()) / 1000));
+
+  setCookie(c, SESSION_COOKIE_NAME, signedToken, {
+    path: '/',
+    httpOnly: true,
+    secure: isSecure,
+    sameSite: 'Lax',
+    maxAge: remainingSeconds,
   });
 
   c.set('session', updated);
@@ -114,19 +151,16 @@ export async function updateSession(
 }
 
 /**
- * Destroys current session from KV and clears cookie
+ * Destroys current session by deleting the cookie.
+ * 0 KV writes.
  */
 export async function destroySession(c: Context<AppContext>): Promise<void> {
-  const sessionId = getCookie(c, SESSION_COOKIE_NAME);
-  if (sessionId) {
-    await c.env.CACHE.delete(`session:${sessionId}`);
-    const reqUrl = new URL(c.req.url);
-    deleteCookie(c, SESSION_COOKIE_NAME, {
-      path: '/',
-      secure: reqUrl.protocol === 'https:',
-      sameSite: 'Lax',
-    });
-  }
+  const reqUrl = new URL(c.req.url);
+  deleteCookie(c, SESSION_COOKIE_NAME, {
+    path: '/',
+    secure: reqUrl.protocol === 'https:',
+    sameSite: 'Lax',
+  });
 }
 
 /**

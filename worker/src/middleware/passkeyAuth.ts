@@ -5,22 +5,19 @@
  * by a valid WebAuthn passkey signature from the user's registered credential.
  *
  * This is a second-factor beyond session authentication:
- *   1. requireAuth()      — proves the user has a valid session (X OAuth)
+ *   1. requireAuth()        — proves the user has a valid session (X OAuth)
  *   2. requirePasskeyAuth() — proves the user physically holds the passkey
  *                             device at the moment of the transaction.
  *
- * The passkey signature is verified against the server-issued challenge
- * stored in KV (single-use, 5-minute TTL). Replay attacks are prevented
- * by consuming the challenge on first use.
- *
- * Usage:
- *   router.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => { ... })
+ * Challenges are managed via in-memory cache and D1 (zero KV writes).
+ * Replay attacks are prevented by consuming the challenge on first use.
  */
 
 import { MiddlewareHandler } from 'hono';
 import type { AppContext, ErrorResponse } from '../types';
 import * as webauthnService from '../services/webauthn';
 import { getDb } from '../db/postgres';
+import { storeChallenge, consumeChallenge } from '../services/challengeService';
 
 /**
  * Middleware that verifies a WebAuthn passkey assertion is present and valid
@@ -46,7 +43,6 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     try {
       body = await c.req.json();
       // Re-attach parsed body for downstream handlers via a cached approach
-      // We store it in the context variable map
       c.set('parsedBody' as any, body);
     } catch {
       return c.json<ErrorResponse>(
@@ -94,10 +90,15 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
       );
     }
 
-    // Verify challenge was issued by this server (fail-closed: reject if not found)
+    // Verify challenge was issued by this server and consume it (single-use, fail-closed)
     const challengeKey = `passkey_tx_auth:${session.x_id}:${challenge}`;
-    const storedChallenge = await c.env.CACHE.get(challengeKey);
-    if (!storedChallenge) {
+    const consumed = await consumeChallenge(c.env, {
+      key: challengeKey,
+      purpose: 'tx_auth',
+      expectedChallenge: challenge,
+    });
+
+    if (!consumed) {
       return c.json<ErrorResponse>(
         {
           error: 'Passkey challenge expired or not recognized. Request a fresh challenge and retry.',
@@ -106,9 +107,6 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
         400
       );
     }
-
-    // Consume the challenge immediately (single-use; prevents replay attacks)
-    await c.env.CACHE.delete(challengeKey);
 
     // Look up the user's registered passkey credential
     let passkeyRow: { public_key: string; counter: number } | null = null;
@@ -202,9 +200,6 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
  * GET handler — issues a fresh single-use passkey challenge for a fund-moving action.
  * The client must call this BEFORE requesting a passkey assertion from the browser.
  *
- * The issued challenge is bound to the authenticated user's x_id and expires in 5 minutes.
- * It is consumed on first use by requirePasskeyAuth().
- *
  * Route: GET /api/auth-challenge
  */
 export async function issueTxChallenge(c: any): Promise<Response> {
@@ -218,8 +213,14 @@ export async function issueTxChallenge(c: any): Promise<Response> {
 
   const challengeKey = `passkey_tx_auth:${session.x_id}:${options.challenge}`;
 
-  // Store challenge with 5-minute TTL (single-use)
-  await c.env.CACHE.put(challengeKey, '1', { expirationTtl: 300 });
+  // Store challenge with 5-minute TTL via challengeService (0 KV writes)
+  await storeChallenge(c.env, {
+    key: challengeKey,
+    challenge: options.challenge,
+    xId: session.x_id,
+    purpose: 'tx_auth',
+    ttlSeconds: 300,
+  });
 
   return c.json({
     ...options,

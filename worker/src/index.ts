@@ -71,7 +71,7 @@ app.use('*', async (c, next) => {
       403
     );
   }
-  await next();
+  return await next();
 });
 
 // Mount Route Groups

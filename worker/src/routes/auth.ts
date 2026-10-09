@@ -1,17 +1,24 @@
 /**
- * Authentication routes for X OAuth 2.0 PKCE flow
- * Free tier integration (/2/users/me) and KV-backed sessions
+ * Authentication routes for X OAuth 2.0 PKCE flow and WebAuthn Passkey Login
+ * Free tier integration (/2/users/me) and zero KV writes
  */
 
 import { Hono } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext, ErrorResponse } from '../types';
 import { generatePKCE, exchangeCode, getMe } from '../services/xApi';
 import { createSession, destroySession } from '../middleware/session';
 import { getDb, upsertXIdentity, getXIdentity } from '../db/postgres';
 import * as webauthnService from '../services/webauthn';
 import { redeemInvite } from '../services/inviteService';
+import { signPayload, verifyAndUnpack } from '../utils/crypto';
+import { storeChallenge, consumeChallenge } from '../services/challengeService';
 
 export const authRouter = new Hono<AppContext>();
+
+function getSecret(c: any): string {
+  return c.env.SESSION_SECRET || 'uprail_master_signed_session_edge_2026';
+}
 
 /**
  * GET /auth/x/login
@@ -28,18 +35,32 @@ authRouter.get('/login', async (c) => {
     const reqUrl = new URL(c.req.url);
     const callbackUrl = `${reqUrl.origin}/auth/x/callback`;
 
-    // Store state and verifier in KV (10 minutes TTL)
-    await c.env.CACHE.put(
-      `x_oauth:${state}`,
-      JSON.stringify({
-        codeVerifier,
-        state,
-        returnTo,
-        callbackUrl,
-        inviteCode,
-      }),
-      { expirationTtl: 600 }
-    );
+    const oauthData = JSON.stringify({
+      codeVerifier,
+      state,
+      returnTo,
+      callbackUrl,
+      inviteCode,
+    });
+
+    // 1. Set signed HttpOnly cookie for stateless edge resolution
+    const secret = getSecret(c);
+    const signedToken = await signPayload(oauthData, secret);
+    setCookie(c, 'uprail_oauth_state', signedToken, {
+      path: '/',
+      httpOnly: true,
+      secure: reqUrl.protocol === 'https:',
+      sameSite: 'Lax',
+      maxAge: 600,
+    });
+
+    // 2. Persist to memory + D1 fallback (zero KV writes)
+    await storeChallenge(c.env, {
+      key: `x_oauth:${state}`,
+      challenge: oauthData,
+      purpose: 'oauth_pkce',
+      ttlSeconds: 600,
+    });
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -97,8 +118,30 @@ authRouter.get('/callback', async (c) => {
       );
     }
 
-    // Retrieve state data from KV
-    const rawData = await c.env.CACHE.get(`x_oauth:${state}`);
+    // Retrieve state data: check signed cookie first, then fallback to challengeService
+    let rawData: string | null = null;
+    const cookieState = getCookie(c, 'uprail_oauth_state');
+    if (cookieState) {
+      const secret = getSecret(c);
+      const unpacked = await verifyAndUnpack(cookieState, secret);
+      if (unpacked) {
+        try {
+          const parsed = JSON.parse(unpacked);
+          if (parsed.state === state) {
+            rawData = unpacked;
+          }
+        } catch {}
+      }
+      deleteCookie(c, 'uprail_oauth_state', { path: '/' });
+    }
+
+    if (!rawData) {
+      rawData = await consumeChallenge(c.env, {
+        key: `x_oauth:${state}`,
+        purpose: 'oauth_pkce',
+      });
+    }
+
     if (!rawData) {
       return c.json<ErrorResponse>(
         {
@@ -108,9 +151,6 @@ authRouter.get('/callback', async (c) => {
         400
       );
     }
-
-    // Immediately remove state from KV
-    await c.env.CACHE.delete(`x_oauth:${state}`);
 
     const { codeVerifier, returnTo, callbackUrl, inviteCode } = JSON.parse(rawData);
 
@@ -201,7 +241,7 @@ authRouter.get('/callback', async (c) => {
       } catch {}
     }
 
-    // Establish KV + Postgres session and set HttpOnly cookie
+    // Establish signed cookie session (0 KV writes)
     await createSession(c, {
       x_id: xUser.id,
       x_handle: xUser.username.toLowerCase(),
@@ -292,7 +332,7 @@ authRouter.get('/status', getSessionHandler);
 
 /**
  * POST /auth/x/logout
- * Destroys session from KV + Postgres and clears cookie
+ * Destroys session by clearing cookie (0 KV writes)
  */
 authRouter.post('/logout', async (c) => {
   try {
@@ -319,9 +359,12 @@ authRouter.get('/passkey/login-options', async (c) => {
     const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
     const options = await webauthnService.generateAuthenticationOptions({ rpId });
 
-    // Store challenge in KV for single-use verification (5 min TTL)
-    await c.env.CACHE.put(`webauthn_auth:${options.challenge}`, 'pending', {
-      expirationTtl: 300,
+    // Store challenge via challengeService (zero KV writes)
+    await storeChallenge(c.env, {
+      key: `webauthn_auth:${options.challenge}`,
+      challenge: options.challenge,
+      purpose: 'passkey_login',
+      ttlSeconds: 300,
     });
 
     return c.json(options);
@@ -362,11 +405,16 @@ authRouter.post('/passkey/login-verify', async (c) => {
       return c.json<ErrorResponse>({ error: 'Missing challenge in assertion', code: 'INVALID_CHALLENGE' }, 400);
     }
 
-    const storedChallenge = await c.env.CACHE.get(`webauthn_auth:${challenge}`);
+    // Verify challenge via challengeService (zero KV writes)
+    const storedChallenge = await consumeChallenge(c.env, {
+      key: `webauthn_auth:${challenge}`,
+      purpose: 'passkey_login',
+      expectedChallenge: challenge,
+    });
+
     if (!storedChallenge) {
       return c.json<ErrorResponse>({ error: 'Challenge expired or invalid', code: 'CHALLENGE_EXPIRED' }, 400);
     }
-    await c.env.CACHE.delete(`webauthn_auth:${challenge}`);
 
     // Look up passkey credential from Postgres (or D1)
     let passkeyRow: { x_id: string; public_key: string; counter: number } | null = null;
@@ -432,7 +480,7 @@ authRouter.post('/passkey/login-verify', async (c) => {
       return c.json<ErrorResponse>({ error: 'User profile not found', code: 'USER_NOT_FOUND' }, 404);
     }
 
-    // Create session and set cookie
+    // Create session and set cookie (zero KV writes)
     const session = await createSession(c, {
       x_id: userProfile.x_id,
       x_handle: userProfile.x_handle,
