@@ -74,10 +74,10 @@ export const LandingPage: React.FC = () => {
       {/* Main Flow: Balanced spacing */}
       <main className="relative z-20 w-full pt-4 sm:pt-7 md:pt-9 lg:pt-10 pb-16 sm:pb-24 space-y-10 sm:space-y-16 md:space-y-20">
         {/* 
-          1. Hero Section: Halved vertical padding for tighter aesthetic
+          1. Hero Section: Full width end to end
         */}
-        <section className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 space-y-4 sm:space-y-5 text-left md:px-8 lg:px-16 xl:px-20 py-2 sm:py-4 md:py-5">
-          <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-display font-extrabold tracking-tight leading-[1.05] sm:leading-[0.92] text-stone-950 max-w-4xl">
+        <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-4 sm:space-y-6 text-left py-2 sm:py-4 md:py-6">
+          <h1 className="w-full text-5xl sm:text-7xl md:text-8xl lg:text-9xl xl:text-[10rem] 2xl:text-[11.5rem] font-display font-extrabold tracking-tight leading-[1.0] sm:leading-[0.9] text-stone-950">
             Send money
             <br />
             to anyone on{' '}
@@ -87,7 +87,7 @@ export const LandingPage: React.FC = () => {
             <span className="text-black">.</span>
           </h1>
 
-          <p className="text-base sm:text-xl text-stone-600 max-w-xl font-sans leading-relaxed">
+          <p className="text-lg sm:text-2xl md:text-3xl text-stone-600 max-w-3xl font-sans leading-relaxed">
             Confidential by design. Claimed by touch.
           </p>
 
