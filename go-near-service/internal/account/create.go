@@ -2,6 +2,7 @@ package account
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
@@ -12,14 +13,18 @@ import (
 // CreateAccountRequest specifies parameters for registering a passkey-controlled NEAR account.
 type CreateAccountRequest struct {
 	PublicKeyP256    string `json:"publicKeyP256"`
+	PublicKeyHex     string `json:"publicKeyHex,omitempty"`
 	DesiredAccountID string `json:"desiredAccountID"`
+	XHandle          string `json:"xHandle,omitempty"`
 	Deadline         string `json:"deadline,omitempty"`
 }
 
 // CreateAccountResult returns the confirmed or pending account ID and the intent hash.
 type CreateAccountResult struct {
 	NearAccountID string `json:"nearAccountID"`
+	NearAccount   string `json:"nearAccount"`
 	IntentHash    string `json:"intentHash"`
+	TxHash        string `json:"txHash"`
 	Status        string `json:"status"`
 }
 
@@ -41,12 +46,16 @@ func NewService(signer *escrow.Signer, relay *intents.RelayClient) *Service {
 func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (*CreateAccountResult, error) {
 	pubKey := strings.TrimSpace(req.PublicKeyP256)
 	if pubKey == "" {
+		pubKey = strings.TrimSpace(req.PublicKeyHex)
+	}
+	if pubKey == "" {
 		return nil, fmt.Errorf("create account: publicKeyP256 is required")
 	}
 
 	accountID := strings.TrimSpace(req.DesiredAccountID)
 	if accountID == "" {
-		return nil, fmt.Errorf("create account: desiredAccountID is required")
+		hash := sha256.Sum256([]byte(pubKey))
+		accountID = fmt.Sprintf("u_%x.%s", hash[:8], "uprail.near")
 	}
 
 	// Ensure P-256 key has proper prefix
@@ -73,7 +82,9 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 
 	return &CreateAccountResult{
 		NearAccountID: accountID,
+		NearAccount:   accountID,
 		IntentHash:    intentHash,
+		TxHash:        intentHash,
 		Status:        "PENDING",
 	}, nil
 }

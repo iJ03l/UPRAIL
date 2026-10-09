@@ -2,18 +2,20 @@ package oneclick
 
 // QuoteRequest represents the parameters for requesting a swap quote from 1Click API.
 type QuoteRequest struct {
-	SwapType        string   `json:"swapType,omitempty"`
-	OriginAsset     string   `json:"originAsset"`
-	DestinationAsset string  `json:"destinationAsset"`
-	Amount          string   `json:"amount"`
-	Recipient       string   `json:"recipient"`
-	RecipientType   string   `json:"recipientType,omitempty"`
-	RefundTo        string   `json:"refundTo,omitempty"`
-	RefundType      string   `json:"refundType,omitempty"`
-	Confidentiality string   `json:"confidentiality"` // "advanced"
-	DepositType     string   `json:"depositType,omitempty"`
-	Dry             bool     `json:"dry,omitempty"`
-	AppFees         []AppFee `json:"appFees,omitempty"`
+	SwapType          string   `json:"swapType"`
+	OriginAsset       string   `json:"originAsset"`
+	DestinationAsset  string   `json:"destinationAsset"`
+	Amount            string   `json:"amount"`
+	Recipient         string   `json:"recipient"`
+	RecipientType     string   `json:"recipientType"`
+	RefundTo          string   `json:"refundTo"`
+	RefundType        string   `json:"refundType"`
+	Confidentiality   string   `json:"confidentiality"` // "advanced"
+	DepositType       string   `json:"depositType"`
+	SlippageTolerance int      `json:"slippageTolerance"`
+	Deadline          string   `json:"deadline"`
+	Dry               bool     `json:"dry"`
+	AppFees           []AppFee `json:"appFees,omitempty"`
 }
 
 // AppFee defines fee split configured for application partners.

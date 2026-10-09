@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import {
   ShieldCheck,
@@ -51,7 +53,7 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
             <Clock className="w-3.5 h-3.5 mr-1 text-stone-600" />
-            In Escrow
+            Open Intent
           </span>
         );
       case 'expired':

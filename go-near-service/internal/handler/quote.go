@@ -31,13 +31,19 @@ func (h *QuoteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
+	// Flexible asset fallback
 	if strings.TrimSpace(req.OriginAsset) == "" {
-		writeError(w, http.StatusBadRequest, "originAsset is required")
-		return
+		if strings.TrimSpace(req.DestinationAsset) != "" {
+			req.OriginAsset = req.DestinationAsset
+		}
 	}
 	if strings.TrimSpace(req.DestinationAsset) == "" {
-		writeError(w, http.StatusBadRequest, "destinationAsset is required")
+		req.DestinationAsset = req.OriginAsset
+	}
+
+	// Validate required fields
+	if strings.TrimSpace(req.OriginAsset) == "" {
+		writeError(w, http.StatusBadRequest, "originAsset or asset is required")
 		return
 	}
 	if strings.TrimSpace(req.Amount) == "" {

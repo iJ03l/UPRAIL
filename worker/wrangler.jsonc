@@ -9,10 +9,15 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "X_CLIENT_ID": "YOUR_X_CLIENT_ID",
+    "X_CLIENT_ID": "UHZFT2JxeEhZeEFqWTc2QzUxY2E6MTpjaQ",
     "NEAR_API_BASE": "https://1click.chaindefuser.com",
     "SOLVER_RELAY_URL": "https://solver-relay-v2.chaindefuser.com/rpc",
+    "NEAR_RPC_URL": "https://nameless-practical-liquid.near-mainnet.quiknode.pro/764c7b41d38ccdf55377d79578d11c41efa0a3b8/",
+    "INTENTS_CONTRACT_ID": "intents.near",
     "ESCROW_ACCOUNT_ID": "escrow.uprail.near",
+    "MASTER_ACCOUNT_ID": "uprail.near",
+    "FEE_ACCOUNT_ID": "fees.uprail.near",
+    "FEE_PERCENT": "0.008",
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",

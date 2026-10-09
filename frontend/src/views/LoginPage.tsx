@@ -1,5 +1,7 @@
+'use client';
+
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from '../lib/router';
 import {
   Fingerprint,
   CheckCircle2,
@@ -18,6 +20,15 @@ export const LoginPage: React.FC = () => {
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [urlInvite, setUrlInvite] = useState('');
+
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const inv = params.get('invite');
+      if (inv) setUrlInvite(inv.trim().toUpperCase());
+    }
+  }, []);
 
   // If already authenticated, redirect smoothly to vault
   React.useEffect(() => {
@@ -87,6 +98,17 @@ export const LoginPage: React.FC = () => {
             </p>
           </div>
         </div>
+
+        {/* Preloaded Invite Banner */}
+        {urlInvite && (
+          <div className="p-3 rounded-2xl bg-stone-50 border border-stone-200 text-xs font-mono flex items-center justify-between animate-fade-in shadow-xs">
+            <span className="text-stone-500">Access Invite:</span>
+            <span className="font-bold text-stone-950 bg-white px-2 py-0.5 rounded border border-stone-300 tracking-wider">
+              {urlInvite}
+            </span>
+            <span className="text-[10px] text-stone-400">Preloaded</span>
+          </div>
+        )}
 
         {/* Error / Success Feedback */}
         {error && (

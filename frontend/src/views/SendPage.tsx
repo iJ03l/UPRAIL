@@ -1,7 +1,8 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '../lib/router';
 import {
-  Send,
   Zap,
   CheckCircle2,
   AlertCircle,
@@ -9,6 +10,7 @@ import {
   ArrowLeft,
   Wallet,
   AtSign,
+  Fingerprint,
 } from 'lucide-react';
 import { HandleInput } from '../components/HandleInput';
 import { AmountInput } from '../components/AmountInput';
@@ -217,8 +219,22 @@ export const SendPage: React.FC = () => {
           {quote && parseFloat(amount) > 0 && (
             <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 space-y-2 text-xs font-mono">
               <div className="flex items-center justify-between text-stone-500">
-                <span>Protocol Fee</span>
-                <span className="text-stone-900 font-bold">Free (0%)</span>
+                <span>Platform Fee (0.8%)</span>
+                <span className="text-stone-900 font-bold">
+                  {quote.protocolFee} {quote.token.symbol} (${quote.protocolFeeUsd.toFixed(2)})
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-stone-500 text-[11px]">
+                <span className="text-stone-400">Fee Routing</span>
+                <span className="text-stone-600 font-mono">Immediate → fees.uprail.near</span>
+              </div>
+              <div className="flex items-center justify-between text-stone-500 text-[11px]">
+                <span className="text-stone-400">Recipient Claim Fee</span>
+                <span className="text-stone-900 font-bold">0% (Claims 100%)</span>
+              </div>
+              <div className="flex items-center justify-between text-stone-500 text-[11px]">
+                <span className="text-stone-400">Access Invite</span>
+                <span className="text-stone-900 font-bold">Preloaded in Claim Link</span>
               </div>
               <div className="flex items-center justify-between text-stone-500">
                 <span>Solver Routing</span>
@@ -236,7 +252,7 @@ export const SendPage: React.FC = () => {
             </div>
           )}
 
-          {/* Send CTA Button */}
+          {/* Send CTA Button — Authorized by Device Passkey */}
           <button
             type="submit"
             disabled={!isFormValid}
@@ -249,18 +265,18 @@ export const SendPage: React.FC = () => {
             {isSubmitting ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Executing Intent...</span>
+                <span>Authorizing with Passkey...</span>
               </>
             ) : (
               <>
-                <Send className="w-4 h-4" />
+                <Fingerprint className="w-4 h-4" />
                 <span>
                   {sendMode === 'handle'
                     ? recipient
-                      ? `Send to @${recipient.replace(/^@/, '')}`
+                      ? `Authorize & Send to @${recipient.replace(/^@/, '')}`
                       : 'Enter Handle to Send'
                     : walletAddress
-                    ? `Route to Wallet via Intents`
+                    ? `Authorize & Route via Intents`
                     : 'Enter Wallet Address'}
                 </span>
                 <ArrowRight className="w-4 h-4 ml-1" />

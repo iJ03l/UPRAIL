@@ -1,5 +1,7 @@
+'use client';
+
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '../lib/router';
 import {
   History,
   Search,
@@ -101,7 +103,7 @@ export const HistoryPage: React.FC = () => {
             { id: 'all', label: 'All' },
             { id: 'ready', label: 'Ready to Claim' },
             { id: 'claimed', label: 'Claimed' },
-            { id: 'escrowed', label: 'In Escrow' },
+            { id: 'pending', label: 'Open Intents' },
           ].map((tab) => (
             <button
               key={tab.id}

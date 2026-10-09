@@ -23,10 +23,11 @@ export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
           } else {
             // Expired in data
             await c.env.CACHE.delete(`session:${sessionId}`);
+            const reqUrl = new URL(c.req.url);
             deleteCookie(c, SESSION_COOKIE_NAME, {
               path: '/',
-              secure: true,
-              sameSite: 'Strict',
+              secure: reqUrl.protocol === 'https:',
+              sameSite: 'Lax',
             });
           }
         }
@@ -49,6 +50,8 @@ export async function createSession(
     x_handle: string;
     x_name: string;
     near_account?: string | null;
+    is_activated?: boolean;
+    personal_invite_code?: string | null;
   }
 ): Promise<Session> {
   const sessionId = crypto.randomUUID();
@@ -61,6 +64,8 @@ export async function createSession(
     x_handle: userData.x_handle,
     x_name: userData.x_name,
     near_account: userData.near_account || null,
+    is_activated: userData.is_activated,
+    personal_invite_code: userData.personal_invite_code || null,
     created_at: now,
     expires_at: expiresAt,
   };
@@ -69,11 +74,14 @@ export async function createSession(
     expirationTtl: SESSION_TTL_SECONDS,
   });
 
+  const reqUrl = new URL(c.req.url);
+  const isSecure = reqUrl.protocol === 'https:';
+
   setCookie(c, SESSION_COOKIE_NAME, sessionId, {
     path: '/',
     httpOnly: true,
-    secure: true,
-    sameSite: 'Strict',
+    secure: isSecure,
+    sameSite: 'Lax',
     maxAge: SESSION_TTL_SECONDS,
   });
 
@@ -112,10 +120,11 @@ export async function destroySession(c: Context<AppContext>): Promise<void> {
   const sessionId = getCookie(c, SESSION_COOKIE_NAME);
   if (sessionId) {
     await c.env.CACHE.delete(`session:${sessionId}`);
+    const reqUrl = new URL(c.req.url);
     deleteCookie(c, SESSION_COOKIE_NAME, {
       path: '/',
-      secure: true,
-      sameSite: 'Strict',
+      secure: reqUrl.protocol === 'https:',
+      sameSite: 'Lax',
     });
   }
 }

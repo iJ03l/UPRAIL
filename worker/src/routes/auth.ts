@@ -9,6 +9,7 @@ import { generatePKCE, exchangeCode, getMe } from '../services/xApi';
 import { createSession, destroySession } from '../middleware/session';
 import { getDb, upsertXIdentity, getXIdentity } from '../db/postgres';
 import * as webauthnService from '../services/webauthn';
+import { redeemInvite } from '../services/inviteService';
 
 export const authRouter = new Hono<AppContext>();
 
@@ -19,6 +20,7 @@ export const authRouter = new Hono<AppContext>();
 authRouter.get('/login', async (c) => {
   try {
     const returnTo = c.req.query('return_to') || '/';
+    const inviteCode = c.req.query('invite') || null;
     const { codeVerifier, codeChallenge } = await generatePKCE();
     const state = crypto.randomUUID();
 
@@ -34,6 +36,7 @@ authRouter.get('/login', async (c) => {
         state,
         returnTo,
         callbackUrl,
+        inviteCode,
       }),
       { expirationTtl: 600 }
     );
@@ -73,7 +76,11 @@ authRouter.get('/callback', async (c) => {
     const error = c.req.query('error');
     const errorDescription = c.req.query('error_description');
 
-    const appOrigin = c.env.WEBAUTHN_ORIGIN || 'https://uprail.app';
+    const reqUrl = new URL(c.req.url);
+    const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
+    const appOrigin = isLocal
+      ? (c.req.header('x-forwarded-host') ? `http://${c.req.header('x-forwarded-host')}` : 'http://localhost:3000')
+      : (c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world');
 
     if (error) {
       console.warn('X OAuth error received:', error, errorDescription);
@@ -105,7 +112,7 @@ authRouter.get('/callback', async (c) => {
     // Immediately remove state from KV
     await c.env.CACHE.delete(`x_oauth:${state}`);
 
-    const { codeVerifier, returnTo, callbackUrl } = JSON.parse(rawData);
+    const { codeVerifier, returnTo, callbackUrl, inviteCode } = JSON.parse(rawData);
 
     // Exchange authorization code for tokens
     const tokens = await exchangeCode({
@@ -165,12 +172,43 @@ authRouter.get('/callback', async (c) => {
       }
     }
 
+    // Auto-redeem invite code if user arrived with one
+    if (inviteCode) {
+      try {
+        await redeemInvite(c.env, inviteCode, {
+          x_id: xUser.id,
+          x_handle: xUser.username.toLowerCase(),
+        });
+      } catch (invErr) {
+        console.warn('Auto-redeem invite on OAuth callback notice:', invErr);
+      }
+    }
+
+    // Check activation and personal invite code from identity
+    let isActivated = false;
+    let personalInviteCode: string | null = null;
+    if (c.env.DB) {
+      try {
+        const idRow = await c.env.DB.prepare(
+          'SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
+        )
+          .bind(xUser.id)
+          .first<{ is_activated: number | null; personal_invite_code: string | null }>();
+        if (idRow) {
+          isActivated = idRow.is_activated === 1;
+          personalInviteCode = idRow.personal_invite_code || null;
+        }
+      } catch {}
+    }
+
     // Establish KV + Postgres session and set HttpOnly cookie
     await createSession(c, {
       x_id: xUser.id,
       x_handle: xUser.username.toLowerCase(),
       x_name: xUser.name,
       near_account: nearAccount,
+      is_activated: isActivated,
+      personal_invite_code: personalInviteCode,
     });
 
     // Redirect user to destination
@@ -205,12 +243,33 @@ const getSessionHandler = async (c: any) => {
     });
   }
 
+  let isActivated = session.is_activated;
+  let personalInviteCode = session.personal_invite_code;
+
+  if (isActivated === undefined || !personalInviteCode) {
+    try {
+      if (c.env.DB) {
+        const idRow = await c.env.DB.prepare(
+          'SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
+        )
+          .bind(session.x_id)
+          .first<{ is_activated: number | null; personal_invite_code: string | null }>();
+        if (idRow) {
+          isActivated = idRow.is_activated === 1;
+          personalInviteCode = idRow.personal_invite_code || null;
+        }
+      }
+    } catch {}
+  }
+
   const user = {
     id: session.x_id,
     handle: session.x_handle,
     name: session.x_name,
     avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
     nearAccount: session.near_account,
+    isActivated: !!isActivated,
+    personalInviteCode: personalInviteCode || null,
   };
 
   return c.json({
@@ -222,6 +281,8 @@ const getSessionHandler = async (c: any) => {
       xName: session.x_name,
       nearAccount: session.near_account,
       expiresAt: session.expires_at,
+      isActivated: !!isActivated,
+      personalInviteCode: personalInviteCode || null,
     },
   });
 };

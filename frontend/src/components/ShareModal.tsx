@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import {
   X,
@@ -118,6 +120,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               )}
             </button>
           </div>
+        </div>
+
+        {/* Preloaded Invite Code Notice */}
+        <div className="mb-4 p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs font-mono">
+          <span className="text-stone-500 text-[11px]">VIP Invite Attached:</span>
+          <span className="font-bold text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200">
+            {payment.inviteCode || (payment.claimLink.includes('invite=') ? payment.claimLink.split('invite=')[1] : 'INCLUDED')}
+          </span>
+          <span className="text-[10px] text-stone-400">Preloaded for Recipient</span>
         </div>
 
         {/* Actions */}

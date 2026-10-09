@@ -31,14 +31,15 @@ func (h *AccountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(req.PublicKeyP256) == "" {
-		writeError(w, http.StatusBadRequest, "publicKeyP256 is required")
+	pubKey := strings.TrimSpace(req.PublicKeyP256)
+	if pubKey == "" {
+		pubKey = strings.TrimSpace(req.PublicKeyHex)
+	}
+	if pubKey == "" {
+		writeError(w, http.StatusBadRequest, "publicKeyP256 or publicKeyHex is required")
 		return
 	}
-	if strings.TrimSpace(req.DesiredAccountID) == "" {
-		writeError(w, http.StatusBadRequest, "desiredAccountID is required")
-		return
-	}
+	req.PublicKeyP256 = pubKey
 
 	result, err := h.accountService.CreateAccount(r.Context(), req)
 	if err != nil {

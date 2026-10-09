@@ -22,12 +22,22 @@ export interface Env {
   // Environment variables
   X_CLIENT_ID: string;
   NEAR_API_BASE: string;
+  NEAR_RPC_URL: string;
+  INTENTS_CONTRACT_ID: string;
   SOLVER_RELAY_URL: string;
   ESCROW_ACCOUNT_ID: string;
   PAYMENT_EXPIRY_DAYS: string;
   WEBAUTHN_RP_ID: string;
   WEBAUTHN_RP_NAME: string;
   WEBAUTHN_ORIGIN: string;
+
+  // Master Wallet & Custody
+  MASTER_ACCOUNT_ID?: string;
+  MASTER_PRIVATE_KEY?: string;
+
+  // Protocol Fees (0.8% to fees.uprail.near)
+  FEE_ACCOUNT_ID?: string;
+  FEE_PERCENT?: string;
 
   // Worker Secrets
   X_CLIENT_SECRET?: string;
@@ -54,6 +64,9 @@ export interface Payment {
   recipient_handle: string;
   asset: string;
   amount: string;
+  fee?: string | null;
+  fee_recipient?: string | null;
+  invite_code?: string | null;
   status: PaymentStatus;
   deposit_address?: string | null;
   intent_hash?: string | null;
@@ -69,6 +82,10 @@ export interface XIdentity {
   x_handle: string;
   x_name: string;
   near_account?: string | null;
+  is_activated?: boolean;
+  personal_invite_code?: string | null;
+  invited_by_code?: string | null;
+  invited_by_handle?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -89,8 +106,49 @@ export interface Session {
   x_handle: string;
   x_name: string;
   near_account?: string | null;
+  is_activated?: boolean;
+  personal_invite_code?: string | null;
   created_at: number;
   expires_at: number;
+}
+
+export interface Invite {
+  code: string;
+  creator_x_id?: string | null;
+  creator_x_handle?: string | null;
+  claimed_by_x_id?: string | null;
+  claimed_by_x_handle?: string | null;
+  payment_id?: string | null;
+  status: 'ACTIVE' | 'USED' | 'EXPIRED';
+  created_at: number;
+  claimed_at?: number | null;
+}
+
+export interface MyInviteResponse {
+  inviteCode: string;
+  status: 'ACTIVE' | 'USED';
+  claimedBy?: {
+    handle: string;
+    claimedAt: number;
+  } | null;
+  inviteLink: string;
+  paymentInvites?: Array<{
+    code: string;
+    paymentId: string;
+    recipientHandle: string;
+    status: 'ACTIVE' | 'USED';
+  }>;
+}
+
+export interface RedeemInviteRequest {
+  code: string;
+}
+
+export interface RedeemInviteResponse {
+  success: boolean;
+  message: string;
+  personalInviteCode: string;
+  isActivated: boolean;
 }
 
 // Request and Response Types
@@ -125,6 +183,8 @@ export interface QuoteResponse {
   depositAddress: string;
   quoteSignature: string;
   estimatedFees: string;
+  protocolFee?: string;
+  feeRecipient?: string;
   expiresAt: number;
 }
 
@@ -142,6 +202,9 @@ export interface SendResponse {
   status: PaymentStatus;
   depositAddress: string;
   expiresAt: number;
+  fee?: string;
+  feeRecipient?: string;
+  inviteCode?: string;
 }
 
 export interface ClaimPendingResponse {

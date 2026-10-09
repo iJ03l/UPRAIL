@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import {
   Fingerprint,
@@ -134,7 +136,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                   <h3 className="font-display font-bold text-stone-950 text-base">Connect 𝕏 Account</h3>
                 </div>
                 <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">
-                  Authenticate your @handle to find payments waiting in escrow for you.
+                  Authenticate your @handle to claim payments sent to you via NEAR Intents.
                 </p>
               </div>
             </div>

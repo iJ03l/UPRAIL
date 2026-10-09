@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import {
   Zap,
@@ -9,7 +11,7 @@ import {
   VolumeX,
   CheckCircle2,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from '../lib/router';
 
 const PRESET_HANDLES = [
   { handle: 'satoshi', name: 'Satoshi', icon: '⚡' },

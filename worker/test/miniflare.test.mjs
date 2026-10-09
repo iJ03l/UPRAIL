@@ -23,10 +23,14 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         NEAR_API_BASE: 'https://1click.chaindefuser.com',
         SOLVER_RELAY_URL: 'https://solver-relay-v2.chaindefuser.com/rpc',
         ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+        FEE_ACCOUNT_ID: 'fees.uprail.near',
+        FEE_PERCENT: '0.008',
         PAYMENT_EXPIRY_DAYS: '30',
         WEBAUTHN_RP_ID: 'uprail.app',
         WEBAUTHN_RP_NAME: 'UPRAIL',
         WEBAUTHN_ORIGIN: 'https://uprail.app',
+        INTERNAL_SERVICE_KEY: 'uprail_confidential_master_sig_2026',
+        ESCROW_PRIVATE_KEY: 'ed25519:3tgX4A9y7J55RUf1JMtvqBWdPNRk8BNLtNucwmSBz3Rgj4ELzs1pgya17u7wTuuJJkJTPESpWWsQukVr2AExFWkQ',
       },
     });
   });
@@ -104,4 +108,212 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const body = await res.json();
     assert.equal(body.code, 'UNAUTHORIZED');
   });
+
+  it('GET /api/tokens returns live supported tokens', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/tokens');
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(Array.isArray(body.tokens));
+    assert.ok(body.tokens.length > 0);
+  });
+
+  it('GET /api/onchain/tokens returns tokens array', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/onchain/tokens');
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(Array.isArray(body.tokens));
+  });
+
+  it('GET /api/onchain/balances requires authentication (clean access control)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/onchain/balances');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('GET /api/onchain/deposit-address requires authentication (clean access control)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/onchain/deposit-address');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('GET /api/onchain/history requires authentication (clean access control)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/onchain/history');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('GET /api/auth-challenge requires authentication', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/auth-challenge');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/send requires authentication and passkey authorization', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipientHandle: 'alice',
+        asset: 'usdc',
+        amount: '10',
+        quoteSignature: 'sig',
+        depositAddress: 'addr',
+      }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/claim/execute requires authentication and passkey authorization', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/claim/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentIds: ['test_id'] }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/quote returns cryptographically signed quote token', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipientHandle: '@vitalik',
+        asset: 'nep141:wrap.near',
+        amount: '1.5',
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.recipientHandle, '@vitalik');
+    assert.equal(body.asset, 'nep141:wrap.near');
+    assert.equal(body.amount, '1.5');
+    assert.equal(body.protocolFee, '0.012', 'Must calculate 0.8% send fee (1.5 * 0.008 = 0.012)');
+    assert.equal(body.feeRecipient, 'fees.uprail.near', 'Must route send fee to fees.uprail.near');
+    assert.ok(body.quoteId, 'Must include quoteId');
+    assert.ok(body.depositAddress, 'Must include depositAddress');
+    assert.ok(body.quoteSignature, 'Must include quoteSignature');
+    assert.ok(body.expiresAt > Date.now(), 'Must have future expiry');
+    assert.notEqual(body.quoteSignature, 'near_intent_quote_sig', 'Must not be dummy string');
+    assert.notEqual(body.quoteSignature, 'escrow_platform_holding_sig', 'Must not be dummy string');
+  });
+
+  it('POST /api/quote rejects missing parameters', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipientHandle: '@vitalik',
+      }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.code, 'INVALID_REQUEST');
+  });
+
+  it('Quote signature token verification rejects dummy mock signatures', async () => {
+    const quoteRes = await mf.dispatchFetch('http://localhost/api/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipientHandle: '@alice',
+        asset: 'nep141:wrap.near',
+        amount: '2.0',
+      }),
+    });
+    assert.equal(quoteRes.status, 200);
+    const quote = await quoteRes.json();
+    assert.ok(quote.quoteSignature);
+    assert.notEqual(quote.quoteSignature, 'near_intent_quote_sig');
+    assert.notEqual(quote.quoteSignature, 'escrow_platform_holding_sig');
+    assert.ok(quote.quoteSignature.includes('.'), 'Quote token is signed and self-verifiable');
+  });
+
+  it('POST /api/invites/validate validates genesis code UPRAIL', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/invites/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'UPRAIL' }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.valid, true);
+  });
+
+  it('POST /api/invites/validate rejects non-6-letter format', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/invites/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'toolongcode123' }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.valid, false);
+    assert.equal(body.reason, 'Invite code must be exactly 6 capital letters');
+  });
+
+  it('POST /api/invites/validate rejects nonexistent invite code', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/invites/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'ZZZZZZ' }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.valid, false);
+    assert.equal(body.reason, 'Invite code does not exist');
+  });
+
+  it('GET /api/invites/status returns unauthenticated status when logged out', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/invites/status');
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.authenticated, false);
+    assert.equal(body.isActivated, false);
+    assert.equal(body.personalInviteCode, null);
+  });
+
+  it('GET /api/invites/my-invite requires authentication', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/invites/my-invite');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/invites/redeem requires authentication', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/invites/redeem', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'UPRAIL' }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('GET /api/claim/balance requires authentication (anti-BAC)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/claim/balance');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/claim/withdraw requires authentication (anti-BAC)', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/claim/withdraw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ destinationAddress: 'alice.near', amount: '10' }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
 });
+

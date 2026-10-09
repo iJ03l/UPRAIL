@@ -6,9 +6,15 @@ import {
   XUser,
   ClaimPaymentResult,
   ShieldedBalance,
+  MyInviteResponse,
+  RedeemInviteResponse,
 } from '../types';
+import { fetchOnchainTokens } from './onchainApi';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE =
+  (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL) ||
+  (typeof process !== 'undefined' && process.env?.API_URL) ||
+  '';
 
 // Built-in supported tokens for NEAR Confidential Intents (clean initial state: 0.00)
 export const SUPPORTED_TOKENS: Token[] = [
@@ -96,8 +102,14 @@ export const api = {
     return { user: null };
   },
 
-  async loginWithX(): Promise<never> {
-    const url = API_BASE ? `${API_BASE}/auth/x/login` : '/auth/x/login';
+  async loginWithX(inviteCode?: string): Promise<never> {
+    let invite = inviteCode;
+    if (!invite && typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      invite = params.get('invite') || undefined;
+    }
+    const query = invite ? `?invite=${encodeURIComponent(invite.trim().toUpperCase())}` : '';
+    const url = API_BASE ? `${API_BASE}/auth/x/login${query}` : `/auth/x/login${query}`;
     window.location.href = url;
     return new Promise<never>(() => {});
   },
@@ -147,24 +159,80 @@ export const api = {
     try {
       const url = API_BASE ? `${API_BASE}/api/tokens` : '/api/tokens';
       const res = await fetch(url);
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.tokens && Array.isArray(data.tokens) ? data.tokens : []);
+        if (list.length > 0) return list;
+      }
     } catch (e) {
-      console.warn('Backend /api/tokens unavailable, returning supported tokens', e);
+      console.warn('Backend /api/tokens unavailable, trying onchainApi', e);
     }
+    try {
+      const onchainTokens = await fetchOnchainTokens();
+      if (onchainTokens.length > 0) return onchainTokens as unknown as Token[];
+    } catch {}
     return SUPPORTED_TOKENS;
   },
 
-  // Payment quote calculation
-  async getQuote(tokenId: string, amount: string): Promise<PaymentQuote> {
+  // Payment quote calculation with cryptographic backend binding
+  // Payment quote calculation with cryptographic backend binding
+  async getQuote(tokenId: string, amount: string, recipientHandle = 'escrow'): Promise<PaymentQuote> {
     const numAmount = parseFloat(amount) || 0;
-    const token = SUPPORTED_TOKENS.find((t) => t.id === tokenId) || SUPPORTED_TOKENS[0];
-    const amountUsd = numAmount * token.priceUsd;
-    const networkFee = token.id === 'near' ? '0.005' : '0.01';
-    const networkFeeUsd = parseFloat(networkFee) * token.priceUsd;
-    const protocolFee = '0.00';
-    const protocolFeeUsd = 0;
-    const totalAmount = (numAmount + parseFloat(networkFee)).toFixed(token.decimals > 6 ? 4 : 2);
-    const totalUsd = amountUsd + networkFeeUsd;
+    const tokens = await api.getTokens();
+    const token = tokens.find((t) => t.id === tokenId || t.symbol.toLowerCase() === tokenId.toLowerCase()) || tokens[0] || SUPPORTED_TOKENS[0];
+    const amountUsd = numAmount * (token.priceUsd || 1.0);
+
+    try {
+      const url = API_BASE ? `${API_BASE}/api/quote` : '/api/quote';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipientHandle: recipientHandle || 'escrow',
+          asset: token.id,
+          amount: amount || '0',
+        }),
+      });
+
+      if (res.ok) {
+        const q = await res.json();
+        const networkFee = q.estimatedFees || (token.id.includes('near') ? '0.005' : '0.01');
+        const networkFeeUsd = parseFloat(networkFee) * (token.priceUsd || 1.0);
+        const protocolFee = q.protocolFee !== undefined ? q.protocolFee : (numAmount * 0.008).toFixed(6).replace(/\.?0+$/, '') || '0';
+        const protocolFeeUsd = parseFloat(protocolFee) * (token.priceUsd || 1.0);
+        const protocolFeeRecipient = q.feeRecipient || 'fees.uprail.near';
+        const totalAmount = (numAmount + parseFloat(networkFee) + parseFloat(protocolFee)).toFixed(token.decimals > 6 ? 4 : 2);
+        const totalUsd = amountUsd + networkFeeUsd + protocolFeeUsd;
+
+        return {
+          token,
+          amount: amount || '0',
+          amountUsd,
+          networkFee,
+          networkFeeUsd,
+          protocolFee,
+          protocolFeeUsd,
+          protocolFeeRecipient,
+          totalAmount,
+          totalUsd,
+          depositAddress: q.depositAddress || 'escrow.uprail.near',
+          quoteId: q.quoteId,
+          quoteSignature: q.quoteSignature,
+          expiresAt: q.expiresAt,
+          estimatedTimeSeconds: 2,
+        };
+      }
+    } catch (e) {
+      console.warn('Backend /api/quote call error:', e);
+    }
+
+    const networkFee = token.id.includes('near') ? '0.005' : '0.01';
+    const networkFeeUsd = parseFloat(networkFee) * (token.priceUsd || 1.0);
+    const protocolFee = (numAmount * 0.008).toFixed(6).replace(/\.?0+$/, '') || '0';
+    const protocolFeeUsd = parseFloat(protocolFee) * (token.priceUsd || 1.0);
+    const protocolFeeRecipient = 'fees.uprail.near';
+    const totalAmount = (numAmount + parseFloat(networkFee) + parseFloat(protocolFee)).toFixed(token.decimals > 6 ? 4 : 2);
+    const totalUsd = amountUsd + networkFeeUsd + protocolFeeUsd;
 
     return {
       token,
@@ -174,6 +242,7 @@ export const api = {
       networkFeeUsd,
       protocolFee,
       protocolFeeUsd,
+      protocolFeeRecipient,
       totalAmount,
       totalUsd,
       depositAddress: 'escrow.uprail.near',
@@ -181,23 +250,41 @@ export const api = {
     };
   },
 
-  // Create payment intent
+  // Create payment intent with authentic quote signature
   async createPayment(params: CreatePaymentRequest): Promise<PaymentIntent> {
     const url = API_BASE ? `${API_BASE}/api/send` : '/api/send';
+    const cleanHandle = params.recipientHandle.replace(/^@/, '').toLowerCase();
+
+    // If quoteSignature is not provided, obtain a real cryptographic quote first
+    let quoteSignature = params.quoteSignature;
+    let depositAddress = params.depositAddress;
+
+    if (!quoteSignature || !depositAddress) {
+      const q = await api.getQuote(params.tokenId, params.amount, cleanHandle);
+      quoteSignature = q.quoteSignature;
+      depositAddress = q.depositAddress;
+    }
+
+    if (!quoteSignature) {
+      throw new Error('Unable to obtain cryptographically signed quote for payment');
+    }
+
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({
-        recipientHandle: params.recipientHandle,
+        recipientHandle: cleanHandle,
         asset: params.tokenId,
         amount: params.amount,
-        quoteSignature: 'near_intent_quote_sig',
-        depositAddress: 'escrow.uprail.near',
+        quoteSignature,
+        depositAddress: depositAddress || 'escrow.uprail.near',
+        passkeyAssertion: params.passkeyAssertion,
       }),
     });
 
-    const token = SUPPORTED_TOKENS.find((t) => t.id === params.tokenId) || SUPPORTED_TOKENS[0];
+    const tokens = await api.getTokens();
+    const token = tokens.find((t) => t.id === params.tokenId || t.symbol.toLowerCase() === params.tokenId.toLowerCase()) || tokens[0] || SUPPORTED_TOKENS[0];
     const numAmount = parseFloat(params.amount) || 0;
 
     if (res.ok) {
@@ -206,15 +293,17 @@ export const api = {
         id: backendData.paymentId,
         claimCode: backendData.paymentId,
         senderHandle: '',
-        recipientHandle: params.recipientHandle.replace(/^@/, '').toLowerCase(),
+        recipientHandle: cleanHandle,
         token,
         amount: params.amount,
-        amountUsd: numAmount * token.priceUsd,
-        fee: '0.01',
-        feeUsd: 0.01 * token.priceUsd,
+        amountUsd: numAmount * (token.priceUsd || 1.0),
+        fee: backendData.fee || '0',
+        feeUsd: (parseFloat(backendData.fee || '0')) * (token.priceUsd || 1.0),
+        feeRecipient: backendData.feeRecipient || 'fees.uprail.near',
+        inviteCode: backendData.inviteCode,
         memo: params.memo || '',
         status: 'ready',
-        depositAddress: backendData.depositAddress || 'escrow.uprail.near',
+        depositAddress: backendData.depositAddress || depositAddress || 'escrow.uprail.near',
         claimLink: backendData.shareLink || `${window.location.origin}/claim/${backendData.paymentId}`,
         createdAt: new Date().toISOString(),
         expiresAt: new Date(backendData.expiresAt || Date.now() + 86400000 * 30).toISOString(),
@@ -350,6 +439,43 @@ export const api = {
     };
   },
 
+  // Get pending payments sent to the authenticated user (no code or link needed!)
+  async getPendingPayments(): Promise<PaymentIntent[]> {
+    try {
+      const url = API_BASE ? `${API_BASE}/api/claim/pending` : '/api/claim/pending';
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const paymentsList = data.payments || [];
+        return paymentsList.map((p: any) => {
+          const token = SUPPORTED_TOKENS.find((t) => t.id.toLowerCase() === (p.asset || 'usdc').toLowerCase()) || SUPPORTED_TOKENS[0];
+          const numAmount = parseFloat(p.amount) || 0;
+          return {
+            id: p.id,
+            claimCode: p.id,
+            senderHandle: p.sender_x_handle || '',
+            senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
+            recipientHandle: p.recipient_handle || '',
+            token,
+            amount: p.amount,
+            amountUsd: numAmount * token.priceUsd,
+            fee: '0.01',
+            feeUsd: 0.01 * token.priceUsd,
+            memo: '',
+            status: p.status === 'CLAIMED' ? 'claimed' : p.status === 'CANCELLED' ? 'cancelled' : 'ready',
+            depositAddress: p.deposit_address || 'escrow.uprail.near',
+            claimLink: `https://uprail.app/claim/${p.id}`,
+            createdAt: new Date(p.created_at).toISOString(),
+            expiresAt: new Date(p.expires_at).toISOString(),
+          };
+        });
+      }
+    } catch (e) {
+      console.warn('Backend getPendingPayments error', e);
+    }
+    return [];
+  },
+
   // Claim Payment with Passkey verification
   async claimPayment(claimCode: string, _recipientHandle: string, passkeyAuthPayload: unknown): Promise<ClaimPaymentResult> {
     const url = API_BASE ? `${API_BASE}/api/claim/execute` : '/api/claim/execute';
@@ -359,7 +485,8 @@ export const api = {
       credentials: 'include',
       body: JSON.stringify({
         paymentIds: [claimCode],
-        passkeySignature: JSON.stringify(passkeyAuthPayload),
+        passkeyAssertion: passkeyAuthPayload,
+        passkeySignature: typeof passkeyAuthPayload === 'string' ? passkeyAuthPayload : JSON.stringify(passkeyAuthPayload),
       }),
     });
 
@@ -368,13 +495,41 @@ export const api = {
       const firstResult = data.results?.[0];
       return {
         success: firstResult?.status === 'CLAIMED',
-        shieldedTxHash: firstResult?.txHash || 'intent_claim_tx',
+        shieldedTxHash: firstResult?.txHash || '',
         message: 'Payment successfully settled into your confidential NEAR vault!',
       };
     }
 
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || 'Failed to claim payment');
+  },
+
+  // Batch Claim Multiple Payments with a Single Passkey verification
+  async claimAllPayments(claimCodes: string[], _recipientHandle: string, passkeyAuthPayload: unknown): Promise<ClaimPaymentResult> {
+    const url = API_BASE ? `${API_BASE}/api/claim/execute` : '/api/claim/execute';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        paymentIds: claimCodes,
+        passkeyAssertion: passkeyAuthPayload,
+        passkeySignature: typeof passkeyAuthPayload === 'string' ? passkeyAuthPayload : JSON.stringify(passkeyAuthPayload),
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const allSuccess = data.results?.every((r: any) => r.status === 'CLAIMED');
+      return {
+        success: allSuccess,
+        shieldedTxHash: data.results?.[0]?.txHash || '',
+        message: `Successfully claimed ${data.results?.filter((r: any) => r.status === 'CLAIMED').length || 0} payments!`,
+      };
+    }
+
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to claim payments');
   },
 
   // Shielded balances
@@ -392,5 +547,90 @@ export const api = {
       console.warn('Backend getShieldedBalances error', e);
     }
     return [];
+  },
+
+  // Withdraw shielded funds from virtual vault to external blockchain address
+  async withdraw(params: {
+    destinationAddress: string;
+    asset?: string;
+    amount?: string;
+  }): Promise<{
+    success: boolean;
+    txHash: string;
+    withdrawalId?: string;
+    destinationAddress: string;
+    amount: string;
+    asset: string;
+    message: string;
+  }> {
+    const url = API_BASE ? `${API_BASE}/api/claim/withdraw` : '/api/claim/withdraw';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(params),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Withdrawal failed');
+    }
+    return await res.json();
+  },
+
+  // Invite & Referral Endpoints
+  async getMyInvite(): Promise<MyInviteResponse> {
+    const url = API_BASE ? `${API_BASE}/api/invites/my-invite` : '/api/invites/my-invite';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to fetch personal invite');
+    }
+    return await res.json();
+  },
+
+  async validateInvite(code: string): Promise<{ valid: boolean; reason?: string }> {
+    const url = API_BASE ? `${API_BASE}/api/invites/validate` : '/api/invites/validate';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code }),
+    });
+    return await res.json();
+  },
+
+  async redeemInvite(code: string): Promise<RedeemInviteResponse> {
+    const url = API_BASE ? `${API_BASE}/api/invites/redeem` : '/api/invites/redeem';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to redeem invite code');
+    }
+    const data = await res.json();
+    try {
+      const cached = localStorage.getItem(STORAGE_KEYS.USER);
+      if (cached) {
+        const u = JSON.parse(cached);
+        u.isActivated = true;
+        u.personalInviteCode = data.personalInviteCode;
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(u));
+      }
+    } catch {}
+    return data;
+  },
+
+  async getInviteStatus(): Promise<{ authenticated: boolean; isActivated: boolean; personalInviteCode: string | null }> {
+    const url = API_BASE ? `${API_BASE}/api/invites/status` : '/api/invites/status';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      return { authenticated: false, isActivated: false, personalInviteCode: null };
+    }
+    return await res.json();
   },
 };

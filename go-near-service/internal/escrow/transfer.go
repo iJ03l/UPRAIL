@@ -10,15 +10,17 @@ import (
 
 // TransferRequest specifies the destination, asset, and quantity for a confidential escrow transfer.
 type TransferRequest struct {
-	Recipient string `json:"recipient"`
-	Asset     string `json:"asset"`
-	Amount    string `json:"amount"`
-	Deadline  string `json:"deadline,omitempty"`
+	Recipient            string `json:"recipient"`
+	RecipientNearAccount string `json:"recipientNearAccount,omitempty"`
+	Asset                string `json:"asset"`
+	Amount               string `json:"amount"`
+	Deadline             string `json:"deadline,omitempty"`
 }
 
 // TransferResult contains the result of publishing the transfer intent.
 type TransferResult struct {
 	IntentHash string `json:"intentHash"`
+	TxHash     string `json:"txHash"`
 	Status     string `json:"status"`
 }
 
@@ -38,7 +40,11 @@ func NewTransferService(signer *Signer, relay *intents.RelayClient) *TransferSer
 
 // Transfer builds, signs, and relays a confidential transfer intent from the escrow account.
 func (s *TransferService) Transfer(ctx context.Context, req TransferRequest) (*TransferResult, error) {
-	if strings.TrimSpace(req.Recipient) == "" {
+	recipient := strings.TrimSpace(req.Recipient)
+	if recipient == "" {
+		recipient = strings.TrimSpace(req.RecipientNearAccount)
+	}
+	if recipient == "" {
 		return nil, fmt.Errorf("transfer: recipient is required")
 	}
 	if strings.TrimSpace(req.Asset) == "" {
@@ -52,7 +58,7 @@ func (s *TransferService) Transfer(ctx context.Context, req TransferRequest) (*T
 		s.signer.AccountID(),
 		req.Asset,
 		req.Amount,
-		req.Recipient,
+		recipient,
 		req.Deadline,
 	)
 	if err != nil {
@@ -71,6 +77,7 @@ func (s *TransferService) Transfer(ctx context.Context, req TransferRequest) (*T
 
 	return &TransferResult{
 		IntentHash: intentHash,
+		TxHash:     intentHash,
 		Status:     "SUBMITTED",
 	}, nil
 }

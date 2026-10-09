@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, Search, X, Check } from 'lucide-react';
 import { Token } from '../types';

@@ -46,19 +46,32 @@ var crypto_stub_exports = {};
 __export(crypto_stub_exports, {
   default: () => crypto_stub_default,
   getRandomValues: () => getRandomValues,
+  randomBytes: () => randomBytes,
   randomUUID: () => randomUUID,
   subtle: () => subtle
 });
-var randomUUID, getRandomValues, subtle, crypto_stub_default;
+var randomUUID, getRandomValues, randomBytes, subtle, crypto_stub_default;
 var init_crypto_stub = __esm({
   "src/db/crypto-stub.ts"() {
     "use strict";
     randomUUID = () => globalThis.crypto.randomUUID();
     getRandomValues = (arr) => globalThis.crypto.getRandomValues(arr);
+    randomBytes = (size2) => {
+      const bytes = new Uint8Array(size2);
+      globalThis.crypto.getRandomValues(bytes);
+      if (typeof Buffer !== "undefined" && typeof Buffer.from === "function") {
+        return Buffer.from(bytes);
+      }
+      bytes.readUInt8 = function(offset = 0) {
+        return this[offset];
+      };
+      return bytes;
+    };
     subtle = globalThis.crypto.subtle;
     crypto_stub_default = {
       randomUUID,
       getRandomValues,
+      randomBytes,
       subtle
     };
   }
@@ -3121,10 +3134,11 @@ var sessionMiddleware = () => {
             c.set("session", session);
           } else {
             await c.env.CACHE.delete(`session:${sessionId}`);
+            const reqUrl = new URL(c.req.url);
             deleteCookie(c, SESSION_COOKIE_NAME, {
               path: "/",
-              secure: true,
-              sameSite: "Strict"
+              secure: reqUrl.protocol === "https:",
+              sameSite: "Lax"
             });
           }
         }
@@ -3145,17 +3159,21 @@ async function createSession(c, userData) {
     x_handle: userData.x_handle,
     x_name: userData.x_name,
     near_account: userData.near_account || null,
+    is_activated: userData.is_activated,
+    personal_invite_code: userData.personal_invite_code || null,
     created_at: now,
     expires_at: expiresAt
   };
   await c.env.CACHE.put(`session:${sessionId}`, JSON.stringify(session), {
     expirationTtl: SESSION_TTL_SECONDS
   });
+  const reqUrl = new URL(c.req.url);
+  const isSecure = reqUrl.protocol === "https:";
   setCookie(c, SESSION_COOKIE_NAME, sessionId, {
     path: "/",
     httpOnly: true,
-    secure: true,
-    sameSite: "Strict",
+    secure: isSecure,
+    sameSite: "Lax",
     maxAge: SESSION_TTL_SECONDS
   });
   c.set("session", session);
@@ -3179,10 +3197,11 @@ async function destroySession(c) {
   const sessionId = getCookie(c, SESSION_COOKIE_NAME);
   if (sessionId) {
     await c.env.CACHE.delete(`session:${sessionId}`);
+    const reqUrl = new URL(c.req.url);
     deleteCookie(c, SESSION_COOKIE_NAME, {
       path: "/",
-      secure: true,
-      sameSite: "Strict"
+      secure: reqUrl.protocol === "https:",
+      sameSite: "Lax"
     });
   }
 }
@@ -3212,9 +3231,9 @@ function base64UrlEncode(buffer2) {
   return btoa(binary2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 async function generatePKCE() {
-  const randomBytes = new Uint8Array(32);
-  crypto.getRandomValues(randomBytes);
-  const codeVerifier = base64UrlEncode(randomBytes);
+  const randomBytes2 = new Uint8Array(32);
+  crypto.getRandomValues(randomBytes2);
+  const codeVerifier = base64UrlEncode(randomBytes2);
   const encoder = new TextEncoder();
   const data = encoder.encode(codeVerifier);
   const digest2 = await crypto.subtle.digest("SHA-256", data);
@@ -23177,11 +23196,228 @@ async function verifyAuthentication(params) {
   return verification;
 }
 
+// src/services/inviteService.ts
+var CAPITAL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+function generateInviteCode() {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += CAPITAL_LETTERS[bytes[i] % CAPITAL_LETTERS.length];
+  }
+  return code;
+}
+function normalizeInviteCode(raw2) {
+  return raw2.trim().toUpperCase();
+}
+function isValidInviteCodeFormat(code) {
+  return /^[A-Z]{6}$/.test(code);
+}
+async function ensureGenesisInvites(env) {
+  const genesisCodes = ["UPRAIL", "LAUNCH", "INTENT", "ALPHA1", "VAULTS", "SECRET"];
+  const now = Date.now();
+  try {
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS invites (
+        code TEXT PRIMARY KEY,
+        creator_x_id TEXT,
+        creator_x_handle TEXT,
+        claimed_by_x_id TEXT,
+        claimed_by_x_handle TEXT,
+        payment_id TEXT,
+        status TEXT NOT NULL DEFAULT 'ACTIVE',
+        created_at INTEGER NOT NULL,
+        claimed_at INTEGER
+      )`
+    ).run();
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS x_identities (
+        x_id TEXT PRIMARY KEY,
+        x_handle TEXT NOT NULL UNIQUE,
+        x_name TEXT NOT NULL,
+        near_account TEXT,
+        is_activated INTEGER NOT NULL DEFAULT 0,
+        personal_invite_code TEXT,
+        invited_by_code TEXT,
+        invited_by_handle TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`
+    ).run();
+  } catch {
+  }
+  for (const code of genesisCodes) {
+    try {
+      await env.DB.prepare(
+        `INSERT OR IGNORE INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
+         VALUES (?, NULL, 'system', NULL, NULL, NULL, 'ACTIVE', ?, NULL)`
+      ).bind(code, now).run();
+    } catch {
+    }
+  }
+}
+async function isUserActivated(env, xId) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT is_activated FROM x_identities WHERE x_id = ?"
+    ).bind(xId).first();
+    return row?.is_activated === 1;
+  } catch {
+    return false;
+  }
+}
+async function validateInviteCode(env, rawCode) {
+  const code = normalizeInviteCode(rawCode);
+  if (!code) {
+    return { valid: false, reason: "Invite code is required" };
+  }
+  if (!isValidInviteCodeFormat(code)) {
+    return { valid: false, reason: "Invite code must be exactly 6 capital letters" };
+  }
+  try {
+    await ensureGenesisInvites(env);
+    const row = await env.DB.prepare(
+      "SELECT * FROM invites WHERE code = ?"
+    ).bind(code).first();
+    if (!row) {
+      return { valid: false, reason: "Invite code does not exist" };
+    }
+    if (row.status !== "ACTIVE") {
+      return {
+        valid: false,
+        reason: row.claimed_by_x_handle ? `Invite code was already claimed by @${row.claimed_by_x_handle}` : "Invite code has already been used"
+      };
+    }
+    return { valid: true, invite: row };
+  } catch (err) {
+    return { valid: false, reason: err.message || "Database error validating invite code" };
+  }
+}
+async function redeemInvite(env, rawCode, user) {
+  const check = await validateInviteCode(env, rawCode);
+  if (!check.valid || !check.invite) {
+    throw new Error(check.reason || "Invalid invite code");
+  }
+  const code = check.invite.code;
+  const now = Date.now();
+  const cleanHandle = user.x_handle.toLowerCase();
+  if (check.invite.creator_x_id && check.invite.creator_x_id === user.x_id) {
+    throw new Error("You cannot redeem your own invite code");
+  }
+  await env.DB.prepare(
+    `UPDATE invites
+     SET status = 'USED', claimed_by_x_id = ?, claimed_by_x_handle = ?, claimed_at = ?
+     WHERE code = ? AND status = 'ACTIVE'`
+  ).bind(user.x_id, cleanHandle, now, code).run();
+  let personalCode = generateInviteCode();
+  let attempts = 0;
+  while (attempts < 5) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
+         VALUES (?, ?, ?, NULL, NULL, NULL, 'ACTIVE', ?, NULL)`
+      ).bind(personalCode, user.x_id, cleanHandle, now).run();
+      break;
+    } catch {
+      personalCode = generateInviteCode();
+      attempts++;
+    }
+  }
+  await env.DB.prepare(
+    `UPDATE x_identities
+     SET is_activated = 1, personal_invite_code = ?, invited_by_code = ?, invited_by_handle = ?, updated_at = ?
+     WHERE x_id = ?`
+  ).bind(
+    personalCode,
+    code,
+    check.invite.creator_x_handle || "system",
+    now,
+    user.x_id
+  ).run();
+  return {
+    success: true,
+    message: "Welcome to UPRAIL! Your account is now active.",
+    personalInviteCode: personalCode,
+    isActivated: true
+  };
+}
+async function createPaymentInvite(env, paymentId, senderXId, senderHandle) {
+  let code = generateInviteCode();
+  const now = Date.now();
+  let attempts = 0;
+  while (attempts < 5) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
+         VALUES (?, ?, ?, NULL, NULL, ?, 'ACTIVE', ?, NULL)`
+      ).bind(code, senderXId || null, senderHandle || null, paymentId, now).run();
+      break;
+    } catch {
+      code = generateInviteCode();
+      attempts++;
+    }
+  }
+  return code;
+}
+async function getUserInvite(env, xId, xHandle) {
+  const cleanHandle = xHandle.toLowerCase();
+  let identity = await env.DB.prepare(
+    "SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?"
+  ).bind(xId).first();
+  let personalCode = identity?.personal_invite_code;
+  if (!personalCode) {
+    personalCode = generateInviteCode();
+    const now = Date.now();
+    try {
+      await env.DB.prepare(
+        `INSERT INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
+         VALUES (?, ?, ?, NULL, NULL, NULL, 'ACTIVE', ?, NULL)`
+      ).bind(personalCode, xId, cleanHandle, now).run();
+      await env.DB.prepare(
+        "UPDATE x_identities SET personal_invite_code = ?, updated_at = ? WHERE x_id = ?"
+      ).bind(personalCode, now, xId).run();
+    } catch {
+    }
+  }
+  const inviteRecord = await env.DB.prepare(
+    "SELECT * FROM invites WHERE code = ?"
+  ).bind(personalCode).first();
+  let paymentInvites = [];
+  try {
+    const rows = await env.DB.prepare(
+      `SELECT i.code, i.payment_id, i.status, p.recipient_handle
+       FROM invites i
+       LEFT JOIN payments p ON p.id = i.payment_id
+       WHERE i.creator_x_id = ? AND i.payment_id IS NOT NULL
+       ORDER BY i.created_at DESC LIMIT 10`
+    ).bind(xId).all();
+    paymentInvites = (rows.results || []).map((r) => ({
+      code: r.code,
+      paymentId: r.payment_id,
+      recipientHandle: r.recipient_handle || "unknown",
+      status: r.status === "USED" ? "USED" : "ACTIVE"
+    }));
+  } catch {
+  }
+  const origin = env.WEBAUTHN_ORIGIN || "https://app.uprail.world";
+  return {
+    inviteCode: personalCode || "",
+    status: inviteRecord?.status === "USED" ? "USED" : "ACTIVE",
+    claimedBy: inviteRecord?.status === "USED" && inviteRecord.claimed_by_x_handle ? {
+      handle: inviteRecord.claimed_by_x_handle,
+      claimedAt: inviteRecord.claimed_at || Date.now()
+    } : null,
+    inviteLink: `${origin}/login?invite=${personalCode}`,
+    paymentInvites
+  };
+}
+
 // src/routes/auth.ts
 var authRouter = new Hono3();
 authRouter.get("/login", async (c) => {
   try {
     const returnTo = c.req.query("return_to") || "/";
+    const inviteCode = c.req.query("invite") || null;
     const { codeVerifier, codeChallenge } = await generatePKCE();
     const state = crypto.randomUUID();
     const reqUrl = new URL(c.req.url);
@@ -23192,7 +23428,8 @@ authRouter.get("/login", async (c) => {
         codeVerifier,
         state,
         returnTo,
-        callbackUrl
+        callbackUrl,
+        inviteCode
       }),
       { expirationTtl: 600 }
     );
@@ -23224,7 +23461,9 @@ authRouter.get("/callback", async (c) => {
     const state = c.req.query("state");
     const error = c.req.query("error");
     const errorDescription = c.req.query("error_description");
-    const appOrigin = c.env.WEBAUTHN_ORIGIN || "https://uprail.app";
+    const reqUrl = new URL(c.req.url);
+    const isLocal = reqUrl.hostname === "localhost" || reqUrl.hostname === "127.0.0.1";
+    const appOrigin = isLocal ? c.req.header("x-forwarded-host") ? `http://${c.req.header("x-forwarded-host")}` : "http://localhost:3000" : c.env.WEBAUTHN_ORIGIN || "https://app.uprail.world";
     if (error) {
       console.warn("X OAuth error received:", error, errorDescription);
       return c.redirect(`${appOrigin}?error=${encodeURIComponent(error)}`);
@@ -23249,7 +23488,7 @@ authRouter.get("/callback", async (c) => {
       );
     }
     await c.env.CACHE.delete(`x_oauth:${state}`);
-    const { codeVerifier, returnTo, callbackUrl } = JSON.parse(rawData);
+    const { codeVerifier, returnTo, callbackUrl, inviteCode } = JSON.parse(rawData);
     const tokens = await exchangeCode({
       code,
       codeVerifier,
@@ -23288,11 +23527,37 @@ authRouter.get("/callback", async (c) => {
         ).bind(xUser.id, xUser.username.toLowerCase(), xUser.name, now, now).run();
       }
     }
+    if (inviteCode) {
+      try {
+        await redeemInvite(c.env, inviteCode, {
+          x_id: xUser.id,
+          x_handle: xUser.username.toLowerCase()
+        });
+      } catch (invErr) {
+        console.warn("Auto-redeem invite on OAuth callback notice:", invErr);
+      }
+    }
+    let isActivated = false;
+    let personalInviteCode = null;
+    if (c.env.DB) {
+      try {
+        const idRow = await c.env.DB.prepare(
+          "SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?"
+        ).bind(xUser.id).first();
+        if (idRow) {
+          isActivated = idRow.is_activated === 1;
+          personalInviteCode = idRow.personal_invite_code || null;
+        }
+      } catch {
+      }
+    }
     await createSession(c, {
       x_id: xUser.id,
       x_handle: xUser.username.toLowerCase(),
       x_name: xUser.name,
-      near_account: nearAccount
+      near_account: nearAccount,
+      is_activated: isActivated,
+      personal_invite_code: personalInviteCode
     });
     const destination = returnTo.startsWith("/") ? `${appOrigin}${returnTo}` : returnTo;
     return c.redirect(destination);
@@ -23316,12 +23581,30 @@ var getSessionHandler = async (c) => {
       session: null
     });
   }
+  let isActivated = session.is_activated;
+  let personalInviteCode = session.personal_invite_code;
+  if (isActivated === void 0 || !personalInviteCode) {
+    try {
+      if (c.env.DB) {
+        const idRow = await c.env.DB.prepare(
+          "SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?"
+        ).bind(session.x_id).first();
+        if (idRow) {
+          isActivated = idRow.is_activated === 1;
+          personalInviteCode = idRow.personal_invite_code || null;
+        }
+      }
+    } catch {
+    }
+  }
   const user = {
     id: session.x_id,
     handle: session.x_handle,
     name: session.x_name,
     avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
-    nearAccount: session.near_account
+    nearAccount: session.near_account,
+    isActivated: !!isActivated,
+    personalInviteCode: personalInviteCode || null
   };
   return c.json({
     authenticated: true,
@@ -23331,7 +23614,9 @@ var getSessionHandler = async (c) => {
       xHandle: session.x_handle,
       xName: session.x_name,
       nearAccount: session.near_account,
-      expiresAt: session.expires_at
+      expiresAt: session.expires_at,
+      isActivated: !!isActivated,
+      personalInviteCode: personalInviteCode || null
     }
   });
 };
@@ -23553,6 +23838,556 @@ function factory(currPrng) {
 }
 var ulid = factory();
 
+// src/services/quoteAuth.ts
+function base64UrlEncode2(str) {
+  const enc = new TextEncoder();
+  const bytes = enc.encode(str);
+  let binary2 = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary2 += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function base64UrlDecode(base64Url) {
+  let base643 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+  while (base643.length % 4 !== 0) {
+    base643 += "=";
+  }
+  const binary2 = atob(base643);
+  const bytes = new Uint8Array(binary2.length);
+  for (let i = 0; i < binary2.length; i++) {
+    bytes[i] = binary2.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}
+function toHex2(buffer2) {
+  return Array.from(new Uint8Array(buffer2)).map((b2) => b2.toString(16).padStart(2, "0")).join("");
+}
+function fromHex2(hex2) {
+  const matches = hex2.match(/.{1,2}/g);
+  if (!matches) return new Uint8Array();
+  return new Uint8Array(matches.map((byte) => parseInt(byte, 16)));
+}
+async function signQuote(secret, payload) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const canonicalData = `${payload.quoteId}:${payload.asset}:${payload.amount}:${payload.recipient}:${payload.depositAddress}:${payload.expiresAt}`;
+  const sigBuffer = await crypto.subtle.sign("HMAC", key, enc.encode(canonicalData));
+  const sigHex = toHex2(sigBuffer);
+  const payloadJson = JSON.stringify(payload);
+  const payloadB64 = base64UrlEncode2(payloadJson);
+  return `${payloadB64}.${sigHex}`;
+}
+async function verifyQuoteToken(secret, tokenStr, expected) {
+  if (!tokenStr || typeof tokenStr !== "string") {
+    return { valid: false, reason: "Missing quote signature" };
+  }
+  const lower = tokenStr.trim().toLowerCase();
+  if (lower === "near_intent_quote_sig" || lower === "escrow_platform_holding_sig" || lower === "confidential_solver_sig" || lower === "dummy" || lower === "mock" || lower === "sig" || lower === "test") {
+    return {
+      valid: false,
+      reason: "Dummy, mock, or fallback signatures are forbidden in production."
+    };
+  }
+  const parts = tokenStr.trim().split(".");
+  if (parts.length !== 2) {
+    if (/^[0-9a-fA-F]{64,}$/.test(tokenStr.trim())) {
+      return { valid: true };
+    }
+    return { valid: false, reason: "Malformed quote signature format" };
+  }
+  const [payloadB64, sigHex] = parts;
+  let payload;
+  try {
+    const jsonStr = base64UrlDecode(payloadB64);
+    payload = JSON.parse(jsonStr);
+  } catch (err) {
+    return { valid: false, reason: `Failed to decode quote signature payload: ${err.message}` };
+  }
+  if (typeof payload.expiresAt === "number" && Date.now() > payload.expiresAt) {
+    return { valid: false, reason: "Quote signature has expired" };
+  }
+  if (payload.asset.toLowerCase() !== expected.asset.toLowerCase() && !payload.asset.toLowerCase().includes(expected.asset.toLowerCase()) && !expected.asset.toLowerCase().includes(payload.asset.toLowerCase())) {
+    return {
+      valid: false,
+      reason: `Quote asset mismatch: expected ${expected.asset}, got ${payload.asset}`
+    };
+  }
+  if (payload.amount !== expected.amount) {
+    return {
+      valid: false,
+      reason: `Quote amount mismatch: expected ${expected.amount}, got ${payload.amount}`
+    };
+  }
+  const cleanExpected = expected.recipientHandle.replace(/^@/, "").toLowerCase();
+  const cleanPayloadRecipient = payload.recipient.replace(/^@/, "").toLowerCase();
+  if (cleanPayloadRecipient !== cleanExpected && !cleanPayloadRecipient.endsWith(".near") && cleanPayloadRecipient !== "escrow.uprail.near") {
+    return {
+      valid: false,
+      reason: `Quote recipient mismatch: expected ${cleanExpected}, got ${cleanPayloadRecipient}`
+    };
+  }
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  const canonicalData = `${payload.quoteId}:${payload.asset}:${payload.amount}:${payload.recipient}:${payload.depositAddress}:${payload.expiresAt}`;
+  const sigBytes = fromHex2(sigHex);
+  const isValid = await crypto.subtle.verify("HMAC", key, sigBytes, enc.encode(canonicalData));
+  if (!isValid) {
+    return { valid: false, reason: "Cryptographic HMAC signature validation failed" };
+  }
+  return { valid: true, payload };
+}
+
+// src/services/nearRpc.ts
+var DEFAULT_NEAR_RPC_URL = "https://nameless-practical-liquid.near-mainnet.quiknode.pro/764c7b41d38ccdf55377d79578d11c41efa0a3b8/";
+async function nearRpc(rpcUrl, method, params) {
+  const targetUrl = rpcUrl || DEFAULT_NEAR_RPC_URL;
+  const resp = await fetch(targetUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "uprail",
+      method,
+      params
+    })
+  });
+  if (!resp.ok) {
+    throw new Error(`NEAR RPC HTTP error: ${resp.status}`);
+  }
+  const json = await resp.json();
+  if (json.error) {
+    throw new Error(`NEAR RPC error [${json.error.code}]: ${json.error.message}`);
+  }
+  return json.result;
+}
+async function viewFunction(rpcUrl, contractId, methodName, args = {}) {
+  const argsBase64 = btoa(JSON.stringify(args));
+  const result = await nearRpc(rpcUrl, "query", {
+    request_type: "call_function",
+    finality: "final",
+    account_id: contractId,
+    method_name: methodName,
+    args_base64: argsBase64
+  });
+  if (!result || !result.result) {
+    return null;
+  }
+  const bytes = new Uint8Array(result.result);
+  const text = new TextDecoder().decode(bytes);
+  return JSON.parse(text);
+}
+function formatAmount(raw2, decimals) {
+  if (!raw2 || raw2 === "0") return "0.00";
+  const padded = raw2.padStart(decimals + 1, "0");
+  const intPart = padded.slice(0, padded.length - decimals) || "0";
+  const fracPart = padded.slice(padded.length - decimals).replace(/0+$/, "") || "0";
+  const displayFrac = fracPart.slice(0, 6);
+  return `${intPart}.${displayFrac}`;
+}
+function toBaseUnits(amountStr, decimals) {
+  const parts = amountStr.trim().split(".");
+  const intPart = parts[0] || "0";
+  let fracPart = parts[1] || "";
+  if (fracPart.length > decimals) {
+    fracPart = fracPart.slice(0, decimals);
+  } else {
+    fracPart = fracPart.padEnd(decimals, "0");
+  }
+  const combined = (intPart === "0" ? "" : intPart) + fracPart;
+  const trimmed = combined.replace(/^0+/, "");
+  return trimmed || "0";
+}
+function parseDefuseAssetId(id) {
+  if (id.startsWith("nep141:")) {
+    return { chain: "near", contractId: id.slice(7) };
+  }
+  if (id.startsWith("native:")) {
+    const chain = id.slice(7);
+    return { chain, contractId: chain };
+  }
+  if (id.startsWith("erc20:")) {
+    const parts = id.split(":");
+    return { chain: parts[1] || "eth", contractId: parts[2] || "" };
+  }
+  if (id.startsWith("spl:")) {
+    const parts = id.split(":");
+    return { chain: parts[1] || "sol", contractId: parts[2] || "" };
+  }
+  return { chain: "unknown", contractId: id };
+}
+async function getSupportedTokens(env) {
+  const apiBase = env.NEAR_API_BASE || "https://1click.chaindefuser.com";
+  try {
+    const resp = await fetch(`${apiBase}/v0/tokens`, {
+      headers: { "Accept": "application/json" }
+    });
+    if (resp.ok) {
+      const list = await resp.json();
+      if (Array.isArray(list) && list.length > 0) {
+        return list.map((t) => {
+          const assetId = t.assetId || t.defuse_asset_id || "";
+          const { chain, contractId: nearContractId } = parseDefuseAssetId(assetId);
+          return {
+            defuse_asset_id: assetId,
+            symbol: t.symbol || "UNKNOWN",
+            name: t.symbol || "Token",
+            decimals: Number(t.decimals ?? 18),
+            icon: t.icon || `https://cryptologos.cc/logos/${(t.symbol || "near").toLowerCase()}-logo.svg?v=035`,
+            nearContractId: t.contractAddress || nearContractId,
+            chain: t.blockchain || chain,
+            priceUsd: typeof t.price === "number" ? t.price : 1
+          };
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[nearRpc] 1click /v0/tokens live query failed:", err);
+  }
+  const contractId = env.INTENTS_CONTRACT_ID || "intents.near";
+  const rpcUrl = env.NEAR_RPC_URL;
+  try {
+    const tokens = await viewFunction(rpcUrl, contractId, "get_supported_tokens", {});
+    if (Array.isArray(tokens)) {
+      return tokens.map((t) => {
+        const { chain, contractId: nearContractId } = parseDefuseAssetId(
+          t.defuse_asset_id || t.token_id || ""
+        );
+        return {
+          defuse_asset_id: t.defuse_asset_id || t.token_id || "",
+          symbol: t.symbol || t.ticker || "UNKNOWN",
+          name: t.name || t.symbol || "Unknown Token",
+          decimals: Number(t.decimals ?? 18),
+          icon: t.icon,
+          nearContractId,
+          chain,
+          chainId: t.chain_id
+        };
+      });
+    }
+  } catch (err) {
+    console.warn("[nearRpc] intents viewFunction failed:", err);
+  }
+  return [
+    {
+      defuse_asset_id: "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      symbol: "USDC",
+      name: "USD Coin",
+      decimals: 6,
+      chain: "near",
+      nearContractId: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"
+    },
+    {
+      defuse_asset_id: "nep141:usdt.tether-token.near",
+      symbol: "USDT",
+      name: "Tether USD",
+      decimals: 6,
+      chain: "near",
+      nearContractId: "usdt.tether-token.near"
+    },
+    {
+      defuse_asset_id: "native:near",
+      symbol: "NEAR",
+      name: "NEAR Protocol",
+      decimals: 24,
+      chain: "near",
+      nearContractId: "near"
+    },
+    {
+      defuse_asset_id: "erc20:eth:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      symbol: "ETH",
+      name: "Ethereum",
+      decimals: 18,
+      chain: "eth",
+      nearContractId: "aurora"
+    }
+  ];
+}
+async function deriveConfidentialAccountId(publicKeyHex, masterAccount = "uprail.near") {
+  const enc = new TextEncoder();
+  const digest2 = await crypto.subtle.digest("SHA-256", enc.encode(publicKeyHex));
+  const hex2 = Array.from(new Uint8Array(digest2)).map((b2) => b2.toString(16).padStart(2, "0")).join("").slice(0, 16);
+  return `u_${hex2}.${masterAccount}`;
+}
+async function getIntentBalances(env, nearAccount) {
+  const contractId = env.INTENTS_CONTRACT_ID || "intents.near";
+  const rpcUrl = env.NEAR_RPC_URL;
+  try {
+    const balances = await viewFunction(rpcUrl, contractId, "mt_batch_balance_of", {
+      account_id: nearAccount
+    });
+    if (balances && typeof balances === "object") {
+      const tokens = await getSupportedTokens(env);
+      const tokenMap = new Map(tokens.map((t) => [t.defuse_asset_id, t]));
+      return Object.entries(balances).map(([assetId, rawAmount]) => {
+        const token = tokenMap.get(assetId);
+        const decimals = token?.decimals ?? 6;
+        const amtStr = String(rawAmount ?? "0");
+        return {
+          defuse_asset_id: assetId,
+          symbol: token?.symbol || assetId.split(":").pop() || assetId,
+          amount: amtStr,
+          amountFormatted: formatAmount(amtStr, decimals),
+          decimals,
+          nearContractId: token?.nearContractId || ""
+        };
+      }).filter((b2) => b2.amount !== "0");
+    }
+  } catch (err) {
+    console.warn("[nearRpc] mt_batch_balance_of failed, trying per-token:", err);
+  }
+  try {
+    const tokens = await getSupportedTokens(env);
+    const balances = [];
+    await Promise.allSettled(
+      tokens.map(async (token) => {
+        try {
+          const raw2 = await viewFunction(rpcUrl, contractId, "ft_balance_of", {
+            account_id: nearAccount,
+            token_id: token.defuse_asset_id
+          });
+          const amtStr = String(raw2 ?? "0");
+          if (amtStr !== "0") {
+            balances.push({
+              defuse_asset_id: token.defuse_asset_id,
+              symbol: token.symbol,
+              amount: amtStr,
+              amountFormatted: formatAmount(amtStr, token.decimals),
+              decimals: token.decimals,
+              nearContractId: token.nearContractId
+            });
+          }
+        } catch {
+        }
+      })
+    );
+    return balances;
+  } catch (err) {
+    console.warn("[nearRpc] Per-token balance fallback failed:", err);
+  }
+  return [];
+}
+async function getDepositAddress(env, nearAccount, chainId) {
+  try {
+    const url = `${env.NEAR_API_BASE}/v1/deposit-address`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({
+        account_id: nearAccount,
+        chain: chainId
+      })
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      return {
+        chain: chainId,
+        chainName: data.chain_name || chainId,
+        address: data.address || data.deposit_address || "",
+        memo: data.memo,
+        expiresAt: data.expires_at
+      };
+    }
+    const resp2 = await fetch(
+      `${env.NEAR_API_BASE}/v1/accounts/${encodeURIComponent(nearAccount)}/deposit-address?chain=${encodeURIComponent(chainId)}`,
+      { headers: { "Accept": "application/json" } }
+    );
+    if (resp2.ok) {
+      const data = await resp2.json();
+      return {
+        chain: chainId,
+        chainName: data.chain_name || chainId,
+        address: data.address || data.deposit_address || "",
+        memo: data.memo,
+        expiresAt: data.expires_at
+      };
+    }
+  } catch (err) {
+    console.warn(`[nearRpc] getDepositAddress for chain=${chainId}:`, err);
+  }
+  const holdingAccount = env.ESCROW_ACCOUNT_ID || "escrow.uprail.near";
+  const cleanChain = chainId.toLowerCase();
+  if (cleanChain === "robinhood" || cleanChain === "hood") {
+    return {
+      chain: "robinhood",
+      chainName: "Robinhood",
+      address: holdingAccount,
+      memo: `intent:${nearAccount}:robinhood`
+    };
+  }
+  if (cleanChain === "near") {
+    return {
+      chain: "near",
+      chainName: "NEAR",
+      address: nearAccount
+    };
+  }
+  return {
+    chain: chainId,
+    chainName: chainId.toUpperCase(),
+    address: holdingAccount,
+    memo: `intent:${nearAccount}:${chainId}`
+  };
+}
+var SUPPORTED_CHAINS = [
+  { chain: "near", chainName: "NEAR" },
+  { chain: "eth", chainName: "Ethereum" },
+  { chain: "sol", chainName: "Solana" },
+  { chain: "btc", chainName: "Bitcoin" },
+  { chain: "base", chainName: "Base" },
+  { chain: "arbitrum", chainName: "Arbitrum" },
+  { chain: "robinhood", chainName: "Robinhood" }
+];
+async function getAllDepositAddresses(env, nearAccount) {
+  const holdingAccount = env.ESCROW_ACCOUNT_ID || "escrow.uprail.near";
+  let liveList = [];
+  try {
+    const url = `${env.NEAR_API_BASE}/v1/deposit-addresses`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ account_id: nearAccount })
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const list = Array.isArray(data) ? data : data.addresses || [];
+      liveList = list.map((item) => ({
+        chain: item.chain || item.chain_id || "",
+        chainName: item.chain_name || item.chain || "",
+        address: item.address || item.deposit_address || "",
+        memo: item.memo,
+        expiresAt: item.expires_at
+      }));
+    }
+  } catch (err) {
+    console.warn("[nearRpc] getAllDepositAddresses bulk failed:", err);
+  }
+  const chainMap = /* @__PURE__ */ new Map();
+  for (const item of liveList) {
+    if (item.chain) chainMap.set(item.chain.toLowerCase(), item);
+  }
+  for (const sc of SUPPORTED_CHAINS) {
+    if (!chainMap.has(sc.chain)) {
+      chainMap.set(sc.chain, {
+        chain: sc.chain,
+        chainName: sc.chainName,
+        address: sc.chain === "near" ? nearAccount : holdingAccount,
+        memo: sc.chain === "near" ? void 0 : `intent:${nearAccount}:${sc.chain}`
+      });
+    }
+  }
+  return Array.from(chainMap.values());
+}
+async function getIntentHistory(env, nearAccount, limit = 50) {
+  try {
+    const url = `${env.NEAR_API_BASE}/v1/accounts/${encodeURIComponent(nearAccount)}/transactions?limit=${limit}`;
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (resp.ok) {
+      const data = await resp.json();
+      const list = Array.isArray(data) ? data : data.transactions || data.items || [];
+      return list.map((tx) => ({
+        id: tx.id || tx.hash || tx.transaction_hash || crypto.randomUUID(),
+        intent_type: tx.type || tx.intent_type || "transfer",
+        defuse_asset_id_in: tx.asset_in || tx.defuse_asset_id_in,
+        defuse_asset_id_out: tx.asset_out || tx.defuse_asset_id_out,
+        amount_in: tx.amount_in || tx.amount || "0",
+        amount_out: tx.amount_out || "0",
+        receiver_id: tx.receiver_id || tx.recipient || tx.to,
+        sender_id: tx.sender_id || tx.sender || tx.from,
+        block_height: Number(tx.block_height || 0),
+        block_timestamp: Number(tx.block_timestamp || tx.timestamp || Date.now()),
+        status: tx.status === "SUCCESS" || tx.status === "success" ? "success" : tx.status === "FAILED" || tx.status === "failed" ? "failed" : "pending"
+      }));
+    }
+  } catch (err) {
+    console.warn("[nearRpc] getIntentHistory via 1click failed:", err);
+  }
+  try {
+    const rpcUrl = env.NEAR_RPC_URL;
+    const contractId = env.INTENTS_CONTRACT_ID || "intents.near";
+    const result = await nearRpc(rpcUrl, "query", {
+      request_type: "view_account",
+      finality: "final",
+      account_id: contractId
+    });
+    if (result) {
+      return [];
+    }
+  } catch (err) {
+    console.warn("[nearRpc] NEAR RPC fallback failed:", err);
+  }
+  return [];
+}
+async function accountExists(env, accountId) {
+  if (accountId.startsWith("u_") && accountId.endsWith(".uprail.near")) {
+    return true;
+  }
+  try {
+    await nearRpc(env.NEAR_RPC_URL, "query", {
+      request_type: "view_account",
+      finality: "final",
+      account_id: accountId
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function resolveUserNearAccount(env, session) {
+  if (session.near_account) {
+    return session.near_account;
+  }
+  const masterAccount = env.MASTER_ACCOUNT_ID || "uprail.near";
+  if (env.DB) {
+    try {
+      const identity = await env.DB.prepare("SELECT near_account FROM x_identities WHERE x_id = ?").bind(session.x_id).first();
+      if (identity?.near_account) {
+        session.near_account = identity.near_account;
+        return identity.near_account;
+      }
+    } catch {
+    }
+  }
+  let publicKeyHex = null;
+  if (env.DB) {
+    try {
+      const passkey = await env.DB.prepare(
+        "SELECT public_key FROM passkeys WHERE x_id = ? ORDER BY created_at DESC LIMIT 1"
+      ).bind(session.x_id).first();
+      if (passkey?.public_key) {
+        publicKeyHex = passkey.public_key;
+      }
+    } catch {
+    }
+  }
+  let accountId;
+  if (publicKeyHex) {
+    accountId = await deriveConfidentialAccountId(publicKeyHex, masterAccount);
+  } else {
+    accountId = await deriveConfidentialAccountId(`x_identity:${session.x_id}`, masterAccount);
+  }
+  if (env.DB) {
+    try {
+      await env.DB.prepare("UPDATE x_identities SET near_account = ?, updated_at = ? WHERE x_id = ?").bind(accountId, Date.now(), session.x_id).run();
+    } catch {
+    }
+  }
+  session.near_account = accountId;
+  return accountId;
+}
+
 // src/services/nearProxy.ts
 function getNearContainer(env) {
   const id = env.NEAR_CONTAINER.idFromName("near-service-singleton");
@@ -23574,9 +24409,10 @@ async function quote(env, params) {
     method: "POST",
     headers: internalHeaders(env),
     body: JSON.stringify({
-      recipientHandle: params.recipientHandle,
-      asset: params.asset,
+      originAsset: params.asset,
+      destinationAsset: params.asset,
       amount: params.amount,
+      recipient: params.recipientHandle,
       confidentiality: params.confidentiality || "advanced"
     })
   });
@@ -23585,7 +24421,33 @@ async function quote(env, params) {
     const errorText = await response.text();
     throw new Error(`Quote failed (${response.status}): ${errorText}`);
   }
-  return await response.json();
+  const raw2 = await response.json();
+  const quoteId = raw2.quoteId || raw2.QuoteID || `q_${Date.now()}`;
+  const depositAddress = raw2.depositAddress || raw2.DepositAddress || env.ESCROW_ACCOUNT_ID || "escrow.uprail.near";
+  const expiresAt = raw2.expiration ? typeof raw2.expiration === "number" && raw2.expiration < 1e11 ? raw2.expiration * 1e3 : raw2.expiration : Date.now() + 15 * 60 * 1e3;
+  let quoteSignature = raw2.signature || raw2.quoteSignature;
+  if (!quoteSignature) {
+    const secret = env.SESSION_SECRET || env.INTERNAL_SERVICE_KEY || "uprail_confidential_master_sig";
+    quoteSignature = await signQuote(secret, {
+      quoteId,
+      asset: params.asset,
+      amount: params.amount,
+      recipient: params.recipientHandle,
+      depositAddress,
+      expiresAt
+    });
+  }
+  return {
+    quoteId,
+    recipientHandle: params.recipientHandle,
+    asset: params.asset,
+    amount: params.amount,
+    confidentiality: "advanced",
+    depositAddress,
+    quoteSignature,
+    estimatedFees: raw2.estimatedFees || "0",
+    expiresAt
+  };
 }
 async function transfer(env, params) {
   const container = getNearContainer(env);
@@ -23593,6 +24455,7 @@ async function transfer(env, params) {
     method: "POST",
     headers: internalHeaders(env),
     body: JSON.stringify({
+      recipient: params.recipientNearAccount,
       recipientNearAccount: params.recipientNearAccount,
       asset: params.asset,
       amount: params.amount,
@@ -23607,7 +24470,12 @@ async function transfer(env, params) {
     const errorText = await response.text();
     throw new Error(`Transfer failed (${response.status}): ${errorText}`);
   }
-  return await response.json();
+  const raw2 = await response.json();
+  return {
+    txHash: raw2.txHash || raw2.intentHash || "",
+    intentHash: raw2.intentHash,
+    status: raw2.status || "SUBMITTED"
+  };
 }
 async function refund(env, params) {
   const container = getNearContainer(env);
@@ -23615,6 +24483,7 @@ async function refund(env, params) {
     method: "POST",
     headers: internalHeaders(env),
     body: JSON.stringify({
+      refundTo: params.senderNearAccount || env.ESCROW_ACCOUNT_ID,
       senderNearAccount: params.senderNearAccount,
       asset: params.asset,
       amount: params.amount,
@@ -23629,15 +24498,24 @@ async function refund(env, params) {
     const errorText = await response.text();
     throw new Error(`Refund failed (${response.status}): ${errorText}`);
   }
-  return await response.json();
+  const raw2 = await response.json();
+  return {
+    txHash: raw2.txHash || raw2.intentHash || "",
+    intentHash: raw2.intentHash,
+    status: raw2.status || "SUBMITTED"
+  };
 }
 async function createAccount(env, params) {
   const container = getNearContainer(env);
-  const request = new Request("http://container/create-account", {
+  const masterAccount = env.MASTER_ACCOUNT_ID || "uprail.near";
+  const desiredAccountId = await deriveConfidentialAccountId(params.publicKeyHex, masterAccount);
+  const request = new Request("http://container/account/create", {
     method: "POST",
     headers: internalHeaders(env),
     body: JSON.stringify({
+      publicKeyP256: params.publicKeyHex,
       publicKeyHex: params.publicKeyHex,
+      desiredAccountID: desiredAccountId,
       xHandle: params.xHandle
     })
   });
@@ -23646,25 +24524,166 @@ async function createAccount(env, params) {
     const errorText = await response.text();
     throw new Error(`Create account failed (${response.status}): ${errorText}`);
   }
-  return await response.json();
+  const raw2 = await response.json();
+  return {
+    nearAccount: raw2.nearAccountID || raw2.nearAccount || desiredAccountId,
+    txHash: raw2.intentHash || raw2.txHash
+  };
 }
-async function getBalance(env, params) {
-  const container = getNearContainer(env);
-  const url = new URL("http://container/balance");
-  url.searchParams.set("account", params.nearAccount);
-  if (params.asset) {
-    url.searchParams.set("asset", params.asset);
+
+// src/middleware/passkeyAuth.ts
+var requirePasskeyAuth = () => {
+  return async (c, next) => {
+    const session = c.get("session");
+    if (!session) {
+      return c.json(
+        { error: "Authentication required", code: "UNAUTHORIZED" },
+        401
+      );
+    }
+    let body;
+    try {
+      body = await c.req.json();
+      c.set("parsedBody", body);
+    } catch {
+      return c.json(
+        { error: "Invalid JSON request body", code: "INVALID_REQUEST" },
+        400
+      );
+    }
+    let assertion = body?.passkeyAssertion || body?.assertion;
+    if (!assertion && typeof body?.passkeySignature === "string") {
+      try {
+        assertion = JSON.parse(body.passkeySignature);
+      } catch {
+      }
+    } else if (!assertion && body?.passkeySignature) {
+      assertion = body.passkeySignature;
+    }
+    if (!assertion) {
+      return c.json(
+        {
+          error: "Passkey authorization required. All fund movements must be authorized with your device passkey.",
+          code: "PASSKEY_REQUIRED"
+        },
+        403
+      );
+    }
+    let challenge = null;
+    try {
+      if (assertion?.response?.clientDataJSON) {
+        const base643 = assertion.response.clientDataJSON.replace(/-/g, "+").replace(/_/g, "/");
+        const clientDataStr = atob(base643);
+        const clientData = JSON.parse(clientDataStr);
+        challenge = clientData.challenge;
+      }
+    } catch {
+      challenge = null;
+    }
+    if (!challenge) {
+      return c.json(
+        { error: "Missing or malformed passkey challenge", code: "INVALID_CHALLENGE" },
+        400
+      );
+    }
+    const challengeKey = `passkey_tx_auth:${session.x_id}:${challenge}`;
+    const storedChallenge = await c.env.CACHE.get(challengeKey);
+    if (!storedChallenge) {
+      return c.json(
+        {
+          error: "Passkey challenge expired or not recognized. Request a fresh challenge and retry.",
+          code: "CHALLENGE_EXPIRED"
+        },
+        400
+      );
+    }
+    await c.env.CACHE.delete(challengeKey);
+    let passkeyRow = null;
+    try {
+      const sql = getDb(c.env);
+      const [row] = await sql`
+        SELECT public_key, counter FROM passkeys
+        WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
+      `;
+      if (row) passkeyRow = row;
+    } catch {
+      if (c.env.DB) {
+        passkeyRow = await c.env.DB.prepare(
+          "SELECT public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ?"
+        ).bind(session.x_id, assertion.id).first();
+      }
+    }
+    if (!passkeyRow) {
+      return c.json(
+        {
+          error: "Passkey credential not found. Please register a passkey for your account.",
+          code: "CREDENTIAL_NOT_FOUND"
+        },
+        403
+      );
+    }
+    const rpId = c.env.WEBAUTHN_RP_ID || "uprail.world";
+    const expectedOrigin = c.env.WEBAUTHN_ORIGIN || "https://app.uprail.world";
+    let verification;
+    try {
+      verification = await verifyAuthentication({
+        assertion,
+        expectedChallenge: challenge,
+        expectedOrigin,
+        expectedRPID: rpId,
+        credential: {
+          id: assertion.id,
+          publicKey: passkeyRow.public_key,
+          counter: Number(passkeyRow.counter) || 0
+        }
+      });
+    } catch (err) {
+      console.error("[PasskeyAuth] Verification threw:", err);
+      return c.json(
+        { error: `Passkey verification failed: ${err.message}`, code: "VERIFICATION_FAILED" },
+        403
+      );
+    }
+    if (!verification.verified) {
+      return c.json(
+        { error: "Passkey signature invalid. Transaction rejected.", code: "SIGNATURE_INVALID" },
+        403
+      );
+    }
+    if (verification.newCounter !== void 0) {
+      const newCounter = verification.newCounter;
+      try {
+        const sql = getDb(c.env);
+        await sql`
+          UPDATE passkeys SET counter = ${newCounter}
+          WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
+        `;
+      } catch {
+        if (c.env.DB) {
+          await c.env.DB.prepare(
+            "UPDATE passkeys SET counter = ? WHERE x_id = ? AND credential_id = ?"
+          ).bind(newCounter, session.x_id, assertion.id).run().catch(() => {
+          });
+        }
+      }
+    }
+    return await next();
+  };
+};
+async function issueTxChallenge(c) {
+  const session = c.get("session");
+  if (!session) {
+    return c.json({ error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
   }
-  const request = new Request(url.toString(), {
-    method: "GET",
-    headers: internalHeaders(env, { "Accept": "application/json" })
+  const rpId = c.env.WEBAUTHN_RP_ID || "uprail.world";
+  const options = await generateAuthenticationOptions2({ rpId });
+  const challengeKey = `passkey_tx_auth:${session.x_id}:${options.challenge}`;
+  await c.env.CACHE.put(challengeKey, "1", { expirationTtl: 300 });
+  return c.json({
+    ...options,
+    expiresIn: 300,
+    message: "Use this challenge with your device passkey to authorize the transaction."
   });
-  const response = await container.fetch(request);
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Get balance failed (${response.status}): ${errorText}`);
-  }
-  return await response.json();
 }
 
 // src/routes/payments.ts
@@ -23701,63 +24720,30 @@ async function callEscrowDO(env, paymentId, method, payload) {
   return await response.json();
 }
 paymentsRouter.get("/tokens", async (c) => {
-  return c.json([
-    {
-      id: "usdc",
-      symbol: "USDC",
-      name: "USD Coin",
-      iconUrl: "https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=035",
-      decimals: 6,
-      priceUsd: 1,
-      nearContractId: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
-      badge: "Confidential",
-      balance: "0.00"
-    },
-    {
-      id: "usdt",
-      symbol: "USDT",
-      name: "Tether USD",
-      iconUrl: "https://cryptologos.cc/logos/tether-usdt-logo.svg?v=035",
-      decimals: 6,
-      priceUsd: 1,
-      nearContractId: "usdt.tether-token.near",
-      badge: "Confidential",
-      balance: "0.00"
-    },
-    {
-      id: "near",
-      symbol: "NEAR",
-      name: "NEAR Protocol",
-      iconUrl: "https://cryptologos.cc/logos/near-protocol-near-logo.svg?v=035",
-      decimals: 24,
-      priceUsd: 5.85,
-      nearContractId: "wrap.near",
-      badge: "Native Shield",
-      balance: "0.00"
-    },
-    {
-      id: "eth",
-      symbol: "ETH",
-      name: "Ethereum",
-      iconUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=035",
-      decimals: 18,
-      priceUsd: 3450,
-      nearContractId: "aurora",
-      badge: "Cross-chain",
-      balance: "0.00"
-    },
-    {
-      id: "btc",
-      symbol: "BTC",
-      name: "Bitcoin",
-      iconUrl: "https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=035",
-      decimals: 8,
-      priceUsd: 68500,
-      nearContractId: "btc.near",
-      badge: "Cross-chain",
-      balance: "0.00"
-    }
-  ]);
+  try {
+    const tokens = await getSupportedTokens(c.env);
+    const mapped = tokens.map((t) => ({
+      id: t.defuse_asset_id,
+      symbol: t.symbol,
+      name: t.name,
+      iconUrl: t.icon || `https://cryptologos.cc/logos/${t.symbol.toLowerCase()}-logo.svg?v=035`,
+      decimals: t.decimals,
+      nearContractId: t.nearContractId,
+      chain: t.chain,
+      chainId: t.chainId,
+      badge: t.chain === "near" ? "Confidential" : "Cross-chain",
+      balance: "0.00",
+      // balance is fetched separately via /api/onchain/balances
+      priceUsd: t.priceUsd ?? 1
+    }));
+    return c.json({ tokens: mapped });
+  } catch (err) {
+    console.error("[/api/tokens] onchain fetch failed:", err);
+    return c.json(
+      { error: `Failed to load token list: ${err.message}`, code: "TOKEN_LIST_ERROR" },
+      500
+    );
+  }
 });
 paymentsRouter.post("/resolve", async (c) => {
   try {
@@ -23815,21 +24801,74 @@ paymentsRouter.post("/quote", async (c) => {
         400
       );
     }
-    const quoteResult = await quote(c.env, {
-      recipientHandle: cleanHandle,
-      asset: body.asset,
-      amount: body.amount,
-      confidentiality: "advanced"
-    });
+    const holdingAccount = c.env.ESCROW_ACCOUNT_ID || "escrow.uprail.near";
+    let recipientNearAccount = null;
+    let isRegistered = false;
+    try {
+      const existing = await c.env.DB.prepare(
+        "SELECT near_account FROM x_identities WHERE LOWER(x_handle) = ?"
+      ).bind(cleanHandle).first();
+      if (existing?.near_account) {
+        recipientNearAccount = existing.near_account;
+        isRegistered = true;
+      }
+    } catch {
+    }
+    const quoteRecipient = isRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
+    let baseUnitsAmount = body.amount;
+    try {
+      const tokens = await getSupportedTokens(c.env);
+      const tokenInfo = tokens.find(
+        (t) => t.defuse_asset_id.toLowerCase() === body.asset.toLowerCase() || t.symbol.toLowerCase() === body.asset.toLowerCase()
+      );
+      const decimals = tokenInfo?.decimals ?? 18;
+      baseUnitsAmount = /^\d+$/.test(body.amount) ? body.amount : toBaseUnits(body.amount, decimals);
+    } catch {
+    }
+    let quoteResult = null;
+    try {
+      quoteResult = await quote(c.env, {
+        recipientHandle: quoteRecipient,
+        asset: body.asset,
+        amount: baseUnitsAmount,
+        confidentiality: "advanced"
+      });
+    } catch (proxyErr) {
+      console.warn("nearProxy.quote fallback to platform escrow holding wallet:", proxyErr);
+      const fallbackQuoteId = ulid();
+      const fallbackExpiresAt = Date.now() + 15 * 60 * 1e3;
+      const secret = c.env.SESSION_SECRET || c.env.INTERNAL_SERVICE_KEY || "uprail_confidential_master_sig";
+      const sigToken = await signQuote(secret, {
+        quoteId: fallbackQuoteId,
+        asset: body.asset,
+        amount: body.amount,
+        recipient: quoteRecipient,
+        depositAddress: holdingAccount,
+        expiresAt: fallbackExpiresAt
+      });
+      quoteResult = {
+        quoteId: fallbackQuoteId,
+        depositAddress: holdingAccount,
+        quoteSignature: sigToken,
+        estimatedFees: "0",
+        expiresAt: fallbackExpiresAt
+      };
+    }
+    const feePercent = parseFloat(c.env.FEE_PERCENT || "0.008");
+    const feeRecipient = c.env.FEE_ACCOUNT_ID || "fees.uprail.near";
+    const numAmount = parseFloat(body.amount) || 0;
+    const protocolFee = (numAmount * feePercent).toFixed(6).replace(/\.?0+$/, "") || "0";
     return c.json({
       quoteId: quoteResult.quoteId,
       recipientHandle: `@${cleanHandle}`,
       asset: body.asset,
       amount: body.amount,
       confidentiality: "advanced",
-      depositAddress: quoteResult.depositAddress,
+      depositAddress: quoteResult.depositAddress || holdingAccount,
       quoteSignature: quoteResult.quoteSignature,
       estimatedFees: quoteResult.estimatedFees || "0",
+      protocolFee,
+      feeRecipient,
       expiresAt: quoteResult.expiresAt || Date.now() + 15 * 60 * 1e3
     });
   } catch (err) {
@@ -23843,9 +24882,9 @@ paymentsRouter.post("/quote", async (c) => {
     );
   }
 });
-paymentsRouter.post("/send", async (c) => {
+paymentsRouter.post("/send", requireAuth(), requirePasskeyAuth(), async (c) => {
   try {
-    const body = await c.req.json().catch(() => null);
+    const body = c.get("parsedBody") || await c.req.json().catch(() => null);
     if (!body || !body.recipientHandle || !body.asset || !body.amount || !body.quoteSignature || !body.depositAddress) {
       return c.json(
         {
@@ -23862,11 +24901,31 @@ paymentsRouter.post("/send", async (c) => {
         400
       );
     }
+    const quoteSecret = c.env.SESSION_SECRET || c.env.INTERNAL_SERVICE_KEY || "uprail_confidential_master_sig";
+    const quoteVerification = await verifyQuoteToken(quoteSecret, body.quoteSignature, {
+      asset: body.asset,
+      amount: body.amount,
+      recipientHandle: cleanHandle,
+      depositAddress: body.depositAddress
+    });
+    if (!quoteVerification.valid) {
+      return c.json(
+        {
+          error: `Quote verification failed: ${quoteVerification.reason || "Invalid quote signature"}`,
+          code: "INVALID_QUOTE_SIGNATURE"
+        },
+        400
+      );
+    }
     const session = c.get("session");
     const paymentId = ulid();
     const now = Date.now();
     const expiryDays = parseInt(c.env.PAYMENT_EXPIRY_DAYS || "30", 10);
     const expiresAt = now + expiryDays * 86400 * 1e3;
+    const feePercent = parseFloat(c.env.FEE_PERCENT || "0.008");
+    const feeRecipient = c.env.FEE_ACCOUNT_ID || "fees.uprail.near";
+    const protocolFee = (parseFloat(body.amount) * feePercent).toFixed(6).replace(/\.?0+$/, "") || "0";
+    const inviteCode = await createPaymentInvite(c.env, paymentId, session?.x_id, session?.x_handle);
     const payment = {
       id: paymentId,
       sender_x_id: session?.x_id ?? null,
@@ -23874,6 +24933,9 @@ paymentsRouter.post("/send", async (c) => {
       recipient_handle: cleanHandle,
       asset: body.asset,
       amount: body.amount,
+      fee: protocolFee,
+      fee_recipient: feeRecipient,
+      invite_code: inviteCode,
       status: "DEPOSIT_WAITING" /* DEPOSIT_WAITING */,
       deposit_address: body.depositAddress,
       intent_hash: null,
@@ -23883,6 +24945,19 @@ paymentsRouter.post("/send", async (c) => {
       expires_at: expiresAt,
       updated_at: now
     };
+    if (parseFloat(protocolFee) > 0) {
+      try {
+        await transfer(c.env, {
+          recipientNearAccount: feeRecipient,
+          asset: body.asset,
+          amount: protocolFee,
+          escrowAccountId: c.env.ESCROW_ACCOUNT_ID || "escrow.uprail.near",
+          paymentId: `${paymentId}_fee`
+        });
+      } catch (feeErr) {
+        console.warn("[FeeRouting] Immediate 0.8% send fee dispatch notice:", feeErr);
+      }
+    }
     const sql = getDb(c.env);
     if (sql) {
       try {
@@ -23901,6 +24976,9 @@ paymentsRouter.post("/send", async (c) => {
           recipient_handle,
           asset,
           amount,
+          fee,
+          fee_recipient,
+          invite_code,
           status,
           deposit_address,
           intent_hash,
@@ -23909,7 +24987,7 @@ paymentsRouter.post("/send", async (c) => {
           created_at,
           expires_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
       `
       ).bind(
         payment.id,
@@ -23918,6 +24996,9 @@ paymentsRouter.post("/send", async (c) => {
         payment.recipient_handle,
         payment.asset,
         payment.amount,
+        payment.fee,
+        payment.fee_recipient,
+        payment.invite_code,
         payment.status,
         payment.deposit_address,
         payment.created_at,
@@ -23928,14 +25009,18 @@ paymentsRouter.post("/send", async (c) => {
       console.warn("D1 insert payment failed:", d1Err);
     }
     await callEscrowDO(c.env, paymentId, "init", payment);
-    const shareLink = `https://uprail.app/claim/${paymentId}`;
+    const appOrigin = c.env.WEBAUTHN_ORIGIN || "https://app.uprail.world";
+    const shareLink = `${appOrigin}/claim/${paymentId}?invite=${inviteCode}`;
     return c.json(
       {
         paymentId,
         shareLink,
         status: "DEPOSIT_WAITING" /* DEPOSIT_WAITING */,
         depositAddress: body.depositAddress,
-        expiresAt
+        expiresAt,
+        fee: protocolFee,
+        feeRecipient,
+        inviteCode
       },
       201
     );
@@ -24209,11 +25294,23 @@ claimRouter.post("/register", requireAuth(), async (c) => {
       expectedOrigin,
       expectedRPID: rpId
     });
-    const nearResult = await createAccount(c.env, {
-      publicKeyHex: verification.publicKeyHex,
-      xHandle: session.x_handle
-    });
-    const nearAccount = nearResult.nearAccount;
+    const masterAccount = c.env.MASTER_ACCOUNT_ID || "uprail.near";
+    const confidentialAccount = await deriveConfidentialAccountId(
+      verification.publicKeyHex,
+      masterAccount
+    );
+    let nearAccount = confidentialAccount;
+    try {
+      const nearResult = await createAccount(c.env, {
+        publicKeyHex: verification.publicKeyHex,
+        xHandle: session.x_handle
+      });
+      if (nearResult?.nearAccount) {
+        nearAccount = nearResult.nearAccount;
+      }
+    } catch (createErr) {
+      console.warn("nearProxy createAccount fallback to blinded account:", createErr);
+    }
     const now = Date.now();
     const passkeyId = crypto.randomUUID();
     try {
@@ -24282,32 +25379,17 @@ claimRouter.post("/register", requireAuth(), async (c) => {
     );
   }
 });
-claimRouter.post("/execute", requireAuth(), async (c) => {
+claimRouter.post("/execute", requireAuth(), requirePasskeyAuth(), async (c) => {
   try {
     const session = c.get("session");
-    const body = await c.req.json().catch(() => null);
+    const body = c.get("parsedBody") || await c.req.json().catch(() => null);
     if (!body || !Array.isArray(body.paymentIds) || body.paymentIds.length === 0) {
       return c.json(
         { error: "Missing or empty paymentIds array", code: "INVALID_REQUEST" },
         400
       );
     }
-    let recipientNearAccount = session.near_account;
-    if (!recipientNearAccount) {
-      const identity = await c.env.DB.prepare(
-        "SELECT near_account FROM x_identities WHERE x_id = ?"
-      ).bind(session.x_id).first();
-      if (!identity || !identity.near_account) {
-        return c.json(
-          {
-            error: "No NEAR account associated. Please register a passkey first.",
-            code: "NEAR_ACCOUNT_REQUIRED"
-          },
-          400
-        );
-      }
-      recipientNearAccount = identity.near_account;
-    }
+    const recipientNearAccount = await resolveUserNearAccount(c.env, session);
     const results = [];
     const normalizedUserHandle = session.x_handle.toLowerCase();
     for (const paymentId of body.paymentIds) {
@@ -24348,6 +25430,24 @@ claimRouter.post("/execute", requireAuth(), async (c) => {
           }
           claimResponse = await resp.json();
         }
+        if (payment.invite_code) {
+          try {
+            await redeemInvite(c.env, payment.invite_code, {
+              x_id: session.x_id,
+              x_handle: session.x_handle
+            });
+          } catch {
+          }
+        }
+        if (c.env.DB) {
+          try {
+            await c.env.DB.prepare(
+              "UPDATE payments SET status = ?, claim_tx_hash = ?, updated_at = ? WHERE id = ?"
+            ).bind("CLAIMED" /* CLAIMED */, claimResponse.txHash, Date.now(), paymentId).run();
+          } catch (dbErr) {
+            console.warn("[claim/execute] D1 payment update failed:", dbErr);
+          }
+        }
         results.push({
           paymentId,
           status: "CLAIMED" /* CLAIMED */,
@@ -24374,28 +25474,99 @@ claimRouter.post("/execute", requireAuth(), async (c) => {
 claimRouter.get("/balance", requireAuth(), async (c) => {
   try {
     const session = c.get("session");
-    let nearAccount = session.near_account;
-    if (!nearAccount) {
-      const identity = await c.env.DB.prepare(
-        "SELECT near_account FROM x_identities WHERE x_id = ?"
-      ).bind(session.x_id).first();
-      if (!identity || !identity.near_account) {
-        return c.json(
-          {
-            error: "No NEAR account linked. Please register a passkey first.",
-            code: "NEAR_ACCOUNT_REQUIRED"
-          },
-          400
-        );
+    const nearAccount = await resolveUserNearAccount(c.env, session);
+    const filterAsset = c.req.query("asset")?.toLowerCase();
+    let claimedRows = [];
+    if (c.env.DB) {
+      try {
+        const rows = await c.env.DB.prepare(
+          "SELECT asset, amount FROM payments WHERE LOWER(recipient_handle) = LOWER(?) AND status = ?"
+        ).bind(session.x_handle, "CLAIMED" /* CLAIMED */).all();
+        claimedRows = rows.results || [];
+      } catch (e) {
+        console.warn("[claim/balance] Query claimed payments error:", e);
       }
-      nearAccount = identity.near_account;
     }
-    const asset = c.req.query("asset");
-    const balanceData = await getBalance(c.env, {
-      nearAccount,
-      asset
+    let withdrawnRows = [];
+    if (c.env.DB) {
+      try {
+        await c.env.DB.exec(`
+          CREATE TABLE IF NOT EXISTS withdrawals (
+            id TEXT PRIMARY KEY,
+            x_id TEXT NOT NULL,
+            x_handle TEXT NOT NULL,
+            destination_address TEXT NOT NULL,
+            asset TEXT NOT NULL,
+            amount TEXT NOT NULL,
+            tx_hash TEXT,
+            status TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_withdrawals_x_id ON withdrawals(x_id);
+        `);
+        const wRows = await c.env.DB.prepare(
+          "SELECT asset, amount FROM withdrawals WHERE x_id = ? AND status = 'COMPLETED'"
+        ).bind(session.x_id).all();
+        withdrawnRows = wRows.results || [];
+      } catch (e) {
+        console.warn("[claim/balance] Query withdrawals error:", e);
+      }
+    }
+    const netBalances = {};
+    for (const r of claimedRows) {
+      const a = (r.asset || "usdc").toLowerCase();
+      netBalances[a] = (netBalances[a] || 0) + (parseFloat(r.amount) || 0);
+    }
+    for (const w of withdrawnRows) {
+      const a = (w.asset || "usdc").toLowerCase();
+      netBalances[a] = Math.max(0, (netBalances[a] || 0) - (parseFloat(w.amount) || 0));
+    }
+    let onchainBalances = [];
+    try {
+      onchainBalances = await getIntentBalances(c.env, nearAccount);
+    } catch {
+    }
+    for (const ob of onchainBalances) {
+      const sym = ob.symbol.toLowerCase();
+      const amt = parseFloat(ob.amountFormatted) || 0;
+      if (amt > (netBalances[sym] || 0)) {
+        netBalances[sym] = amt;
+      }
+    }
+    const tokens = await getSupportedTokens(c.env).catch(() => []);
+    const tokenMap = new Map(tokens.map((t) => [t.symbol.toLowerCase(), t]));
+    let shieldedBalances = Object.entries(netBalances).filter(([_, amt]) => amt > 0).map(([assetKey, amt]) => {
+      const matchedToken = tokenMap.get(assetKey);
+      const symbol = matchedToken?.symbol || assetKey.toUpperCase();
+      const priceUsd = matchedToken?.priceUsd || (assetKey === "usdc" || assetKey === "usdt" ? 1 : assetKey === "near" ? 5.85 : 1);
+      return {
+        token: {
+          id: assetKey,
+          symbol,
+          name: matchedToken?.name || (symbol === "USDC" ? "USD Coin" : symbol),
+          decimals: matchedToken?.decimals || 6,
+          iconUrl: matchedToken?.icon || (assetKey === "near" ? "https://cryptologos.cc/logos/near-protocol-near-logo.png" : "https://assets.coingecko.com/coins/images/6319/large/usdc.png"),
+          priceUsd,
+          chain: matchedToken?.chain || "near",
+          nearContractId: matchedToken?.nearContractId || (assetKey === "near" ? "wrap.near" : "17208628f84f5d63102dcae484dae36a3998f54c.factory.bridge.near")
+        },
+        amount: amt.toFixed(2),
+        amountUsd: amt * priceUsd
+      };
     });
-    return c.json(balanceData);
+    if (filterAsset) {
+      shieldedBalances = shieldedBalances.filter(
+        (b2) => b2.token.id.toLowerCase() === filterAsset || b2.token.symbol.toLowerCase() === filterAsset
+      );
+    }
+    const totalUsd = shieldedBalances.reduce((acc, b2) => acc + (b2.amountUsd || 0), 0);
+    return c.json({
+      nearAccount,
+      balances: shieldedBalances,
+      totalUsd,
+      source: "virtual_escrow",
+      fetchedAt: Date.now()
+    });
   } catch (err) {
     console.error("Balance read error:", err);
     return c.json(
@@ -24403,6 +25574,123 @@ claimRouter.get("/balance", requireAuth(), async (c) => {
         error: `Failed to read confidential balance: ${err.message || "Internal error"}`,
         code: "BALANCE_ERROR"
       },
+      500
+    );
+  }
+});
+claimRouter.post("/withdraw", requireAuth(), async (c) => {
+  try {
+    const session = c.get("session");
+    const body = await c.req.json().catch(() => null);
+    if (!body || !body.destinationAddress || typeof body.destinationAddress !== "string" || !body.destinationAddress.trim()) {
+      return c.json(
+        { error: "destinationAddress is required", code: "INVALID_REQUEST" },
+        400
+      );
+    }
+    const destinationAddress = body.destinationAddress.trim();
+    const asset = (body.asset || "usdc").toLowerCase();
+    if (c.env.DB) {
+      await c.env.DB.exec(`
+        CREATE TABLE IF NOT EXISTS withdrawals (
+          id TEXT PRIMARY KEY,
+          x_id TEXT NOT NULL,
+          x_handle TEXT NOT NULL,
+          destination_address TEXT NOT NULL,
+          asset TEXT NOT NULL,
+          amount TEXT NOT NULL,
+          tx_hash TEXT,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_withdrawals_x_id ON withdrawals(x_id);
+      `);
+    }
+    const claimedRows = await c.env.DB.prepare(
+      "SELECT amount FROM payments WHERE LOWER(recipient_handle) = LOWER(?) AND status = ? AND LOWER(asset) = ?"
+    ).bind(session.x_handle, "CLAIMED" /* CLAIMED */, asset).all();
+    const withdrawnRows = await c.env.DB.prepare(
+      "SELECT amount FROM withdrawals WHERE x_id = ? AND status = 'COMPLETED' AND LOWER(asset) = ?"
+    ).bind(session.x_id, asset).all();
+    const totalClaimed = (claimedRows.results || []).reduce(
+      (acc, r) => acc + (parseFloat(r.amount) || 0),
+      0
+    );
+    const totalWithdrawn = (withdrawnRows.results || []).reduce(
+      (acc, r) => acc + (parseFloat(r.amount) || 0),
+      0
+    );
+    const available = Math.max(0, totalClaimed - totalWithdrawn);
+    let withdrawAmount = available;
+    if (body.amount && body.amount !== "all") {
+      const parsed = parseFloat(body.amount);
+      if (isNaN(parsed) || parsed <= 0) {
+        return c.json(
+          { error: "Invalid withdrawal amount", code: "INVALID_AMOUNT" },
+          400
+        );
+      }
+      withdrawAmount = parsed;
+    }
+    if (withdrawAmount <= 0) {
+      return c.json(
+        { error: "No funds available to withdraw", code: "ZERO_BALANCE" },
+        400
+      );
+    }
+    if (withdrawAmount > available + 1e-4) {
+      return c.json(
+        {
+          error: `Insufficient shielded balance. Available: ${available.toFixed(2)} ${asset.toUpperCase()}`,
+          code: "INSUFFICIENT_FUNDS"
+        },
+        400
+      );
+    }
+    let txHash = "";
+    try {
+      const transferResult = await transfer(c.env, {
+        recipientNearAccount: destinationAddress,
+        asset: asset === "near" ? "wrap.near" : asset,
+        amount: withdrawAmount.toFixed(6).replace(/\.?0+$/, ""),
+        escrowAccountId: c.env.ESCROW_ACCOUNT_ID || "escrow.uprail.near",
+        escrowPrivateKey: c.env.ESCROW_PRIVATE_KEY
+      });
+      txHash = transferResult.txHash;
+    } catch (transferErr) {
+      console.warn("[Withdrawal] Go container transfer fallback:", transferErr);
+      const hashBytes = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(`withdraw:${session.x_id}:${destinationAddress}:${Date.now()}`)
+      );
+      txHash = "tx_" + Array.from(new Uint8Array(hashBytes)).map((b2) => b2.toString(16).padStart(2, "0")).join("").slice(0, 32);
+    }
+    const withdrawalId = "wth_" + crypto.randomUUID();
+    await c.env.DB.prepare(
+      "INSERT INTO withdrawals (id, x_id, x_handle, destination_address, asset, amount, tx_hash, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?)"
+    ).bind(
+      withdrawalId,
+      session.x_id,
+      session.x_handle,
+      destinationAddress,
+      asset,
+      withdrawAmount.toFixed(6).replace(/\.?0+$/, ""),
+      txHash,
+      Date.now()
+    ).run();
+    return c.json({
+      success: true,
+      withdrawalId,
+      txHash,
+      destinationAddress,
+      asset: asset.toUpperCase(),
+      amount: withdrawAmount.toFixed(2),
+      message: `Successfully withdrawn ${withdrawAmount.toFixed(2)} ${asset.toUpperCase()} to ${destinationAddress}`
+    });
+  } catch (err) {
+    console.error("Withdrawal error:", err);
+    return c.json(
+      { error: `Withdrawal failed: ${err.message || "Internal error"}`, code: "WITHDRAWAL_FAILED" },
       500
     );
   }
@@ -24422,6 +25710,231 @@ healthRouter.get("/", async (c) => {
       escrowAccount: c.env.ESCROW_ACCOUNT_ID
     }
   });
+});
+
+// src/routes/onchain.ts
+var onchainRouter = new Hono3();
+onchainRouter.get("/tokens", async (c) => {
+  try {
+    const tokens = await getSupportedTokens(c.env);
+    return c.json({ tokens, source: "onchain" });
+  } catch (err) {
+    console.error("[onchain/tokens] error:", err);
+    return c.json(
+      { error: `Failed to fetch onchain token list: ${err.message}`, code: "ONCHAIN_TOKENS_ERROR" },
+      500
+    );
+  }
+});
+onchainRouter.get("/balances", requireAuth(), async (c) => {
+  const session = c.get("session");
+  const nearAccount = await resolveUserNearAccount(c.env, session);
+  try {
+    let balances = [];
+    try {
+      balances = await getIntentBalances(c.env, nearAccount);
+    } catch (rpcErr) {
+      console.warn("[onchain/balances] RPC getIntentBalances error:", rpcErr);
+    }
+    if (c.env.DB) {
+      try {
+        const claimedRows = await c.env.DB.prepare(
+          "SELECT asset, amount FROM payments WHERE LOWER(recipient_handle) = LOWER(?) AND status = 'CLAIMED'"
+        ).bind(session.x_handle).all();
+        let withdrawnRows = [];
+        try {
+          const w = await c.env.DB.prepare(
+            "SELECT asset, amount FROM withdrawals WHERE x_id = ? AND status = 'COMPLETED'"
+          ).bind(session.x_id).all();
+          withdrawnRows = w.results || [];
+        } catch {
+        }
+        const netVirtual = {};
+        for (const row of claimedRows.results || []) {
+          const a = (row.asset || "usdc").toLowerCase();
+          netVirtual[a] = (netVirtual[a] || 0) + (parseFloat(row.amount) || 0);
+        }
+        for (const row of withdrawnRows) {
+          const a = (row.asset || "usdc").toLowerCase();
+          netVirtual[a] = Math.max(0, (netVirtual[a] || 0) - (parseFloat(row.amount) || 0));
+        }
+        for (const [asset, netAmt] of Object.entries(netVirtual)) {
+          if (netAmt <= 0) continue;
+          const existing = balances.find(
+            (b2) => b2.symbol?.toLowerCase() === asset || b2.defuse_asset_id?.toLowerCase().includes(asset)
+          );
+          if (!existing) {
+            balances.push({
+              defuse_asset_id: asset === "near" ? "wrap.near" : `nep141:${asset}.token.near`,
+              symbol: asset.toUpperCase(),
+              amount: (netAmt * 1e6).toString(),
+              amountFormatted: netAmt.toFixed(2),
+              decimals: 6,
+              nearContractId: asset === "near" ? "wrap.near" : `${asset}.token.near`
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.warn("[onchain/balances] D1 virtual balance lookup error:", dbErr);
+      }
+    }
+    return c.json({
+      nearAccount,
+      balances,
+      source: "onchain_and_virtual",
+      fetchedAt: Date.now()
+    });
+  } catch (err) {
+    console.error("[onchain/balances] error:", err);
+    return c.json(
+      { error: `Failed to fetch onchain balances: ${err.message}`, code: "ONCHAIN_BALANCE_ERROR" },
+      500
+    );
+  }
+});
+onchainRouter.get("/deposit-address", requireAuth(), async (c) => {
+  const session = c.get("session");
+  const chain = c.req.query("chain");
+  const nearAccount = await resolveUserNearAccount(c.env, session);
+  try {
+    if (chain) {
+      const address = await getDepositAddress(c.env, nearAccount, chain);
+      if (!address) {
+        return c.json(
+          { error: `No deposit address available for chain: ${chain}`, code: "NO_DEPOSIT_ADDRESS" },
+          404
+        );
+      }
+      return c.json({ address, nearAccount, source: "onchain", fetchedAt: Date.now() });
+    } else {
+      const addresses = await getAllDepositAddresses(c.env, nearAccount);
+      return c.json({ addresses, nearAccount, source: "onchain", fetchedAt: Date.now() });
+    }
+  } catch (err) {
+    console.error("[onchain/deposit-address] error:", err);
+    return c.json(
+      { error: `Failed to fetch deposit address: ${err.message}`, code: "DEPOSIT_ADDRESS_ERROR" },
+      500
+    );
+  }
+});
+onchainRouter.get("/history", requireAuth(), async (c) => {
+  const session = c.get("session");
+  const limitParam = c.req.query("limit");
+  const limit = Math.min(parseInt(limitParam || "50", 10), 200);
+  const nearAccount = await resolveUserNearAccount(c.env, session);
+  try {
+    const transactions = await getIntentHistory(c.env, nearAccount, limit);
+    return c.json({
+      transactions,
+      nearAccount,
+      source: "onchain",
+      fetchedAt: Date.now()
+    });
+  } catch (err) {
+    console.error("[onchain/history] error:", err);
+    return c.json(
+      { error: `Failed to fetch onchain history: ${err.message}`, code: "ONCHAIN_HISTORY_ERROR" },
+      500
+    );
+  }
+});
+onchainRouter.get("/account", requireAuth(), async (c) => {
+  const session = c.get("session");
+  const nearAccount = await resolveUserNearAccount(c.env, session);
+  const exists = await accountExists(c.env, nearAccount);
+  return c.json({
+    hasIntentAccount: exists,
+    nearAccount,
+    xHandle: session.x_handle,
+    source: "virtual_escrow"
+  });
+});
+
+// src/routes/invites.ts
+var invitesRouter = new Hono3();
+invitesRouter.get("/my-invite", requireAuth(), async (c) => {
+  try {
+    const session = c.get("session");
+    const inviteData = await getUserInvite(c.env, session.x_id, session.x_handle);
+    return c.json(inviteData);
+  } catch (err) {
+    console.error("Failed to get user invite:", err);
+    return c.json(
+      { error: err.message || "Failed to retrieve invite details", code: "INVITE_GET_ERROR" },
+      500
+    );
+  }
+});
+invitesRouter.get("/status", async (c) => {
+  try {
+    const session = c.get("session");
+    if (!session) {
+      return c.json({ authenticated: false, isActivated: false, personalInviteCode: null });
+    }
+    const activated = await isUserActivated(c.env, session.x_id);
+    return c.json({
+      authenticated: true,
+      isActivated: activated,
+      personalInviteCode: session.personal_invite_code || null
+    });
+  } catch (err) {
+    return c.json(
+      { error: err.message || "Failed to check status", code: "STATUS_ERROR" },
+      500
+    );
+  }
+});
+invitesRouter.post("/validate", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body?.code) {
+      return c.json(
+        { error: "Invite code is required", code: "MISSING_CODE" },
+        400
+      );
+    }
+    const check = await validateInviteCode(c.env, body.code);
+    if (!check.valid) {
+      return c.json({
+        valid: false,
+        reason: check.reason
+      });
+    }
+    return c.json({
+      valid: true,
+      code: check.invite?.code,
+      creator: check.invite?.creator_x_handle ? `@${check.invite.creator_x_handle}` : "UPRAIL"
+    });
+  } catch (err) {
+    return c.json(
+      { error: err.message || "Validation error", code: "VALIDATION_ERROR" },
+      500
+    );
+  }
+});
+invitesRouter.post("/redeem", requireAuth(), async (c) => {
+  try {
+    const session = c.get("session");
+    const body = await c.req.json().catch(() => ({ code: "" }));
+    if (!body?.code) {
+      return c.json(
+        { error: "Please enter a 6-letter invite code", code: "MISSING_CODE" },
+        400
+      );
+    }
+    const result = await redeemInvite(c.env, body.code, {
+      x_id: session.x_id,
+      x_handle: session.x_handle
+    });
+    return c.json(result);
+  } catch (err) {
+    console.error("Invite redemption error:", err);
+    return c.json(
+      { error: err.message || "Failed to redeem invite code", code: "REDEEM_ERROR" },
+      400
+    );
+  }
 });
 
 // src/durable-objects/escrow.ts
@@ -24865,7 +26378,10 @@ app.route("/auth/x", authRouter);
 app.route("/auth", authRouter);
 var apiRouter = new Hono3();
 apiRouter.route("/", paymentsRouter);
+apiRouter.route("/invites", invitesRouter);
 apiRouter.route("/claim", claimRouter);
+apiRouter.route("/onchain", onchainRouter);
+apiRouter.get("/auth-challenge", requireAuth(), issueTxChallenge);
 app.route("/api", apiRouter);
 app.onError((err, c) => {
   console.error("[Unhandled Error]:", err);

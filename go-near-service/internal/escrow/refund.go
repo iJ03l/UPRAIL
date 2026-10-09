@@ -10,15 +10,17 @@ import (
 
 // RefundRequest specifies the sender to refund, along with asset and quantity.
 type RefundRequest struct {
-	RefundTo string `json:"refundTo"`
-	Asset    string `json:"asset"`
-	Amount   string `json:"amount"`
-	Deadline string `json:"deadline,omitempty"`
+	RefundTo          string `json:"refundTo"`
+	SenderNearAccount string `json:"senderNearAccount,omitempty"`
+	Asset             string `json:"asset"`
+	Amount            string `json:"amount"`
+	Deadline          string `json:"deadline,omitempty"`
 }
 
 // RefundResult contains the intent hash and status of the refund.
 type RefundResult struct {
 	IntentHash string `json:"intentHash"`
+	TxHash     string `json:"txHash"`
 	Status     string `json:"status"`
 }
 
@@ -38,7 +40,11 @@ func NewRefundService(signer *Signer, relay *intents.RelayClient) *RefundService
 
 // Refund builds, signs, and relays a refund transfer intent from the escrow account.
 func (s *RefundService) Refund(ctx context.Context, req RefundRequest) (*RefundResult, error) {
-	if strings.TrimSpace(req.RefundTo) == "" {
+	refundTo := strings.TrimSpace(req.RefundTo)
+	if refundTo == "" {
+		refundTo = strings.TrimSpace(req.SenderNearAccount)
+	}
+	if refundTo == "" {
 		return nil, fmt.Errorf("refund: refundTo is required")
 	}
 	if strings.TrimSpace(req.Asset) == "" {
@@ -52,7 +58,7 @@ func (s *RefundService) Refund(ctx context.Context, req RefundRequest) (*RefundR
 		s.signer.AccountID(),
 		req.Asset,
 		req.Amount,
-		req.RefundTo,
+		refundTo,
 		req.Deadline,
 	)
 	if err != nil {
@@ -71,6 +77,7 @@ func (s *RefundService) Refund(ctx context.Context, req RefundRequest) (*RefundR
 
 	return &RefundResult{
 		IntentHash: intentHash,
+		TxHash:     intentHash,
 		Status:     "SUBMITTED",
 	}, nil
 }

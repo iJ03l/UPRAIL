@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Token, PaymentQuote, PaymentIntent } from '../types';
 import { api, SUPPORTED_TOKENS } from '../lib/api';
+import { usePasskeyTxAuth } from './usePasskeyTxAuth';
 
 export function usePayments() {
+  const { authorizeWithPasskey } = usePasskeyTxAuth();
   const [tokens, setTokens] = useState<Token[]>(SUPPORTED_TOKENS);
   const [selectedToken, setSelectedToken] = useState<Token>(SUPPORTED_TOKENS[0]);
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
@@ -47,7 +49,7 @@ export function usePayments() {
     []
   );
 
-  // Send confidential payment
+  // Send confidential payment (authorized by device Passkey)
   const sendPayment = async (
     recipientHandle: string,
     amount: string,
@@ -65,11 +67,25 @@ export function usePayments() {
         throw new Error('Please enter a valid amount to send');
       }
 
+      // Step 1: Prompt hardware passkey to authorize fund movement
+      let assertion: unknown = undefined;
+      try {
+        assertion = await authorizeWithPasskey(`Send ${amount} ${selectedToken.symbol} to @${cleanHandle}`);
+      } catch (authErr: any) {
+        const msg = authErr?.message || 'Passkey authorization cancelled';
+        setError(msg);
+        throw new Error(msg);
+      }
+
+      // Step 2: Send payment intent with passkey cryptographic assertion
       const payment = await api.createPayment({
         recipientHandle: cleanHandle,
         tokenId: selectedToken.id,
         amount,
         memo,
+        passkeyAssertion: assertion,
+        quoteSignature: quote?.quoteSignature,
+        depositAddress: quote?.depositAddress,
       });
 
       setCreatedPayment(payment);

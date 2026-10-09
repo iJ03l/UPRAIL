@@ -19,7 +19,11 @@ import {
   SendResponse,
 } from '../types';
 import * as nearProxy from '../services/nearProxy';
+import * as nearRpc from '../services/nearRpc';
+import { signQuote, verifyQuoteToken } from '../services/quoteAuth';
+import { createPaymentInvite } from '../services/inviteService';
 import { requireAuth } from '../middleware/session';
+import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import {
   getDb,
   insertPayment,
@@ -84,66 +88,33 @@ async function callEscrowDO(
 
 /**
  * GET /api/tokens
- * Returns supported assets for confidential transfers
+ * Returns all tokens supported by NEAR Intents, pulled live from the intents contract.
+ * No hardcoded list — every supported asset on every chain is included.
  */
 paymentsRouter.get('/tokens', async (c) => {
-  return c.json([
-    {
-      id: 'usdc',
-      symbol: 'USDC',
-      name: 'USD Coin',
-      iconUrl: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=035',
-      decimals: 6,
-      priceUsd: 1.0,
-      nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-      badge: 'Confidential',
-      balance: '0.00',
-    },
-    {
-      id: 'usdt',
-      symbol: 'USDT',
-      name: 'Tether USD',
-      iconUrl: 'https://cryptologos.cc/logos/tether-usdt-logo.svg?v=035',
-      decimals: 6,
-      priceUsd: 1.0,
-      nearContractId: 'usdt.tether-token.near',
-      badge: 'Confidential',
-      balance: '0.00',
-    },
-    {
-      id: 'near',
-      symbol: 'NEAR',
-      name: 'NEAR Protocol',
-      iconUrl: 'https://cryptologos.cc/logos/near-protocol-near-logo.svg?v=035',
-      decimals: 24,
-      priceUsd: 5.85,
-      nearContractId: 'wrap.near',
-      badge: 'Native Shield',
-      balance: '0.00',
-    },
-    {
-      id: 'eth',
-      symbol: 'ETH',
-      name: 'Ethereum',
-      iconUrl: 'https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=035',
-      decimals: 18,
-      priceUsd: 3450.0,
-      nearContractId: 'aurora',
-      badge: 'Cross-chain',
-      balance: '0.00',
-    },
-    {
-      id: 'btc',
-      symbol: 'BTC',
-      name: 'Bitcoin',
-      iconUrl: 'https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=035',
-      decimals: 8,
-      priceUsd: 68500.0,
-      nearContractId: 'btc.near',
-      badge: 'Cross-chain',
-      balance: '0.00',
-    },
-  ]);
+  try {
+    const tokens = await nearRpc.getSupportedTokens(c.env);
+    const mapped = tokens.map((t) => ({
+      id: t.defuse_asset_id,
+      symbol: t.symbol,
+      name: t.name,
+      iconUrl: t.icon || `https://cryptologos.cc/logos/${t.symbol.toLowerCase()}-logo.svg?v=035`,
+      decimals: t.decimals,
+      nearContractId: t.nearContractId,
+      chain: t.chain,
+      chainId: t.chainId,
+      badge: t.chain === 'near' ? 'Confidential' : 'Cross-chain',
+      balance: '0.00', // balance is fetched separately via /api/onchain/balances
+      priceUsd: t.priceUsd ?? 1.0,
+    }));
+    return c.json({ tokens: mapped });
+  } catch (err: any) {
+    console.error('[/api/tokens] onchain fetch failed:', err);
+    return c.json<ErrorResponse>(
+      { error: `Failed to load token list: ${err.message}`, code: 'TOKEN_LIST_ERROR' },
+      500
+    );
+  }
 });
 
 /**
@@ -217,13 +188,75 @@ paymentsRouter.post('/quote', async (c) => {
       );
     }
 
-    // Call Go Container via NearProxy
-    const quoteResult = await nearProxy.quote(c.env, {
-      recipientHandle: cleanHandle,
-      asset: body.asset,
-      amount: body.amount,
-      confidentiality: 'advanced',
-    });
+    const holdingAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+
+    // Check if recipient is already registered with an active NEAR intent account
+    let recipientNearAccount: string | null = null;
+    let isRegistered = false;
+    try {
+      const existing = await c.env.DB.prepare(
+        'SELECT near_account FROM x_identities WHERE LOWER(x_handle) = ?'
+      )
+        .bind(cleanHandle)
+        .first<{ near_account: string | null }>();
+      if (existing?.near_account) {
+        recipientNearAccount = existing.near_account;
+        isRegistered = true;
+      }
+    } catch {}
+
+    // When the X user HAS NOT signed up yet:
+    // Funds are escrowed to the platform holding wallet (ESCROW_ACCOUNT_ID)
+    const quoteRecipient = isRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
+
+    // Look up token decimals for base unit conversion
+    let baseUnitsAmount = body.amount;
+    try {
+      const tokens = await nearRpc.getSupportedTokens(c.env);
+      const tokenInfo = tokens.find(
+        (t) =>
+          t.defuse_asset_id.toLowerCase() === body.asset.toLowerCase() ||
+          t.symbol.toLowerCase() === body.asset.toLowerCase()
+      );
+      const decimals = tokenInfo?.decimals ?? 18;
+      baseUnitsAmount = /^\d+$/.test(body.amount) ? body.amount : nearRpc.toBaseUnits(body.amount, decimals);
+    } catch {}
+
+    let quoteResult: any = null;
+    try {
+      quoteResult = await nearProxy.quote(c.env, {
+        recipientHandle: quoteRecipient,
+        asset: body.asset,
+        amount: baseUnitsAmount,
+        confidentiality: 'advanced',
+      });
+    } catch (proxyErr: any) {
+      console.warn('nearProxy.quote fallback to platform escrow holding wallet:', proxyErr);
+      const fallbackQuoteId = ulid();
+      const fallbackExpiresAt = Date.now() + 15 * 60 * 1000;
+      const secret = c.env.SESSION_SECRET || c.env.INTERNAL_SERVICE_KEY || 'uprail_confidential_master_sig';
+      const sigToken = await signQuote(secret, {
+        quoteId: fallbackQuoteId,
+        asset: body.asset,
+        amount: body.amount,
+        recipient: quoteRecipient,
+        depositAddress: holdingAccount,
+        expiresAt: fallbackExpiresAt,
+      });
+
+      quoteResult = {
+        quoteId: fallbackQuoteId,
+        depositAddress: holdingAccount,
+        quoteSignature: sigToken,
+        estimatedFees: '0',
+        expiresAt: fallbackExpiresAt,
+      };
+    }
+
+    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.008');
+    const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
+    const numAmount = parseFloat(body.amount) || 0;
+    const protocolFee = (numAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
 
     return c.json<QuoteResponse>({
       quoteId: quoteResult.quoteId,
@@ -231,9 +264,11 @@ paymentsRouter.post('/quote', async (c) => {
       asset: body.asset,
       amount: body.amount,
       confidentiality: 'advanced',
-      depositAddress: quoteResult.depositAddress,
+      depositAddress: quoteResult.depositAddress || holdingAccount,
       quoteSignature: quoteResult.quoteSignature,
       estimatedFees: quoteResult.estimatedFees || '0',
+      protocolFee,
+      feeRecipient,
       expiresAt: quoteResult.expiresAt || Date.now() + 15 * 60 * 1000,
     });
   } catch (err: any) {
@@ -250,11 +285,16 @@ paymentsRouter.post('/quote', async (c) => {
 
 /**
  * POST /api/send
- * Creates payment record in D1, initializes EscrowDO instance with 30-day expiry alarm
+ * Creates payment record in D1, initializes EscrowDO instance with 30-day expiry alarm.
+ *
+ * SECURITY: Requires both session auth AND passkey authorization.
+ * The client must include `passkeyAssertion` (from /api/auth-challenge flow) in the body.
+ * This ensures every fund movement is authorized by the user's physical device.
  */
-paymentsRouter.post('/send', async (c) => {
+paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
   try {
-    const body = await c.req.json<SendRequest>().catch(() => null);
+    // Body was already parsed and validated by requirePasskeyAuth()
+    const body = (c.get('parsedBody' as any) || await c.req.json<SendRequest>().catch(() => null)) as SendRequest | null;
     if (
       !body ||
       !body.recipientHandle ||
@@ -280,11 +320,38 @@ paymentsRouter.post('/send', async (c) => {
       );
     }
 
+    // Cryptographically verify quote signature authenticity and exact binding
+    const quoteSecret = c.env.SESSION_SECRET || c.env.INTERNAL_SERVICE_KEY || 'uprail_confidential_master_sig';
+    const quoteVerification = await verifyQuoteToken(quoteSecret, body.quoteSignature, {
+      asset: body.asset,
+      amount: body.amount,
+      recipientHandle: cleanHandle,
+      depositAddress: body.depositAddress,
+    });
+
+    if (!quoteVerification.valid) {
+      return c.json<ErrorResponse>(
+        {
+          error: `Quote verification failed: ${quoteVerification.reason || 'Invalid quote signature'}`,
+          code: 'INVALID_QUOTE_SIGNATURE',
+        },
+        400
+      );
+    }
+
     const session = c.get('session');
     const paymentId = ulid();
     const now = Date.now();
     const expiryDays = parseInt(c.env.PAYMENT_EXPIRY_DAYS || '30', 10);
     const expiresAt = now + expiryDays * 86400 * 1000;
+
+    // 0.8% platform fee to fees.uprail.near on every send
+    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.008');
+    const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
+    const protocolFee = (parseFloat(body.amount) * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
+
+    // Generate preloaded 6-capital-letter invite code attached to this payment
+    const inviteCode = await createPaymentInvite(c.env, paymentId, session?.x_id, session?.x_handle);
 
     const payment: Payment = {
       id: paymentId,
@@ -293,6 +360,9 @@ paymentsRouter.post('/send', async (c) => {
       recipient_handle: cleanHandle,
       asset: body.asset,
       amount: body.amount,
+      fee: protocolFee,
+      fee_recipient: feeRecipient,
+      invite_code: inviteCode,
       status: PaymentStatus.DEPOSIT_WAITING,
       deposit_address: body.depositAddress,
       intent_hash: null,
@@ -302,6 +372,21 @@ paymentsRouter.post('/send', async (c) => {
       expires_at: expiresAt,
       updated_at: now,
     };
+
+    // Immediately route 0.8% protocol fee to fees.uprail.near (send fee only, 0% on claim)
+    if (parseFloat(protocolFee) > 0) {
+      try {
+        await nearProxy.transfer(c.env, {
+          recipientNearAccount: feeRecipient,
+          asset: body.asset,
+          amount: protocolFee,
+          escrowAccountId: c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near',
+          paymentId: `${paymentId}_fee`,
+        });
+      } catch (feeErr) {
+        console.warn('[FeeRouting] Immediate 0.8% send fee dispatch notice:', feeErr);
+      }
+    }
 
     // 1. Insert into PostgreSQL and D1 database
     const sql = getDb(c.env);
@@ -323,6 +408,9 @@ paymentsRouter.post('/send', async (c) => {
           recipient_handle,
           asset,
           amount,
+          fee,
+          fee_recipient,
+          invite_code,
           status,
           deposit_address,
           intent_hash,
@@ -331,7 +419,7 @@ paymentsRouter.post('/send', async (c) => {
           created_at,
           expires_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
       `
       )
         .bind(
@@ -341,6 +429,9 @@ paymentsRouter.post('/send', async (c) => {
           payment.recipient_handle,
           payment.asset,
           payment.amount,
+          payment.fee,
+          payment.fee_recipient,
+          payment.invite_code,
           payment.status,
           payment.deposit_address,
           payment.created_at,
@@ -355,7 +446,8 @@ paymentsRouter.post('/send', async (c) => {
     // 2. Initialize EscrowDO instance
     await callEscrowDO(c.env, paymentId, 'init', payment);
 
-    const shareLink = `https://uprail.app/claim/${paymentId}`;
+    const appOrigin = c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+    const shareLink = `${appOrigin}/claim/${paymentId}?invite=${inviteCode}`;
 
     return c.json<SendResponse>(
       {
@@ -364,6 +456,9 @@ paymentsRouter.post('/send', async (c) => {
         status: PaymentStatus.DEPOSIT_WAITING,
         depositAddress: body.depositAddress,
         expiresAt,
+        fee: protocolFee,
+        feeRecipient,
+        inviteCode,
       },
       201
     );

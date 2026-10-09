@@ -1,11 +1,25 @@
+/**
+ * useClaimFlow — Automated pending payment discovery & passkey claim
+ *
+ * When someone sends funds to a user, the payment is addressed to their X handle.
+ * When the user opens the Claim page:
+ *   - All payments addressed to them are AUTOMATICALLY loaded from the backend
+ *   - NO code or link input is required!
+ *   - The user claims with 1 tap of their hardware Passkey (Touch ID, Face ID, PIN)
+ *   - Multiple payments can be claimed simultaneously ("Claim All")
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import { PaymentIntent, ClaimPaymentResult, ShieldedBalance } from '../types';
 import { api } from '../lib/api';
 import { webauthn } from '../lib/webauthn';
+import { useXAuth } from './useXAuth';
 
 export function useClaimFlow(initialCode?: string) {
-  const [claimCode, setClaimCode] = useState<string>(initialCode || '');
-  const [payment, setPayment] = useState<PaymentIntent | null>(null);
+  const { user } = useXAuth();
+
+  const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>([]);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentIntent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [claimSuccess, setClaimSuccess] = useState(false);
@@ -14,88 +28,160 @@ export function useClaimFlow(initialCode?: string) {
   const [hasPasskey, setHasPasskey] = useState(false);
   const [shieldedBalances, setShieldedBalances] = useState<ShieldedBalance[]>([]);
 
-  // Load payment details by claim code
-  const fetchPayment = useCallback(async (code: string) => {
-    if (!code.trim()) {
-      setPayment(null);
-      return;
-    }
+  // ── Load all pending payments for the logged-in user ──────────────────────
+  const loadPendingPayments = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const data = await api.getPaymentByCode(code.trim());
-      if (!data) {
-        setError('Payment intent not found. Please check your link or code.');
-        setPayment(null);
-      } else {
-        setPayment(data);
-        const registered = webauthn.hasLocalPasskey(data.recipientHandle);
-        setHasPasskey(registered);
-        if (data.status === 'claimed') {
-          setClaimSuccess(true);
+
+      // 1. Fetch all pending payments addressed to this user from backend
+      const payments = await api.getPendingPayments();
+      setPendingPayments(payments);
+
+      // 2. If there's an initialCode (e.g. from deep-link /claim/:id), find or fetch it
+      if (initialCode?.trim()) {
+        const found = payments.find((p) => p.id === initialCode.trim() || p.claimCode === initialCode.trim());
+        if (found) {
+          setSelectedPayment(found);
+        } else {
+          // Fetch directly
+          const direct = await api.getPaymentByCode(initialCode.trim());
+          if (direct) {
+            setSelectedPayment(direct);
+            // Prepend if not already in list
+            if (!payments.some((p) => p.id === direct.id)) {
+              setPendingPayments([direct, ...payments]);
+            }
+          }
         }
+      } else if (payments.length > 0) {
+        setSelectedPayment(payments[0]);
       }
-    } catch (err) {
-      console.error('Error fetching payment:', err);
-      setError('Failed to retrieve payment details');
+
+      // Check passkey status
+      if (user?.handle) {
+        const registered = webauthn.hasLocalPasskey(user.handle);
+        setHasPasskey(registered);
+      }
+    } catch (err: any) {
+      console.error('Error loading pending payments:', err);
+      setError('Could not load incoming payments.');
     } finally {
       setIsLoading(false);
+    }
+  }, [initialCode, user?.handle]);
+
+  // Load balances
+  const loadShieldedBalances = useCallback(async () => {
+    try {
+      const b = await api.getShieldedBalances();
+      setShieldedBalances(b || []);
+    } catch {
+      // Ignore
     }
   }, []);
 
   useEffect(() => {
-    if (initialCode) {
-      setClaimCode(initialCode);
-      fetchPayment(initialCode);
-    }
-    // Load balances
-    api.getShieldedBalances().then(setShieldedBalances);
-  }, [initialCode, fetchPayment]);
+    loadPendingPayments();
+    loadShieldedBalances();
+  }, [loadPendingPayments, loadShieldedBalances]);
 
-  // Execute Passkey Claim
-  const claimWithPasskey = async (recipientHandle?: string) => {
+  // ── Claim a single payment with Passkey ──────────────────────────────────
+  const claimPaymentWithPasskey = async (paymentId: string) => {
+    const payment = pendingPayments.find((p) => p.id === paymentId) || selectedPayment;
     if (!payment) {
-      setError('No active payment to claim.');
+      setError('Payment not found');
       return;
     }
 
-    const targetHandle = recipientHandle || payment.recipientHandle;
-    const cleanHandle = targetHandle.replace(/^@/, '').trim().toLowerCase();
+    const recipientHandle = payment.recipientHandle || user?.handle || '';
+    const cleanHandle = recipientHandle.replace(/^@/, '').trim().toLowerCase();
 
     try {
       setIsClaiming(true);
       setError(null);
 
-      // Step 1: Check or Register Passkey if needed
+      // Step 1: Ensure passkey is registered
       const alreadyHasPasskey = webauthn.hasLocalPasskey(cleanHandle);
       if (!alreadyHasPasskey) {
-        // Create NIST P-256 Passkey on device
         await webauthn.registerPasskey(cleanHandle);
         setHasPasskey(true);
       }
 
-      // Step 2: Sign claim with biometric / device passkey
+      // Step 2: Sign with device passkey (Touch ID / Face ID)
       const assertion = await webauthn.authenticatePasskey(cleanHandle);
 
-      // Step 3: Verify and complete confidential claim on NEAR intent
+      // Step 3: Complete confidential claim on NEAR intent
       const result = await api.claimPayment(
-        payment.claimCode,
+        payment.claimCode || payment.id,
         cleanHandle,
         assertion.authPayload
       );
 
-      if (result.payment) {
-        setPayment(result.payment);
-      }
       setClaimResult(result);
       setClaimSuccess(true);
 
+      // Remove claimed payment from pending list
+      setPendingPayments((prev) => prev.filter((p) => p.id !== payment.id));
+      if (selectedPayment?.id === payment.id) {
+        setSelectedPayment(null);
+      }
+
       // Refresh shielded balances
-      const updatedBalances = await api.getShieldedBalances();
-      setShieldedBalances(updatedBalances);
+      await loadShieldedBalances();
 
       return result;
-    } catch (err) {
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : 'Claim failed. Please try again.';
+      setError(msg);
+      throw err;
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
+  // ── Claim ALL pending payments in one touch ──────────────────────────────
+  const claimAllWithPasskey = async () => {
+    if (pendingPayments.length === 0) {
+      setError('No pending payments to claim.');
+      return;
+    }
+
+    const recipientHandle = user?.handle || pendingPayments[0].recipientHandle;
+    const cleanHandle = recipientHandle.replace(/^@/, '').trim().toLowerCase();
+    const ids = pendingPayments.map((p) => p.claimCode || p.id);
+
+    try {
+      setIsClaiming(true);
+      setError(null);
+
+      // Step 1: Ensure passkey
+      const alreadyHasPasskey = webauthn.hasLocalPasskey(cleanHandle);
+      if (!alreadyHasPasskey) {
+        await webauthn.registerPasskey(cleanHandle);
+        setHasPasskey(true);
+      }
+
+      // Step 2: Single passkey touch to authorize all claims
+      const assertion = await webauthn.authenticatePasskey(cleanHandle);
+
+      // Step 3: Execute batch claim
+      const result = await api.claimAllPayments(
+        ids,
+        cleanHandle,
+        assertion.authPayload
+      );
+
+      setClaimResult(result);
+      setClaimSuccess(true);
+      setPendingPayments([]);
+      setSelectedPayment(null);
+
+      // Refresh balances
+      await loadShieldedBalances();
+
+      return result;
+    } catch (err: any) {
       const msg = err instanceof Error ? err.message : 'Claim failed. Please try again.';
       setError(msg);
       throw err;
@@ -105,9 +191,9 @@ export function useClaimFlow(initialCode?: string) {
   };
 
   return {
-    claimCode,
-    setClaimCode,
-    payment,
+    pendingPayments,
+    selectedPayment,
+    setSelectedPayment,
     isLoading,
     isClaiming,
     claimSuccess,
@@ -115,8 +201,11 @@ export function useClaimFlow(initialCode?: string) {
     error,
     hasPasskey,
     shieldedBalances,
-    fetchPayment,
-    claimWithPasskey,
+    loadShieldedBalances,
+    loadPendingPayments,
+    claimPaymentWithPasskey,
+    claimAllWithPasskey,
     clearError: () => setError(null),
+    resetSuccess: () => setClaimSuccess(false),
   };
 }

@@ -95,6 +95,28 @@ func (c *Client) GetQuote(ctx context.Context, req QuoteRequest) (*QuoteResponse
 	// Enforce confidential routing
 	req.Confidentiality = "advanced"
 
+	if req.SwapType == "" {
+		req.SwapType = "EXACT_INPUT"
+	}
+	if req.DepositType == "" {
+		req.DepositType = "INTENTS"
+	}
+	if req.RecipientType == "" {
+		req.RecipientType = "INTENTS"
+	}
+	if req.RefundTo == "" {
+		req.RefundTo = req.Recipient
+	}
+	if req.RefundType == "" {
+		req.RefundType = "INTENTS"
+	}
+	if req.Deadline == "" {
+		req.Deadline = time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339)
+	}
+	if req.SlippageTolerance == 0 {
+		req.SlippageTolerance = 100 // 1%
+	}
+
 	httpReq, err := c.newRequest(ctx, http.MethodPost, "/v0/quote", req)
 	if err != nil {
 		return nil, fmt.Errorf("get quote: %w", err)

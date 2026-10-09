@@ -1,13 +1,14 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { LandingPage } from './pages/LandingPage';
-import { AppHome } from './pages/AppHome';
-import { SendPage } from './pages/SendPage';
-import { ReceivePage } from './pages/ReceivePage';
-import { ClaimPage } from './pages/ClaimPage';
-import { HistoryPage } from './pages/HistoryPage';
-import { LoginPage } from './pages/LoginPage';
+import { LandingPage } from './views/LandingPage';
+import { AppHome } from './views/AppHome';
+import { SendPage } from './views/SendPage';
+import { ReceivePage } from './views/ReceivePage';
+import { ClaimPage } from './views/ClaimPage';
+import { HistoryPage } from './views/HistoryPage';
+import { LoginPage } from './views/LoginPage';
 import { AppLayout } from './components/AppLayout';
+import { ProtectedRoute } from './components/ProtectedRoute';
 
 const isSubdomainApp = () => {
   if (typeof window === 'undefined') return false;
@@ -20,94 +21,112 @@ export const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Landing Page on uprail.world, or App Home on app.uprail.world */}
+        {/* Landing Page on uprail.world, or App Home on app.uprail.world (protected) */}
         <Route
           path="/"
           element={
             isAppDomain ? (
-              <AppLayout>
-                <AppHome />
-              </AppLayout>
+              <ProtectedRoute>
+                <AppLayout>
+                  <AppHome />
+                </AppLayout>
+              </ProtectedRoute>
             ) : (
               <LandingPage />
             )
           }
         />
 
-        {/* Dedicated App Dashboard */}
+        {/* Dedicated App Dashboard (Strictly Protected) */}
         <Route
           path="/app"
           element={
-            <AppLayout>
-              <AppHome />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <AppHome />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
         <Route
           path="/app/home"
           element={
-            <AppLayout>
-              <AppHome />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <AppHome />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
 
-        {/* Dedicated Send Page (𝕏 Handle & Wallet via Intents) */}
+        {/* Dedicated Send Page (𝕏 Handle & Wallet via Intents - Strictly Protected) */}
         <Route
           path="/app/send"
           element={
-            <AppLayout>
-              <SendPage />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <SendPage />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
         <Route path="/send" element={<Navigate to="/app/send" replace />} />
 
-        {/* Dedicated Receive Page (Cross-chain Intents) */}
+        {/* Dedicated Receive Page (Cross-chain Intents - Strictly Protected) */}
         <Route
           path="/app/receive"
           element={
-            <AppLayout>
-              <ReceivePage />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <ReceivePage />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
         <Route path="/receive" element={<Navigate to="/app/receive" replace />} />
 
-        {/* Dedicated Claim Page (Hardware Biometrics) */}
+        {/* Dedicated Claim Page (Hardware Biometrics - Strictly Protected) */}
         <Route
           path="/app/claim"
           element={
-            <AppLayout>
-              <ClaimPage />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <ClaimPage />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
         <Route
           path="/app/claim/:id"
           element={
-            <AppLayout>
-              <ClaimPage />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <ClaimPage />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
         <Route path="/claim" element={<Navigate to="/app/claim" replace />} />
         <Route
           path="/claim/:id"
           element={
-            <AppLayout>
-              <ClaimPage />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <ClaimPage />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
 
-        {/* Dedicated History Page (Simple clean list) */}
+        {/* Dedicated History Page (Strictly Protected) */}
         <Route
           path="/app/history"
           element={
-            <AppLayout>
-              <HistoryPage />
-            </AppLayout>
+            <ProtectedRoute>
+              <AppLayout>
+                <HistoryPage />
+              </AppLayout>
+            </ProtectedRoute>
           }
         />
         <Route path="/history" element={<Navigate to="/app/history" replace />} />

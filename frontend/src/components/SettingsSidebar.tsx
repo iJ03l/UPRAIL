@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Link } from '../lib/router';
 import {
   X,
   LogOut,
@@ -7,8 +9,13 @@ import {
   Globe,
   Sliders,
   Check,
+  Copy,
+  ExternalLink,
+  ShieldCheck,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
+import { api } from '../lib/api';
+import { MyInviteResponse } from '../types';
 
 interface SettingsSidebarProps {
   isOpen: boolean;
@@ -21,6 +28,17 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 }) => {
   const { user, logout } = useXAuth();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && user) {
+      api.getMyInvite()
+        .then(setInviteData)
+        .catch(() => {});
+    }
+  }, [isOpen, user]);
 
   const handleClearCache = () => {
     if (window.confirm('Reset local application state and cached intent records?')) {
@@ -109,6 +127,80 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Personal Invite Section (1 Invite Access) */}
+            {user && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
+                    Your Personal Invite
+                  </span>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-800 border border-stone-200">
+                    1 Quota
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                  {inviteData ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-lg font-mono font-black tracking-widest text-stone-950 bg-white px-3 py-1 rounded-xl border border-stone-200">
+                          {inviteData.inviteCode}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(inviteData.inviteCode);
+                              setCopiedInvite(true);
+                              setTimeout(() => setCopiedInvite(false), 2000);
+                            }}
+                            className="p-1.5 rounded-lg bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono transition-colors cursor-pointer"
+                            title="Copy Code"
+                          >
+                            {copiedInvite ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(inviteData.inviteLink);
+                              setCopiedLink(true);
+                              setTimeout(() => setCopiedLink(false), 2000);
+                            }}
+                            className="p-1.5 rounded-lg bg-black hover:bg-stone-800 text-white text-xs font-mono transition-colors cursor-pointer"
+                            title="Copy Link"
+                          >
+                            {copiedLink ? <Check className="w-3.5 h-3.5" /> : <ExternalLink className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {inviteData.status === 'USED' && inviteData.claimedBy ? (
+                        <div className="p-2.5 rounded-xl bg-white border border-stone-200 text-[11px] text-stone-700 flex items-center space-x-2">
+                          <ShieldCheck className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+                          <span>
+                            Claimed by <strong className="font-mono text-stone-950">@{inviteData.claimedBy.handle}</strong> ({new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()})
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-stone-500 font-mono flex items-center space-x-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
+                          <span>1 invite available to share with a friend</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-xs text-stone-400 font-mono animate-pulse">
+                      Loading your invite code...
+                    </div>
+                  )}
+
+                  <div className="text-[10px] text-stone-500 font-sans border-t border-stone-200 pt-2 leading-relaxed">
+                    Need more invites? Sending confidential money automatically preloads an invite code into the recipient's claim link!
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Network Routing Status */}
             <div className="space-y-2">

@@ -9,6 +9,8 @@ vendor/
 # Build artifacts
 dist/
 build/
+.next/
+next-env.d.ts
 *.exe
 
 # Logs & temp
@@ -16,6 +18,11 @@ build/
 .DS_Store
 *.env
 *.env.local
+.dev.vars
+worker/.dev.vars
+go-near-service/.env
 
 # Go binaries
 cmd/server/server
+go-near-service/bin/
+bin/

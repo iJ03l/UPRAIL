@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { Token } from '../types';
 import { AssetPicker } from './AssetPicker';

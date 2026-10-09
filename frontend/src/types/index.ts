@@ -5,6 +5,8 @@ export interface XUser {
   avatarUrl: string;
   isVerified?: boolean;
   nearAccount?: string | null;
+  isActivated?: boolean;
+  personalInviteCode?: string | null;
 }
 
 export interface AuthSession {
@@ -45,6 +47,8 @@ export interface PaymentIntent {
   amountUsd: number;
   fee: string;
   feeUsd: number;
+  feeRecipient?: string;
+  inviteCode?: string;
   memo?: string;
   status: PaymentStatus;
   depositAddress: string;
@@ -66,10 +70,37 @@ export interface PaymentQuote {
   networkFeeUsd: number;
   protocolFee: string;
   protocolFeeUsd: number;
+  protocolFeeRecipient?: string;
   totalAmount: string;
   totalUsd: number;
   depositAddress: string;
   estimatedTimeSeconds: number;
+  quoteId?: string;
+  quoteSignature?: string;
+  expiresAt?: number;
+}
+
+export interface MyInviteResponse {
+  inviteCode: string;
+  status: 'ACTIVE' | 'USED';
+  claimedBy?: {
+    handle: string;
+    claimedAt: number;
+  } | null;
+  inviteLink: string;
+  paymentInvites?: Array<{
+    code: string;
+    paymentId: string;
+    recipientHandle: string;
+    status: 'ACTIVE' | 'USED';
+  }>;
+}
+
+export interface RedeemInviteResponse {
+  success: boolean;
+  message: string;
+  personalInviteCode: string;
+  isActivated: boolean;
 }
 
 export interface CreatePaymentRequest {
@@ -77,6 +108,9 @@ export interface CreatePaymentRequest {
   tokenId: string;
   amount: string;
   memo?: string;
+  passkeyAssertion?: unknown;
+  quoteSignature?: string;
+  depositAddress?: string;
 }
 
 export interface PasskeyCredential {
