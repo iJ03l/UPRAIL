@@ -106,6 +106,66 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
       }
     }
 
+    // Check active 1Click cross-chain deposit addresses for incoming deposits
+    if (c.env.DB) {
+      try {
+        const depositRows = await c.env.DB.prepare(
+          'SELECT address, chain, chain_name FROM deposit_addresses WHERE account_id = ?'
+        )
+          .bind(nearAccount)
+          .all<{ address: string; chain: string; chain_name: string }>();
+
+        for (const dep of depositRows.results || []) {
+          if (!dep.address) continue;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+            const statusResp = await fetch(
+              `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(dep.address)}`,
+              {
+                signal: controller.signal,
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+                  Accept: 'application/json',
+                },
+              }
+            );
+            clearTimeout(timeoutId);
+
+            if (statusResp.ok) {
+              const statusData = (await statusResp.json()) as any;
+              const swapDetails = statusData?.swapDetails;
+              const depAmt = parseFloat(swapDetails?.depositedAmountFormatted || '0');
+              if (depAmt > 0 && statusData?.status !== 'REFUNDED') {
+                const assetSymbol = dep.chain === 'near' ? 'NEAR' : (dep.chain || 'USDC').toUpperCase();
+                const existing = balances.find((b) => b.symbol?.toUpperCase() === assetSymbol);
+                if (existing) {
+                  const currentVal = parseFloat(existing.amountFormatted || '0');
+                  if (currentVal < depAmt) {
+                    existing.amountFormatted = depAmt.toString();
+                    existing.amount = (depAmt * Math.pow(10, existing.decimals || (dep.chain === 'near' ? 24 : 6))).toString();
+                  }
+                } else {
+                  balances.push({
+                    defuse_asset_id: dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`,
+                    symbol: assetSymbol,
+                    amount: (depAmt * (dep.chain === 'near' ? 1e24 : 1e6)).toString(),
+                    amountFormatted: depAmt.toString(),
+                    decimals: dep.chain === 'near' ? 24 : 6,
+                    nearContractId: dep.chain === 'near' ? 'wrap.near' : `${dep.chain}.omft.near`,
+                  });
+                }
+              }
+            }
+          } catch (statusErr) {
+            console.warn('[onchain/balances] 1click deposit status check error:', statusErr);
+          }
+        }
+      } catch (depErr) {
+        console.warn('[onchain/balances] deposit_addresses check error:', depErr);
+      }
+    }
+
     return c.json({
       nearAccount,
       balances,
@@ -176,6 +236,61 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
 
   try {
     const transactions = await nearRpc.getIntentHistory(c.env, nearAccount, limit);
+
+    // Merge any detected 1Click deposit transactions
+    if (c.env.DB) {
+      try {
+        const depositRows = await c.env.DB.prepare(
+          'SELECT address, chain FROM deposit_addresses WHERE account_id = ?'
+        )
+          .bind(nearAccount)
+          .all<{ address: string; chain: string }>();
+
+        for (const dep of depositRows.results || []) {
+          if (!dep.address) continue;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+            const statusResp = await fetch(
+              `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(dep.address)}`,
+              {
+                signal: controller.signal,
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+                  Accept: 'application/json',
+                },
+              }
+            );
+            clearTimeout(timeoutId);
+
+            if (statusResp.ok) {
+              const statusData = (await statusResp.json()) as any;
+              const swapDetails = statusData?.swapDetails;
+              const txHashes = [
+                ...(swapDetails?.nearTxHashes || []),
+                ...(swapDetails?.originChainTxHashes || []),
+              ];
+              for (const hash of txHashes) {
+                if (!transactions.some((t: any) => t.id === hash)) {
+                  transactions.unshift({
+                    id: hash,
+                    intent_type: 'deposit',
+                    defuse_asset_id_in: dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`,
+                    amount_in: swapDetails?.depositedAmountFormatted || '0',
+                    sender_id: dep.address,
+                    receiver_id: nearAccount,
+                    block_height: 0,
+                    block_timestamp: statusData.updatedAt ? new Date(statusData.updatedAt).getTime() : Date.now(),
+                    status: statusData.status === 'SUCCESS' ? 'success' : 'pending',
+                  });
+                }
+              }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+
     return c.json({
       transactions,
       nearAccount,
