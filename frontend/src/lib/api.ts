@@ -108,7 +108,10 @@ export const api = {
       const params = new URLSearchParams(window.location.search);
       invite = params.get('invite') || undefined;
     }
-    const query = invite ? `?invite=${encodeURIComponent(invite.trim().toUpperCase())}` : '';
+    const params = new URLSearchParams();
+    if (invite) params.set('invite', invite.trim().toUpperCase());
+    params.set('return_to', '/login');
+    const query = `?${params.toString()}`;
     const url = API_BASE ? `${API_BASE}/auth/x/login${query}` : `/auth/x/login${query}`;
     window.location.href = url;
     return new Promise<never>(() => {});

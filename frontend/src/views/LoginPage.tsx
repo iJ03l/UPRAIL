@@ -8,15 +8,15 @@ import {
   AlertCircle,
   ArrowRight,
   ShieldCheck,
-  Sparkles,
-  KeyRound,
+  Loader2,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { webauthn } from '../lib/webauthn';
+import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 
 export const LoginPage: React.FC = () => {
-  const { user, login: loginWithX, refreshSession } = useXAuth();
+  const { user, isLoading, login: loginWithX, refreshSession } = useXAuth();
   const navigate = useNavigate();
 
   const [isXLoading, setIsXLoading] = useState(false);
@@ -35,17 +35,17 @@ export const LoginPage: React.FC = () => {
     }
   }, []);
 
-  // Determine which step the user is on:
-  // Step 1: Connect 𝕏 (if !user)
-  // Step 2: Create / Verify Passkey (if user && !user.hasPasskey)
-  // Step 3: Complete -> route to /parking (first time) or /app (returning)
-  const isStep1 = !user;
-  const isStep2 = !!user && user.hasPasskey === false;
-  const isComplete = !!user && user.hasPasskey === true;
+  // Determine user progression stage:
+  // Stage 1: Connect 𝕏 (if !user)
+  // Stage 2: Create Device Passkey (if user exists, but hasPasskey is false)
+  // Stage 3: Fully onboarded (has 𝕏 and passkey) -> route to /parking or /app
+  const isStep1 = !isLoading && !user;
+  const isStep2 = !isLoading && !!user && user.hasPasskey === false;
+  const isComplete = !isLoading && !!user && user.hasPasskey === true;
 
   // If already complete, forward immediately to destination
   useEffect(() => {
-    if (isComplete) {
+    if (isComplete && user) {
       if (user.isActivated === false) {
         navigate('/parking', { replace: true });
       } else {
@@ -80,11 +80,12 @@ export const LoginPage: React.FC = () => {
         setSuccessStepMessage('Device Passkey created! Confidential vault secured.');
 
         // Refresh user session to pick up new passkey & near account
+        const status = await api.getAuthStatus();
         await refreshSession();
 
         // Redirect after short confirmation
         setTimeout(() => {
-          if (user.isActivated === false) {
+          if (!status.user?.isActivated) {
             navigate('/parking', { replace: true });
           } else {
             navigate('/app', { replace: true });
@@ -136,6 +137,24 @@ export const LoginPage: React.FC = () => {
   };
 
   const isInteracting = isXLoading || isPasskeyLoading || isSuccess;
+
+  // Show clean branded splash while resolving auth status
+  if (isLoading) {
+    return (
+      <div className="min-h-[100dvh] w-full bg-stone-50 text-stone-900 flex flex-col justify-center items-center px-4 font-sans">
+        <QuantusInteractiveCanvas fullScreenRoam={true} />
+        <div className="relative z-10 w-full max-w-sm bg-white border border-stone-200/90 rounded-3xl p-8 shadow-xl text-center space-y-4">
+          <div className="w-12 h-12 rounded-2xl bg-black text-white flex items-center justify-center shadow-xs mx-auto animate-pulse">
+            <span className="font-display font-black text-base tracking-tight">UP</span>
+          </div>
+          <div className="flex items-center justify-center space-x-2 text-stone-500 font-mono text-xs">
+            <Loader2 className="w-4 h-4 animate-spin text-stone-900" />
+            <span>Verifying session...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] w-full bg-stone-50 text-stone-900 flex flex-col justify-center items-center px-4 py-8 sm:px-6 sm:py-12 selection:bg-black selection:text-white relative overflow-hidden font-sans">
@@ -233,7 +252,7 @@ export const LoginPage: React.FC = () => {
               </span>
             </div>
 
-            {/* Quick Unlock for Returning Users who already configured passkey */}
+            {/* Quick Unlock for Returning Users who already set up both */}
             <button
               type="button"
               onClick={handleQuickPasskeyLogin}
@@ -249,7 +268,7 @@ export const LoginPage: React.FC = () => {
                 <>
                   <div className="flex items-center space-x-2">
                     <Fingerprint className="w-4 h-4 text-stone-600" />
-                    <span>Already configured? Quick unlock</span>
+                    <span>Already signed up? Quick unlock</span>
                   </div>
                   <ArrowRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-700 transition-colors" />
                 </>

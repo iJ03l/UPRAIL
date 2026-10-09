@@ -101,15 +101,18 @@ export async function createSession(
   const signedToken = await signPayload(JSON.stringify(session), secret);
 
   const reqUrl = new URL(c.req.url);
-  const isSecure = reqUrl.protocol === 'https:';
-
-  setCookie(c, SESSION_COOKIE_NAME, signedToken, {
+  const cookieOptions: any = {
     path: '/',
     httpOnly: true,
-    secure: isSecure,
+    secure: reqUrl.protocol === 'https:',
     sameSite: 'Lax',
     maxAge: SESSION_TTL_SECONDS,
-  });
+  };
+  if (reqUrl.hostname.endsWith('uprail.world')) {
+    cookieOptions.domain = '.uprail.world';
+  }
+
+  setCookie(c, SESSION_COOKIE_NAME, signedToken, cookieOptions);
 
   c.set('session', session);
   return session;
@@ -135,16 +138,19 @@ export async function updateSession(
   const signedToken = await signPayload(JSON.stringify(updated), secret);
 
   const reqUrl = new URL(c.req.url);
-  const isSecure = reqUrl.protocol === 'https:';
   const remainingSeconds = Math.max(1, Math.floor((updated.expires_at - Date.now()) / 1000));
-
-  setCookie(c, SESSION_COOKIE_NAME, signedToken, {
+  const cookieOptions: any = {
     path: '/',
     httpOnly: true,
-    secure: isSecure,
+    secure: reqUrl.protocol === 'https:',
     sameSite: 'Lax',
     maxAge: remainingSeconds,
-  });
+  };
+  if (reqUrl.hostname.endsWith('uprail.world')) {
+    cookieOptions.domain = '.uprail.world';
+  }
+
+  setCookie(c, SESSION_COOKIE_NAME, signedToken, cookieOptions);
 
   c.set('session', updated);
   return updated;
@@ -156,11 +162,15 @@ export async function updateSession(
  */
 export async function destroySession(c: Context<AppContext>): Promise<void> {
   const reqUrl = new URL(c.req.url);
-  deleteCookie(c, SESSION_COOKIE_NAME, {
+  const deleteOptions: any = {
     path: '/',
     secure: reqUrl.protocol === 'https:',
     sameSite: 'Lax',
-  });
+  };
+  if (reqUrl.hostname.endsWith('uprail.world')) {
+    deleteOptions.domain = '.uprail.world';
+  }
+  deleteCookie(c, SESSION_COOKIE_NAME, deleteOptions);
 }
 
 /**

@@ -251,10 +251,20 @@ authRouter.get('/callback', async (c) => {
       personal_invite_code: personalInviteCode,
     });
 
-    // Redirect user to destination
-    const destination = returnTo.startsWith('/')
-      ? `${appOrigin}${returnTo}`
-      : returnTo;
+    // Intelligently route user to the right step to prevent bounce loops:
+    // 1. If user does not have a passkey yet -> /login (Step 2: Set Up Passkey)
+    // 2. If user has passkey but is not activated -> /parking (Comical Parking Gate)
+    // 3. If user has both -> /app (or returnTo if custom)
+    let destination: string;
+    if (!nearAccount) {
+      destination = `${appOrigin}/login`;
+    } else if (!isActivated) {
+      destination = `${appOrigin}/parking`;
+    } else {
+      destination = returnTo && returnTo !== '/' && returnTo !== '/login'
+        ? (returnTo.startsWith('/') ? `${appOrigin}${returnTo}` : returnTo)
+        : `${appOrigin}/app`;
+    }
 
     return c.redirect(destination);
   } catch (err: any) {
