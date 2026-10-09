@@ -14,8 +14,13 @@ import { useXAuth } from '../hooks/useXAuth';
 import { webauthn } from '../lib/webauthn';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
+import { LegalModal, LegalTab } from '../components/LegalModal';
 
-export const LoginPage: React.FC = () => {
+interface LoginPageProps {
+  initialLegalTab?: LegalTab;
+}
+
+export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   const { user, isLoading, login: loginWithX, refreshSession } = useXAuth();
   const navigate = useNavigate();
 
@@ -26,7 +31,21 @@ export const LoginPage: React.FC = () => {
   const [successStepMessage, setSuccessStepMessage] = useState('');
   const [urlInvite, setUrlInvite] = useState('');
 
-  // Capture ?invite=CODE and ?error=... if present
+  // Legal modal state
+  const [legalModalOpen, setLegalModalOpen] = useState(!!initialLegalTab);
+  const [legalTab, setLegalTab] = useState<LegalTab>(initialLegalTab || 'privacy');
+
+  const openPrivacyPolicy = () => {
+    setLegalTab('privacy');
+    setLegalModalOpen(true);
+  };
+
+  const openTerms = () => {
+    setLegalTab('terms');
+    setLegalModalOpen(true);
+  };
+
+  // Capture ?invite=CODE, ?error=..., and legal query params if present
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -34,6 +53,13 @@ export const LoginPage: React.FC = () => {
       if (inv) setUrlInvite(inv.trim().toUpperCase());
       const err = params.get('error');
       if (err) setError(decodeURIComponent(err));
+      if (params.get('privacy') || params.get('legal') === 'privacy') {
+        setLegalTab('privacy');
+        setLegalModalOpen(true);
+      } else if (params.get('terms') || params.get('legal') === 'terms') {
+        setLegalTab('terms');
+        setLegalModalOpen(true);
+      }
     }
   }, []);
 
@@ -363,7 +389,54 @@ export const LoginPage: React.FC = () => {
           </div>
         )}
 
+        {/* Terms & Privacy Disclaimer inside the Card */}
+        <div className="pt-3 text-center text-[11px] font-sans text-stone-400 leading-normal border-t border-stone-100">
+          By continuing, you agree to UPRAIL&apos;s{' '}
+          <button
+            type="button"
+            onClick={openTerms}
+            className="text-stone-700 hover:text-black underline underline-offset-2 transition-colors cursor-pointer font-medium"
+          >
+            Terms &amp; Conditions
+          </button>{' '}
+          and{' '}
+          <button
+            type="button"
+            onClick={openPrivacyPolicy}
+            className="text-stone-700 hover:text-black underline underline-offset-2 transition-colors cursor-pointer font-medium"
+          >
+            Privacy Policy
+          </button>
+          .
+        </div>
+
       </div>
+
+      {/* Subtle Footer with Legal Links */}
+      <footer className="relative z-10 mt-6 flex items-center justify-center space-x-3 text-xs font-mono text-stone-400 select-none">
+        <button
+          type="button"
+          onClick={openPrivacyPolicy}
+          className="hover:text-stone-700 transition-colors cursor-pointer underline underline-offset-4"
+        >
+          Privacy Policy
+        </button>
+        <span>•</span>
+        <button
+          type="button"
+          onClick={openTerms}
+          className="hover:text-stone-700 transition-colors cursor-pointer underline underline-offset-4"
+        >
+          Terms &amp; Conditions
+        </button>
+      </footer>
+
+      {/* Modal for Privacy Policy and Terms & Conditions */}
+      <LegalModal
+        isOpen={legalModalOpen}
+        onClose={() => setLegalModalOpen(false)}
+        initialTab={legalTab}
+      />
     </div>
   );
 };

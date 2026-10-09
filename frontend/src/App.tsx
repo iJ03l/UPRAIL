@@ -227,8 +227,10 @@ export const App: React.FC = () => {
         />
         <Route path="/history" element={<Navigate to="/app/history" replace />} />
 
-        {/* Dedicated Login Page */}
+        {/* Dedicated Login Page & Legal Overlays */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/privacy" element={<LoginPage initialLegalTab="privacy" />} />
+        <Route path="/terms" element={<LoginPage initialLegalTab="terms" />} />
 
         {/* Comical First-Time User Parking Page */}
         <Route path="/parking" element={<ParkingPage />} />

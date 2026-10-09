@@ -88,6 +88,10 @@ app.use('*', async (c, next) => {
       url.pathname.startsWith('/claim/') ||
       url.pathname === '/history' ||
       url.pathname.startsWith('/history/') ||
+      url.pathname === '/privacy' ||
+      url.pathname.startsWith('/privacy/') ||
+      url.pathname === '/terms' ||
+      url.pathname.startsWith('/terms/') ||
       url.pathname.startsWith('/auth/')
     ) {
       return c.redirect(`https://app.uprail.world${url.pathname}${url.search}`, 302);
