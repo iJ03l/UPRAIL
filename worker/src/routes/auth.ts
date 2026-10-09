@@ -46,13 +46,17 @@ authRouter.get('/login', async (c) => {
     // 1. Set signed HttpOnly cookie for stateless edge resolution
     const secret = getSecret(c);
     const signedToken = await signPayload(oauthData, secret);
-    setCookie(c, 'uprail_oauth_state', signedToken, {
+    const cookieOptions: any = {
       path: '/',
       httpOnly: true,
       secure: reqUrl.protocol === 'https:',
       sameSite: 'Lax',
       maxAge: 600,
-    });
+    };
+    if (reqUrl.hostname.endsWith('uprail.world')) {
+      cookieOptions.domain = '.uprail.world';
+    }
+    setCookie(c, 'uprail_oauth_state', signedToken, cookieOptions);
 
     // 2. Persist to memory + D1 fallback (zero KV writes)
     await storeChallenge(c.env, {
@@ -105,17 +109,11 @@ authRouter.get('/callback', async (c) => {
 
     if (error) {
       console.warn('X OAuth error received:', error, errorDescription);
-      return c.redirect(`${appOrigin}?error=${encodeURIComponent(error)}`);
+      return c.redirect(`${appOrigin}/login?error=${encodeURIComponent(errorDescription || error)}`);
     }
 
     if (!code || !state) {
-      return c.json<ErrorResponse>(
-        {
-          error: 'Missing code or state parameter',
-          code: 'INVALID_REQUEST',
-        },
-        400
-      );
+      return c.redirect(`${appOrigin}/login?error=${encodeURIComponent('Missing code or state parameter from 𝕏')}`);
     }
 
     // Retrieve state data: check signed cookie first, then fallback to challengeService
@@ -132,7 +130,11 @@ authRouter.get('/callback', async (c) => {
           }
         } catch {}
       }
-      deleteCookie(c, 'uprail_oauth_state', { path: '/' });
+      const deleteOptions: any = { path: '/' };
+      if (reqUrl.hostname.endsWith('uprail.world')) {
+        deleteOptions.domain = '.uprail.world';
+      }
+      deleteCookie(c, 'uprail_oauth_state', deleteOptions);
     }
 
     if (!rawData) {
@@ -143,13 +145,7 @@ authRouter.get('/callback', async (c) => {
     }
 
     if (!rawData) {
-      return c.json<ErrorResponse>(
-        {
-          error: 'Invalid, expired, or previously used OAuth state',
-          code: 'INVALID_STATE',
-        },
-        400
-      );
+      return c.redirect(`${appOrigin}/login?error=${encodeURIComponent('Your login session expired. Please connect with 𝕏 again.')}`);
     }
 
     const { codeVerifier, returnTo, callbackUrl, inviteCode } = JSON.parse(rawData);
@@ -269,13 +265,12 @@ authRouter.get('/callback', async (c) => {
     return c.redirect(destination);
   } catch (err: any) {
     console.error('X OAuth callback processing error:', err);
-    return c.json<ErrorResponse>(
-      {
-        error: `Authentication failed: ${err.message || 'Unknown error'}`,
-        code: 'AUTH_CALLBACK_FAILED',
-      },
-      500
-    );
+    const reqUrl = new URL(c.req.url);
+    const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
+    const appOrigin = isLocal
+      ? (c.req.header('x-forwarded-host') ? `http://${c.req.header('x-forwarded-host')}` : 'http://localhost:3000')
+      : (c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world');
+    return c.redirect(`${appOrigin}/login?error=${encodeURIComponent(err.message || 'Authentication with 𝕏 failed')}`);
   }
 });
 

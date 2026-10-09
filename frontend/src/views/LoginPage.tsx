@@ -26,12 +26,14 @@ export const LoginPage: React.FC = () => {
   const [successStepMessage, setSuccessStepMessage] = useState('');
   const [urlInvite, setUrlInvite] = useState('');
 
-  // Capture ?invite=CODE if present
+  // Capture ?invite=CODE and ?error=... if present
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const inv = params.get('invite');
       if (inv) setUrlInvite(inv.trim().toUpperCase());
+      const err = params.get('error');
+      if (err) setError(decodeURIComponent(err));
     }
   }, []);
 

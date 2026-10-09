@@ -10,6 +10,10 @@
   },
   "vars": {
     "X_CLIENT_ID": "UHZFT2JxeEhZeEFqWTc2QzUxY2E6MTpjaQ",
+    "X_CLIENT_SECRET": "Uzwwmc2W6Yd5MaQXxTXXZyRnz42kIsmygR7fGV2EdD_FccBRjr",
+    "SESSION_SECRET": "d083cdb5bc9d70c9e0e5f70ad08ed1858e3c0a4b097281564a60b493e9d8fdb9",
+    "INTERNAL_SERVICE_KEY": "uprail_confidential_master_sig_2026",
+    "ESCROW_PRIVATE_KEY": "ed25519:3tgX4A9y7J55RUf1JMtvqBWdPNRk8BNLtNucwmSBz3Rgj4ELzs1pgya17u7wTuuJJkJTPESpWWsQukVr2AExFWkQ",
     "NEAR_API_BASE": "https://1click.chaindefuser.com",
     "SOLVER_RELAY_URL": "https://solver-relay-v2.chaindefuser.com/rpc",
     "NEAR_RPC_URL": "https://nameless-practical-liquid.near-mainnet.quiknode.pro/764c7b41d38ccdf55377d79578d11c41efa0a3b8/",
