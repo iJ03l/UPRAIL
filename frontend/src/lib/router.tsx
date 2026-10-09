@@ -1,12 +1,11 @@
-'use client';
-
 import React from 'react';
-import NextLink, { LinkProps as NextLinkProps } from 'next/link';
 import {
-  useRouter as useNextRouter,
-  usePathname,
-  useSearchParams as useNextSearchParams,
-} from 'next/navigation';
+  Link as RouterLink,
+  useNavigate as useRouterNavigate,
+  useLocation as useRouterLocation,
+  useSearchParams as useRouterSearchParams,
+  Navigate as RouterNavigate,
+} from 'react-router-dom';
 
 interface LinkProps extends Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> {
   to?: string;
@@ -18,25 +17,21 @@ interface LinkProps extends Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 
  * Universal Link component supporting both `to` and `href`
  */
 export const Link: React.FC<LinkProps> = ({ to, href, children, className, ...props }) => {
-  const destination = href || to || '#';
+  const destination = to || href || '#';
   return (
-    <NextLink href={destination} className={className} {...props}>
+    <RouterLink to={destination} className={className} {...props}>
       {children}
-    </NextLink>
+    </RouterLink>
   );
 };
 
 /**
- * Universal useNavigate hook compatible with Next.js navigation
+ * Universal useNavigate hook compatible with react-router-dom
  */
 export function useNavigate() {
-  const router = useNextRouter();
+  const navigate = useRouterNavigate();
   return (path: string, options?: { replace?: boolean }) => {
-    if (options?.replace) {
-      router.replace(path);
-    } else {
-      router.push(path);
-    }
+    navigate(path, options);
   };
 }
 
@@ -44,18 +39,15 @@ export function useNavigate() {
  * Universal useLocation hook returning current pathname and search
  */
 export function useLocation() {
-  const pathname = usePathname() || '/';
-  const searchParams = useNextSearchParams();
-  const search = searchParams ? `?${searchParams.toString()}` : '';
-  return { pathname, search };
+  const location = useRouterLocation();
+  return { pathname: location.pathname, search: location.search };
 }
 
 /**
  * Universal useSearchParams hook
  */
 export function useSearchParams() {
-  const searchParams = useNextSearchParams();
-  return [searchParams || new URLSearchParams(), () => {}] as const;
+  return useRouterSearchParams();
 }
 
 /**
@@ -64,14 +56,7 @@ export function useSearchParams() {
 export const Navigate: React.FC<{ to: string; replace?: boolean; state?: any }> = ({
   to,
   replace,
+  state,
 }) => {
-  const router = useNextRouter();
-  React.useEffect(() => {
-    if (replace) {
-      router.replace(to);
-    } else {
-      router.push(to);
-    }
-  }, [to, replace, router]);
-  return null;
+  return <RouterNavigate to={to} replace={replace} state={state} />;
 };
