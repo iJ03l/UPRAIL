@@ -30,7 +30,7 @@ const app = new Hono<AppContext>();
 
 // Global Middlewares
 app.use('*', corsMiddleware());
-app.use('*', rateLimit({ limit: 60, prefix: 'global' }));
+app.use('*', rateLimit({ limit: 300, prefix: 'global' }));
 app.use('*', sessionMiddleware());
 
 // Enforce strict separation: /app is strictly forbidden on apex uprail.world,

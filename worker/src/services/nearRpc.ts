@@ -9,6 +9,7 @@
 import type { Env } from '../types';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58Decode, base58Encode } from './nativeIntents';
+import { getOnchainIcon } from './onchainIcons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -174,26 +175,57 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
     if (resp.ok) {
       const list = (await resp.json()) as any[];
       if (Array.isArray(list) && list.length > 0) {
-        return list.map((t: any) => {
+        const tokens: OnchainToken[] = list.map((t: any) => {
           const assetId = t.assetId || t.defuse_asset_id || '';
-          const { chain, contractId: nearContractId } = parseDefuseAssetId(assetId);
-          const sym = (t.symbol || '').toLowerCase();
-          const reliableIcon =
+          const { chain, contractId: parsedContractId } = parseDefuseAssetId(assetId);
+          const contractAddress = t.contractAddress || parsedContractId;
+          const rawSymbol = (t.symbol || '').trim();
+          const isNear =
+            rawSymbol.toLowerCase() === 'wnear' ||
+            rawSymbol.toLowerCase() === 'near' ||
+            contractAddress === 'wrap.near';
+
+          const symbol = isNear ? 'NEAR' : rawSymbol || 'UNKNOWN';
+          const name = isNear ? 'NEAR Protocol' : (t.name || symbol);
+          const onchainIcon =
+            (isNear ? getOnchainIcon('near') : undefined) ||
             t.icon ||
-            (['usdc', 'usdt', 'eth', 'weth', 'btc', 'wbtc', 'sol', 'dai', 'uni', 'aave', 'link', 'doge', 'ltc'].includes(sym)
-              ? `https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/${sym.replace(/^w/, '')}.svg`
-              : undefined);
+            getOnchainIcon(contractAddress) ||
+            getOnchainIcon(symbol.toLowerCase()) ||
+            getOnchainIcon(rawSymbol.toLowerCase());
+
           return {
             defuse_asset_id: assetId,
-            symbol: t.symbol || 'UNKNOWN',
-            name: t.symbol || 'Token',
-            decimals: Number(t.decimals ?? 18),
-            icon: reliableIcon,
-            nearContractId: t.contractAddress || nearContractId,
+            symbol,
+            name,
+            decimals: Number(t.decimals ?? (isNear ? 24 : 18)),
+            icon: onchainIcon,
+            nearContractId: contractAddress,
             chain: t.blockchain || chain,
             priceUsd: typeof t.price === 'number' ? t.price : 1.0,
           } satisfies OnchainToken;
         });
+
+        // Priority sorting: NEAR, USDC, USDT, ETH, BTC first
+        const priorityOrder: Record<string, number> = {
+          NEAR: 1,
+          USDC: 2,
+          USDT: 3,
+          ETH: 4,
+          WBTC: 5,
+          BTC: 6,
+          SOL: 7,
+          DAI: 8,
+        };
+
+        tokens.sort((a, b) => {
+          const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
+          const pB = priorityOrder[b.symbol.toUpperCase()] ?? 999;
+          if (pA !== pB) return pA - pB;
+          return a.symbol.localeCompare(b.symbol);
+        });
+
+        return tokens;
       }
     }
   } catch (err) {
@@ -210,12 +242,15 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
         const { chain, contractId: nearContractId } = parseDefuseAssetId(
           t.defuse_asset_id || t.token_id || ''
         );
+        const rawSym = (t.symbol || t.ticker || 'UNKNOWN').trim();
+        const isNear = rawSym.toLowerCase() === 'wnear' || rawSym.toLowerCase() === 'near';
+        const symbol = isNear ? 'NEAR' : rawSym;
         return {
           defuse_asset_id: t.defuse_asset_id || t.token_id || '',
-          symbol: t.symbol || t.ticker || 'UNKNOWN',
-          name: t.name || t.symbol || 'Unknown Token',
+          symbol,
+          name: isNear ? 'NEAR Protocol' : (t.name || symbol),
           decimals: Number(t.decimals ?? 18),
-          icon: t.icon,
+          icon: isNear ? getOnchainIcon('near') : (t.icon || getOnchainIcon(nearContractId) || getOnchainIcon(symbol.toLowerCase())),
           nearContractId,
           chain,
           chainId: t.chain_id,
@@ -229,36 +264,44 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
   // Fallback for offline, sandbox, or network partition
   return [
     {
+      defuse_asset_id: 'nep141:wrap.near',
+      symbol: 'NEAR',
+      name: 'NEAR Protocol',
+      decimals: 24,
+      icon: getOnchainIcon('near'),
+      chain: 'near',
+      nearContractId: 'wrap.near',
+      priceUsd: 4.75,
+    },
+    {
       defuse_asset_id: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
       symbol: 'USDC',
       name: 'USD Coin',
       decimals: 6,
+      icon: getOnchainIcon('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'),
       chain: 'near',
       nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+      priceUsd: 1.0,
     },
     {
       defuse_asset_id: 'nep141:usdt.tether-token.near',
       symbol: 'USDT',
       name: 'Tether USD',
       decimals: 6,
+      icon: getOnchainIcon('usdt.tether-token.near'),
       chain: 'near',
       nearContractId: 'usdt.tether-token.near',
+      priceUsd: 1.0,
     },
     {
-      defuse_asset_id: 'native:near',
-      symbol: 'NEAR',
-      name: 'NEAR Protocol',
-      decimals: 24,
-      chain: 'near',
-      nearContractId: 'near',
-    },
-    {
-      defuse_asset_id: 'erc20:eth:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+      defuse_asset_id: 'nep141:eth.bridge.near',
       symbol: 'ETH',
       name: 'Ethereum',
       decimals: 18,
-      chain: 'eth',
-      nearContractId: 'aurora',
+      icon: getOnchainIcon('eth.bridge.near'),
+      chain: 'near',
+      nearContractId: 'eth.bridge.near',
+      priceUsd: 2500.0,
     },
   ];
 }

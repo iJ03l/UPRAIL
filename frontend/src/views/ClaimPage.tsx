@@ -8,9 +8,6 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowLeft,
-  Wallet,
-  Check,
-  Shield,
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
@@ -19,22 +16,15 @@ import { useXAuth } from '../hooks/useXAuth';
 import { PasskeyPrompt } from '../components/PasskeyPrompt';
 import { XAuthBanner } from '../components/XAuthBanner';
 import { TokenIcon } from '../components/TokenIcon';
-import { api } from '../lib/api';
 
 export const ClaimPage: React.FC = () => {
-  const { user } = useXAuth();
+  const { user, isLoading: isAuthLoading } = useXAuth();
   const [searchParams] = useSearchParams();
   const queryPaymentCode = searchParams.get('payment') || searchParams.get('code') || '';
   const urlInvite = searchParams.get('invite') || '';
 
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [withdrawAddress, setWithdrawAddress] = useState('');
-  const [withdrawSuccess, setWithdrawSuccess] = useState(false);
-  const [isWithdrawing, setIsWithdrawing] = useState(false);
-  const [withdrawError, setWithdrawError] = useState<string | null>(null);
-  const [withdrawTxHash, setWithdrawTxHash] = useState<string | null>(null);
 
   const {
     pendingPayments,
@@ -44,8 +34,6 @@ export const ClaimPage: React.FC = () => {
     claimResult,
     error,
     hasPasskey,
-    shieldedBalances,
-    loadShieldedBalances,
     loadPendingPayments,
     claimPaymentWithPasskey,
     claimAllWithPasskey,
@@ -71,42 +59,8 @@ export const ClaimPage: React.FC = () => {
     }
   };
 
-  const handleWithdraw = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!withdrawAddress.trim() || isWithdrawing) return;
-    setIsWithdrawing(true);
-    setWithdrawError(null);
-    try {
-      const targetToken = shieldedBalances[0]?.token?.id || 'usdc';
-      const targetAmount = shieldedBalances[0]?.amount || 'all';
-      const res = await api.withdraw({
-        destinationAddress: withdrawAddress.trim(),
-        asset: targetToken,
-        amount: targetAmount,
-      });
-      setWithdrawTxHash(res.txHash);
-      setWithdrawSuccess(true);
-      await loadShieldedBalances();
-      setTimeout(() => {
-        setShowWithdrawModal(false);
-        setWithdrawSuccess(false);
-        setWithdrawAddress('');
-        setWithdrawTxHash(null);
-      }, 3500);
-    } catch (err: any) {
-      setWithdrawError(err.message || 'Withdrawal failed');
-    } finally {
-      setIsWithdrawing(false);
-    }
-  };
-
   const totalPendingUsd = pendingPayments.reduce(
     (acc, p) => acc + (p.amountUsd || 0),
-    0
-  );
-
-  const totalShieldedUsd = shieldedBalances.reduce(
-    (acc, b) => acc + (b.amountUsd || 0),
     0
   );
 
@@ -203,8 +157,7 @@ export const ClaimPage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap gap-2 pt-2 border-t border-stone-800 text-xs font-mono">
-            <span className="text-stone-400">Vault Balance:</span>
-            <span className="font-bold text-white">${totalShieldedUsd.toFixed(2)} USD</span>
+            <span className="text-emerald-400 font-bold">100% Shielded & Settled</span>
             {claimResult?.shieldedTxHash && (
               <span className="text-stone-400 ml-auto truncate max-w-[200px]">
                 Tx: {claimResult.shieldedTxHash}
@@ -330,13 +283,15 @@ export const ClaimPage: React.FC = () => {
         </div>
       )}
 
-      {/* Unauthenticated State: Show X Authentication Wall */}
+      {/* Authentication / Empty State Handling */}
       {!user ? (
-        <XAuthBanner
-          title="Sign In with 𝕏 to Discover Incoming Claims"
-          description="Payments sent to your 𝕏 handle are held in confidential escrow waiting for you. Sign in with 𝕏 to auto-discover all incoming payments and claim them directly into your passkey vault."
-          actionText="Sign In with 𝕏"
-        />
+        !isAuthLoading && (
+          <XAuthBanner
+            title="Sign In with 𝕏 to Discover Incoming Claims"
+            description="Payments sent to your 𝕏 handle are held in confidential escrow waiting for you. Sign in with 𝕏 to auto-discover all incoming payments and claim them directly into your passkey vault."
+            actionText="Sign In with 𝕏"
+          />
+        )
       ) : (
         /* Empty State: Authenticated but NO pending payments */
         !isLoading && pendingPayments.length === 0 && (
@@ -371,80 +326,6 @@ export const ClaimPage: React.FC = () => {
         )
       )}
 
-      {/* Device Shielded Vault Balances Card */}
-      <div className="rounded-3xl p-6 sm:p-7 shadow-xs bg-white border border-stone-200 space-y-4">
-        <div className="flex items-center justify-between pb-2 border-b border-stone-100">
-          <div className="flex items-center space-x-2">
-            <Shield className="w-5 h-5 text-stone-900" />
-            <h3 className="text-base font-bold text-stone-950 font-display">
-              Your Shielded Device Vault
-            </h3>
-          </div>
-          <div className="text-right">
-            <span className="text-xs font-mono font-bold text-stone-900">
-              ${totalShieldedUsd.toFixed(2)} USD
-            </span>
-            <div className="text-[10px] text-stone-400 font-mono">
-              Passkey protected
-            </div>
-          </div>
-        </div>
-
-        <p className="text-xs text-stone-500 leading-relaxed">
-          Secured by your hardware-bound passkey. Every withdrawal requires device biometric authorization.
-        </p>
-
-        {shieldedBalances.length > 0 ? (
-          <div className="space-y-2">
-            {shieldedBalances.map((bal) => (
-              <div
-                key={bal.token.id}
-                className="flex items-center justify-between p-3 rounded-2xl bg-stone-50 border border-stone-200"
-              >
-                <div className="flex items-center space-x-2.5">
-                  <TokenIcon
-                    symbol={bal.token.symbol}
-                    iconUrl={bal.token.iconUrl}
-                    size="lg"
-                  />
-                  <div>
-                    <span className="text-xs font-bold text-stone-900 block font-mono">
-                      {bal.token.symbol}
-                    </span>
-                    <span className="text-[10px] text-stone-400">
-                      {bal.token.name}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <span className="text-xs font-bold text-stone-900 block font-mono">
-                    {bal.amount} {bal.token.symbol}
-                  </span>
-                  <span className="text-[10px] text-stone-500 font-mono">
-                    ≈ ${bal.amountUsd.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center text-xs font-mono text-stone-400">
-            No shielded balances yet. Claim incoming payments to deposit here.
-          </div>
-        )}
-
-        <div className="pt-2">
-          <button
-            type="button"
-            onClick={() => setShowWithdrawModal(true)}
-            className="w-full py-3 px-4 rounded-xl border border-stone-200 hover:border-black text-stone-700 hover:text-black font-display font-bold text-xs uppercase tracking-wider bg-stone-50 transition-colors flex items-center justify-center space-x-2 cursor-pointer"
-          >
-            <Wallet className="w-4 h-4" />
-            <span>Withdraw to External Wallet</span>
-          </button>
-        </div>
-      </div>
-
       {/* Passkey Authentication Modal Prompt */}
       <PasskeyPrompt
         isOpen={showPasskeyModal}
@@ -454,81 +335,6 @@ export const ClaimPage: React.FC = () => {
         isClaiming={isClaiming}
         hasExistingPasskey={hasPasskey}
       />
-
-      {/* Withdraw Modal */}
-      {showWithdrawModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
-          <div className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-stone-950 mb-1 font-display">
-              Withdraw to External Wallet
-            </h3>
-            <p className="text-xs text-stone-500 mb-4">
-              Send your shielded tokens to any external NEAR or exchange address.
-            </p>
-
-            {withdrawSuccess ? (
-              <div className="p-4 rounded-2xl bg-stone-100 border border-stone-300 text-stone-900 text-xs space-y-2 mb-4">
-                <div className="flex items-center space-x-2 font-bold">
-                  <Check className="w-4 h-4 text-emerald-600" />
-                  <span>Withdrawal relayed successfully!</span>
-                </div>
-                {withdrawTxHash && (
-                  <div className="text-[11px] font-mono text-stone-500 break-all">
-                    Tx: {withdrawTxHash}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <form onSubmit={handleWithdraw} className="space-y-4">
-                {withdrawError && (
-                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center space-x-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{withdrawError}</span>
-                  </div>
-                )}
-                <div>
-                  <label className="text-xs font-bold uppercase tracking-wider text-stone-600 block mb-1">
-                    Destination Address
-                  </label>
-                  <input
-                    type="text"
-                    value={withdrawAddress}
-                    onChange={(e) => setWithdrawAddress(e.target.value)}
-                    placeholder="e.g. illia.near, 0x..., or Solana address"
-                    disabled={isWithdrawing}
-                    className="w-full bg-stone-50 rounded-xl px-4 py-3 text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono disabled:opacity-50"
-                    required
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowWithdrawModal(false)}
-                    disabled={isWithdrawing}
-                    className="flex-1 py-3 text-xs text-stone-500 hover:text-stone-900 font-bold cursor-pointer disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isWithdrawing}
-                    className="flex-1 py-3 rounded-xl bg-black hover:bg-stone-800 text-white font-extrabold text-xs transition-colors cursor-pointer flex items-center justify-center space-x-2 disabled:opacity-50"
-                  >
-                    {isWithdrawing ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Processing...</span>
-                      </>
-                    ) : (
-                      <span>Confirm Withdrawal</span>
-                    )}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

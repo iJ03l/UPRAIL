@@ -15,10 +15,24 @@ import { api } from '../lib/api';
 import { webauthn } from '../lib/webauthn';
 import { useXAuth } from './useXAuth';
 
+const PENDING_CACHE_KEY = 'uprail_pending_payments_cache';
+
+function getCachedPending(): PaymentIntent[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PENDING_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+let inFlightPendingPromise: Promise<PaymentIntent[]> | null = null;
+
 export function useClaimFlow(initialCode?: string) {
   const { user } = useXAuth();
 
-  const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>([]);
+  const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>(getCachedPending);
   const [selectedPayment, setSelectedPayment] = useState<PaymentIntent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
@@ -30,13 +44,28 @@ export function useClaimFlow(initialCode?: string) {
 
   // ── Load all pending payments for the logged-in user ──────────────────────
   const loadPendingPayments = useCallback(async () => {
+    // If not authenticated, do not spam API
+    if (!user) {
+      setPendingPayments([]);
+      return;
+    }
+
     try {
-      setIsLoading(true);
+      if (pendingPayments.length === 0) setIsLoading(true);
       setError(null);
 
-      // 1. Fetch all pending payments addressed to this user from backend
-      const payments = await api.getPendingPayments();
+      // Deduplicate in-flight pending fetch
+      if (!inFlightPendingPromise) {
+        inFlightPendingPromise = api.getPendingPayments().finally(() => {
+          inFlightPendingPromise = null;
+        });
+      }
+
+      const payments = await inFlightPendingPromise;
       setPendingPayments(payments);
+      try {
+        localStorage.setItem(PENDING_CACHE_KEY, JSON.stringify(payments));
+      } catch {}
 
       // 2. If there's an initialCode (e.g. from deep-link /claim/:id), find or fetch it
       if (initialCode?.trim()) {
@@ -48,7 +77,6 @@ export function useClaimFlow(initialCode?: string) {
           const direct = await api.getPaymentByCode(initialCode.trim());
           if (direct) {
             setSelectedPayment(direct);
-            // Prepend if not already in list
             if (!payments.some((p) => p.id === direct.id)) {
               setPendingPayments([direct, ...payments]);
             }
@@ -65,7 +93,10 @@ export function useClaimFlow(initialCode?: string) {
       }
     } catch (err: any) {
       console.error('Error loading pending payments:', err);
-      setError('Could not load incoming payments.');
+      // Don't show disruptive error if we have cached payments
+      if (pendingPayments.length === 0) {
+        setError('Could not load incoming payments.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -73,18 +104,18 @@ export function useClaimFlow(initialCode?: string) {
 
   // Load balances
   const loadShieldedBalances = useCallback(async () => {
+    if (!user) return;
     try {
       const b = await api.getShieldedBalances();
       setShieldedBalances(b || []);
     } catch {
       // Ignore
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     loadPendingPayments();
-    loadShieldedBalances();
-  }, [loadPendingPayments, loadShieldedBalances]);
+  }, [loadPendingPayments]);
 
   // ── Claim a single payment with Passkey ──────────────────────────────────
   const claimPaymentWithPasskey = async (paymentId: string) => {

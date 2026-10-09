@@ -16,13 +16,26 @@ const API_BASE =
   (typeof process !== 'undefined' && process.env?.API_URL) ||
   '';
 
+import { getOnchainIcon } from './onchainIcons';
+
 // Built-in supported tokens for NEAR Confidential Intents (clean initial state: 0.00)
 export const SUPPORTED_TOKENS: Token[] = [
+  {
+    id: 'near',
+    symbol: 'NEAR',
+    name: 'NEAR Protocol',
+    iconUrl: getOnchainIcon('near') || '',
+    decimals: 24,
+    priceUsd: 4.75,
+    nearContractId: 'wrap.near',
+    badge: 'Native Shield',
+    balance: '0.00',
+  },
   {
     id: 'usdc',
     symbol: 'USDC',
     name: 'USD Coin',
-    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/usdc.svg',
+    iconUrl: getOnchainIcon('usdc') || '',
     decimals: 6,
     priceUsd: 1.0,
     nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
@@ -33,7 +46,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     id: 'usdt',
     symbol: 'USDT',
     name: 'Tether USD',
-    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/usdt.svg',
+    iconUrl: getOnchainIcon('usdt') || '',
     decimals: 6,
     priceUsd: 1.0,
     nearContractId: 'usdt.tether-token.near',
@@ -41,24 +54,13 @@ export const SUPPORTED_TOKENS: Token[] = [
     balance: '0.00',
   },
   {
-    id: 'near',
-    symbol: 'NEAR',
-    name: 'NEAR Protocol',
-    iconUrl: 'https://cryptologos.cc/logos/near-protocol-near-logo.svg?v=035',
-    decimals: 24,
-    priceUsd: 5.85,
-    nearContractId: 'wrap.near',
-    badge: 'Native Shield',
-    balance: '0.00',
-  },
-  {
     id: 'eth',
     symbol: 'ETH',
     name: 'Ethereum',
-    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/eth.svg',
+    iconUrl: getOnchainIcon('eth') || '',
     decimals: 18,
-    priceUsd: 3450.0,
-    nearContractId: 'aurora',
+    priceUsd: 2500.0,
+    nearContractId: 'eth.bridge.near',
     badge: 'Cross-chain',
     balance: '0.00',
   },
@@ -66,10 +68,10 @@ export const SUPPORTED_TOKENS: Token[] = [
     id: 'btc',
     symbol: 'BTC',
     name: 'Bitcoin',
-    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/btc.svg',
+    iconUrl: getOnchainIcon('wbtc') || '',
     decimals: 8,
-    priceUsd: 68500.0,
-    nearContractId: 'btc.near',
+    priceUsd: 82000.0,
+    nearContractId: '2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near',
     badge: 'Cross-chain',
     balance: '0.00',
   },
@@ -187,7 +189,56 @@ export const api = {
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data) ? data : (data?.tokens && Array.isArray(data.tokens) ? data.tokens : []);
-        if (list.length > 0) return list;
+        if (list.length > 0) {
+          const priorityOrder: Record<string, number> = {
+            NEAR: 1,
+            USDC: 2,
+            USDT: 3,
+            ETH: 4,
+            WBTC: 5,
+            BTC: 6,
+            SOL: 7,
+            DAI: 8,
+          };
+          const mapped: Token[] = list.map((t: any) => {
+            const rawSym = (t.symbol || '').trim();
+            const isNear =
+              rawSym.toLowerCase() === 'wnear' ||
+              rawSym.toLowerCase() === 'near' ||
+              t.nearContractId === 'wrap.near' ||
+              t.id === 'nep141:wrap.near';
+            const symbol = isNear ? 'NEAR' : rawSym || 'UNKNOWN';
+            const name = isNear ? 'NEAR Protocol' : (t.name || symbol);
+            const iconUrl =
+              (isNear ? getOnchainIcon('near') : undefined) ||
+              t.iconUrl ||
+              t.icon ||
+              getOnchainIcon(t.nearContractId) ||
+              getOnchainIcon(symbol.toLowerCase()) ||
+              getOnchainIcon(rawSym.toLowerCase()) ||
+              '';
+            return {
+              id: t.id || t.defuse_asset_id,
+              symbol,
+              name,
+              iconUrl,
+              decimals: t.decimals ?? (isNear ? 24 : 18),
+              priceUsd: t.priceUsd ?? 1.0,
+              nearContractId: t.nearContractId || 'wrap.near',
+              badge: isNear || t.chain === 'near' ? 'Native Shield' : 'Cross-chain',
+              balance: t.balance || '0.00',
+            };
+          });
+
+          mapped.sort((a, b) => {
+            const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
+            const pB = priorityOrder[b.symbol.toUpperCase()] ?? 999;
+            if (pA !== pB) return pA - pB;
+            return a.symbol.localeCompare(b.symbol);
+          });
+
+          return mapped;
+        }
       }
     } catch (e) {
       console.warn('Backend /api/tokens unavailable, trying onchainApi', e);

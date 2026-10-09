@@ -78,11 +78,11 @@ export const LandingPage: React.FC = () => {
       </header>
 
       {/* Main Flow: Balanced spacing */}
-      <main className="relative z-20 w-full px-4 sm:px-8 lg:px-12 pt-4 sm:pt-7 md:pt-9 lg:pt-10 pb-16 sm:pb-24 space-y-10 sm:space-y-16 md:space-y-20">
+      <main className="relative z-20 w-full pt-4 sm:pt-7 md:pt-9 lg:pt-10 pb-16 sm:pb-24 space-y-10 sm:space-y-16 md:space-y-20">
         {/* 
           1. Hero Section: Halved vertical padding for tighter aesthetic
         */}
-        <section className="w-full space-y-4 sm:space-y-5 text-left md:px-8 lg:px-16 xl:px-20 py-2 sm:py-4 md:py-5">
+        <section className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 space-y-4 sm:space-y-5 text-left md:px-8 lg:px-16 xl:px-20 py-2 sm:py-4 md:py-5">
           <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-display font-extrabold tracking-tight leading-[1.05] sm:leading-[0.92] text-stone-950 max-w-4xl">
             Send money
             <br />
@@ -113,7 +113,7 @@ export const LandingPage: React.FC = () => {
         {/* 
           2. The Manifesto: Punchy core text, mobile readable
         */}
-        <section id="manifesto" className="w-full space-y-4 sm:space-y-6 scroll-mt-24">
+        <section id="manifesto" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 space-y-4 sm:space-y-6 scroll-mt-24">
           <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
             // Manifesto
           </span>
@@ -130,24 +130,22 @@ export const LandingPage: React.FC = () => {
         {/* 
           3. Schematic: Money Flow (Mobile 2x2 grid, Desktop conduits)
         */}
-        <section id="schematic" className="w-full scroll-mt-24">
+        <section id="schematic" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24">
           <MoneyFlowSchematic />
         </section>
 
         {/* 
-          4. Visual Simulator: Compact for mobile
+          4. Visual Simulator: Fullwidth end-to-end background
         */}
         <section id="simulator" className="w-full scroll-mt-24">
-          <div className="max-w-6xl mx-auto">
-            <InteractiveRailSimulator />
-          </div>
+          <InteractiveRailSimulator />
         </section>
 
         {/* 
           5. Fast Send Portal
         */}
-        <section className="w-full">
-          <div className="max-w-6xl mx-auto relative rounded-3xl border border-stone-200 bg-stone-950 text-white p-6 sm:p-10 lg:p-12 overflow-hidden shadow-xl">
+        <section className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12">
+          <div className="relative rounded-3xl border border-stone-200 bg-stone-950 text-white p-6 sm:p-10 lg:p-12 overflow-hidden shadow-xl">
             <div className="relative z-10 max-w-2xl space-y-5 text-left">
               <div className="space-y-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-stone-800 border border-stone-700 text-stone-300 text-[10px] font-mono font-bold uppercase tracking-wider inline-block">

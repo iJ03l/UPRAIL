@@ -30,13 +30,18 @@ function pruneExpiredRecords() {
 }
 
 export const rateLimit = (options?: RateLimitOptions): MiddlewareHandler<AppContext> => {
-  const limit = options?.limit ?? 60;
+  const defaultLimit = options?.limit ?? 300;
   const prefix = options?.prefix ?? 'default';
 
   return async (c, next) => {
+    // 1. Bypass CORS preflight
+    if (c.req.method === 'OPTIONS') {
+      return await next();
+    }
+
     const pathname = c.req.path.toLowerCase();
 
-    // Bypass rate limiting for static assets to avoid eating request quota
+    // 2. Bypass static assets and direct SPA page document routes
     if (
       pathname.startsWith('/assets/') ||
       pathname.endsWith('.js') ||
@@ -47,10 +52,21 @@ export const rateLimit = (options?: RateLimitOptions): MiddlewareHandler<AppCont
       pathname.endsWith('.jpg') ||
       pathname.endsWith('.woff') ||
       pathname.endsWith('.woff2') ||
-      pathname.endsWith('.map')
+      pathname.endsWith('.map') ||
+      // Standard SPA document routes
+      pathname === '/' ||
+      pathname === '/app' ||
+      pathname === '/app/' ||
+      (pathname.startsWith('/app/') && !pathname.startsWith('/api/')) ||
+      pathname === '/login' ||
+      pathname === '/parking'
     ) {
       return await next();
     }
+
+    // 3. Higher allowance for authenticated sessions
+    const hasSessionCookie = !!c.req.header('cookie')?.includes('uprail_session');
+    const effectiveLimit = hasSessionCookie ? Math.max(defaultLimit, 600) : defaultLimit;
 
     // Extract client IP address
     const ip =
@@ -76,12 +92,12 @@ export const rateLimit = (options?: RateLimitOptions): MiddlewareHandler<AppCont
       pruneExpiredRecords();
     }
 
-    const remaining = Math.max(0, limit - record.count);
+    const remaining = Math.max(0, effectiveLimit - record.count);
 
-    c.header('X-RateLimit-Limit', limit.toString());
+    c.header('X-RateLimit-Limit', effectiveLimit.toString());
     c.header('X-RateLimit-Remaining', remaining.toString());
 
-    if (record.count > limit) {
+    if (record.count > effectiveLimit) {
       const retryAfterSeconds = Math.max(1, Math.ceil((record.resetAt - now) / 1000));
       c.header('Retry-After', retryAfterSeconds.toString());
 

@@ -1,21 +1,5 @@
 import React, { useState } from 'react';
-
-// Reliable, embedded SVG data URIs & verified vectors for all major tokens
-const EMBEDDED_ICONS: Record<string, string> = {
-  usdc: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/usdc.svg',
-  usdt: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/usdt.svg',
-  eth: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/eth.svg',
-  weth: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/eth.svg',
-  btc: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/btc.svg',
-  wbtc: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/btc.svg',
-  sol: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/sol.svg',
-  dai: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/dai.svg',
-  uni: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/uni.svg',
-  aave: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/aave.svg',
-  link: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/link.svg',
-  doge: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/doge.svg',
-  ltc: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/ltc.svg',
-};
+import { getOnchainIcon } from '../lib/onchainIcons';
 
 // NEAR official black & white vector SVG
 const NEAR_SVG_DATA = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none"><rect width="100" height="100" rx="50" fill="%23000000"/><path d="M69.75 30.25L54.75 51.5L71.25 72.5H62.75L49.5 55.75L37.25 72.5H28.75L45.25 50L30.25 30.25H38.75L51 46.25L62.25 30.25H69.75Z" fill="white"/></svg>`;
@@ -56,15 +40,15 @@ export const TokenIcon: React.FC<TokenIconProps> = ({
   const cleanSymbol = (symbol || '').trim();
   const lowerSymbol = cleanSymbol.toLowerCase();
 
-  // Resolve best candidate icon URL
+  // Resolve authentic onchain icon directly from contract metadata
   let resolvedUrl: string | undefined = undefined;
 
-  if (lowerSymbol === 'near' || lowerSymbol === 'wnear') {
-    resolvedUrl = NEAR_SVG_DATA;
-  } else if (EMBEDDED_ICONS[lowerSymbol]) {
-    resolvedUrl = EMBEDDED_ICONS[lowerSymbol];
-  } else if (iconUrl && !iconUrl.includes('cryptologos.cc')) {
+  if (iconUrl && !iconUrl.includes('cryptologos.cc') && !iconUrl.includes('jsdelivr.net')) {
     resolvedUrl = iconUrl;
+  } else if (lowerSymbol === 'near' || lowerSymbol === 'wnear') {
+    resolvedUrl = getOnchainIcon('near') || NEAR_SVG_DATA;
+  } else {
+    resolvedUrl = getOnchainIcon(lowerSymbol);
   }
 
   // Dimension mapping
