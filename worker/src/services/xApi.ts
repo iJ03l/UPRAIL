@@ -63,13 +63,12 @@ export async function exchangeCode(params: {
   clientSecret?: string;
   redirectUri: string;
 }): Promise<XTokenResponse> {
-  const body = new URLSearchParams({
+  const bodyParams: Record<string, string> = {
     code: params.code,
     grant_type: 'authorization_code',
-    client_id: params.clientId,
     redirect_uri: params.redirectUri,
     code_verifier: params.codeVerifier,
-  });
+  };
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
@@ -78,7 +77,12 @@ export async function exchangeCode(params: {
   if (params.clientSecret) {
     const credentials = btoa(`${params.clientId}:${params.clientSecret}`);
     headers['Authorization'] = `Basic ${credentials}`;
+  } else {
+    // For public clients without secret, client_id goes in the body
+    bodyParams.client_id = params.clientId;
   }
+
+  const body = new URLSearchParams(bodyParams);
 
   const response = await fetch('https://api.twitter.com/2/oauth2/token', {
     method: 'POST',
@@ -89,7 +93,14 @@ export async function exchangeCode(params: {
   if (!response.ok) {
     const errorText = await response.text();
     console.error('X OAuth token exchange failed:', response.status, errorText);
-    throw new Error(`X OAuth token exchange failed: ${response.statusText}`);
+    let errorDetail = response.statusText;
+    try {
+      const parsed = JSON.parse(errorText);
+      errorDetail = parsed.error_description || parsed.error || errorText;
+    } catch {
+      if (errorText) errorDetail = errorText;
+    }
+    throw new Error(`X OAuth token exchange failed: ${errorDetail}`);
   }
 
   return (await response.json()) as XTokenResponse;

@@ -33,16 +33,18 @@ app.use('*', corsMiddleware());
 app.use('*', rateLimit({ limit: 60, prefix: 'global' }));
 app.use('*', sessionMiddleware());
 
-// Enforce strict separation: /app is strictly forbidden on apex uprail.world
+// Enforce strict separation: /app is strictly forbidden on apex uprail.world,
+// and all login/app routes on apex are redirected to app.uprail.world
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
   const host = url.hostname.toLowerCase();
-  if (
-    (host === 'uprail.world' || host === 'www.uprail.world') &&
-    (url.pathname === '/app' || url.pathname.startsWith('/app/'))
-  ) {
-    return c.html(
-      `<!DOCTYPE html>
+  const isApex = host === 'uprail.world' || host === 'www.uprail.world';
+
+  if (isApex) {
+    // 1. /app is strictly forbidden on apex
+    if (url.pathname === '/app' || url.pathname.startsWith('/app/')) {
+      return c.html(
+        `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -64,13 +66,34 @@ app.use('*', async (c, next) => {
     <h1>Application Restricted</h1>
     <p>/app is strictly forbidden on uprail.world.<br>The application is hosted on the dedicated secure subdomain:</p>
     <div class="domain">https://app.uprail.world</div>
-    <a href="https://app.uprail.world">Launch app.uprail.world &rarr;</a>
+    <a href="https://app.uprail.world" target="_blank" rel="noopener noreferrer">Launch app.uprail.world &rarr;</a>
   </div>
 </body>
 </html>`,
-      403
-    );
+        403
+      );
+    }
+
+    // 2. Login, onboarding, and internal routes on apex redirect directly to app.uprail.world
+    if (
+      url.pathname === '/login' ||
+      url.pathname.startsWith('/login/') ||
+      url.pathname === '/parking' ||
+      url.pathname.startsWith('/parking/') ||
+      url.pathname === '/send' ||
+      url.pathname.startsWith('/send/') ||
+      url.pathname === '/receive' ||
+      url.pathname.startsWith('/receive/') ||
+      url.pathname === '/claim' ||
+      url.pathname.startsWith('/claim/') ||
+      url.pathname === '/history' ||
+      url.pathname.startsWith('/history/') ||
+      url.pathname.startsWith('/auth/')
+    ) {
+      return c.redirect(`https://app.uprail.world${url.pathname}${url.search}`, 302);
+    }
   }
+
   return await next();
 });
 

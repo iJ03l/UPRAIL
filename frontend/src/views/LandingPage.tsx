@@ -78,11 +78,11 @@ export const LandingPage: React.FC = () => {
       </header>
 
       {/* Main Flow: Balanced spacing */}
-      <main className="relative z-20 w-full px-4 sm:px-8 lg:px-12 pt-8 sm:pt-14 md:pt-18 lg:pt-20 pb-16 sm:pb-24 space-y-12 sm:space-y-20 md:space-y-28">
+      <main className="relative z-20 w-full px-4 sm:px-8 lg:px-12 pt-4 sm:pt-7 md:pt-9 lg:pt-10 pb-16 sm:pb-24 space-y-10 sm:space-y-16 md:space-y-20">
         {/* 
-          1. Hero Section: Perfectly balanced padding
+          1. Hero Section: Halved vertical padding for tighter aesthetic
         */}
-        <section className="w-full space-y-4 sm:space-y-6 md:space-y-7 text-left md:px-8 lg:px-16 xl:px-20 py-4 sm:py-8 md:py-10">
+        <section className="w-full space-y-4 sm:space-y-5 text-left md:px-8 lg:px-16 xl:px-20 py-2 sm:py-4 md:py-5">
           <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-display font-extrabold tracking-tight leading-[1.05] sm:leading-[0.92] text-stone-950 max-w-4xl">
             Send money
             <br />

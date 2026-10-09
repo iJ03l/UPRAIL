@@ -112,7 +112,12 @@ export const api = {
     if (invite) params.set('invite', invite.trim().toUpperCase());
     params.set('return_to', '/login');
     const query = `?${params.toString()}`;
-    const url = API_BASE ? `${API_BASE}/auth/x/login${query}` : `/auth/x/login${query}`;
+    const origin =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+        ? window.location.origin
+        : 'https://app.uprail.world';
+    const url = API_BASE ? `${API_BASE}/auth/x/login${query}` : `${origin}/auth/x/login${query}`;
     window.location.href = url;
     return new Promise<never>(() => {});
   },

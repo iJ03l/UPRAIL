@@ -67,8 +67,26 @@ export const App: React.FC = () => {
   const isAppDomain = isSubdomainApp();
   const isApex = isApexDomain();
 
-  // If on apex uprail.world, strictly enforce Landing Page on `/` and 403 Forbidden on `/app` or any subpath
+  // If on apex uprail.world:
+  // - Landing page on `/`
+  // - 403 Forbidden on `/app` or `/app/*`
+  // - Immediate redirect to app.uprail.world for `/login` and any other routes
   if (isApex) {
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      if (pathname === '/login' || pathname.startsWith('/login/')) {
+        window.location.href = `https://app.uprail.world${pathname}${window.location.search}`;
+        return null;
+      }
+      if (
+        pathname !== '/' &&
+        !pathname.startsWith('/app')
+      ) {
+        window.location.href = `https://app.uprail.world${pathname}${window.location.search}`;
+        return null;
+      }
+    }
+
     return (
       <BrowserRouter>
         <Routes>
@@ -198,6 +216,16 @@ export const App: React.FC = () => {
         {/* Comical First-Time User Parking Page */}
         <Route path="/parking" element={<ParkingPage />} />
         <Route path="/app/parking" element={<Navigate to="/parking" replace />} />
+
+        {/* Server Auth Route Passthrough */}
+        <Route
+          path="/auth/*"
+          element={
+            <div className="min-h-screen bg-stone-50 flex items-center justify-center font-mono text-xs text-stone-500">
+              Connecting...
+            </div>
+          }
+        />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to={isAppDomain ? '/app' : '/'} replace />} />

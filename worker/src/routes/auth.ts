@@ -31,9 +31,12 @@ authRouter.get('/login', async (c) => {
     const { codeVerifier, codeChallenge } = await generatePKCE();
     const state = crypto.randomUUID();
 
-    // Determine absolute callback URL
+    // Determine absolute callback URL (always app.uprail.world in production)
     const reqUrl = new URL(c.req.url);
-    const callbackUrl = `${reqUrl.origin}/auth/x/callback`;
+    const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
+    const callbackUrl = isLocal
+      ? `${reqUrl.origin}/auth/x/callback`
+      : 'https://app.uprail.world/auth/x/callback';
 
     const oauthData = JSON.stringify({
       codeVerifier,
@@ -167,17 +170,19 @@ authRouter.get('/callback', async (c) => {
     let nearAccount: string | null = null;
     let identityPersisted = false;
 
-    try {
-      const sql = getDb(c.env);
-      const identity = await upsertXIdentity(sql, {
-        x_id: xUser.id,
-        x_handle: xUser.username.toLowerCase(),
-        x_name: xUser.name,
-      });
-      nearAccount = identity.near_account || null;
-      identityPersisted = true;
-    } catch (pgErr) {
-      console.warn('Postgres identity upsert failed, using D1:', pgErr);
+    if ((c.env as any).DATABASE_URL || (c.env as any).HYPERDRIVE) {
+      try {
+        const sql = getDb(c.env);
+        const identity = await upsertXIdentity(sql, {
+          x_id: xUser.id,
+          x_handle: xUser.username.toLowerCase(),
+          x_name: xUser.name,
+        });
+        nearAccount = identity.near_account || null;
+        identityPersisted = true;
+      } catch (pgErr) {
+        console.warn('Postgres identity upsert failed, using D1:', pgErr);
+      }
     }
 
     if (!identityPersisted && c.env.DB) {
@@ -237,6 +242,17 @@ authRouter.get('/callback', async (c) => {
       } catch {}
     }
 
+    // Check if user has registered passkey
+    let hasPasskey = !!nearAccount;
+    if (!hasPasskey && c.env.DB) {
+      try {
+        const pk = await c.env.DB.prepare('SELECT id FROM passkeys WHERE x_id = ?')
+          .bind(xUser.id)
+          .first();
+        if (pk) hasPasskey = true;
+      } catch {}
+    }
+
     // Establish signed cookie session (0 KV writes)
     await createSession(c, {
       x_id: xUser.id,
@@ -252,7 +268,7 @@ authRouter.get('/callback', async (c) => {
     // 2. If user has passkey but is not activated -> /parking (Comical Parking Gate)
     // 3. If user has both -> /app (or returnTo if custom)
     let destination: string;
-    if (!nearAccount) {
+    if (!hasPasskey) {
       destination = `${appOrigin}/login`;
     } else if (!isActivated) {
       destination = `${appOrigin}/parking`;

@@ -345,6 +345,21 @@ export const LoginPage: React.FC = () => {
                 </>
               )}
             </button>
+
+            {/* Switch Account */}
+            <div className="pt-1 text-center">
+              <button
+                type="button"
+                onClick={async () => {
+                  await api.logout();
+                  await refreshSession();
+                }}
+                disabled={isInteracting}
+                className="text-[11px] font-mono text-stone-400 hover:text-stone-700 transition-colors underline underline-offset-4 cursor-pointer"
+              >
+                Sign in with a different 𝕏 account
+              </button>
+            </div>
           </div>
         )}
 
