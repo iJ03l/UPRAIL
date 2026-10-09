@@ -170,14 +170,17 @@ export async function redeemInvite(
     throw new Error('You cannot redeem your own invite code');
   }
 
-  // 1. Mark invite as USED
-  await env.DB.prepare(
-    `UPDATE invites
-     SET status = 'USED', claimed_by_x_id = ?, claimed_by_x_handle = ?, claimed_at = ?
-     WHERE code = ? AND status = 'ACTIVE'`
-  )
-    .bind(user.x_id, cleanHandle, now, code)
-    .run();
+  // 1. Mark invite as USED (user-generated personal invites are single-use; system bootstrap codes remain active)
+  const isSystemGenesis = check.invite.creator_x_handle === 'system' || ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET'].includes(code);
+  if (!isSystemGenesis) {
+    await env.DB.prepare(
+      `UPDATE invites
+       SET status = 'USED', claimed_by_x_id = ?, claimed_by_x_handle = ?, claimed_at = ?
+       WHERE code = ? AND status = 'ACTIVE'`
+    )
+      .bind(user.x_id, cleanHandle, now, code)
+      .run();
+  }
 
   // 2. Generate exactly 1 personal invite code for the new user
   let personalCode = generateInviteCode();
