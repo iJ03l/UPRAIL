@@ -12,6 +12,7 @@
     "test": "esbuild src/index.ts --bundle --format=esm --main-fields=module,main --outfile=dist/worker.js --external:cloudflare:workers --alias:os=./src/db/os-stub.ts --alias:fs=./src/db/fs-stub.ts --alias:net=./src/db/net-stub.ts --alias:tls=./src/db/tls-stub.ts --alias:perf_hooks=./src/db/perf_hooks-stub.ts --alias:crypto=./src/db/crypto-stub.ts --alias:stream=node:stream --external:node:* && node --test test/miniflare.test.mjs"
   },
   "dependencies": {
+    "@noble/curves": "^2.4.0",
     "@simplewebauthn/server": "^13.0.0",
     "hono": "^4.7.0",
     "postgres": "^3.4.9",

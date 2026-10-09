@@ -21,49 +21,33 @@
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",
-    "WEBAUTHN_ORIGIN": "https://app.uprail.world",
-    "DATABASE_URL": "postgres://postgres@localhost:5432/uprail"
+    "WEBAUTHN_ORIGIN": "https://app.uprail.world"
   },
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "ESCROW",
-        "class_name": "EscrowDO"
-      },
-      {
-        "name": "NEAR_CONTAINER",
-        "class_name": "NearContainer"
-      }
-    ]
+  "triggers": {
+    "crons": ["0 * * * *"]
   },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["EscrowDO"]
-    }
+  "assets": {
+    "directory": "../frontend/dist",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [
+    { "pattern": "api.uprail.world", "custom_domain": true },
+    { "pattern": "app.uprail.world", "custom_domain": true },
+    { "pattern": "uprail.world/*", "zone_name": "uprail.world" }
   ],
-  "containers": {
-    "app": [
-      {
-        "name": "near-service",
-        "instances": 1,
-        "configuration": {
-          "image": "./go-near-service/Dockerfile"
-        }
-      }
-    ]
-  },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "uprail-db",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "0d6f8300-67cb-4a82-9b38-33f5a0342edd"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "CACHE",
-      "id": "00000000000000000000000000000000"
+      "id": "45901b063153427da3bf4e668d996d91"
     }
   ]
 }

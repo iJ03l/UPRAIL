@@ -22,7 +22,7 @@ import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 
-// Export Durable Object classes for Cloudflare runtime
+// Export Durable Object classes for runtime
 export { EscrowDO } from './durable-objects/escrow';
 export { NearContainer } from './durable-objects/near-container';
 
@@ -72,8 +72,11 @@ app.onError((err, c) => {
   );
 });
 
-// 404 Not Found Handler
-app.notFound((c) => {
+// 404 / Asset Fallback Handler
+app.notFound(async (c) => {
+  if (c.env.ASSETS) {
+    return await c.env.ASSETS.fetch(c.req.raw);
+  }
   return c.json<ErrorResponse>(
     {
       error: `Endpoint not found: ${c.req.method} ${c.req.path}`,
@@ -83,4 +86,27 @@ app.notFound((c) => {
   );
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  async scheduled(event: any, env: AppContext['Bindings'], ctx: any) {
+    if (env.DB) {
+      const now = Date.now();
+      try {
+        const expired = await env.DB.prepare(
+          "SELECT id FROM payments WHERE expires_at < ? AND status IN ('PENDING', 'DEPOSIT_WAITING')"
+        )
+          .bind(now)
+          .all();
+        for (const payment of (expired.results || []) as { id: string }[]) {
+          await env.DB.prepare(
+            "UPDATE payments SET status = 'EXPIRED', updated_at = ? WHERE id = ?"
+          )
+            .bind(now, payment.id)
+            .run();
+        }
+      } catch (e) {
+        console.warn('Scheduled expiry check failed:', e);
+      }
+    }
+  },
+};

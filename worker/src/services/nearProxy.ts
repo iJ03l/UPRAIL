@@ -5,6 +5,7 @@
 import type { Env, QuoteResponse, BalanceResponse } from '../types';
 import { signQuote } from './quoteAuth';
 import { deriveConfidentialAccountId } from './nearRpc';
+import * as nativeIntents from './nativeIntents';
 
 export interface TransferParams {
   recipientNearAccount: string;
@@ -46,6 +47,7 @@ export interface TxResult {
  * Obtain the singleton NearContainer DO stub
  */
 export function getNearContainer(env: Env) {
+  if (!env.NEAR_CONTAINER) return null;
   const id = env.NEAR_CONTAINER.idFromName('near-service-singleton');
   return env.NEAR_CONTAINER.get(id);
 }
@@ -74,6 +76,9 @@ export async function quote(
   }
 ): Promise<QuoteResponse> {
   const container = getNearContainer(env);
+  if (!container) {
+    return nativeIntents.quote(env, params);
+  }
 
   const request = new Request('http://container/quote', {
     method: 'POST',
@@ -133,6 +138,9 @@ export async function quote(
  */
 export async function transfer(env: Env, params: TransferParams): Promise<TxResult> {
   const container = getNearContainer(env);
+  if (!container) {
+    return nativeIntents.transfer(env, params);
+  }
 
   const request = new Request('http://container/transfer', {
     method: 'POST',
@@ -169,6 +177,9 @@ export async function transfer(env: Env, params: TransferParams): Promise<TxResu
  */
 export async function refund(env: Env, params: RefundParams): Promise<TxResult> {
   const container = getNearContainer(env);
+  if (!container) {
+    return nativeIntents.refund(env, params);
+  }
 
   const request = new Request('http://container/refund', {
     method: 'POST',
@@ -210,6 +221,12 @@ export async function createAccount(
   const container = getNearContainer(env);
   const masterAccount = env.MASTER_ACCOUNT_ID || 'uprail.near';
   const desiredAccountId = await deriveConfidentialAccountId(params.publicKeyHex, masterAccount);
+  if (!container) {
+    return {
+      nearAccount: desiredAccountId,
+      txHash: 'account_derived',
+    } satisfies CreateAccountResponse;
+  }
 
   const request = new Request('http://container/account/create', {
     method: 'POST',
@@ -244,6 +261,12 @@ export async function getBalance(
   params: { nearAccount: string; asset?: string }
 ): Promise<BalanceResponse> {
   const container = getNearContainer(env);
+  if (!container) {
+    return {
+      account: params.nearAccount,
+      balances: [],
+    };
+  }
 
   const url = new URL('http://container/balance');
   url.searchParams.set('account', params.nearAccount);

@@ -249,11 +249,11 @@ const getSessionHandler = async (c: any) => {
   if (isActivated === undefined || !personalInviteCode) {
     try {
       if (c.env.DB) {
-        const idRow = await c.env.DB.prepare(
+        const idRow = (await c.env.DB.prepare(
           'SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
         )
           .bind(session.x_id)
-          .first<{ is_activated: number | null; personal_invite_code: string | null }>();
+          .first()) as { is_activated: number | null; personal_invite_code: string | null } | null;
         if (idRow) {
           isActivated = idRow.is_activated === 1;
           personalInviteCode = idRow.personal_invite_code || null;

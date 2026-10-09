@@ -1,4 +1,2 @@
-export const performance = globalThis.performance;
-export default {
-  performance,
-};
+export const performance = (globalThis as any).performance;
+export default { performance };

@@ -64,7 +64,7 @@ invitesRouter.get('/status', async (c) => {
  */
 invitesRouter.post('/validate', async (c) => {
   try {
-    const body = await c.req.json<{ code?: string }>().catch(() => ({}));
+    const body = (await c.req.json<{ code?: string }>().catch(() => ({}))) as { code?: string };
     if (!body?.code) {
       return c.json<ErrorResponse>(
         { error: 'Invite code is required', code: 'MISSING_CODE' },

@@ -210,7 +210,7 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
 export async function issueTxChallenge(c: any): Promise<Response> {
   const session = c.get('session');
   if (!session) {
-    return c.json<ErrorResponse>({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, 401);
+    return c.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, 401);
   }
 
   const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';

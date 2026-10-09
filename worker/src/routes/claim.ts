@@ -21,6 +21,7 @@ import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import * as webauthn from '../services/webauthn';
 import * as nearProxy from '../services/nearProxy';
 import * as nearRpc from '../services/nearRpc';
+import * as nativeIntents from '../services/nativeIntents';
 import { redeemInvite } from '../services/inviteService';
 import {
   getDb,
@@ -315,28 +316,49 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
           continue;
         }
 
-        // Get EscrowDO stub
-        const doId = c.env.ESCROW.idFromName(paymentId);
-        const stub = c.env.ESCROW.get(doId) as any;
-
         let claimResponse: { payment: Payment; txHash: string };
 
-        if (typeof stub.claim === 'function') {
-          claimResponse = await stub.claim(recipientNearAccount);
-        } else {
-          const resp = await stub.fetch(
-            new Request('http://escrow/claim', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ recipientNearAccount }),
-            })
-          );
+        if (c.env.ESCROW) {
+          const doId = c.env.ESCROW.idFromName(paymentId);
+          const stub = c.env.ESCROW.get(doId) as any;
 
-          if (!resp.ok) {
-            const errJson = (await resp.json().catch(() => ({}))) as any;
-            throw new Error(errJson.error || `DO claim failed with HTTP ${resp.status}`);
+          if (typeof stub.claim === 'function') {
+            claimResponse = await stub.claim(recipientNearAccount);
+          } else {
+            const resp = await stub.fetch(
+              new Request('http://escrow/claim', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recipientNearAccount }),
+              })
+            );
+
+            if (!resp.ok) {
+              const errJson = (await resp.json().catch(() => ({}))) as any;
+              throw new Error(errJson.error || `DO claim failed with HTTP ${resp.status}`);
+            }
+            claimResponse = await resp.json();
           }
-          claimResponse = await resp.json();
+        } else {
+          // Pure Free Tier Mode - Native NEAR Intents NEP-413 transfer
+          const transferResult = await nativeIntents.transfer(c.env, {
+            recipientNearAccount,
+            asset: payment.asset,
+            amount: payment.amount,
+            escrowAccountId: c.env.ESCROW_ACCOUNT_ID,
+            escrowPrivateKey: c.env.ESCROW_PRIVATE_KEY,
+            paymentId: payment.id,
+          });
+
+          claimResponse = {
+            payment: {
+              ...payment,
+              status: PaymentStatus.CLAIMED,
+              claim_tx_hash: transferResult.txHash,
+              updated_at: Date.now(),
+            },
+            txHash: transferResult.txHash,
+          };
         }
 
         // If payment carries an invite code and recipient is claiming, auto-activate recipient

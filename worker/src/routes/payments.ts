@@ -57,6 +57,10 @@ async function callEscrowDO(
   method: 'init' | 'status' | 'cancel',
   payload?: any
 ): Promise<any> {
+  if (!env.ESCROW) {
+    // Pure Free Tier mode - Escrow state is maintained in D1 database
+    return null;
+  }
   const doId = env.ESCROW.idFromName(paymentId);
   const stub = env.ESCROW.get(doId) as any;
 
@@ -682,7 +686,7 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
     return c.json({
       success: true,
       paymentId: id,
-      status: updated.status || PaymentStatus.CANCELLED,
+      status: updated?.status || PaymentStatus.CANCELLED,
     });
   } catch (err: any) {
     console.error('Cancel payment error:', err);

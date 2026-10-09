@@ -16,8 +16,9 @@ export interface Env {
   // Bindings
   DB: D1Database;
   CACHE: KVNamespace;
-  ESCROW: DurableObjectNamespace;
-  NEAR_CONTAINER: DurableObjectNamespace;
+  ASSETS?: Fetcher;
+  ESCROW?: DurableObjectNamespace;
+  NEAR_CONTAINER?: DurableObjectNamespace;
 
   // Environment variables
   X_CLIENT_ID: string;
