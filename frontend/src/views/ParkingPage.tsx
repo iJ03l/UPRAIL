@@ -5,6 +5,7 @@ import { useNavigate, Navigate } from '../lib/router';
 import { useXAuth } from '../hooks/useXAuth';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
+import { GlitchLogo } from '../components/GlitchLogo';
 import {
   ArrowRight,
   CheckCircle2,
@@ -120,9 +121,7 @@ export const ParkingPage: React.FC = () => {
           
           {/* Brand & Step Header */}
           <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-black text-white flex items-center justify-center shadow-xs">
-              <span className="font-display font-black text-base tracking-tight">UP</span>
-            </div>
+            <GlitchLogo href="/" size="lg" />
 
             <div className="space-y-1">
               <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 border border-stone-200 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-600 mb-1">

@@ -7,6 +7,7 @@ import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas
 import { TextReveal } from '../components/TextReveal';
 import { MoneyFlowSchematic } from '../components/MoneyFlowSchematic';
 import { InteractiveRailSimulator } from '../components/InteractiveRailSimulator';
+import { GlitchLogo } from '../components/GlitchLogo';
 
 const getAppSubdomainUrl = () => {
   if (typeof window !== 'undefined') {
@@ -41,15 +42,8 @@ export const LandingPage: React.FC = () => {
       {/* Clean Header */}
       <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-white/80 backdrop-blur-md">
         <div className="w-full px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between">
-          {/* Brand */}
-          <Link to="/" className="flex items-center space-x-2.5 group">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-black text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform duration-200">
-              <span className="font-display font-black text-white text-xs sm:text-sm tracking-tight">UP</span>
-            </div>
-            <span className="font-display font-extrabold text-lg sm:text-xl tracking-tight text-stone-950">
-              UPRAIL
-            </span>
-          </Link>
+          {/* Brand with Cinematic Glitch */}
+          <GlitchLogo href="/" size="md" />
 
           {/* Section Navigation (Desktop) */}
           <nav className="hidden md:flex items-center space-x-7 text-xs font-mono uppercase tracking-widest text-stone-500">
@@ -191,7 +185,7 @@ export const LandingPage: React.FC = () => {
       <footer className="w-full border-t border-stone-200 bg-white py-8 relative z-20">
         <div className="w-full px-4 sm:px-8 lg:px-12 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-stone-400">
           <div className="flex items-center space-x-2">
-            <span className="font-display font-bold text-stone-950 text-xs">UPRAIL</span>
+            <GlitchLogo href="/" size="sm" />
             <span>//</span>
             <span>NEAR Intents</span>
           </div>

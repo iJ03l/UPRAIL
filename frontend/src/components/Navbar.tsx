@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { XUser } from '../types';
 import { AuthModal } from './AuthModal';
+import { GlitchLogo } from './GlitchLogo';
 
 interface NavbarProps {
   user: XUser | null;
@@ -41,19 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
           {/* Brand Emblem */}
           <div className="flex items-center space-x-6 sm:space-x-8">
-            <Link to="/" className="flex items-center space-x-3 group">
-              <div className="w-9 h-9 rounded-2xl bg-black text-white shadow-sm flex items-center justify-center group-hover:scale-105 transition-transform duration-200">
-                <span className="font-display font-black text-white text-base tracking-tight">UP</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="font-display font-extrabold text-xl tracking-tight text-stone-950">
-                  UPRAIL
-                </span>
-                <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold bg-stone-100 text-stone-800 border border-stone-200 rounded-md">
-                  APP
-                </span>
-              </div>
-            </Link>
+            <GlitchLogo href="/" size="md" badge="APP" />
 
             {/* Navigation links for App */}
             <nav className="flex items-center space-x-1.5">

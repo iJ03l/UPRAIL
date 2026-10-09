@@ -8,6 +8,7 @@ import { SettingsSidebar } from './SettingsSidebar';
 import { QuantusInteractiveCanvas } from './QuantusInteractiveCanvas';
 import { InviteGateModal } from './InviteGateModal';
 import { InviteModal } from './InviteModal';
+import { GlitchLogo } from './GlitchLogo';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -29,15 +30,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       */}
       <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-stone-100">
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Left: Brand */}
-          <Link to="/app" className="flex items-center space-x-2.5 group">
-            <div className="w-8 h-8 rounded-xl bg-black flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform duration-200">
-              <span className="font-display font-black text-white text-xs tracking-tight">UP</span>
-            </div>
-            <span className="font-display font-extrabold text-base tracking-tight text-stone-950">
-              UPRAIL
-            </span>
-          </Link>
+          {/* Left: Brand with Cinematic Glitch */}
+          <GlitchLogo href="/app" size="md" />
 
           {/* Center: Subtle Protocol Status (Desktop) */}
           <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-stone-50 border border-stone-200 text-[10px] font-mono text-stone-600">

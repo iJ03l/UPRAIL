@@ -48,9 +48,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
         {/* Header */}
         <div className="p-5 sm:p-6 border-b border-stone-100 flex items-center justify-between bg-stone-50/60 flex-shrink-0">
           <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-xl bg-black text-white flex items-center justify-center font-display font-black text-xs shadow-xs">
-              UP
-            </div>
+            <img src="/brand/uprail-icon.png" alt="UPRAIL" className="w-8 h-8 object-contain" />
             <div>
               <h2 className="font-display font-extrabold text-base sm:text-lg text-stone-950 tracking-tight">
                 {activeTab === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions'}

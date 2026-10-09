@@ -26,3 +26,4 @@ go-near-service/.env
 cmd/server/server
 go-near-service/bin/
 bin/
+*.tsbuildinfo

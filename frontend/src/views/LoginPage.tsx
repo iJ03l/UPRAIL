@@ -15,6 +15,7 @@ import { webauthn } from '../lib/webauthn';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { LegalModal, LegalTab } from '../components/LegalModal';
+import { GlitchLogo } from '../components/GlitchLogo';
 
 interface LoginPageProps {
   initialLegalTab?: LegalTab;
@@ -172,8 +173,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       <div className="min-h-[100dvh] w-full bg-stone-50 text-stone-900 flex flex-col justify-center items-center px-4 font-sans">
         <QuantusInteractiveCanvas fullScreenRoam={true} />
         <div className="relative z-10 w-full max-w-sm bg-white border border-stone-200/90 rounded-3xl p-8 shadow-xl text-center space-y-4">
-          <div className="w-12 h-12 rounded-2xl bg-black text-white flex items-center justify-center shadow-xs mx-auto animate-pulse">
-            <span className="font-display font-black text-base tracking-tight">UP</span>
+          <div className="flex justify-center pb-1">
+            <GlitchLogo href="/" size="lg" />
           </div>
           <div className="flex items-center justify-center space-x-2 text-stone-500 font-mono text-xs">
             <Loader2 className="w-4 h-4 animate-spin text-stone-900" />
@@ -194,9 +195,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         
         {/* Brand & Step Indicator */}
         <div className="flex flex-col items-center text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-black text-white flex items-center justify-center shadow-xs">
-            <span className="font-display font-black text-base tracking-tight">UP</span>
-          </div>
+          <GlitchLogo href="/" size="lg" />
 
           <div className="space-y-1">
             <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 border border-stone-200 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-600 mb-1">
