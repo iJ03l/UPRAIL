@@ -77,12 +77,12 @@ export const LandingPage: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Flow: Generously padded hero & sections */}
-      <main className="relative z-20 w-full px-4 sm:px-8 lg:px-14 pt-16 sm:pt-28 md:pt-36 lg:pt-44 pb-24 sm:pb-36 space-y-20 sm:space-y-32 md:space-y-44">
+      {/* Main Flow: Balanced spacing */}
+      <main className="relative z-20 w-full px-4 sm:px-8 lg:px-12 pt-8 sm:pt-14 md:pt-18 lg:pt-20 pb-16 sm:pb-24 space-y-12 sm:space-y-20 md:space-y-28">
         {/* 
-          1. Hero Section: Spacious, grand padding on desktop and mobile
+          1. Hero Section: Perfectly balanced padding
         */}
-        <section className="w-full space-y-7 sm:space-y-9 md:space-y-12 text-left px-4 sm:px-10 md:px-16 lg:px-24 xl:px-36 py-8 sm:py-16 md:py-24">
+        <section className="w-full space-y-4 sm:space-y-6 md:space-y-7 text-left md:px-8 lg:px-16 xl:px-20 py-4 sm:py-8 md:py-10">
           <h1 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-display font-extrabold tracking-tight leading-[1.05] sm:leading-[0.92] text-stone-950 max-w-4xl">
             Send money
             <br />
@@ -93,16 +93,16 @@ export const LandingPage: React.FC = () => {
             <span className="text-black">.</span>
           </h1>
 
-          <p className="text-lg sm:text-2xl text-stone-600 max-w-2xl font-sans leading-relaxed">
+          <p className="text-base sm:text-xl text-stone-600 max-w-xl font-sans leading-relaxed">
             Confidential by design. Claimed by touch.
           </p>
 
-          <div className="pt-4 sm:pt-8 flex items-center gap-4">
+          <div className="pt-2 sm:pt-4 flex items-center gap-3">
             <a
               href={appSubdomainUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-8 py-4 sm:px-10 sm:py-5 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider shadow-md hover:shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center space-x-2.5 cursor-pointer group"
+              className="px-7 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider shadow-sm hover:shadow-md hover:scale-105 active:scale-95 transition-all flex items-center space-x-2 cursor-pointer group"
             >
               <span>Launch App</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
