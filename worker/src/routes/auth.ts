@@ -7,9 +7,10 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext, ErrorResponse } from '../types';
 import { generatePKCE, exchangeCode, getMe } from '../services/xApi';
-import { createSession, destroySession } from '../middleware/session';
+import { createSession, destroySession, requireAuth } from '../middleware/session';
 import { getDb, upsertXIdentity, getXIdentity } from '../db/postgres';
 import * as webauthnService from '../services/webauthn';
+import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
 import { signPayload, verifyAndUnpack } from '../utils/crypto';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
@@ -584,3 +585,136 @@ authRouter.post('/passkey/login-verify', async (c) => {
     return c.json<ErrorResponse>({ error: err.message || 'Passkey login failed', code: 'LOGIN_FAILED' }, 500);
   }
 });
+
+/**
+ * GET /auth/export-key-challenge
+ * Generates a challenge for the user to authenticate with their WebAuthn passkey
+ * before exporting their authentic NEAR private key.
+ */
+authRouter.get('/export-key-challenge', requireAuth(), async (c) => {
+  const session = c.get('session')!;
+  const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
+
+  let passkey: any = null;
+  if (c.env.DB) {
+    try {
+      passkey = await c.env.DB.prepare(
+        'SELECT credential_id, transports FROM passkeys WHERE x_id = ? ORDER BY created_at DESC LIMIT 1'
+      )
+        .bind(session.x_id)
+        .first();
+    } catch (err) {
+      console.warn('export-key-challenge DB error:', err);
+    }
+  }
+
+  const credentialIds = passkey?.credential_id ? [passkey.credential_id] : undefined;
+  const options = await webauthnService.generateAuthenticationOptions({
+    credentialIds,
+    rpId,
+  });
+
+  const challengeToken = await signPayload(
+    JSON.stringify({
+      challenge: options.challenge,
+      x_id: session.x_id,
+      exp: Date.now() + 5 * 60 * 1000,
+    }),
+    getSecret(c)
+  );
+
+  return c.json({ options, challengeToken });
+});
+
+/**
+ * POST /auth/export-key
+ * Verifies the WebAuthn passkey assertion and returns the user's authentic
+ * NEAR master keypair for self-custody export.
+ */
+authRouter.post('/export-key', requireAuth(), async (c) => {
+  const session = c.get('session')!;
+  const body = (await c.req.json().catch(() => ({}))) as any;
+  const { assertion, challengeToken } = body;
+
+  if (!assertion || !challengeToken) {
+    return c.json<ErrorResponse>(
+      { error: 'Missing assertion or challenge token', code: 'INVALID_REQUEST' },
+      400
+    );
+  }
+
+  // Verify challenge token
+  const payloadStr = await verifyAndUnpack(challengeToken, getSecret(c));
+  if (!payloadStr) {
+    return c.json<ErrorResponse>(
+      { error: 'Challenge expired or invalid', code: 'CHALLENGE_EXPIRED' },
+      401
+    );
+  }
+
+  const payload = JSON.parse(payloadStr);
+  if (payload.x_id !== session.x_id || payload.exp < Date.now()) {
+    return c.json<ErrorResponse>(
+      { error: 'Challenge token expired or mismatched', code: 'CHALLENGE_MISMATCH' },
+      401
+    );
+  }
+
+  // Look up passkey credential
+  let passkeyRow: any = null;
+  if (c.env.DB) {
+    passkeyRow = await c.env.DB.prepare(
+      'SELECT public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ? LIMIT 1'
+    )
+      .bind(session.x_id, assertion.id)
+      .first<any>();
+  }
+
+  if (!passkeyRow) {
+    return c.json<ErrorResponse>(
+      { error: 'Passkey credential not found', code: 'CREDENTIAL_NOT_FOUND' },
+      404
+    );
+  }
+
+  const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
+  const expectedOrigin = c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+
+  try {
+    const verification = await webauthnService.verifyAuthentication({
+      assertion,
+      expectedChallenge: payload.challenge,
+      expectedOrigin,
+      expectedRPID: rpId,
+      credential: {
+        id: assertion.id,
+        publicKey: passkeyRow.public_key,
+        counter: Number(passkeyRow.counter) || 0,
+      },
+    });
+
+    if (!verification.verified) {
+      return c.json<ErrorResponse>(
+        { error: 'Passkey authentication failed', code: 'VERIFICATION_FAILED' },
+        401
+      );
+    }
+  } catch (authErr: any) {
+    return c.json<ErrorResponse>(
+      { error: `Passkey verification failed: ${authErr.message}`, code: 'VERIFICATION_FAILED' },
+      401
+    );
+  }
+
+  // Passkey verified! Derive authentic NEAR keypair
+  const derived = await nearRpc.deriveUserNearKeypair(c.env, session.x_id);
+  const nearAccount = session.near_account || derived.accountId;
+
+  return c.json({
+    success: true,
+    nearAccount,
+    privateKey: derived.privateKeyB58,
+    publicKey: derived.publicKeyB58,
+  });
+});
+

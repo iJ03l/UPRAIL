@@ -27,6 +27,7 @@ export const onchainRouter = new Hono<AppContext>();
 onchainRouter.get('/tokens', async (c) => {
   try {
     const tokens = await nearRpc.getSupportedTokens(c.env);
+    c.header('Cache-Control', 'public, max-age=300, s-maxage=3600');
     return c.json({ tokens, source: 'onchain' });
   } catch (err: any) {
     console.error('[onchain/tokens] error:', err);

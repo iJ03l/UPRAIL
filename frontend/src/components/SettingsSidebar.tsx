@@ -12,6 +12,10 @@ import {
   Copy,
   ExternalLink,
   ShieldCheck,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Loader2,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { api } from '../lib/api';
@@ -31,6 +35,27 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Export Vault Private Key states
+  const [exportedKey, setExportedKey] = useState<{ nearAccount: string; privateKey: string; publicKey: string } | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+
+  const handleExportKey = async () => {
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const res = await api.exportKeyWithPasskey();
+      setExportedKey(res);
+      setShowKey(true);
+    } catch (err: any) {
+      setExportError(err.message || 'Passkey verification failed');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen && user) {
@@ -198,6 +223,108 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   <div className="text-[10px] text-stone-500 font-sans border-t border-stone-200 pt-2 leading-relaxed">
                     Need more invites? Sending confidential money automatically preloads an invite code into the recipient's claim link!
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Export Vault Key Section (Passkey Protected) */}
+            {user && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
+                    Vault Private Key
+                  </span>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-1">
+                    <KeyRound className="w-2.5 h-2.5" />
+                    Passkey Protected
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                  {!exportedKey ? (
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-stone-600 leading-relaxed">
+                        Export the Full Access NEAR private key for your vault (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Authorized with your biometric passkey.
+                      </p>
+                      {exportError && (
+                        <p className="text-[11px] font-mono text-red-600 bg-red-50 p-2 rounded-xl border border-red-200">
+                          {exportError}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleExportKey}
+                        disabled={isExporting}
+                        className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 shadow-xs"
+                      >
+                        {isExporting ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Authenticating Passkey...</span>
+                          </>
+                        ) : (
+                          <>
+                            <KeyRound className="w-3.5 h-3.5" />
+                            <span>Export Private Key</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 animate-fade-in">
+                      <div className="flex items-center justify-between text-[11px] text-stone-500 font-mono">
+                        <span>Vault Account:</span>
+                        <span className="font-bold text-stone-900 truncate max-w-[170px]">
+                          {exportedKey.nearAccount}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-mono font-bold text-stone-500">
+                          Private Key (Ed25519)
+                        </label>
+                        <div className="p-2.5 rounded-xl bg-stone-950 text-stone-100 font-mono text-xs break-all select-all relative group">
+                          {showKey ? exportedKey.privateKey : '••••••••••••••••••••••••••••••••••••••••••••••••'}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(exportedKey.privateKey);
+                            setCopiedKey(true);
+                            setTimeout(() => setCopiedKey(false), 2000);
+                          }}
+                          className="flex-1 py-2 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
+                        >
+                          {copiedKey ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Copied Key</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy Key</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowKey(!showKey)}
+                          className="py-2 px-3 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono transition-colors cursor-pointer"
+                          title={showKey ? 'Hide Key' : 'Reveal Key'}
+                        >
+                          {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+
+                      <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-[10px] font-mono text-amber-900 leading-tight">
+                        ⚠️ <strong>Never share this key.</strong> Grants full custody to withdraw funds from your onchain NEAR vault in any wallet.
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, Search, X, Check } from 'lucide-react';
 import { Token } from '../types';
+import { TokenIcon } from './TokenIcon';
 
 interface AssetPickerProps {
   tokens: Token[];
@@ -47,14 +48,10 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
         className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-left transition-colors focus:outline-none focus:border-black disabled:opacity-50 shadow-xs cursor-pointer select-none"
         title="Change Token"
       >
-        <img
-          src={selectedToken.iconUrl}
-          alt={selectedToken.symbol}
-          className="w-5 h-5 rounded-full bg-stone-100 object-cover border border-stone-200 flex-shrink-0"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src =
-              'https://raw.githubusercontent.com/feathericons/feather/master/icons/circle.svg';
-          }}
+        <TokenIcon
+          symbol={selectedToken.symbol}
+          iconUrl={selectedToken.iconUrl}
+          size="md"
         />
         <span className="text-xs sm:text-sm font-bold text-stone-950 font-mono tracking-tight">
           {selectedToken.symbol}
@@ -135,14 +132,10 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                       }`}
                     >
                       <div className="flex items-center space-x-3">
-                        <img
-                          src={token.iconUrl}
-                          alt={token.symbol}
-                          className="w-8 h-8 rounded-full bg-stone-100 object-cover border border-stone-200 flex-shrink-0"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src =
-                              'https://raw.githubusercontent.com/feathericons/feather/master/icons/circle.svg';
-                          }}
+                        <TokenIcon
+                          symbol={token.symbol}
+                          iconUrl={token.iconUrl}
+                          size="xl"
                         />
                         <div>
                           <div className="text-xs font-bold text-stone-950 flex items-center space-x-1.5 font-mono">

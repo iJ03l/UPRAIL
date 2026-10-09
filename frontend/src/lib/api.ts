@@ -22,7 +22,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     id: 'usdc',
     symbol: 'USDC',
     name: 'USD Coin',
-    iconUrl: 'https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=035',
+    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/usdc.svg',
     decimals: 6,
     priceUsd: 1.0,
     nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
@@ -33,7 +33,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     id: 'usdt',
     symbol: 'USDT',
     name: 'Tether USD',
-    iconUrl: 'https://cryptologos.cc/logos/tether-usdt-logo.svg?v=035',
+    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/usdt.svg',
     decimals: 6,
     priceUsd: 1.0,
     nearContractId: 'usdt.tether-token.near',
@@ -55,7 +55,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     id: 'eth',
     symbol: 'ETH',
     name: 'Ethereum',
-    iconUrl: 'https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=035',
+    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/eth.svg',
     decimals: 18,
     priceUsd: 3450.0,
     nearContractId: 'aurora',
@@ -66,7 +66,7 @@ export const SUPPORTED_TOKENS: Token[] = [
     id: 'btc',
     symbol: 'BTC',
     name: 'Bitcoin',
-    iconUrl: 'https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=035',
+    iconUrl: 'https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/svg/color/btc.svg',
     decimals: 8,
     priceUsd: 68500.0,
     nearContractId: 'btc.near',
@@ -657,5 +657,34 @@ export const api = {
       return { authenticated: false, isActivated: false, personalInviteCode: null };
     }
     return await res.json();
+  },
+
+  // Export Vault Private Key (Passkey Authenticated)
+  async exportKeyWithPasskey(): Promise<{ nearAccount: string; privateKey: string; publicKey: string }> {
+    const challengeUrl = API_BASE ? `${API_BASE}/auth/export-key-challenge` : '/auth/export-key-challenge';
+    const challengeRes = await fetch(challengeUrl, { credentials: 'include' });
+    if (!challengeRes.ok) {
+      const err = await challengeRes.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to initialize passkey challenge');
+    }
+    const { options, challengeToken } = await challengeRes.json();
+
+    const { startAuthentication } = await import('@simplewebauthn/browser');
+    const assertion = await startAuthentication(options);
+
+    const exportUrl = API_BASE ? `${API_BASE}/auth/export-key` : '/auth/export-key';
+    const exportRes = await fetch(exportUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ assertion, challengeToken }),
+    });
+
+    if (!exportRes.ok) {
+      const err = await exportRes.json().catch(() => ({}));
+      throw new Error(err.error || 'Passkey verification failed');
+    }
+
+    return await exportRes.json();
   },
 };

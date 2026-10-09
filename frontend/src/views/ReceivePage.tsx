@@ -11,8 +11,6 @@ import {
   Info,
   RefreshCw,
   Loader2,
-  KeyRound,
-  ExternalLink,
 } from 'lucide-react';
 import { useOnchainData } from '../hooks/useOnchainData';
 
@@ -28,7 +26,6 @@ export const ReceivePage: React.FC = () => {
 
   const [selectedChain, setSelectedChain] = useState<string>('eth');
   const [copied, setCopied] = useState(false);
-  const [copiedVault, setCopiedVault] = useState(false);
   const [showQr, setShowQr] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -60,12 +57,6 @@ export const ReceivePage: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleCopyVault = () => {
-    if (!nearAccount) return;
-    navigator.clipboard.writeText(nearAccount);
-    setCopiedVault(true);
-    setTimeout(() => setCopiedVault(false), 2000);
-  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -114,47 +105,6 @@ export const ReceivePage: React.FC = () => {
         </h1>
         <p className="text-sm text-stone-600 max-w-md mx-auto">
           Deposit tokens from any wallet or exchange. NEAR Intents automatically routes and shields it directly into your passkey-bound vault.
-        </p>
-      </div>
-
-      {/* Custody Vault Status Card */}
-      <div className="rounded-3xl p-5 sm:p-6 bg-stone-900 text-white border border-stone-800 space-y-3 relative overflow-hidden shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center space-x-2">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <Shield className="w-3 h-3 mr-1" />
-                Hardware Custody Vault Active
-              </span>
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono bg-stone-800 text-stone-300 border border-stone-700">
-                <KeyRound className="w-3 h-3 mr-1" />
-                Passkey P-256
-              </span>
-            </div>
-            <h2 className="text-base sm:text-lg font-bold font-display tracking-tight text-white flex items-center space-x-2">
-              <span>Your Confidential Intent Vault</span>
-            </h2>
-          </div>
-
-          {nearAccount && (
-            <div className="flex items-center space-x-2 bg-stone-950/80 p-2 rounded-2xl border border-stone-800 self-start sm:self-auto">
-              <span className="font-mono text-xs text-stone-300 px-1 truncate max-w-[200px] sm:max-w-[240px]">
-                {nearAccount}
-              </span>
-              <button
-                type="button"
-                onClick={handleCopyVault}
-                className="p-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 transition-colors cursor-pointer"
-                title="Copy Vault Account ID"
-              >
-                {copiedVault ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <p className="text-xs text-stone-400 leading-relaxed">
-          Your vault is 100% self-custodial on the NEAR Intents settlement layer. Deposits from any external network below are swept by solvers and auto-shielded directly into this account.
         </p>
       </div>
 

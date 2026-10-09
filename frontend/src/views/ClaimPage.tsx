@@ -18,6 +18,7 @@ import { useClaimFlow } from '../hooks/useClaimFlow';
 import { useXAuth } from '../hooks/useXAuth';
 import { PasskeyPrompt } from '../components/PasskeyPrompt';
 import { XAuthBanner } from '../components/XAuthBanner';
+import { TokenIcon } from '../components/TokenIcon';
 import { api } from '../lib/api';
 
 export const ClaimPage: React.FC = () => {
@@ -273,10 +274,11 @@ export const ClaimPage: React.FC = () => {
               >
                 {/* Left: Token Icon + Sender + Memo */}
                 <div className="flex items-start sm:items-center space-x-3.5">
-                  <img
-                    src={p.token.iconUrl}
-                    alt={p.token.symbol}
-                    className="w-12 h-12 rounded-2xl p-1 bg-stone-50 border border-stone-200 flex-shrink-0"
+                  <TokenIcon
+                    symbol={p.token.symbol}
+                    iconUrl={p.token.iconUrl}
+                    size="xl"
+                    className="w-12 h-12 rounded-2xl"
                   />
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
@@ -400,10 +402,10 @@ export const ClaimPage: React.FC = () => {
                 className="flex items-center justify-between p-3 rounded-2xl bg-stone-50 border border-stone-200"
               >
                 <div className="flex items-center space-x-2.5">
-                  <img
-                    src={bal.token.iconUrl}
-                    alt={bal.token.symbol}
-                    className="w-7 h-7 rounded-full bg-white border border-stone-200"
+                  <TokenIcon
+                    symbol={bal.token.symbol}
+                    iconUrl={bal.token.iconUrl}
+                    size="lg"
                   />
                   <div>
                     <span className="text-xs font-bold text-stone-900 block font-mono">

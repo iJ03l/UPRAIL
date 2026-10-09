@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Link } from '../lib/router';
-import { Settings, Users } from 'lucide-react';
+import { Users } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { SettingsSidebar } from './SettingsSidebar';
 import { QuantusInteractiveCanvas } from './QuantusInteractiveCanvas';
@@ -88,17 +88,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 Sign In
               </Link>
             )}
-
-            {/* Settings Sidebar Toggle */}
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 rounded-xl text-stone-500 hover:text-black hover:bg-stone-100 border border-stone-200 transition-colors cursor-pointer"
-              aria-label="Settings"
-              title="Open Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
           </div>
         </div>
       </header>

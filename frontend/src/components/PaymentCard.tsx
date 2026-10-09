@@ -12,6 +12,7 @@ import {
   Fingerprint,
 } from 'lucide-react';
 import { PaymentIntent } from '../types';
+import { TokenIcon } from './TokenIcon';
 
 interface PaymentCardProps {
   payment: PaymentIntent;
@@ -71,10 +72,10 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
     return (
       <div className="flex items-center justify-between p-3.5 rounded-2xl bg-white border border-stone-200 hover:border-stone-300 transition-colors shadow-sm">
         <div className="flex items-center space-x-3">
-          <img
-            src={payment.token.iconUrl}
-            alt={payment.token.symbol}
-            className="w-8 h-8 rounded-full bg-stone-100 border border-stone-200"
+          <TokenIcon
+            symbol={payment.token.symbol}
+            iconUrl={payment.token.iconUrl}
+            size="lg"
           />
           <div>
             <div className="flex items-center space-x-2">
@@ -111,10 +112,11 @@ export const PaymentCard: React.FC<PaymentCardProps> = ({
       <div className="flex items-start justify-between">
         <div className="flex items-center space-x-3">
           <div className="relative">
-            <img
-              src={payment.token.iconUrl}
-              alt={payment.token.symbol}
-              className="w-12 h-12 rounded-full bg-stone-100 p-0.5 border border-stone-200"
+            <TokenIcon
+              symbol={payment.token.symbol}
+              iconUrl={payment.token.iconUrl}
+              size="xl"
+              className="w-12 h-12"
             />
             <div className="absolute -bottom-1 -right-1 p-0.5 rounded-full bg-white border border-stone-200 shadow-sm">
               <ShieldCheck className="w-4 h-4 text-stone-800" />

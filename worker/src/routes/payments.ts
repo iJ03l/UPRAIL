@@ -102,7 +102,7 @@ paymentsRouter.get('/tokens', async (c) => {
       id: t.defuse_asset_id,
       symbol: t.symbol,
       name: t.name,
-      iconUrl: t.icon || `https://cryptologos.cc/logos/${t.symbol.toLowerCase()}-logo.svg?v=035`,
+      iconUrl: t.icon || '',
       decimals: t.decimals,
       nearContractId: t.nearContractId,
       chain: t.chain,

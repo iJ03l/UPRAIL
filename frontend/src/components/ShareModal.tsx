@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { PaymentIntent } from '../types';
+import { TokenIcon } from './TokenIcon';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -72,10 +73,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         {/* Payment Summary Pill */}
         <div className="mb-5 p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
-            <img
-              src={payment.token.iconUrl}
-              alt={payment.token.symbol}
-              className="w-8 h-8 rounded-full bg-white border border-stone-200"
+            <TokenIcon
+              symbol={payment.token.symbol}
+              iconUrl={payment.token.iconUrl}
+              size="lg"
             />
             <div>
               <span className="text-sm font-extrabold text-stone-950 font-mono">

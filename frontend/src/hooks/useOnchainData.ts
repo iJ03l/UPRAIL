@@ -80,19 +80,62 @@ function estimateUsd(symbol: string, amountFormatted: string): number {
   return amount * price;
 }
 
+// ── Shared SWR Module Cache ─────────────────────────────────────────────────
+const CACHE_KEY = 'uprail_onchain_cache';
+
+interface OnchainCache {
+  tokens: OnchainToken[];
+  balances: OnchainBalance[];
+  nearAccount: string | null;
+  hasIntentAccount: boolean;
+  depositAddresses: DepositAddress[];
+  transactions: OnchainTx[];
+}
+
+let globalCache: OnchainCache = {
+  tokens: [],
+  balances: [],
+  nearAccount: null,
+  hasIntentAccount: false,
+  depositAddresses: [],
+  transactions: [],
+};
+
+// Hydrate on module load
+try {
+  if (typeof window !== 'undefined') {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed) globalCache = { ...globalCache, ...parsed };
+    }
+  }
+} catch {}
+
+function persistCache(patch: Partial<OnchainCache>) {
+  globalCache = { ...globalCache, ...patch };
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(globalCache));
+    }
+  } catch {}
+}
+
 export function useOnchainData(): UseOnchainDataResult {
-  const [tokens, setTokens] = useState<OnchainToken[]>([]);
-  const [isLoadingTokens, setIsLoadingTokens] = useState(true);
+  const [tokens, setTokens] = useState<OnchainToken[]>(globalCache.tokens);
+  const [isLoadingTokens, setIsLoadingTokens] = useState(globalCache.tokens.length === 0);
 
-  const [balances, setBalances] = useState<OnchainBalance[]>([]);
-  const [nearAccount, setNearAccount] = useState<string | null>(null);
-  const [hasIntentAccount, setHasIntentAccount] = useState(false);
-  const [isLoadingBalances, setIsLoadingBalances] = useState(true);
+  const [balances, setBalances] = useState<OnchainBalance[]>(globalCache.balances);
+  const [nearAccount, setNearAccount] = useState<string | null>(globalCache.nearAccount);
+  const [hasIntentAccount, setHasIntentAccount] = useState(globalCache.hasIntentAccount);
+  const [isLoadingBalances, setIsLoadingBalances] = useState(
+    globalCache.balances.length === 0 && !globalCache.hasIntentAccount
+  );
 
-  const [depositAddresses, setDepositAddresses] = useState<DepositAddress[]>([]);
-  const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
+  const [depositAddresses, setDepositAddresses] = useState<DepositAddress[]>(globalCache.depositAddresses);
+  const [isLoadingAddresses, setIsLoadingAddresses] = useState(globalCache.depositAddresses.length === 0);
 
-  const [transactions, setTransactions] = useState<OnchainTx[]>([]);
+  const [transactions, setTransactions] = useState<OnchainTx[]>(globalCache.transactions);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
@@ -100,9 +143,12 @@ export function useOnchainData(): UseOnchainDataResult {
   // ── Load supported tokens (no auth required) ──────────────────────────────
   const loadTokens = useCallback(async () => {
     try {
-      setIsLoadingTokens(true);
+      if (globalCache.tokens.length === 0) setIsLoadingTokens(true);
       const toks = await fetchOnchainTokens();
-      if (toks.length > 0) setTokens(toks);
+      if (toks.length > 0) {
+        setTokens(toks);
+        persistCache({ tokens: toks });
+      }
     } catch (err: any) {
       console.warn('[useOnchainData] tokens:', err);
       setError(err.message);
@@ -114,24 +160,26 @@ export function useOnchainData(): UseOnchainDataResult {
   // ── Load user's intent account balances ───────────────────────────────────
   const loadBalances = useCallback(async () => {
     try {
-      setIsLoadingBalances(true);
+      if (globalCache.balances.length === 0 && !globalCache.hasIntentAccount) {
+        setIsLoadingBalances(true);
+      }
       setError(null);
 
       // Check intent account first
       const account = await fetchIntentAccount();
       setNearAccount(account.nearAccount);
       setHasIntentAccount(account.hasIntentAccount);
+      persistCache({ nearAccount: account.nearAccount, hasIntentAccount: account.hasIntentAccount });
 
       if (account.hasIntentAccount && account.nearAccount) {
         const response = await fetchOnchainBalances();
         if (response) {
           setBalances(response.balances);
+          persistCache({ balances: response.balances });
         }
       }
     } catch (err: any) {
       console.warn('[useOnchainData] balances:', err);
-      // Don't surface balance errors as hard errors — just show empty
-      setBalances([]);
     } finally {
       setIsLoadingBalances(false);
     }
@@ -140,9 +188,14 @@ export function useOnchainData(): UseOnchainDataResult {
   // ── Load all deposit addresses ─────────────────────────────────────────────
   const loadDepositAddresses = useCallback(async () => {
     try {
-      setIsLoadingAddresses(true);
+      if (globalCache.depositAddresses.length === 0) {
+        setIsLoadingAddresses(true);
+      }
       const addresses = await fetchAllDepositAddresses();
-      setDepositAddresses(addresses);
+      if (addresses.length > 0) {
+        setDepositAddresses(addresses);
+        persistCache({ depositAddresses: addresses });
+      }
     } catch (err: any) {
       console.warn('[useOnchainData] deposit addresses:', err);
     } finally {
@@ -153,9 +206,12 @@ export function useOnchainData(): UseOnchainDataResult {
   // ── Load transaction history ───────────────────────────────────────────────
   const loadHistory = useCallback(async () => {
     try {
-      setIsLoadingHistory(true);
+      if (globalCache.transactions.length === 0) {
+        setIsLoadingHistory(true);
+      }
       const response = await fetchOnchainHistory(50);
       setTransactions(response.transactions);
+      persistCache({ transactions: response.transactions });
     } catch (err: any) {
       console.warn('[useOnchainData] history:', err);
     } finally {
