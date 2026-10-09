@@ -117,8 +117,25 @@ export const api = {
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
         ? window.location.origin
         : 'https://app.uprail.world';
-    const url = API_BASE ? `${API_BASE}/auth/x/login${query}` : `${origin}/auth/x/login${query}`;
-    window.location.href = url;
+
+    // 1. Fetch real X OAuth authorize URL directly from backend endpoint
+    try {
+      const initUrl = API_BASE ? `${API_BASE}/auth/x/init${query}` : `${origin}/auth/x/init${query}`;
+      const res = await fetch(initUrl, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.url) {
+          window.location.assign(data.url);
+          return new Promise<never>(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('Direct OAuth URL fetch failed, falling back to server redirect:', e);
+    }
+
+    // 2. Direct server redirect fallback
+    const fallbackUrl = API_BASE ? `${API_BASE}/auth/x/login${query}` : `${origin}/auth/x/login${query}`;
+    window.location.assign(fallbackUrl);
     return new Promise<never>(() => {});
   },
 

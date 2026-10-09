@@ -63,6 +63,23 @@ const ForbiddenOnApex: React.FC = () => {
   );
 };
 
+const AuthPassthroughHandler: React.FC = () => {
+  React.useEffect(() => {
+    // If client router ever mounts on /auth/*, immediately force a genuine server request
+    if (typeof window !== 'undefined') {
+      window.location.replace(window.location.href);
+    }
+  }, []);
+  return (
+    <div className="min-h-screen bg-stone-50 flex items-center justify-center font-mono text-xs text-stone-500">
+      <div className="flex items-center space-x-2">
+        <div className="w-3.5 h-3.5 border-2 border-stone-800 border-t-transparent rounded-full animate-spin" />
+        <span>Redirecting to 𝕏...</span>
+      </div>
+    </div>
+  );
+};
+
 export const App: React.FC = () => {
   const isAppDomain = isSubdomainApp();
   const isApex = isApexDomain();
@@ -218,14 +235,7 @@ export const App: React.FC = () => {
         <Route path="/app/parking" element={<Navigate to="/parking" replace />} />
 
         {/* Server Auth Route Passthrough */}
-        <Route
-          path="/auth/*"
-          element={
-            <div className="min-h-screen bg-stone-50 flex items-center justify-center font-mono text-xs text-stone-500">
-              Connecting...
-            </div>
-          }
-        />
+        <Route path="/auth/*" element={<AuthPassthroughHandler />} />
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to={isAppDomain ? '/app' : '/'} replace />} />

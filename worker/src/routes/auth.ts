@@ -21,66 +21,114 @@ function getSecret(c: any): string {
 }
 
 /**
+ * Initiates X OAuth 2.0 PKCE flow, sets signed cookie state, and generates canonical authorize URL
+ */
+async function initiateXAuth(c: any): Promise<{ authorizeUrl: string; state: string }> {
+  const returnTo = c.req.query('return_to') || '/login';
+  const inviteCode = c.req.query('invite') || null;
+  const { codeVerifier, codeChallenge } = await generatePKCE();
+  const state = crypto.randomUUID();
+
+  // Determine absolute callback URL (always app.uprail.world in production)
+  const reqUrl = new URL(c.req.url);
+  const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
+  const callbackUrl = isLocal
+    ? `${reqUrl.origin}/auth/x/callback`
+    : 'https://app.uprail.world/auth/x/callback';
+
+  const oauthData = JSON.stringify({
+    codeVerifier,
+    state,
+    returnTo,
+    callbackUrl,
+    inviteCode,
+  });
+
+  // 1. Set signed HttpOnly cookie for stateless edge resolution
+  const secret = getSecret(c);
+  const signedToken = await signPayload(oauthData, secret);
+  const cookieOptions: any = {
+    path: '/',
+    httpOnly: true,
+    secure: reqUrl.protocol === 'https:',
+    sameSite: 'Lax',
+    maxAge: 600,
+  };
+  if (reqUrl.hostname.endsWith('uprail.world')) {
+    cookieOptions.domain = '.uprail.world';
+  }
+  setCookie(c, 'uprail_oauth_state', signedToken, cookieOptions);
+
+  // 2. Persist to memory + D1 fallback (zero KV writes)
+  await storeChallenge(c.env, {
+    key: `x_oauth:${state}`,
+    challenge: oauthData,
+    purpose: 'oauth_pkce',
+    ttlSeconds: 600,
+  });
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: c.env.X_CLIENT_ID,
+    redirect_uri: callbackUrl,
+    scope: 'users.read tweet.read offline.access',
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+  });
+
+  // Canonical X.com OAuth 2.0 authorize endpoint
+  const authorizeUrl = `https://x.com/i/oauth2/authorize?${params.toString()}`;
+  return { authorizeUrl, state };
+}
+
+/**
+ * GET /auth/x/init and GET /auth/x/authorize-url
+ * Returns JSON { url: authorizeUrl } for client-side direct navigation to real 𝕏 OAuth
+ */
+authRouter.get('/init', async (c) => {
+  try {
+    const { authorizeUrl } = await initiateXAuth(c);
+    return c.json({ url: authorizeUrl });
+  } catch (err: any) {
+    console.error('Failed to init X OAuth:', err);
+    return c.json<ErrorResponse>(
+      {
+        error: 'Failed to initiate X login flow',
+        code: 'AUTH_INIT_FAILED',
+      },
+      500
+    );
+  }
+});
+
+authRouter.get('/authorize-url', async (c) => {
+  try {
+    const { authorizeUrl } = await initiateXAuth(c);
+    return c.json({ url: authorizeUrl });
+  } catch (err: any) {
+    console.error('Failed to get X authorize URL:', err);
+    return c.json<ErrorResponse>(
+      {
+        error: 'Failed to initiate X login flow',
+        code: 'AUTH_INIT_FAILED',
+      },
+      500
+    );
+  }
+});
+
+/**
  * GET /auth/x/login
- * Initiates X OAuth 2.0 PKCE flow
+ * Initiates X OAuth 2.0 PKCE flow - redirects (302) or returns JSON if requested
  */
 authRouter.get('/login', async (c) => {
   try {
-    const returnTo = c.req.query('return_to') || '/';
-    const inviteCode = c.req.query('invite') || null;
-    const { codeVerifier, codeChallenge } = await generatePKCE();
-    const state = crypto.randomUUID();
-
-    // Determine absolute callback URL (always app.uprail.world in production)
-    const reqUrl = new URL(c.req.url);
-    const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
-    const callbackUrl = isLocal
-      ? `${reqUrl.origin}/auth/x/callback`
-      : 'https://app.uprail.world/auth/x/callback';
-
-    const oauthData = JSON.stringify({
-      codeVerifier,
-      state,
-      returnTo,
-      callbackUrl,
-      inviteCode,
-    });
-
-    // 1. Set signed HttpOnly cookie for stateless edge resolution
-    const secret = getSecret(c);
-    const signedToken = await signPayload(oauthData, secret);
-    const cookieOptions: any = {
-      path: '/',
-      httpOnly: true,
-      secure: reqUrl.protocol === 'https:',
-      sameSite: 'Lax',
-      maxAge: 600,
-    };
-    if (reqUrl.hostname.endsWith('uprail.world')) {
-      cookieOptions.domain = '.uprail.world';
+    const { authorizeUrl } = await initiateXAuth(c);
+    if (c.req.header('accept')?.includes('application/json') || c.req.query('format') === 'json') {
+      return c.json({ url: authorizeUrl });
     }
-    setCookie(c, 'uprail_oauth_state', signedToken, cookieOptions);
-
-    // 2. Persist to memory + D1 fallback (zero KV writes)
-    await storeChallenge(c.env, {
-      key: `x_oauth:${state}`,
-      challenge: oauthData,
-      purpose: 'oauth_pkce',
-      ttlSeconds: 600,
-    });
-
-    const params = new URLSearchParams({
-      response_type: 'code',
-      client_id: c.env.X_CLIENT_ID,
-      redirect_uri: callbackUrl,
-      scope: 'users.read tweet.read offline.access',
-      state,
-      code_challenge: codeChallenge,
-      code_challenge_method: 'S256',
-    });
-
-    const authorizeUrl = `https://twitter.com/i/oauth2/authorize?${params.toString()}`;
-    return c.redirect(authorizeUrl);
+    return c.redirect(authorizeUrl, 302);
   } catch (err: any) {
     console.error('Failed to initiate X login:', err);
     return c.json<ErrorResponse>(
