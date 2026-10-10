@@ -202,15 +202,14 @@ export const api = {
           };
           const mapped: Token[] = list.map((t: any) => {
             const rawSym = (t.symbol || '').trim();
-            const isNear =
-              rawSym.toLowerCase() === 'wnear' ||
-              rawSym.toLowerCase() === 'near' ||
-              t.nearContractId === 'wrap.near' ||
-              t.id === 'nep141:wrap.near';
-            const symbol = isNear ? 'NEAR' : rawSym || 'UNKNOWN';
-            const name = isNear ? 'NEAR Protocol' : (t.name || symbol);
+            const tokenChain = (t.chain || t.blockchain || 'near').toLowerCase();
+            const isNativeNear =
+              (rawSym.toLowerCase() === 'wnear' || rawSym.toLowerCase() === 'near') &&
+              (tokenChain === 'near' || t.nearContractId === 'wrap.near' || t.id === 'nep141:wrap.near');
+            const symbol = isNativeNear ? 'NEAR' : rawSym || 'UNKNOWN';
+            const name = isNativeNear ? 'NEAR Protocol' : (t.name || symbol);
             const iconUrl =
-              (isNear ? getOnchainIcon('near') : undefined) ||
+              (isNativeNear ? getOnchainIcon('near') : undefined) ||
               t.iconUrl ||
               t.icon ||
               getOnchainIcon(t.nearContractId) ||
@@ -222,12 +221,12 @@ export const api = {
               symbol,
               name,
               iconUrl,
-              decimals: t.decimals ?? (isNear ? 24 : 18),
+              decimals: t.decimals ?? (isNativeNear ? 24 : 18),
               priceUsd: t.priceUsd ?? 1.0,
-              nearContractId: t.nearContractId || 'wrap.near',
-              chain: t.chain || (isNear ? 'near' : 'near'),
-              badge: t.badge || (isNear || t.chain === 'near' ? 'Native Shield' : 'Cross-chain'),
-              category: t.category || (priorityOrder[symbol.toUpperCase()] <= 6 ? 'popular' : 'all'),
+              nearContractId: t.nearContractId || (isNativeNear ? 'wrap.near' : ''),
+              chain: tokenChain,
+              badge: t.badge || (isNativeNear ? 'Native Shield' : `${tokenChain.toUpperCase()}`),
+              category: t.category || (isNativeNear ? 'popular' : 'all'),
               balance: t.balance || '0.00',
             };
           });
@@ -236,6 +235,10 @@ export const api = {
             const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
             const pB = priorityOrder[b.symbol.toUpperCase()] ?? 999;
             if (pA !== pB) return pA - pB;
+            const isNatA = a.chain === 'near' || a.chain === a.symbol.toLowerCase();
+            const isNatB = b.chain === 'near' || b.chain === b.symbol.toLowerCase();
+            if (isNatA && !isNatB) return -1;
+            if (!isNatA && isNatB) return 1;
             return a.symbol.localeCompare(b.symbol);
           });
 

@@ -117,8 +117,16 @@ paymentsRouter.get('/tokens', async (c) => {
         badge = 'Bitcoin Native';
       }
 
+      const isNativeCanonical =
+        (symUpper === 'NEAR' && (t.chain === 'near' || t.nearContractId === 'wrap.near')) ||
+        (symUpper === 'USDC' && (t.nearContractId?.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1') || t.chain === 'near')) ||
+        (symUpper === 'USDT' && (t.nearContractId?.includes('usdt.tether-token.near') || t.chain === 'near')) ||
+        (symUpper === 'ETH' && (t.nearContractId?.includes('eth.bridge.near') || t.chain === 'near')) ||
+        (symUpper === 'BTC' && (t.nearContractId?.includes('btc.omft.near') || t.chain === 'btc')) ||
+        (symUpper === 'SOL' && (t.nearContractId?.includes('sol.omft.near') || t.chain === 'sol'));
+
       let category: 'popular' | 'stables' | 'l1' | 'all' = 'all';
-      if (['NEAR', 'USDC', 'USDT', 'ETH', 'BTC', 'SOL'].includes(symUpper)) {
+      if (isNativeCanonical) {
         category = 'popular';
       } else if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
         category = 'stables';

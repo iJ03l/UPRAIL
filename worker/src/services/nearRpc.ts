@@ -276,6 +276,10 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
           const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
           const pB = priorityOrder[b.symbol.toUpperCase()] ?? 999;
           if (pA !== pB) return pA - pB;
+          const isNativeA = a.chain === 'near' || a.chain === a.symbol.toLowerCase();
+          const isNativeB = b.chain === 'near' || b.chain === b.symbol.toLowerCase();
+          if (isNativeA && !isNativeB) return -1;
+          if (!isNativeA && isNativeB) return 1;
           return a.symbol.localeCompare(b.symbol);
         });
 
@@ -701,6 +705,94 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     refundTo: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
     symbol: 'BTC',
   },
+
+  // Polygon USDC
+  'pol_usdc': {
+    key: 'pol_usdc',
+    chain: 'pol',
+    chainName: 'Polygon',
+    token: 'USDC',
+    originAsset: 'nep245:v2_1.omni.hot.tg:137_qiStmoQJDQPTebaPjgx5VBxZv6L',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'USDC',
+  },
+  'polygon_usdc': {
+    key: 'polygon_usdc',
+    chain: 'pol',
+    chainName: 'Polygon',
+    token: 'USDC',
+    originAsset: 'nep245:v2_1.omni.hot.tg:137_qiStmoQJDQPTebaPjgx5VBxZv6L',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'USDC',
+  },
+
+  // Optimism USDC
+  'op_usdc': {
+    key: 'op_usdc',
+    chain: 'op',
+    chainName: 'Optimism',
+    token: 'USDC',
+    originAsset: 'nep141:op-0x0b2c639c533813f4aa9d7837caf62653d097ff85.omft.near',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'USDC',
+  },
+
+  // Avalanche USDC
+  'avax_usdc': {
+    key: 'avax_usdc',
+    chain: 'avax',
+    chainName: 'Avalanche',
+    token: 'USDC',
+    originAsset: 'nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omft.near',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'USDC',
+  },
+
+  // BSC USDT
+  'bsc_usdt': {
+    key: 'bsc_usdt',
+    chain: 'bsc',
+    chainName: 'BNB Chain',
+    token: 'USDT',
+    originAsset: 'nep245:v2_1.omni.hot.tg:56_2CMMyVTGZkeyNZTSvS5sarzfir6g',
+    destinationAsset: 'nep141:usdt.tether-token.near',
+    amount: '1000000000000000000',
+    minAmountFormatted: '1.00 USDT',
+    minAmountUsd: '$1.00',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'USDT',
+  },
+
+  // Dogecoin
+  'doge_doge': {
+    key: 'doge_doge',
+    chain: 'doge',
+    chainName: 'Dogecoin',
+    token: 'DOGE',
+    originAsset: 'nep141:doge.omft.near',
+    destinationAsset: 'nep141:doge.omft.near',
+    amount: '20000000',
+    minAmountFormatted: '0.2 DOGE',
+    minAmountUsd: '$0.10',
+    refundTo: 'D8vFzvgQ3bXUa7j4U7qB8fQ3bXUa7j4U7q',
+    symbol: 'DOGE',
+  },
 };
 
 // Aliases for chain-only fallback queries
@@ -714,6 +806,13 @@ CHAIN_DEPOSIT_CONFIGS['ethereum'] = CHAIN_DEPOSIT_CONFIGS['eth_usdc'];
 CHAIN_DEPOSIT_CONFIGS['near'] = CHAIN_DEPOSIT_CONFIGS['near_near'];
 CHAIN_DEPOSIT_CONFIGS['btc'] = CHAIN_DEPOSIT_CONFIGS['btc_btc'];
 CHAIN_DEPOSIT_CONFIGS['bitcoin'] = CHAIN_DEPOSIT_CONFIGS['btc_btc'];
+CHAIN_DEPOSIT_CONFIGS['pol'] = CHAIN_DEPOSIT_CONFIGS['pol_usdc'];
+CHAIN_DEPOSIT_CONFIGS['polygon'] = CHAIN_DEPOSIT_CONFIGS['pol_usdc'];
+CHAIN_DEPOSIT_CONFIGS['op'] = CHAIN_DEPOSIT_CONFIGS['op_usdc'];
+CHAIN_DEPOSIT_CONFIGS['optimism'] = CHAIN_DEPOSIT_CONFIGS['op_usdc'];
+CHAIN_DEPOSIT_CONFIGS['avax'] = CHAIN_DEPOSIT_CONFIGS['avax_usdc'];
+CHAIN_DEPOSIT_CONFIGS['bsc'] = CHAIN_DEPOSIT_CONFIGS['bsc_usdt'];
+CHAIN_DEPOSIT_CONFIGS['doge'] = CHAIN_DEPOSIT_CONFIGS['doge_doge'];
 
 /**
  * Calls 1Click quote endpoint to generate a live, cross-chain deposit address.
@@ -752,6 +851,57 @@ async function fetch1ClickDepositAddress(
     if (!resp.ok) {
       const errText = await resp.text();
       console.warn(`[nearRpc] 1Click quote failed (${resp.status}) for ${cfg.chain}/${cfg.token}:`, errText);
+
+      // Auto-retry with solver minAmount if 1Click specifies minimum bridge amount
+      const minMatch = errText.match(/try at least\s+([0-9]+)/i);
+      if (minMatch && minMatch[1]) {
+        const retryAmount = minMatch[1];
+        try {
+          const retryResp = await fetch(`${apiBase}/v0/quote`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+            },
+            body: JSON.stringify({
+              dry: false,
+              swapType: 'EXACT_INPUT',
+              slippageTolerance: 100,
+              recipientType: 'INTENTS',
+              recipient: nearAccount,
+              originAsset: cfg.originAsset,
+              destinationAsset: cfg.destinationAsset,
+              amount: retryAmount,
+              depositType: 'ORIGIN_CHAIN',
+              refundType: 'ORIGIN_CHAIN',
+              refundTo: cfg.refundTo,
+              deadline,
+            }),
+          });
+          if (retryResp.ok) {
+            const retryData = (await retryResp.json()) as any;
+            const quote = retryData.quote;
+            if (quote?.depositAddress) {
+              return {
+                chain: cfg.chain,
+                chainName: cfg.chainName,
+                address: quote.depositAddress,
+                memo: quote.depositMemo || undefined,
+                expiresAt: quote.deadline ? new Date(quote.deadline).getTime() : undefined,
+                token: cfg.token,
+                minAmount: retryAmount,
+                minAmountFormatted: quote.amountInFormatted ? `${quote.amountInFormatted} ${cfg.token}` : cfg.minAmountFormatted,
+                minAmountUsd: quote.amountInUsd ? `$${parseFloat(quote.amountInUsd).toFixed(2)}` : cfg.minAmountUsd,
+                isOneTime: true,
+              };
+            }
+          }
+        } catch (retryErr) {
+          console.warn('[nearRpc] retry failed:', retryErr);
+        }
+      }
+
       return null;
     }
 
@@ -875,7 +1025,57 @@ export async function getDepositAddress(
   const cleanChain = chainId.toLowerCase();
   const cleanToken = (tokenSymbol || '').toLowerCase();
   const directKey = cleanToken ? `${cleanChain}_${cleanToken}` : cleanChain;
-  const cfg = CHAIN_DEPOSIT_CONFIGS[directKey] || CHAIN_DEPOSIT_CONFIGS[cleanChain] || CHAIN_DEPOSIT_CONFIGS['near_near'];
+  let cfg = CHAIN_DEPOSIT_CONFIGS[directKey] || CHAIN_DEPOSIT_CONFIGS[cleanChain];
+
+  // Dynamic fallback for any token + chain supported by intents
+  if (!cfg && tokenSymbol) {
+    try {
+      const allTokens = await getSupportedTokens(env);
+      const matched = allTokens.find(
+        (t: any) =>
+          ((t.chain || '').toLowerCase() === cleanChain || (t.blockchain || '').toLowerCase() === cleanChain) &&
+          t.symbol.toUpperCase() === tokenSymbol.toUpperCase()
+      );
+      if (matched) {
+        const isEvm = ['eth', 'base', 'arbitrum', 'arb', 'pol', 'polygon', 'bsc', 'op', 'optimism', 'avax', 'scroll', 'bera', 'gnosis'].includes(cleanChain);
+        const isSol = cleanChain === 'sol' || cleanChain === 'solana';
+        const refundTo = isSol
+          ? '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'
+          : isEvm
+          ? '0x742d35Cc6634C0532925a3b844Bc454e4438f44e'
+          : 'escrow.uprail.near';
+
+        let destinationAsset = matched.defuse_asset_id;
+        const symUpper = matched.symbol.toUpperCase();
+        if (symUpper === 'USDC') destinationAsset = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+        else if (symUpper === 'USDT') destinationAsset = 'nep141:usdt.tether-token.near';
+        else if (symUpper === 'NEAR') destinationAsset = 'nep141:wrap.near';
+        else if (symUpper === 'ETH') destinationAsset = 'nep141:eth.bridge.near';
+        else if (symUpper === 'BTC') destinationAsset = 'nep141:btc.omft.near';
+        else if (symUpper === 'SOL') destinationAsset = 'nep141:sol.omft.near';
+
+        cfg = {
+          key: directKey,
+          chain: cleanChain,
+          chainName: cleanChain.toUpperCase(),
+          token: matched.symbol,
+          originAsset: matched.defuse_asset_id,
+          destinationAsset,
+          amount: '100000',
+          minAmountFormatted: `0.10 ${matched.symbol}`,
+          minAmountUsd: '$0.10',
+          refundTo,
+          symbol: matched.symbol,
+        };
+      }
+    } catch (err) {
+      console.warn('[nearRpc] dynamic token resolution failed:', err);
+    }
+  }
+
+  if (!cfg) {
+    cfg = CHAIN_DEPOSIT_CONFIGS['near_near'];
+  }
   const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
 
   // 1. Check D1 cache if not bypassing

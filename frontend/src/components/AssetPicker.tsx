@@ -33,34 +33,55 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  const filteredTokens = tokens.filter((t) => {
-    const symLower = t.symbol.toLowerCase();
-    const nameLower = t.name.toLowerCase();
-    const chainLower = (t.chain || '').toLowerCase();
-    const sLower = search.toLowerCase().trim();
+  const filteredTokens = React.useMemo(() => {
+    const list = tokens.filter((t) => {
+      const symLower = t.symbol.toLowerCase();
+      const nameLower = t.name.toLowerCase();
+      const chainLower = (t.chain || '').toLowerCase();
+      const sLower = search.toLowerCase().trim();
 
-    // If searching, check symbol, name, or chain
-    if (sLower) {
-      return (
-        symLower.includes(sLower) ||
-        nameLower.includes(sLower) ||
-        chainLower.includes(sLower) ||
-        (t.badge && t.badge.toLowerCase().includes(sLower))
-      );
+      // If searching, check symbol, name, or chain
+      if (sLower) {
+        return (
+          symLower.includes(sLower) ||
+          nameLower.includes(sLower) ||
+          chainLower.includes(sLower) ||
+          (t.badge && t.badge.toLowerCase().includes(sLower))
+        );
+      }
+
+      // Tab-based filtering when no active search text
+      if (activeTab === 'popular') {
+        return (
+          t.category === 'popular' ||
+          ((t.chain === 'near' || !t.chain) && ['near', 'usdc', 'usdt', 'eth', 'btc', 'sol'].includes(symLower))
+        );
+      }
+      if (activeTab === 'stables') {
+        return ['usdc', 'usdt', 'dai', 'frax', 'usdg'].some((s) => symLower.includes(s));
+      }
+      if (activeTab === 'l1') {
+        return (
+          (t.chain === 'near' || t.chain === symLower) &&
+          ['near', 'eth', 'btc', 'sol', 'avax', 'bnb', 'aurora'].some((s) => symLower.includes(s))
+        );
+      }
+      return true;
+    });
+
+    // In Popular tab without search, deduplicate so each primary symbol appears once
+    if (activeTab === 'popular' && !search) {
+      const seen = new Set<string>();
+      return list.filter((t) => {
+        const sym = t.symbol.toUpperCase();
+        if (seen.has(sym)) return false;
+        seen.add(sym);
+        return true;
+      });
     }
 
-    // Tab-based filtering when no active search text
-    if (activeTab === 'popular') {
-      return ['near', 'usdc', 'usdt', 'eth', 'btc', 'sol'].includes(symLower);
-    }
-    if (activeTab === 'stables') {
-      return ['usdc', 'usdt', 'dai', 'frax', 'usdg'].some((s) => symLower.includes(s));
-    }
-    if (activeTab === 'l1') {
-      return ['near', 'eth', 'btc', 'sol', 'avax', 'bnb', 'aurora'].some((s) => symLower.includes(s));
-    }
-    return true;
-  });
+    return list;
+  }, [tokens, search, activeTab]);
 
   return (
     <>
@@ -219,9 +240,13 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                         <div>
                           <div className="text-xs font-bold text-stone-950 flex items-center space-x-1.5 font-mono">
                             <span>{token.symbol}</span>
-                            {token.badge && (
-                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-stone-200/70 text-stone-700 font-mono font-medium">
-                                {token.badge}
+                            {token.chain && token.chain !== 'near' ? (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-stone-100 border border-stone-200 text-stone-700 font-mono font-bold uppercase">
+                                {token.chain}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 font-mono font-medium">
+                                Native
                               </span>
                             )}
                           </div>
