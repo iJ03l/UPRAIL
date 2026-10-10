@@ -45,7 +45,8 @@ func (h *BalanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if accessToken == "" && strings.TrimSpace(req.RefreshToken) != "" {
 		authResult, err := h.authService.Refresh(r.Context(), req.RefreshToken)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "refresh failed: "+err.Error())
+			// Sanitized: upstream auth errors embed provider details.
+			writeUpstreamError(w, "token-refresh", err)
 			return
 		}
 		accessToken = authResult.AccessToken
@@ -57,7 +58,8 @@ func (h *BalanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			SignedData: req.SignedData,
 		})
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "authentication failed: "+err.Error())
+			// Sanitized: upstream auth errors embed provider details.
+			writeUpstreamError(w, "authentication", err)
 			return
 		}
 		accessToken = authResult.AccessToken
@@ -70,7 +72,7 @@ func (h *BalanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	balances, err := h.authService.GetBalances(r.Context(), accessToken)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeUpstreamError(w, "balance", err)
 		return
 	}
 

@@ -47,7 +47,6 @@ func RegisterRoutes(r chi.Router, deps RouterDependencies) {
 			r.Post("/account/create", accountH.ServeHTTP)
 			r.Post("/create-account", accountH.ServeHTTP)
 			r.Post("/balance", balanceH.ServeHTTP)
-			r.Get("/balance", balanceH.ServeHTTP)
 			r.Get("/tokens", tokensH.ServeHTTP)
 		})
 	})

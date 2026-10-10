@@ -18,7 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
-import { api } from '../lib/api';
+import { api, clearAppStorage } from '../lib/api';
 import { MyInviteResponse } from '../types';
 
 interface SettingsSidebarProps {
@@ -67,8 +67,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
   const handleClearCache = () => {
     if (window.confirm('Reset local application state and cached intent records?')) {
-      localStorage.removeItem('uprail_payments');
-      localStorage.removeItem('uprail_shielded_balances');
+      clearAppStorage();
       window.location.reload();
     }
   };

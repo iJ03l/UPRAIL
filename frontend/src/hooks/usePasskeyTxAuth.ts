@@ -19,7 +19,20 @@
  */
 
 import { useState, useCallback } from 'react';
-import { requestTxChallenge } from '../lib/onchainApi';
+import { api } from '../lib/api';
+
+/**
+ * Decodes a base64url string (as issued by the server) into raw bytes.
+ * Equivalent to @simplewebauthn/browser's base64URLStringToBuffer().
+ */
+function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const b64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob(padded);
+  const bytes = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
 
 export interface PasskeyAssertion {
   id: string;
@@ -51,11 +64,16 @@ export function usePasskeyTxAuth() {
     setError(null);
 
     try {
-      // Step 1: Get a fresh server-issued challenge
-      const { challenge } = await requestTxChallenge();
+      // Step 1: Get a fresh server-issued single-use tx_auth challenge.
+      // The server also tells us the rpId it registered the passkey under —
+      // guessing it from window.location.hostname breaks on any host that
+      // isn't exactly the registration origin.
+      const { challenge, rpId } = await api.getTxAuthOptions();
 
-      // Step 2: Convert challenge to Uint8Array for WebAuthn
-      const challengeBytes = new TextEncoder().encode(challenge);
+      // Step 2: The server's challenge is a base64url string; the authenticator
+      // must sign its raw bytes so clientDataJSON.challenge round-trips back
+      // to the exact string the server stored.
+      const challengeBytes = base64UrlToBytes(challenge);
 
       // Step 3: Prompt device for passkey assertion
       if (!window.PublicKeyCredential) {
@@ -65,7 +83,7 @@ export function usePasskeyTxAuth() {
       const credential = await navigator.credentials.get({
         publicKey: {
           challenge: challengeBytes,
-          rpId: window.location.hostname,
+          ...(rpId ? { rpId } : {}),
           userVerification: 'required', // Required for fund movements
           timeout: 60000,
         },

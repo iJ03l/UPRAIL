@@ -104,12 +104,6 @@ export interface OnchainHistoryResponse {
   fetchedAt?: number;
 }
 
-export interface TxChallengeResponse {
-  challenge: string;
-  expiresIn: number;
-  message: string;
-}
-
 // ─── API calls ─────────────────────────────────────────────────────────────────
 
 /**
@@ -243,21 +237,4 @@ export async function fetchIntentAccount(): Promise<{
   });
   if (!res.ok) return { hasIntentAccount: false, nearAccount: null, xHandle: '' };
   return await res.json();
-}
-
-// ─── Passkey Transaction Authorization ────────────────────────────────────────
-
-/**
- * Requests a fresh single-use challenge from the server for a passkey-authorized transaction.
- * Call this BEFORE prompting the user for their passkey.
- */
-export async function requestTxChallenge(): Promise<TxChallengeResponse> {
-  const res = await fetch(url('/api/auth-challenge'), {
-    credentials: 'include',
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as any;
-    throw new Error(err.error || 'Failed to get transaction challenge');
-  }
-  return await res.json() as TxChallengeResponse;
 }

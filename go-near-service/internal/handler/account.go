@@ -43,7 +43,7 @@ func (h *AccountHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.accountService.CreateAccount(r.Context(), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, err)
 		return
 	}
 

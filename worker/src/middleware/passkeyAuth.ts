@@ -18,6 +18,7 @@ import type { AppContext, ErrorResponse } from '../types';
 import * as webauthnService from '../services/webauthn';
 import { getDb } from '../db/postgres';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
+import { resolveOrigin, resolveRpId, APP_ORIGIN } from '../services/webauthnConfig';
 
 /**
  * Middleware that verifies a WebAuthn passkey assertion is present and valid
@@ -113,19 +114,23 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
 
     try {
       const sql = getDb(c.env);
-      const [row] = await sql<any[]>`
-        SELECT public_key, counter FROM passkeys
-        WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
-      `;
-      if (row) passkeyRow = row;
-    } catch {
-      if (c.env.DB) {
+      if (sql) {
+        const [row] = await sql<any[]>`
+          SELECT public_key, counter FROM passkeys
+          WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
+        `;
+        if (row) passkeyRow = row;
+      }
+    } catch {}
+
+    if (!passkeyRow && c.env.DB) {
+      try {
         passkeyRow = await c.env.DB.prepare(
           'SELECT public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ?'
         )
           .bind(session.x_id, assertion.id)
           .first<any>();
-      }
+      } catch {}
     }
 
     if (!passkeyRow) {
@@ -139,8 +144,8 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     }
 
     // Verify the WebAuthn assertion cryptographically
-    const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
-    const expectedOrigin = c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+    const rpId = resolveRpId(c.env);
+    const expectedOrigin = resolveOrigin(c.env);
 
     let verification: { verified: boolean; newCounter?: number };
     try {
@@ -175,19 +180,20 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
       const newCounter = verification.newCounter;
       try {
         const sql = getDb(c.env);
-        await sql`
-          UPDATE passkeys SET counter = ${newCounter}
-          WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
-        `;
-      } catch {
-        if (c.env.DB) {
-          await c.env.DB.prepare(
-            'UPDATE passkeys SET counter = ? WHERE x_id = ? AND credential_id = ?'
-          )
-            .bind(newCounter, session.x_id, assertion.id)
-            .run()
-            .catch(() => {});
+        if (sql) {
+          await sql`
+            UPDATE passkeys SET counter = ${newCounter}
+            WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
+          `;
         }
+      } catch {}
+      if (c.env.DB) {
+        await c.env.DB.prepare(
+          'UPDATE passkeys SET counter = ? WHERE x_id = ? AND credential_id = ?'
+        )
+          .bind(newCounter, session.x_id, assertion.id)
+          .run()
+          .catch(() => {});
       }
     }
 
@@ -208,7 +214,7 @@ export async function issueTxChallenge(c: any): Promise<Response> {
     return c.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, 401);
   }
 
-  const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
+  const rpId = resolveRpId(c.env);
   const options = await webauthnService.generateAuthenticationOptions({ rpId });
 
   const challengeKey = `passkey_tx_auth:${session.x_id}:${options.challenge}`;
@@ -224,6 +230,7 @@ export async function issueTxChallenge(c: any): Promise<Response> {
 
   return c.json({
     ...options,
+    rpId,
     expiresIn: 300,
     message: 'Use this challenge with your device passkey to authorize the transaction.',
   });

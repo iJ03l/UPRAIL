@@ -4,15 +4,17 @@
  * All responses are pulled LIVE from the NEAR blockchain via the QuikNode RPC.
  * No hardcoded addresses, no stale token lists, no cached deposit addresses.
  *
- * Access control:
- *   - /onchain/tokens        — public (no auth required)
- *   - /onchain/balances      — requireAuth() — scoped to authenticated user's intent account
- *   - /onchain/deposit-address — requireAuth() — scoped to authenticated user
- *   - /onchain/history       — requireAuth() — scoped to authenticated user
+ * Access control — every route below is authenticated and scoped to the caller:
+ *   - /onchain/tokens          — public, static protocol metadata (no user data)
+ *   - /onchain/balances        — requireAuth() — authenticated user's intent account
+ *   - /onchain/deposit-address — requireAuth() — authenticated user
+ *   - /onchain/deposit-status  — requireAuth() + address ownership check
+ *   - /onchain/account         — requireAuth()
+ *   - /onchain/history         — requireAuth() — authenticated user
  */
 
 import { Hono } from 'hono';
-import type { AppContext, ErrorResponse } from '../types';
+import type { AppContext, ErrorResponse, Session } from '../types';
 import { requireAuth } from '../middleware/session';
 import * as nearRpc from '../services/nearRpc';
 
@@ -228,16 +230,82 @@ onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
 /**
  * Real-time deposit tracker: checks 1Click status for a specific deposit address.
  * Enables live UI updates: PENDING_DEPOSIT -> PROCESSING -> SUCCESS.
+ *
+ * SECURITY: authenticated, and the address must belong to the caller — either
+ * one of their cached 1Click deposit addresses or the deposit address of a
+ * payment they sent or are the recipient of. Without this check the endpoint is
+ * an open proxy to the 1Click status API and a cross-user address oracle.
  */
-onchainRouter.get('/deposit-status', async (c) => {
+onchainRouter.get('/deposit-status', requireAuth(), async (c) => {
+  const session = c.get('session')!;
   const address = c.req.query('address');
   if (!address) {
     return c.json<ErrorResponse>({ error: 'Missing address query param', code: 'INVALID_REQUEST' }, 400);
   }
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const owned = await callerOwnsDepositAddress(c.env, session, address);
+    if (!owned) {
+      return c.json<ErrorResponse>(
+        { error: 'Deposit address not found for this account', code: 'FORBIDDEN' },
+        403
+      );
+    }
+
+    return await probeDepositStatus(address);
+  } catch (err: any) {
+    return c.json({
+      status: 'PENDING_DEPOSIT',
+      depositedAmount: '0',
+      depositedAmountFormatted: '0',
+      depositedAmountUsd: '0',
+      txHashes: [],
+      isSettled: false,
+      error: err.message,
+    });
+  }
+});
+
+/**
+ * True when `address` is a deposit address the authenticated user may inspect.
+ */
+async function callerOwnsDepositAddress(
+  env: AppContext['Bindings'],
+  session: Session,
+  address: string
+): Promise<boolean> {
+  if (!env.DB) return false;
+  try {
+    const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
+    const cached = await env.DB.prepare(
+      'SELECT 1 AS ok FROM deposit_addresses WHERE address = ? AND account_id = ? LIMIT 1'
+    )
+      .bind(address, nearAccount)
+      .first<{ ok: number }>();
+    if (cached) return true;
+
+    const payment = await env.DB.prepare(
+      `SELECT 1 AS ok FROM payments
+        WHERE deposit_address = ?
+          AND (sender_x_id = ?
+               OR recipient_x_id = ?
+               OR LOWER(recipient_handle) = LOWER(?))
+        LIMIT 1`
+    )
+      .bind(address, session.x_id, session.x_id, session.x_handle)
+      .first<{ ok: number }>();
+    return Boolean(payment);
+  } catch (err) {
+    console.warn('[onchain/deposit-status] ownership check failed:', err);
+    return false;
+  }
+}
+
+/** Queries 1Click for the deposit status of an already-authorized address. */
+async function probeDepositStatus(address: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+  try {
     const resp = await fetch(
       `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(address)}`,
       {
@@ -251,7 +319,7 @@ onchainRouter.get('/deposit-status', async (c) => {
     clearTimeout(timeoutId);
 
     if (!resp.ok) {
-      return c.json({
+      return Response.json({
         status: 'PENDING_DEPOSIT',
         depositedAmount: '0',
         depositedAmountFormatted: '0',
@@ -273,7 +341,7 @@ onchainRouter.get('/deposit-status', async (c) => {
     const depAmt = parseFloat(swapDetails?.depositedAmountFormatted || '0');
     const isSettled = data.status === 'SUCCESS' || depAmt > 0;
 
-    return c.json({
+    return Response.json({
       status: data.status || 'PENDING_DEPOSIT',
       depositedAmount: swapDetails?.depositedAmount || '0',
       depositedAmountFormatted: swapDetails?.depositedAmountFormatted || '0',
@@ -286,7 +354,7 @@ onchainRouter.get('/deposit-status', async (c) => {
       isSettled,
     });
   } catch (err: any) {
-    return c.json({
+    return Response.json({
       status: 'PENDING_DEPOSIT',
       depositedAmount: '0',
       depositedAmountFormatted: '0',
@@ -295,8 +363,10 @@ onchainRouter.get('/deposit-status', async (c) => {
       isSettled: false,
       error: err.message,
     });
+  } finally {
+    clearTimeout(timeoutId);
   }
-});
+}
 
 // ─── GET /api/onchain/history ─────────────────────────────────────────────────
 /**

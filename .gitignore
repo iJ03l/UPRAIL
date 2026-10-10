@@ -10,6 +10,7 @@ vendor/
 dist/
 build/
 .next/
+frontend/out/
 next-env.d.ts
 *.exe
 
@@ -24,6 +25,7 @@ go-near-service/.env
 
 # Go binaries
 cmd/server/server
+go-near-service/server
 go-near-service/bin/
 bin/
 *.tsbuildinfo

@@ -38,19 +38,15 @@ export class NearContainer extends DurableObject<Env> {
         }
       }
 
-      // 2. Fallback to container port 8080 via localhost loopback or internal address
+      // 2. Fallback to container port 8080 via localhost loopback or internal address.
+      //    Callers (nearProxy) already produce signed, correctly-pathed requests
+      //    (e.g. /internal/quote); headers and path are forwarded untouched so
+      //    the Go signature still verifies. No rewriting is done here.
       const url = new URL(request.url);
-      let pathname = url.pathname;
-      if (!pathname.startsWith('/internal') && pathname !== '/') {
-        pathname = `/internal${pathname}`;
-      }
-      const targetUrl = new URL(pathname + url.search, 'http://127.0.0.1:8080');
+      const targetUrl = new URL(url.pathname + url.search, 'http://127.0.0.1:8080');
 
       const headers = new Headers(request.headers);
       headers.set('Host', '127.0.0.1:8080');
-      if (this.env.INTERNAL_SERVICE_KEY) {
-        headers.set('X-Internal-Secret', this.env.INTERNAL_SERVICE_KEY);
-      }
 
       const fetchOptions: RequestInit = {
         method: request.method,

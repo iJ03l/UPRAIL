@@ -750,18 +750,20 @@ export const ReceivePage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* QR Code */}
+                    {/* Deposit address card — rendered fully client-side. No
+                        third-party QR service is used: those services receive
+                        the value being encoded, which would leak the deposit
+                        address. */}
                     {showQr && depositAddressValue && (
-                      <div className="p-4 bg-white rounded-2xl border border-stone-200 flex flex-col items-center justify-center animate-fade-in shadow-2xs">
-                        <img
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                            depositAddressValue
-                          )}`}
-                          alt="Deposit QR"
-                          className="w-36 h-36 object-contain"
-                        />
+                      <div className="p-4 bg-white rounded-2xl border border-stone-200 flex flex-col animate-fade-in shadow-2xs">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1.5">
+                          Deposit Address
+                        </span>
+                        <p className="text-[11px] font-mono text-stone-700 break-all bg-stone-50 border border-stone-200 rounded-lg p-2 select-all">
+                          {depositAddressValue}
+                        </p>
                         <span className="text-[11px] text-stone-500 font-mono mt-2.5">
-                          Scan to deposit {selectedToken} on {activeChainDef?.name || selectedChain}
+                          Deposit {selectedToken} on {activeChainDef?.name || selectedChain}
                         </span>
                       </div>
                     )}
@@ -773,7 +775,7 @@ export const ReceivePage: React.FC = () => {
                         className="text-stone-900 hover:underline font-bold flex items-center space-x-1 cursor-pointer"
                       >
                         <QrCode className="w-3.5 h-3.5" />
-                        <span>{showQr ? 'Hide QR' : 'Show QR'}</span>
+                        <span>{showQr ? 'Hide Address' : 'Show Address'}</span>
                       </button>
                       <span className="text-[11px] text-stone-400">
                         Expires in ~3 days

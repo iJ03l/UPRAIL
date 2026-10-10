@@ -44,3 +44,25 @@ func TestSignerLifecycle(t *testing.T) {
 		t.Errorf("public key mismatch")
 	}
 }
+
+func TestSignerWithPostQuantumMasterKey(t *testing.T) {
+	// 4032 bytes master key (ML-DSA-65 format)
+	largeKey := make([]byte, 4032)
+	for i := range largeKey {
+		largeKey[i] = byte(i % 251)
+	}
+	b58Key := "ml-dsa-65:" + crypto.Base58Encode(largeKey)
+
+	signer, err := escrow.NewSigner(b58Key, "escrow.uprail.near")
+	if err != nil {
+		t.Fatalf("unexpected error initializing signer with ML-DSA master key: %v", err)
+	}
+
+	expectedRootPriv := ed25519.NewKeyFromSeed(largeKey[:32])
+	expectedPub := "ed25519:" + crypto.Base58Encode(expectedRootPriv.Public().(ed25519.PublicKey))
+
+	if signer.PublicKey() != expectedPub {
+		t.Errorf("expected public key %s, got %s", expectedPub, signer.PublicKey())
+	}
+}
+

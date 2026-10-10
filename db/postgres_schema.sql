@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS x_identities (
     x_name VARCHAR(128) NOT NULL,              -- Display name
     near_account VARCHAR(128),                 -- Linked NEAR / Intent account (e.g. x_<x_id>.uprail.near)
     avatar_url TEXT,                           -- Profile image URL
+    is_activated BOOLEAN NOT NULL DEFAULT FALSE,   -- Has completed first invite redemption
+    personal_invite_code VARCHAR(8),           -- One personal invite code per user
+    invited_by_code VARCHAR(8),                -- Invite code used at signup
+    invited_by_handle VARCHAR(32),             -- Handle of the inviter
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -70,8 +74,12 @@ CREATE TABLE IF NOT EXISTS payments (
     sender_x_handle VARCHAR(32),
     recipient_handle VARCHAR(32) NOT NULL,     -- Target handle without @
     recipient_x_id VARCHAR(64) REFERENCES x_identities(x_id) ON DELETE SET NULL,
-    asset VARCHAR(32) NOT NULL,               -- e.g. 'usdc', 'usdt', 'near', 'eth', 'btc'
+    asset TEXT NOT NULL,                     -- token id or defuse asset id (e.g. 'usdc', 'nep141:usdc.near')
     amount VARCHAR(64) NOT NULL,              -- Exact string numeric amount
+    fee NUMERIC(32, 12),                      -- Protocol fee taken at send time
+    fee_recipient VARCHAR(128),               -- e.g. fees.uprail.near
+    invite_code VARCHAR(8),                   -- Preloaded invite code attached to this payment
+    memo TEXT,                                -- Sender memo (never onchain)
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING', -- PENDING, DEPOSIT_WAITING, ESCROWED, CLAIMED, REFUNDED, CANCELLED, EXPIRED
     deposit_address TEXT,                     -- 1Click cross-chain deposit address
     intent_hash TEXT,                         -- Defuse / NEAR Intents hash
@@ -83,10 +91,59 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_sender_x_id ON payments(sender_x_id);
+CREATE INDEX IF NOT EXISTS idx_payments_recipient_x_id ON payments(recipient_x_id, status);
 CREATE INDEX IF NOT EXISTS idx_payments_recipient_handle_lower ON payments(LOWER(recipient_handle), status);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payments_expires_at ON payments(expires_at);
+
+-- 6. Invites: 6 capital letter invite codes (1 per user + preloaded payment invites)
+CREATE TABLE IF NOT EXISTS invites (
+    code VARCHAR(8) PRIMARY KEY,
+    creator_x_id VARCHAR(64) REFERENCES x_identities(x_id) ON DELETE SET NULL,
+    creator_x_handle VARCHAR(32),
+    claimed_by_x_id VARCHAR(64) REFERENCES x_identities(x_id) ON DELETE SET NULL,
+    claimed_by_x_handle VARCHAR(32),
+    payment_id VARCHAR(64),
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE | USED | EXPIRED
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claimed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_invites_creator ON invites(creator_x_id);
+CREATE INDEX IF NOT EXISTS idx_invites_claimed_by ON invites(claimed_by_x_id);
+CREATE INDEX IF NOT EXISTS idx_invites_payment ON invites(payment_id);
+CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status);
+
+-- 7. Withdrawals: shielded balance payouts to external blockchain addresses
+CREATE TABLE IF NOT EXISTS withdrawals (
+    id VARCHAR(64) PRIMARY KEY,
+    x_id VARCHAR(64) NOT NULL REFERENCES x_identities(x_id) ON DELETE CASCADE,
+    x_handle VARCHAR(32) NOT NULL,
+    destination_address TEXT NOT NULL,
+    asset TEXT NOT NULL,                     -- token id or defuse asset id
+    amount VARCHAR(64) NOT NULL,
+    tx_hash TEXT,
+    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',  -- PENDING | COMPLETED | FAILED
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_withdrawals_x_id ON withdrawals(x_id, asset, status);
+
+-- 8. Deposit addresses: cached 1Click one-time cross-chain deposit addresses
+CREATE TABLE IF NOT EXISTS deposit_addresses (
+    account_id VARCHAR(128) NOT NULL,
+    chain VARCHAR(32) NOT NULL,
+    chain_name VARCHAR(64) NOT NULL,
+    address TEXT NOT NULL,
+    memo TEXT,
+    expires_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (account_id, chain)
+);
+
+CREATE INDEX IF NOT EXISTS idx_deposit_addresses_account ON deposit_addresses(account_id);
 
 -- Helper trigger for auto-updating updated_at timestamp
 CREATE OR REPLACE FUNCTION set_updated_at_timestamp()

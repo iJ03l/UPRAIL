@@ -39,11 +39,15 @@ CREATE TABLE IF NOT EXISTS payments (
   sender_x_id TEXT,
   sender_x_handle TEXT,
   recipient_handle TEXT NOT NULL,
+  -- Immutable X identity of the recipient when it was known at send time.
+  -- Claim authorization prefers this over recipient_handle (handles are mutable).
+  recipient_x_id TEXT,
   asset TEXT NOT NULL,
   amount TEXT NOT NULL,
   fee TEXT,
   fee_recipient TEXT,
   invite_code TEXT,
+  memo TEXT,
   status TEXT NOT NULL,
   deposit_address TEXT,
   intent_hash TEXT,
@@ -59,6 +63,21 @@ CREATE INDEX IF NOT EXISTS idx_payments_sender ON payments(sender_x_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at);
 CREATE INDEX IF NOT EXISTS idx_payments_invite ON payments(invite_code);
+CREATE INDEX IF NOT EXISTS idx_payments_recipient_x_id ON payments(recipient_x_id, status);
+
+-- Deposit addresses: cached 1Click one-time cross-chain deposit addresses
+CREATE TABLE IF NOT EXISTS deposit_addresses (
+  account_id TEXT NOT NULL,
+  chain TEXT NOT NULL,
+  chain_name TEXT NOT NULL,
+  address TEXT NOT NULL,
+  memo TEXT,
+  expires_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (account_id, chain)
+);
+
+CREATE INDEX IF NOT EXISTS idx_deposit_addresses_account ON deposit_addresses(account_id);
 
 -- Invites: 6 capital letter invite codes (1 per user + preloaded payment invites)
 CREATE TABLE IF NOT EXISTS invites (
@@ -79,6 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_invites_payment ON invites(payment_id);
 CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status);
 
 -- Withdrawals: Vault settlement to external blockchain addresses
+-- Canonical definition — migration 0002 must stay in sync with this block.
 CREATE TABLE IF NOT EXISTS withdrawals (
   id TEXT PRIMARY KEY,
   x_id TEXT NOT NULL,
@@ -87,12 +107,14 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   asset TEXT NOT NULL,
   amount TEXT NOT NULL,
   tx_hash TEXT,
-  status TEXT NOT NULL DEFAULT 'COMPLETED',
-  created_at INTEGER NOT NULL
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_withdrawals_x_id ON withdrawals(x_id);
 CREATE INDEX IF NOT EXISTS idx_withdrawals_created ON withdrawals(created_at);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_x_asset_status ON withdrawals(x_id, asset, status);
 
 -- Auth Challenges: Single-use WebAuthn and OAuth challenges (replaces KV writes)
 CREATE TABLE IF NOT EXISTS auth_challenges (

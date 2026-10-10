@@ -33,7 +33,7 @@ func (h *DepositHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	status, err := h.client.GetStatus(r.Context(), depositAddress)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeUpstreamError(w, "deposit-status", err)
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *DepositHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.client.SubmitDeposit(r.Context(), req.TxHash, req.DepositAddress); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeUpstreamError(w, "deposit-submit", err)
 		return
 	}
 

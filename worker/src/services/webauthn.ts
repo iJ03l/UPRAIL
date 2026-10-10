@@ -12,6 +12,8 @@ import {
   type AuthenticationResponseJSON,
 } from '@simplewebauthn/server';
 
+import { DEFAULT_RP_ID } from './webauthnConfig';
+
 /**
  * Convert Uint8Array to hex string
  */
@@ -39,7 +41,7 @@ export function hexToBuffer(hex: string): Uint8Array {
 export async function generateRegistrationOptions(params: {
   userId: string;
   userName: string;
-  rpId: string;
+  rpId?: string;
   rpName: string;
 }) {
   const encoder = new TextEncoder();
@@ -47,7 +49,7 @@ export async function generateRegistrationOptions(params: {
 
   return await simpleGenerateRegOptions({
     rpName: params.rpName || 'UPRAIL',
-    rpID: params.rpId || 'uprail.app',
+    rpID: params.rpId || DEFAULT_RP_ID,
     userID: new Uint8Array(userIdBytes),
     userName: params.userName,
     userDisplayName: `@${params.userName}`,
@@ -104,7 +106,7 @@ export async function generateAuthenticationOptions(params: {
   rpId: string;
 }) {
   return await simpleGenerateAuthOptions({
-    rpID: params.rpId || 'uprail.app',
+    rpID: params.rpId || DEFAULT_RP_ID,
     allowCredentials:
       params.credentialIds && params.credentialIds.length > 0
         ? params.credentialIds.map((id) => ({

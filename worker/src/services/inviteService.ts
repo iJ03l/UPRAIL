@@ -7,6 +7,7 @@
  */
 
 import type { Env, Invite, MyInviteResponse, RedeemInviteResponse } from '../types';
+import { resolveOrigin } from './webauthnConfig';
 
 const CAPITAL_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -44,36 +45,7 @@ export async function ensureGenesisInvites(env: Env): Promise<void> {
   const genesisCodes = ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET'];
   const now = Date.now();
 
-  try {
-    await env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS invites (
-        code TEXT PRIMARY KEY,
-        creator_x_id TEXT,
-        creator_x_handle TEXT,
-        claimed_by_x_id TEXT,
-        claimed_by_x_handle TEXT,
-        payment_id TEXT,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
-        created_at INTEGER NOT NULL,
-        claimed_at INTEGER
-      )`
-    ).run();
-
-    await env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS x_identities (
-        x_id TEXT PRIMARY KEY,
-        x_handle TEXT NOT NULL UNIQUE,
-        x_name TEXT NOT NULL,
-        near_account TEXT,
-        is_activated INTEGER NOT NULL DEFAULT 0,
-        personal_invite_code TEXT,
-        invited_by_code TEXT,
-        invited_by_handle TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      )`
-    ).run();
-  } catch {}
+  // Schema is owned by worker/src/db/migrations — never CREATE TABLE here.
 
   for (const code of genesisCodes) {
     try {
@@ -173,13 +145,20 @@ export async function redeemInvite(
   // 1. Mark invite as USED (user-generated personal invites are single-use; system bootstrap codes remain active)
   const isSystemGenesis = check.invite.creator_x_handle === 'system' || ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET'].includes(code);
   if (!isSystemGenesis) {
-    await env.DB.prepare(
+    const claimResult = await env.DB.prepare(
       `UPDATE invites
        SET status = 'USED', claimed_by_x_id = ?, claimed_by_x_handle = ?, claimed_at = ?
        WHERE code = ? AND status = 'ACTIVE'`
     )
       .bind(user.x_id, cleanHandle, now, code)
       .run();
+
+    // Atomic single-claim guard: if a concurrent request consumed this code
+    // between our validateInviteCode() read and this UPDATE, changes === 0.
+    // Refuse to activate the account on a lost race.
+    if ((claimResult.meta?.changes ?? 0) === 0) {
+      throw new Error('Invite code was already claimed');
+    }
   }
 
   // 2. Generate exactly 1 personal invite code for the new user
@@ -333,7 +312,7 @@ export async function getUserInvite(
     }));
   } catch {}
 
-  const origin = env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+  const origin = resolveOrigin(env);
 
   return {
     inviteCode: personalCode || '',

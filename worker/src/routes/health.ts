@@ -22,5 +22,10 @@ healthRouter.get('/', async (c) => {
       nearApi: c.env.NEAR_API_BASE,
       escrowAccount: c.env.ESCROW_ACCOUNT_ID,
     },
+    configured: {
+      internalKeySet: !!c.env.INTERNAL_SERVICE_KEY,
+      escrowKeySet: !!c.env.ESCROW_PRIVATE_KEY,
+      sessionSecretSet: !!c.env.SESSION_SECRET,
+    },
   });
 });

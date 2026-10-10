@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Token, PaymentQuote, PaymentIntent } from '../types';
-import { api, SUPPORTED_TOKENS } from '../lib/api';
+import { api, SUPPORTED_TOKENS, normalizeRecipientInput } from '../lib/api';
 import { usePasskeyTxAuth } from './usePasskeyTxAuth';
 
 export function usePayments() {
@@ -59,9 +59,9 @@ export function usePayments() {
       setIsSubmitting(true);
       setError(null);
 
-      const cleanHandle = recipientHandle.replace(/^@/, '').trim().toLowerCase();
+      const cleanHandle = normalizeRecipientInput(recipientHandle).recipient;
       if (!cleanHandle) {
-        throw new Error('Please enter a valid X handle');
+        throw new Error('Please enter a valid recipient');
       }
       if (!amount || parseFloat(amount) <= 0) {
         throw new Error('Please enter a valid amount to send');
@@ -78,14 +78,15 @@ export function usePayments() {
       }
 
       // Step 2: Send payment intent with passkey cryptographic assertion
+      // The quote shown in the UI is only a preview (it is not bound to this
+      // recipient). createPayment requests a fresh, recipient-bound quote so the
+      // signature always matches the payment being submitted.
       const payment = await api.createPayment({
         recipientHandle: cleanHandle,
         tokenId: selectedToken.id,
         amount,
         memo,
         passkeyAssertion: assertion,
-        quoteSignature: quote?.quoteSignature,
-        depositAddress: quote?.depositAddress,
       });
 
       setCreatedPayment(payment);

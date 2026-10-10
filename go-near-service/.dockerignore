@@ -1,0 +1,5 @@
+# Build context for the Go settlement service image (run from the repo root
+# with `docker build -f go-near-service/Dockerfile .`).
+bin/
+*.exe
+*.log

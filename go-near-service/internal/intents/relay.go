@@ -109,24 +109,57 @@ func (c *RelayClient) PublishIntent(ctx context.Context, signedData SignedData) 
 		return "", fmt.Errorf("publish intent: relay rejected with code %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
 	}
 
-	// Result can be a direct string (e.g. "intent_hash") or an object with "intent_hash"
+	// Result can be a direct string (e.g. "intent_hash") or an object with
+	// "intent_hash"/"hash". Anything that does not look like a real hash is an
+	// error: callers persist this value as the settlement transaction hash, and
+	// a fabricated value would make an unsettled payment look settled.
 	var directHash string
 	if err := json.Unmarshal(rpcResp.Result, &directHash); err == nil && directHash != "" {
+		if !looksLikeIntentHash(directHash) {
+			return "", fmt.Errorf("publish intent: relay returned a malformed intent hash")
+		}
 		return directHash, nil
 	}
 
 	var resultMap map[string]any
 	if err := json.Unmarshal(rpcResp.Result, &resultMap); err == nil {
-		if hash, ok := resultMap["intent_hash"].(string); ok && hash != "" {
-			return hash, nil
-		}
-		if hash, ok := resultMap["hash"].(string); ok && hash != "" {
-			return hash, nil
-		}
-		if status, ok := resultMap["status"].(string); ok && status != "" {
-			return status, nil
+		for _, key := range []string{"intent_hash", "hash"} {
+			if hash, ok := resultMap[key].(string); ok && hash != "" {
+				if !looksLikeIntentHash(hash) {
+					return "", fmt.Errorf("publish intent: relay returned a malformed intent hash")
+				}
+				return hash, nil
+			}
 		}
 	}
 
-	return string(rpcResp.Result), nil
+	return "", fmt.Errorf(
+		"publish intent: relay response contained no intent hash: %s",
+		truncateForLog(string(rpcResp.Result), 200),
+	)
+}
+
+// looksLikeIntentHash rejects empty, oversized and structured values (JSON
+// objects, error strings, statuses) that must never be recorded as a tx hash.
+func looksLikeIntentHash(value string) bool {
+	if len(value) < 8 || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == ':' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func truncateForLog(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= max {
+		return value
+	}
+	return value[:max] + "…"
 }

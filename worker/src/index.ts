@@ -14,6 +14,8 @@ import type { AppContext, ErrorResponse } from './types';
 import { corsMiddleware } from './middleware/cors';
 import { rateLimit } from './middleware/rateLimit';
 import { sessionMiddleware, requireAuth } from './middleware/session';
+import { securityHeaders } from './middleware/securityHeaders';
+import { bodyLimit } from './middleware/bodyLimit';
 import { authRouter } from './routes/auth';
 import { paymentsRouter } from './routes/payments';
 import { claimRouter } from './routes/claim';
@@ -29,9 +31,16 @@ export { NearContainer } from './durable-objects/near-container';
 const app = new Hono<AppContext>();
 
 // Global Middlewares
+// 1. Defense-in-depth security headers (CSP, HSTS, frame options, sniffing protection)
+app.use('*', securityHeaders());
+// 2. Body size bounded to prevent memory exhaustion
+app.use('*', bodyLimit());
+// 3. CORS preflight and allowed origins
 app.use('*', corsMiddleware());
-app.use('*', rateLimit({ limit: 300, prefix: 'global' }));
+// 4. Session HMAC authentication (runs before rate limiting)
 app.use('*', sessionMiddleware());
+// 5. Rate limiting (keyed on verified user or IP)
+app.use('*', rateLimit({ limit: 300, prefix: 'global' }));
 
 // Enforce strict separation: /app is strictly forbidden on apex uprail.world,
 // and all login/app routes on apex are redirected to app.uprail.world
@@ -125,6 +134,7 @@ apiRouter.route('/onchain', onchainRouter);
 // The frontend calls this BEFORE prompting for the passkey,
 // then includes the resulting `passkeyAssertion` with fund-moving requests.
 apiRouter.get('/auth-challenge', requireAuth(), issueTxChallenge);
+apiRouter.post('/auth-challenge', requireAuth(), issueTxChallenge);
 
 app.route('/api', apiRouter);
 
@@ -140,9 +150,27 @@ app.onError((err, c) => {
   );
 });
 
+// Share-link deep links: /claim/<paymentId> and /app/claim/<paymentId>.
+// Next.js static export cannot prerender unknown payment IDs, so these paths
+// are rewritten onto the static claim page, which reads the id from the URL.
+const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
+
 // 404 / Asset Fallback Handler
 app.notFound(async (c) => {
   if (c.env.ASSETS) {
+    const url = new URL(c.req.url);
+    if (c.req.method === 'GET' && CLAIM_DEEP_LINK.test(url.pathname)) {
+      const basePath = url.pathname.startsWith('/app/') ? '/app/claim' : '/claim';
+      const assetResponse = await c.env.ASSETS.fetch(
+        new Request(new URL(basePath, url), {
+          method: 'GET',
+          headers: c.req.raw.headers,
+        })
+      );
+      if (assetResponse.ok) {
+        return assetResponse;
+      }
+    }
     return await c.env.ASSETS.fetch(c.req.raw);
   }
   return c.json<ErrorResponse>(

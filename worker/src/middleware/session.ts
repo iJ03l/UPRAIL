@@ -8,12 +8,16 @@ import { Context, MiddlewareHandler } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext, Session } from '../types';
 import { signPayload, verifyAndUnpack } from '../utils/crypto';
+import { getSessionSecret, requireSessionSecret } from '../utils/secrets';
 
 export const SESSION_COOKIE_NAME = 'uprail_session';
 export const SESSION_TTL_SECONDS = 86400 * 7; // 7 days
 
-function getSecret(c: Context<AppContext>): string {
-  return c.env.SESSION_SECRET || 'uprail_master_signed_session_edge_2026';
+let missingSecretWarned = false;
+function warnMissingSecret(): void {
+  if (missingSecretWarned) return;
+  missingSecretWarned = true;
+  console.error('SESSION_SECRET is not configured — all sessions are rejected (fail closed)');
 }
 
 export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
@@ -21,7 +25,14 @@ export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
     const rawCookie = getCookie(c, SESSION_COOKIE_NAME);
 
     if (rawCookie) {
-      const secret = getSecret(c);
+      const secret = getSessionSecret(c.env);
+
+      if (!secret) {
+        // Fail closed: never authenticate against an unsigned/unguessable-cookie-free deployment.
+        warnMissingSecret();
+        deleteCookie(c, SESSION_COOKIE_NAME, { path: '/' });
+        return await next();
+      }
 
       // 1. Signed cookie format (base64url.base64url)
       if (rawCookie.includes('.')) {
@@ -97,7 +108,7 @@ export async function createSession(
     expires_at: expiresAt,
   };
 
-  const secret = getSecret(c);
+  const secret = requireSessionSecret(c.env);
   const signedToken = await signPayload(JSON.stringify(session), secret);
 
   const reqUrl = new URL(c.req.url);
@@ -134,7 +145,7 @@ export async function updateSession(
     ...updates,
   };
 
-  const secret = getSecret(c);
+  const secret = requireSessionSecret(c.env);
   const signedToken = await signPayload(JSON.stringify(updated), secret);
 
   const reqUrl = new URL(c.req.url);

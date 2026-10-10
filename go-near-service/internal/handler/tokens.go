@@ -25,7 +25,7 @@ func (h *TokensHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	tokens, err := h.client.GetTokens(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeUpstreamError(w, "tokens", err)
 		return
 	}
 

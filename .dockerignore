@@ -1,0 +1,21 @@
+# Keep build context lean: never send secrets, git history, node_modules or
+# build output to the Docker daemon.
+**/.git
+**/.git/
+.gitignore
+node_modules/
+**/node_modules
+dist/
+build/
+out/
+.next/
+coverage/
+*.log
+*.env
+*.env.local
+.dev.vars
+.env
+worker/.dev.vars
+bin/
+*.exe
+.DS_Store

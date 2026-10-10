@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
+import { formatRecipientDisplay } from '../lib/api';
 import { ShareModal } from '../components/ShareModal';
 import { PaymentIntent } from '../types';
 
@@ -104,6 +105,8 @@ export const HistoryPage: React.FC = () => {
             { id: 'ready', label: 'Ready to Claim' },
             { id: 'claimed', label: 'Claimed' },
             { id: 'pending', label: 'Open Intents' },
+            { id: 'expired', label: 'Expired' },
+            { id: 'refunded', label: 'Refunded' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -150,7 +153,7 @@ export const HistoryPage: React.FC = () => {
                     <div>
                       <div className="flex items-center space-x-2">
                         <span className="text-xs font-bold text-stone-900 font-mono">
-                          {isSent ? `To @${tx.recipientHandle}` : `From @${tx.senderHandle}`}
+                          {isSent ? `To ${formatRecipientDisplay(tx.recipientHandle)}` : `From @${tx.senderHandle}`}
                         </span>
                         <span className="text-[10px] text-stone-400 font-mono">
                           {new Date(tx.createdAt).toLocaleDateString()}

@@ -90,20 +90,13 @@ export const webauthn = {
     }
 
     const options = await api.getPasskeyRegisterOptions(cleanHandle);
-    const attResp = await startRegistration(options);
+    const attResp = await startRegistration(
+      // DOM lib and @simplewebauthn/types ship structurally duplicate definitions
+      options as unknown as Parameters<typeof startRegistration>[0]
+    );
 
     // Register with backend
-    const res = await fetch('/api/claim/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ attestation: attResp }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to register passkey with server');
-    }
+    await api.registerPasskeyAttestation(attResp);
 
     // Save passkey record locally
     const passkeyInfo: StoredPasskeyInfo = {
@@ -134,7 +127,8 @@ export const webauthn = {
       throw new Error('WebAuthn is not supported on this browser.');
     }
 
-    const options = await api.getPasskeyAuthOptions(cleanHandle);
+    // Single-use tx_auth challenge consumed by requirePasskeyAuth()
+    const options = await api.getTxAuthOptions();
     const asseResp = await startAuthentication(options);
 
     return {

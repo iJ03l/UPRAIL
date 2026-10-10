@@ -4,11 +4,12 @@
 
 import { MiddlewareHandler } from 'hono';
 import type { AppContext } from '../types';
+import { resolveOrigin } from '../services/webauthnConfig';
 
 export const corsMiddleware = (): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
     const origin = c.req.header('Origin');
-    const configuredOrigin = c.env.WEBAUTHN_ORIGIN || 'https://uprail.app';
+    const configuredOrigin = resolveOrigin(c.env);
 
     let allowedOrigin = '';
 

@@ -1,0 +1,29 @@
+# UPRAIL worker secrets template.
+#
+# Local dev : cp .dev.vars.example .dev.vars   (`.dev.vars` is gitignored)
+# Production: wrangler secret put <NAME>       (one command per secret)
+#
+# NEVER commit real values. The worker fails closed when a secret is missing:
+# sessions are rejected, quotes cannot be signed, and NEAR RPC calls error.
+
+# X (Twitter) OAuth 2.0 confidential client secret
+X_CLIENT_SECRET=""
+
+# HMAC key for stateless session cookies + OAuth PKCE state.
+# Must be a long random string, e.g. `openssl rand -hex 32`
+SESSION_SECRET=""
+
+# Shared secret between this worker and the Go settlement service
+# (header `X-Internal-Secret`). Must match the Go service's INTERNAL_SERVICE_KEY.
+INTERNAL_SERVICE_KEY=""
+
+# Escrow root key (`ed25519:...`). Derives every user's vault key via
+# HMAC(ESCROW_PRIVATE_KEY, "near_vault_key:" + x_id). Rotating it invalidates
+# all previously derived vault keys.
+ESCROW_PRIVATE_KEY=""
+
+# NEAR JSON-RPC endpoint (contains a provider API token)
+NEAR_RPC_URL=""
+
+# Optional: Postgres connection string
+DATABASE_URL=""

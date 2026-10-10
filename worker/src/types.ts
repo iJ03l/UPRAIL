@@ -48,11 +48,16 @@ export interface Env {
   DATABASE_URL?: string;
 }
 
+/**
+ * Unauthenticated payment preview.
+ *
+ * Deliberately excludes the recipient handle, the amount, the sender and any
+ * fee/invite data: a payment id is printed into share links, so anyone holding
+ * the link must not learn who it is for or how much it carries.
+ */
 export interface PublicPaymentPreview {
   id: string;
-  recipient_handle: string;
   asset: string;
-  amount: string;
   status: PaymentStatus;
   created_at: number;
   expires_at: number;
@@ -63,11 +68,14 @@ export interface Payment {
   sender_x_id?: string | null;
   sender_x_handle?: string | null;
   recipient_handle: string;
+  /** Immutable recipient identity when known at send time (preferred claim key). */
+  recipient_x_id?: string | null;
   asset: string;
   amount: string;
   fee?: string | null;
   fee_recipient?: string | null;
   invite_code?: string | null;
+  memo?: string | null;
   status: PaymentStatus;
   deposit_address?: string | null;
   intent_hash?: string | null;
@@ -195,6 +203,7 @@ export interface SendRequest {
   amount: string;
   quoteSignature: string;
   depositAddress: string;
+  memo?: string;
 }
 
 export interface SendResponse {
@@ -212,9 +221,16 @@ export interface ClaimPendingResponse {
   payments: Payment[];
 }
 
+/**
+ * POST /api/claim/register body.
+ *
+ * Deliberately does NOT accept a client-supplied `challenge`: the challenge is
+ * issued by GET /api/claim/register-options, stored server-side with a TTL and
+ * consumed single-use. Accepting a caller-chosen challenge would let anyone
+ * forge an attestation for their own challenge.
+ */
 export interface RegisterPasskeyRequest {
   attestation: any;
-  challenge: string;
 }
 
 export interface RegisterPasskeyResponse {

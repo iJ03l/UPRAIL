@@ -1,5 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { Miniflare } from 'miniflare';
 
 describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
@@ -26,13 +27,40 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         FEE_ACCOUNT_ID: 'fees.uprail.near',
         FEE_PERCENT: '0.008',
         PAYMENT_EXPIRY_DAYS: '30',
-        WEBAUTHN_RP_ID: 'uprail.app',
+        WEBAUTHN_RP_ID: 'uprail.world',
         WEBAUTHN_RP_NAME: 'UPRAIL',
-        WEBAUTHN_ORIGIN: 'https://uprail.app',
-        INTERNAL_SERVICE_KEY: 'uprail_confidential_master_sig_2026',
-        ESCROW_PRIVATE_KEY: 'ed25519:3tgX4A9y7J55RUf1JMtvqBWdPNRk8BNLtNucwmSBz3Rgj4ELzs1pgya17u7wTuuJJkJTPESpWWsQukVr2AExFWkQ',
+        WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+        SESSION_SECRET: 'test_session_secret_do_not_use_in_production',
+        INTERNAL_SERVICE_KEY: 'test_internal_service_key',
+        ESCROW_PRIVATE_KEY:
+          'ed25519:5KoVbWDSA7QmnFbGrMVa6oPdxdKa1bbN1LQW3d2dVBbM4Ap7CY6gXPvQUoF1aRxVwPVzrqnJmX1oPkVpKqZ1Qq1',
+        NEAR_RPC_URL: 'https://near.invalid',
       },
     });
+
+    // Apply schema migrations to the in-memory D1 database, exactly as
+    // `wrangler d1 migrations apply` does in production. Route handlers
+    // (invites, payments, claim, ...) depend on these tables existing.
+    const db = await mf.getD1Database('DB');
+    const migrations = ['0001_initial.sql', '0002_payment_identity_and_missing_tables.sql'];
+    for (const file of migrations) {
+      const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
+      // Run statements one at a time: D1's exec() mis-chunks multi-line
+      // CREATE TABLE statements and rejects comment-only chunks.
+      const statements = raw
+        .split(';')
+        .map((stmt) =>
+          stmt
+            .split('\n')
+            .filter((line) => !line.trim().startsWith('--'))
+            .join('\n')
+            .trim()
+        )
+        .filter(Boolean);
+      for (const stmt of statements) {
+        await db.prepare(stmt).run();
+      }
+    }
   });
 
   after(async () => {
@@ -147,6 +175,15 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
 
   it('GET /api/auth-challenge requires authentication', async () => {
     const res = await mf.dispatchFetch('http://localhost/api/auth-challenge');
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/auth-challenge requires authentication', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/auth-challenge', {
+      method: 'POST',
+    });
     assert.equal(res.status, 401);
     const body = await res.json();
     assert.equal(body.code, 'UNAUTHORIZED');

@@ -4,11 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/uprail/near-service/internal/escrow"
 	"github.com/uprail/near-service/internal/intents"
 )
+
+// subaccountLabelRe matches the label part of an allowed subaccount
+// (e.g. "u_9f2c1a…", "alice"). No dots — single-level subaccounts only.
+var subaccountLabelRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,62}$`)
 
 // CreateAccountRequest specifies parameters for registering a passkey-controlled NEAR account.
 type CreateAccountRequest struct {
@@ -29,16 +34,36 @@ type CreateAccountResult struct {
 }
 
 // Service manages NEAR account creation and passkey onboarding.
+//
+// Account creation is an allowlisted operation: it may only create
+// single-level subaccounts of the configured parent accounts, and never
+// touches platform accounts (escrow, fees, the parent itself).
 type Service struct {
-	signer *escrow.Signer
-	relay  *intents.RelayClient
+	signer         *escrow.Signer
+	relay          *intents.RelayClient
+	allowedParents []string
+	deniedIDs      map[string]struct{}
 }
 
 // NewService constructs an account service.
-func NewService(signer *escrow.Signer, relay *intents.RelayClient) *Service {
+func NewService(signer *escrow.Signer, relay *intents.RelayClient, allowedParents, deniedIDs []string) *Service {
+	parents := make([]string, 0, len(allowedParents))
+	for _, p := range allowedParents {
+		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+			parents = append(parents, p)
+		}
+	}
+	denied := make(map[string]struct{}, len(deniedIDs))
+	for _, d := range deniedIDs {
+		if d = strings.ToLower(strings.TrimSpace(d)); d != "" {
+			denied[d] = struct{}{}
+		}
+	}
 	return &Service{
-		signer: signer,
-		relay:  relay,
+		signer:         signer,
+		relay:          relay,
+		allowedParents: parents,
+		deniedIDs:      denied,
 	}
 }
 
@@ -64,6 +89,10 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 		formattedKey = "p256:" + formattedKey
 	}
 
+	if err := s.validateDesiredAccountID(accountID); err != nil {
+		return nil, err
+	}
+
 	// Build add_public_key intent for the desired account ID
 	payload, err := intents.BuildAddPublicKeyIntent(accountID, formattedKey, req.Deadline)
 	if err != nil {
@@ -87,4 +116,49 @@ func (s *Service) CreateAccount(ctx context.Context, req CreateAccountRequest) (
 		TxHash:        intentHash,
 		Status:        "PENDING",
 	}, nil
+}
+
+// validateDesiredAccountID enforces the account-creation allowlist.
+//
+// Allowed: <label>.<parent> where <parent> is in AllowedAccountParents and
+// <label> is a single-level subaccount label. Anything else — including every
+// denied platform account — is rejected.
+func (s *Service) validateDesiredAccountID(accountID string) error {
+	clean := strings.ToLower(strings.TrimSpace(accountID))
+	if clean == "" {
+		return &escrow.ValidationError{Msg: "create account: desiredAccountID is required"}
+	}
+	if len(clean) > 64 {
+		return &escrow.ValidationError{Msg: "create account: desiredAccountID is too long"}
+	}
+	if _, denied := s.deniedIDs[clean]; denied {
+		return &escrow.ValidationError{Msg: "create account: that account may not be created here"}
+	}
+
+	dot := strings.LastIndex(clean, ".")
+	if dot <= 0 || dot == len(clean)-1 {
+		return &escrow.ValidationError{
+			Msg: "create account: only subaccounts of the configured parents may be created",
+		}
+	}
+	label, parent := clean[:dot], clean[dot+1:]
+
+	allowed := false
+	for _, p := range s.allowedParents {
+		if parent == p {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return &escrow.ValidationError{
+			Msg: "create account: parent account is not in the allowlist",
+		}
+	}
+	if !subaccountLabelRe.MatchString(label) {
+		return &escrow.ValidationError{
+			Msg: "create account: invalid subaccount label",
+		}
+	}
+	return nil
 }

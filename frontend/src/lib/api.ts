@@ -11,6 +11,150 @@ import {
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
 
+/**
+ * Canonical claim link base. In production the origin is app.uprail.world
+ * (enforced by the worker's host routing); localhost/apex origins are only
+ * used during local development, with app.uprail.world as the SSR fallback.
+ */
+function claimBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/claim`;
+  }
+  return 'https://app.uprail.world/claim';
+}
+
+function claimUrlFor(paymentId: string, inviteCode?: string | null): string {
+  const base = `${claimBaseUrl()}/${paymentId}`;
+  return inviteCode ? `${base}?invite=${encodeURIComponent(inviteCode)}` : base;
+}
+
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const NEAR_ACCOUNT_RE =
+  /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?)*$/;
+const IMPLICIT_ACCOUNT_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * Normalizes a recipient entered in either send mode:
+ * - X handle: strips leading '@' and lowercases (handles are case-insensitive)
+ * - Raw wallet address ("Send to Wallet"): EVM / Solana base58 / NEAR named or
+ *   implicit account. EVM and NEAR named accounts are case-insensitive and
+ *   canonicalized to lowercase; Solana base58 and 64-hex implicit accounts are
+ *   case-sensitive and MUST be preserved byte-for-byte.
+ * Mirrors classifyRecipient() in worker/src/routes/payments.ts.
+ */
+export function normalizeRecipientInput(raw: string): { recipient: string; isAddress: boolean } {
+  const t = (raw || '').trim();
+  if (!t) return { recipient: '', isAddress: false };
+  if (EVM_ADDRESS_RE.test(t)) return { recipient: t.toLowerCase(), isAddress: true };
+  if (IMPLICIT_ACCOUNT_RE.test(t)) return { recipient: t, isAddress: true };
+  if (SOLANA_ADDRESS_RE.test(t)) return { recipient: t, isAddress: true };
+  if (t.includes('.') && NEAR_ACCOUNT_RE.test(t)) return { recipient: t.toLowerCase(), isAddress: true };
+  return { recipient: t.replace(/^@+/, '').toLowerCase(), isAddress: false };
+}
+
+/**
+ * Resolves a backend `asset` value onto a known Token. Backend rows may store
+ * a short token id ('usdc'), a symbol, a NEAR contract id, or a defuse asset
+ * id (`nep141:usdc.near`, `near:wrap.near`) — all of which must resolve to
+ * the same display token.
+ */
+function resolveTokenForAsset(asset: string | null | undefined, tokens: Token[]): Token {
+  const fallback = tokens[0] || SUPPORTED_TOKENS[0];
+  const a = (asset || '').trim();
+  if (!a) return fallback;
+  const lower = a.toLowerCase();
+
+  const byExact = tokens.find(
+    (t) => t.id.toLowerCase() === lower || t.symbol.toLowerCase() === lower
+  );
+  if (byExact) return byExact;
+
+  const byContract = tokens.find(
+    (t) => t.nearContractId && t.nearContractId.toLowerCase() === lower
+  );
+  if (byContract) return byContract;
+
+  // Defuse ids carry a chain prefix (`nep141:...`, `near:...`) — match on the
+  // unprefixed part against contract ids and token ids.
+  const suffix = lower.includes(':') ? lower.slice(lower.indexOf(':') + 1) : lower;
+  const bySuffix = tokens.find((t) => {
+    const contract = (t.nearContractId || '').toLowerCase();
+    const id = t.id.toLowerCase();
+    return contract === suffix || id === suffix || contract.endsWith(`.${suffix}`) || suffix.endsWith(`.${id}`);
+  });
+  return bySuffix || fallback;
+}
+
+/**
+ * Maps the backend PaymentStatus enum (PENDING / DEPOSIT_WAITING / ESCROWED /
+ * CLAIMED / EXPIRED / REFUNDED / CANCELLED) onto the frontend status union.
+ */
+function mapBackendStatus(status: string | null | undefined): PaymentIntent['status'] {
+  switch ((status || '').toUpperCase()) {
+    case 'CLAIMED':
+      return 'claimed';
+    case 'CANCELLED':
+      return 'cancelled';
+    case 'EXPIRED':
+      return 'expired';
+    case 'REFUNDED':
+      return 'refunded';
+    case 'ESCROWED':
+      return 'ready';
+    case 'PENDING':
+    case 'DEPOSIT_WAITING':
+    default:
+      return 'pending';
+  }
+}
+
+/**
+ * Formats a recipient for display: X handles get an '@' prefix; wallet
+ * addresses (EVM / Solana / NEAR) are shown shortened, never '@'-prefixed.
+ */
+export function formatRecipientDisplay(handle: string | null | undefined): string {
+  const t = (handle || '').trim();
+  if (!t) return 'unknown';
+  const looksLikeAddress =
+    EVM_ADDRESS_RE.test(t) || IMPLICIT_ACCOUNT_RE.test(t) || t.includes('.') || t.length > 15;
+  if (looksLikeAddress) {
+    return t.length > 20 ? `${t.slice(0, 6)}…${t.slice(-4)}` : t;
+  }
+  return `@${t}`;
+}
+
+/**
+ * Maps a backend payment row (D1/Postgres) onto the frontend PaymentIntent,
+ * using the real backend fee, memo, status, and defuse-aware token resolution.
+ */
+function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
+  const token = resolveTokenForAsset(p.asset, tokens);
+  const numAmount = parseFloat(p.amount) || 0;
+  const fee = p.fee != null && p.fee !== '' ? String(p.fee) : '0';
+  return {
+    id: p.id,
+    claimCode: p.id,
+    senderHandle: p.sender_x_handle || '',
+    senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
+    recipientHandle: p.recipient_handle || '',
+    token,
+    amount: p.amount,
+    amountUsd: numAmount * token.priceUsd,
+    fee,
+    feeUsd: (parseFloat(fee) || 0) * token.priceUsd,
+    feeRecipient: p.fee_recipient || 'fees.uprail.near',
+    inviteCode: p.invite_code || undefined,
+    memo: p.memo || '',
+    status: mapBackendStatus(p.status),
+    depositAddress: p.deposit_address || 'escrow.uprail.near',
+    claimTxHash: p.claim_tx_hash || undefined,
+    claimLink: claimUrlFor(p.id, p.invite_code),
+    createdAt: new Date(p.created_at).toISOString(),
+    expiresAt: new Date(p.expires_at).toISOString(),
+  };
+}
+
 const API_BASE =
   (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL) ||
   (typeof process !== 'undefined' && process.env?.API_URL) ||
@@ -84,6 +228,29 @@ const STORAGE_KEYS = {
   PASSKEYS: 'uprail_passkeys',
 };
 
+// Every localStorage key the app writes. logout() clears all of them so no
+// authenticated user's data survives sign-out on a shared device.
+export const ALL_APP_STORAGE_KEYS = [
+  STORAGE_KEYS.USER,
+  STORAGE_KEYS.PAYMENTS,
+  STORAGE_KEYS.SHIELDED,
+  STORAGE_KEYS.PASSKEYS,
+  'uprail_user_cache_v1', // useXAuth global user cache
+  'uprail_user', // legacy user cache key (still read back as a fallback)
+  'uprail_pending_payments_cache', // useClaimFlow pending list cache
+  'uprail_registered_passkeys', // webauthn.ts stored passkey metadata
+  'uprail_onchain_cache', // useOnchainData tokens/balances/history snapshot
+];
+
+/** Removes every app-owned localStorage entry (used on logout and manual cache clear). */
+export function clearAppStorage(): void {
+  for (const key of ALL_APP_STORAGE_KEYS) {
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  }
+}
+
 export const api = {
   // Auth endpoints
   async getAuthStatus(): Promise<{ user: XUser | null }> {
@@ -148,7 +315,7 @@ export const api = {
     } catch (e) {
       console.warn('Backend logout failed', e);
     }
-    localStorage.removeItem(STORAGE_KEYS.USER);
+    clearAppStorage();
   },
 
   // Passkey Login Endpoints
@@ -334,7 +501,7 @@ export const api = {
   // Create payment intent with authentic quote signature
   async createPayment(params: CreatePaymentRequest): Promise<PaymentIntent> {
     const url = API_BASE ? `${API_BASE}/api/send` : '/api/send';
-    const cleanHandle = params.recipientHandle.replace(/^@/, '').toLowerCase();
+    const cleanHandle = normalizeRecipientInput(params.recipientHandle).recipient;
 
     // If quoteSignature is not provided, obtain a real cryptographic quote first
     let quoteSignature = params.quoteSignature;
@@ -358,6 +525,7 @@ export const api = {
         recipientHandle: cleanHandle,
         asset: params.tokenId,
         amount: params.amount,
+        memo: params.memo || undefined,
         quoteSignature,
         depositAddress: depositAddress || 'escrow.uprail.near',
         passkeyAssertion: params.passkeyAssertion,
@@ -365,7 +533,7 @@ export const api = {
     });
 
     const tokens = await api.getTokens();
-    const token = tokens.find((t) => t.id === params.tokenId || t.symbol.toLowerCase() === params.tokenId.toLowerCase()) || tokens[0] || SUPPORTED_TOKENS[0];
+    const token = resolveTokenForAsset(params.tokenId, tokens);
     const numAmount = parseFloat(params.amount) || 0;
 
     if (res.ok) {
@@ -383,9 +551,9 @@ export const api = {
         feeRecipient: backendData.feeRecipient || 'fees.uprail.near',
         inviteCode: backendData.inviteCode,
         memo: params.memo || '',
-        status: 'ready',
+        status: mapBackendStatus(backendData.status),
         depositAddress: backendData.depositAddress || depositAddress || 'escrow.uprail.near',
-        claimLink: backendData.shareLink || `${window.location.origin}/claim/${backendData.paymentId}`,
+        claimLink: backendData.shareLink || claimUrlFor(backendData.paymentId, backendData.inviteCode),
         createdAt: new Date().toISOString(),
         expiresAt: new Date(backendData.expiresAt || Date.now() + 86400000 * 30).toISOString(),
       };
@@ -405,26 +573,8 @@ export const api = {
         const data = await res.json();
         const p = data.payment;
         if (!p) return null;
-        const token = SUPPORTED_TOKENS.find((t) => t.id.toLowerCase() === (p.asset || 'usdc').toLowerCase()) || SUPPORTED_TOKENS[0];
-        const numAmount = parseFloat(p.amount) || 0;
-        return {
-          id: p.id,
-          claimCode: p.id,
-          senderHandle: p.sender_x_handle || '',
-          senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
-          recipientHandle: p.recipient_handle || '',
-          token,
-          amount: p.amount,
-          amountUsd: numAmount * token.priceUsd,
-          fee: '0.01',
-          feeUsd: 0.01 * token.priceUsd,
-          memo: '',
-          status: p.status === 'CLAIMED' ? 'claimed' : p.status === 'CANCELLED' ? 'cancelled' : 'ready',
-          depositAddress: p.deposit_address || 'escrow.uprail.near',
-          claimLink: `https://uprail.app/claim/${p.id}`,
-          createdAt: new Date(p.created_at).toISOString(),
-          expiresAt: new Date(p.expires_at).toISOString(),
-        };
+        const tokens = await api.getTokens().catch(() => SUPPORTED_TOKENS);
+        return mapPaymentRow(p, tokens);
       }
     } catch (e) {
       console.warn('Backend getPaymentByCode error', e);
@@ -440,28 +590,8 @@ export const api = {
       if (res.ok) {
         const data = await res.json();
         const paymentsList = data.payments || [];
-        return paymentsList.map((p: any) => {
-          const token = SUPPORTED_TOKENS.find((t) => t.id.toLowerCase() === (p.asset || 'usdc').toLowerCase()) || SUPPORTED_TOKENS[0];
-          const numAmount = parseFloat(p.amount) || 0;
-          return {
-            id: p.id,
-            claimCode: p.id,
-            senderHandle: p.sender_x_handle || '',
-            senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
-            recipientHandle: p.recipient_handle || '',
-            token,
-            amount: p.amount,
-            amountUsd: numAmount * token.priceUsd,
-            fee: '0.01',
-            feeUsd: 0.01 * token.priceUsd,
-            memo: '',
-            status: p.status === 'CLAIMED' ? 'claimed' : p.status === 'CANCELLED' ? 'cancelled' : 'ready',
-            depositAddress: p.deposit_address || 'escrow.uprail.near',
-            claimLink: `https://uprail.app/claim/${p.id}`,
-            createdAt: new Date(p.created_at).toISOString(),
-            expiresAt: new Date(p.expires_at).toISOString(),
-          };
-        });
+        const tokens = await api.getTokens().catch(() => SUPPORTED_TOKENS);
+        return paymentsList.map((p: any) => mapPaymentRow(p, tokens));
       }
     } catch (e) {
       console.warn('Backend getPaymentHistory error', e);
@@ -470,54 +600,56 @@ export const api = {
   },
 
   // Passkey Registration Options
-  async getPasskeyRegisterOptions(handle: string) {
-    try {
-      const url = API_BASE ? `${API_BASE}/api/claim/register-options` : '/api/claim/register-options';
-      const res = await fetch(url, { credentials: 'include' });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend passkey register-options error', e);
+  // The server MUST issue the challenge and rpId — a locally generated
+  // challenge can never be verified server-side, so failure here is fatal.
+  async getPasskeyRegisterOptions(
+    handle: string
+  ): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    const url = API_BASE ? `${API_BASE}/api/claim/register-options` : '/api/claim/register-options';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'Failed to get passkey registration options');
     }
-
-    // Default WebAuthn PublicKeyCredentialCreationOptionsJSON (NIST P-256)
-    return {
-      challenge: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))),
-      rp: {
-        name: 'UP (UPRAIL.app)',
-        id: window.location.hostname,
-      },
-      user: {
-        id: btoa(handle),
-        name: `@${handle}`,
-        displayName: `@${handle}`,
-      },
-      pubKeyCredParams: [
-        { alg: -7, type: 'public-key' }, // ES256 (NIST P-256)
-      ],
-      timeout: 60000,
-      attestation: 'none' as const,
-      authenticatorSelection: {
-        residentKey: 'preferred' as const,
-        userVerification: 'preferred' as const,
-      },
-    };
+    const options = await res.json();
+    if (!options?.challenge) {
+      throw new Error('Server returned invalid registration options');
+    }
+    return options;
   },
 
-  // Passkey Auth Options (for claiming or verification)
-  async getPasskeyAuthOptions(_handle?: string) {
-    try {
-      const url = API_BASE ? `${API_BASE}/auth/passkey/login-options` : '/auth/passkey/login-options';
-      const res = await fetch(url, { credentials: 'include' });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn('Backend passkey auth-options error', e);
+  // Registers a new passkey attestation on the server (sets API_BASE correctly)
+  async registerPasskeyAttestation(attestation: unknown): Promise<any> {
+    const url = API_BASE ? `${API_BASE}/api/claim/register` : '/api/claim/register';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ attestation }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'Failed to register passkey with server');
     }
-    return {
-      challenge: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))),
-      timeout: 60000,
-      rpId: window.location.hostname,
-      userVerification: 'preferred' as const,
-    };
+    return await res.json();
+  },
+
+  /**
+   * Issues a single-use `tx_auth` challenge for a fund-moving action
+   * (send / claim / withdraw). Required by requirePasskeyAuth().
+   */
+  async getTxAuthOptions(): Promise<{ challenge: string; rpId?: string; timeout?: number }> {
+    const url = API_BASE ? `${API_BASE}/api/auth-challenge` : '/api/auth-challenge';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'Failed to get transaction challenge');
+    }
+    const options = await res.json();
+    if (!options?.challenge) {
+      throw new Error('Server returned invalid transaction challenge');
+    }
+    return options;
   },
 
   // Get pending payments sent to the authenticated user (no code or link needed!)
@@ -528,28 +660,8 @@ export const api = {
       if (res.ok) {
         const data = await res.json();
         const paymentsList = data.payments || [];
-        return paymentsList.map((p: any) => {
-          const token = SUPPORTED_TOKENS.find((t) => t.id.toLowerCase() === (p.asset || 'usdc').toLowerCase()) || SUPPORTED_TOKENS[0];
-          const numAmount = parseFloat(p.amount) || 0;
-          return {
-            id: p.id,
-            claimCode: p.id,
-            senderHandle: p.sender_x_handle || '',
-            senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
-            recipientHandle: p.recipient_handle || '',
-            token,
-            amount: p.amount,
-            amountUsd: numAmount * token.priceUsd,
-            fee: '0.01',
-            feeUsd: 0.01 * token.priceUsd,
-            memo: '',
-            status: p.status === 'CLAIMED' ? 'claimed' : p.status === 'CANCELLED' ? 'cancelled' : 'ready',
-            depositAddress: p.deposit_address || 'escrow.uprail.near',
-            claimLink: `https://uprail.app/claim/${p.id}`,
-            createdAt: new Date(p.created_at).toISOString(),
-            expiresAt: new Date(p.expires_at).toISOString(),
-          };
-        });
+        const tokens = await api.getTokens().catch(() => SUPPORTED_TOKENS);
+        return paymentsList.map((p: any) => mapPaymentRow(p, tokens));
       }
     } catch (e) {
       console.warn('Backend getPendingPayments error', e);
@@ -635,6 +747,7 @@ export const api = {
     destinationAddress: string;
     asset?: string;
     amount?: string;
+    passkeyAssertion: unknown;
   }): Promise<{
     success: boolean;
     txHash: string;

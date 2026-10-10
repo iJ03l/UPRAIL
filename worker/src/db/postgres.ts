@@ -8,7 +8,7 @@ import type { Env, Payment, PaymentStatus, Session, XIdentity } from '../types';
 
 let cachedSql: postgres.Sql | null = null;
 
-export function getDb(env: Env): postgres.Sql {
+export function getDb(env: Env): postgres.Sql | null {
   if (cachedSql) {
     return cachedSql;
   }
@@ -16,8 +16,11 @@ export function getDb(env: Env): postgres.Sql {
   // Support direct DATABASE_URL or Hyperdrive connection string
   const connectionString =
     (env as any).DATABASE_URL ||
-    (env as any).HYPERDRIVE?.connectionString ||
-    'postgres://postgres@127.0.0.1:5432/uprail';
+    (env as any).HYPERDRIVE?.connectionString;
+
+  if (!connectionString) {
+    return null;
+  }
 
   cachedSql = postgres(connectionString, {
     max: 10,
@@ -206,13 +209,33 @@ export async function savePasskey(
 // Payments & Intents
 // -------------------------------------------------------------
 
+/** Canonical payment projection shared by every payments SELECT. */
+const PAYMENT_COLUMNS = `
+  id, sender_x_id, sender_x_handle, recipient_handle, recipient_x_id,
+  asset, amount, fee, fee_recipient, invite_code, memo,
+  status, deposit_address, intent_hash, claim_tx_hash, refund_tx_hash,
+  ROUND(EXTRACT(EPOCH FROM created_at) * 1000) AS created_at,
+  ROUND(EXTRACT(EPOCH FROM expires_at) * 1000) AS expires_at,
+  ROUND(EXTRACT(EPOCH FROM updated_at) * 1000) AS updated_at
+`;
+
+function mapPayment(row: any): Payment {
+  return {
+    ...row,
+    created_at: Number(row.created_at),
+    expires_at: Number(row.expires_at),
+    updated_at: Number(row.updated_at),
+  };
+}
+
 export async function insertPayment(
   sql: postgres.Sql,
   payment: Payment
 ): Promise<void> {
   await sql`
     INSERT INTO payments (
-      id, sender_x_id, sender_x_handle, recipient_handle, asset, amount,
+      id, sender_x_id, sender_x_handle, recipient_handle, recipient_x_id,
+      asset, amount, fee, fee_recipient, invite_code, memo,
       status, deposit_address, intent_hash, claim_tx_hash, refund_tx_hash,
       created_at, expires_at, updated_at
     ) VALUES (
@@ -220,8 +243,13 @@ export async function insertPayment(
       ${payment.sender_x_id ?? null},
       ${payment.sender_x_handle ?? null},
       ${payment.recipient_handle.toLowerCase()},
+      ${payment.recipient_x_id ?? null},
       ${payment.asset},
       ${payment.amount},
+      ${payment.fee ?? null},
+      ${payment.fee_recipient ?? null},
+      ${payment.invite_code ?? null},
+      ${payment.memo ?? null},
       ${payment.status},
       ${payment.deposit_address ?? null},
       ${payment.intent_hash ?? null},
@@ -239,21 +267,12 @@ export async function getPaymentById(
   paymentId: string
 ): Promise<Payment | null> {
   const [row] = await sql<any[]>`
-    SELECT id, sender_x_id, sender_x_handle, recipient_handle, asset, amount,
-           status, deposit_address, intent_hash, claim_tx_hash, refund_tx_hash,
-           ROUND(EXTRACT(EPOCH FROM created_at) * 1000) AS created_at,
-           ROUND(EXTRACT(EPOCH FROM expires_at) * 1000) AS expires_at,
-           ROUND(EXTRACT(EPOCH FROM updated_at) * 1000) AS updated_at
+    SELECT ${PAYMENT_COLUMNS}
     FROM payments
     WHERE id = ${paymentId}
   `;
   if (!row) return null;
-  return {
-    ...row,
-    created_at: Number(row.created_at),
-    expires_at: Number(row.expires_at),
-    updated_at: Number(row.updated_at),
-  };
+  return mapPayment(row);
 }
 
 export async function getUserPayments(
@@ -262,45 +281,30 @@ export async function getUserPayments(
   handle: string
 ): Promise<Payment[]> {
   const rows = await sql<any[]>`
-    SELECT id, sender_x_id, sender_x_handle, recipient_handle, asset, amount,
-           status, deposit_address, intent_hash, claim_tx_hash, refund_tx_hash,
-           ROUND(EXTRACT(EPOCH FROM created_at) * 1000) AS created_at,
-           ROUND(EXTRACT(EPOCH FROM expires_at) * 1000) AS expires_at,
-           ROUND(EXTRACT(EPOCH FROM updated_at) * 1000) AS updated_at
+    SELECT ${PAYMENT_COLUMNS}
     FROM payments
-    WHERE sender_x_id = ${xId} OR LOWER(recipient_handle) = ${handle.toLowerCase()}
+    WHERE sender_x_id = ${xId}
+       OR recipient_x_id = ${xId}
+       OR LOWER(recipient_handle) = ${handle.toLowerCase()}
     ORDER BY created_at DESC
     LIMIT 50
   `;
-  return rows.map((r) => ({
-    ...r,
-    created_at: Number(r.created_at),
-    expires_at: Number(r.expires_at),
-    updated_at: Number(r.updated_at),
-  }));
+  return rows.map(mapPayment);
 }
 
 export async function getPendingPaymentsForRecipient(
   sql: postgres.Sql,
+  xId: string,
   handle: string
 ): Promise<Payment[]> {
   const rows = await sql<any[]>`
-    SELECT id, sender_x_id, sender_x_handle, recipient_handle, asset, amount,
-           status, deposit_address, intent_hash, claim_tx_hash, refund_tx_hash,
-           ROUND(EXTRACT(EPOCH FROM created_at) * 1000) AS created_at,
-           ROUND(EXTRACT(EPOCH FROM expires_at) * 1000) AS expires_at,
-           ROUND(EXTRACT(EPOCH FROM updated_at) * 1000) AS updated_at
+    SELECT ${PAYMENT_COLUMNS}
     FROM payments
-    WHERE LOWER(recipient_handle) = ${handle.toLowerCase()}
+    WHERE (recipient_x_id = ${xId} OR LOWER(recipient_handle) = ${handle.toLowerCase()})
       AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED')
     ORDER BY created_at DESC
   `;
-  return rows.map((r) => ({
-    ...r,
-    created_at: Number(r.created_at),
-    expires_at: Number(r.expires_at),
-    updated_at: Number(r.updated_at),
-  }));
+  return rows.map(mapPayment);
 }
 
 export async function updatePaymentStatus(

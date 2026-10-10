@@ -152,24 +152,23 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-4 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold border border-stone-200 transition-colors cursor-pointer"
           >
             <QrCode className="w-3.5 h-3.5 text-stone-500" />
-            <span>{showQr ? 'Hide QR Code' : 'Show Claim QR Code'}</span>
+            <span>{showQr ? 'Hide Claim Link' : 'Show Claim Link'}</span>
           </button>
         </div>
 
-        {/* QR Code view */}
+        {/* Claim link card — rendered fully client-side. No third-party QR
+            service is used: those services receive the URL being encoded,
+            which would leak the payment id + invite code. */}
         {showQr && (
-          <div className="p-4 rounded-2xl bg-white border border-stone-200 flex flex-col items-center justify-center mb-4 animate-fade-in">
-            <div className="w-36 h-36 bg-stone-50 rounded-lg flex items-center justify-center border border-stone-200 p-2">
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                  payment.claimLink
-                )}`}
-                alt="Claim QR"
-                className="w-full h-full object-contain"
-              />
-            </div>
-            <span className="text-[10px] text-stone-500 font-mono mt-2">
-              Scan with phone camera to claim
+          <div className="p-4 rounded-2xl bg-white border border-stone-200 flex flex-col mb-4 animate-fade-in">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1.5">
+              Claim Link
+            </span>
+            <p className="text-[11px] font-mono text-stone-700 break-all bg-stone-50 border border-stone-200 rounded-lg p-2 select-all">
+              {payment.claimLink}
+            </p>
+            <span className="text-[10px] text-stone-400 mt-1.5">
+              Shown locally — never sent to a third-party QR service
             </span>
           </div>
         )}

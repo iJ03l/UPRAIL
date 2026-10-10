@@ -19,7 +19,7 @@ import {
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
-import { api } from '../lib/api';
+import { api, formatRecipientDisplay } from '../lib/api';
 import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 
@@ -273,7 +273,7 @@ export const AppHome: React.FC = () => {
                         </div>
                         <div>
                           <div className="text-xs font-bold text-stone-900 font-mono">
-                            {isSent ? `@${tx.recipientHandle}` : `@${tx.senderHandle}`}
+                            {isSent ? formatRecipientDisplay(tx.recipientHandle) : `@${tx.senderHandle}`}
                           </div>
                           <div className="text-[10px] text-stone-400 font-mono truncate max-w-[120px] sm:max-w-[160px]">
                             {tx.memo || new Date(tx.createdAt).toLocaleDateString()}

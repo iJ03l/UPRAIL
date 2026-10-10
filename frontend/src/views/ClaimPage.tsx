@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useSearchParams, Link } from '../lib/router';
+import { useSearchParams, useLocation, Link } from '../lib/router';
 import {
   Fingerprint,
   CheckCircle2,
   AlertCircle,
   ArrowRight,
   ArrowLeft,
+  ArrowUpRight,
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
@@ -17,10 +18,98 @@ import { PasskeyPrompt } from '../components/PasskeyPrompt';
 import { XAuthBanner } from '../components/XAuthBanner';
 import { TokenIcon } from '../components/TokenIcon';
 
+// ── Shielded balance withdraw card ──────────────────────────────────────────
+const WithdrawCard: React.FC<{
+  balances: { token: { id: string; symbol: string; iconUrl?: string }; amount: string; amountUsd: number }[];
+  isClaiming: boolean;
+  onWithdraw: (balanceIndex: number, destination: string) => Promise<unknown>;
+}> = ({ balances, isClaiming, onWithdraw }) => {
+  const [balanceIndex, setBalanceIndex] = useState(0);
+  const [destination, setDestination] = useState('');
+  const [result, setResult] = useState<string | null>(null);
+
+  const active = balances.length > 0 ? balances[Math.min(balanceIndex, balances.length - 1)] : null;
+
+  const handleWithdraw = async () => {
+    setResult(null);
+    try {
+      const res = (await onWithdraw(Math.min(balanceIndex, balances.length - 1), destination.trim())) as {
+        success: boolean;
+        txHash: string;
+      };
+      setResult(`Withdrawn — tx ${res.txHash}`);
+    } catch {
+      // Error is surfaced by the page-level error alert
+    }
+  };
+
+  if (balances.length === 0) return null;
+
+  return (
+    <div className="rounded-3xl p-5 sm:p-6 bg-white border border-stone-200 shadow-xs space-y-4">
+      <div className="flex items-center space-x-2.5">
+        <ArrowUpRight className="w-5 h-5 text-stone-900" />
+        <div>
+          <div className="text-xs font-bold text-stone-950 font-display">Withdraw from Vault</div>
+          <div className="text-[11px] text-stone-500 font-mono">
+            Passkey-authorized · settle via POST /api/claim/withdraw
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2.5">
+        <select
+          value={Math.min(balanceIndex, balances.length - 1)}
+          onChange={(e) => setBalanceIndex(Number(e.target.value))}
+          className="sm:w-48 rounded-xl bg-stone-50 border border-stone-200 px-3 py-2.5 text-xs font-mono text-stone-900 focus:outline-none focus:border-black"
+        >
+          {balances.map((b, i) => (
+            <option key={`${b.token.id}-${i}`} value={i}>
+              {b.token.symbol} · {b.amount}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          value={destination}
+          onChange={(e) => setDestination(e.target.value.trim())}
+          placeholder="Destination address (NEAR, 0x…, Solana)…"
+          className="flex-1 rounded-xl bg-stone-50 border border-stone-200 px-3 py-2.5 text-xs font-mono text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white"
+        />
+      </div>
+
+      {result && (
+        <p className="text-xs font-mono text-emerald-700 break-all">{result}</p>
+      )}
+
+      <button
+        type="button"
+        onClick={handleWithdraw}
+        disabled={isClaiming || !destination.trim() || !active}
+        className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+      >
+        <Fingerprint className="w-4 h-4" />
+        <span>Withdraw {active ? `${active.token.symbol}` : ''} with Passkey</span>
+      </button>
+    </div>
+  );
+};
+
 export const ClaimPage: React.FC = () => {
   const { user, isLoading: isAuthLoading } = useXAuth();
   const [searchParams] = useSearchParams();
-  const queryPaymentCode = searchParams.get('payment') || searchParams.get('code') || '';
+  const { pathname } = useLocation();
+
+  // Share links are path-style: https://app.uprail.world/claim/<paymentId>
+  // (the trailing segment is only a payment code when it is not a route name).
+  const pathSegments = pathname.split('/').filter(Boolean);
+  const lastSegment = pathSegments[pathSegments.length - 1] || '';
+  const isRouteName =
+    lastSegment === '' || lastSegment === 'claim' || lastSegment === 'app' || lastSegment === 'id';
+  const pathPaymentCode = isRouteName ? '' : lastSegment;
+
+  const queryPaymentCode =
+    searchParams.get('payment') || searchParams.get('code') || pathPaymentCode || '';
   const urlInvite = searchParams.get('invite') || '';
 
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
@@ -34,9 +123,12 @@ export const ClaimPage: React.FC = () => {
     claimResult,
     error,
     hasPasskey,
+    shieldedBalances,
+    loadShieldedBalances,
     loadPendingPayments,
     claimPaymentWithPasskey,
     claimAllWithPasskey,
+    withdrawShieldedWithPasskey,
     clearError,
     resetSuccess,
   } = useClaimFlow(queryPaymentCode);
@@ -186,6 +278,15 @@ export const ClaimPage: React.FC = () => {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Shielded Vault Balances + Passkey Withdraw */}
+      {user && (
+        <WithdrawCard
+          balances={shieldedBalances}
+          isClaiming={isClaiming}
+          onWithdraw={withdrawShieldedWithPasskey}
+        />
       )}
 
       {/* Pending Payments List — AUTOMATICALLY DISCOVERED (No link/code input!) */}

@@ -21,6 +21,8 @@ import {
 import * as nearProxy from '../services/nearProxy';
 import * as nearRpc from '../services/nearRpc';
 import { signQuote, verifyQuoteToken } from '../services/quoteAuth';
+import { requireQuoteSecret } from '../utils/secrets';
+import { resolveOrigin } from '../services/webauthnConfig';
 import { createPaymentInvite } from '../services/inviteService';
 import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
@@ -46,6 +48,29 @@ function normalizeHandle(rawHandle: string): string {
  */
 function isValidXHandle(handle: string): boolean {
   return /^[a-zA-Z0-9_]{1,15}$/.test(handle);
+}
+
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const NEAR_ACCOUNT_RE =
+  /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?)*$/;
+const IMPLICIT_ACCOUNT_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * Classifies a raw recipient value as either a raw chain address
+ * ("Send to Wallet": EVM, Solana, NEAR named/implicit account) or an X handle.
+ * Handles are lowercased without '@'; addresses keep their canonical form
+ * (EVM/NEAR named accounts are case-insensitive → lowercase; Solana base58
+ * and64-hex implicit accounts are case-sensitive → preserved).
+ */
+function classifyRecipient(raw: string): { isAddress: boolean; value: string } {
+  const t = raw.trim();
+  if (EVM_ADDRESS_RE.test(t)) return { isAddress: true, value: t.toLowerCase() };
+  if (IMPLICIT_ACCOUNT_RE.test(t)) return { isAddress: true, value: t };
+  if (SOLANA_ADDRESS_RE.test(t)) return { isAddress: true, value: t };
+  // NEAR named accounts always contain a dot; X handles never do.
+  if (t.includes('.') && NEAR_ACCOUNT_RE.test(t)) return { isAddress: true, value: t.toLowerCase() };
+  return { isAddress: false, value: normalizeHandle(t) };
 }
 
 /**
@@ -215,13 +240,14 @@ paymentsRouter.post('/quote', async (c) => {
       );
     }
 
-    const cleanHandle = normalizeHandle(body.recipientHandle);
-    if (!isValidXHandle(cleanHandle)) {
+    const recipient = classifyRecipient(body.recipientHandle);
+    if (!recipient.isAddress && !isValidXHandle(recipient.value)) {
       return c.json<ErrorResponse>(
-        { error: 'Invalid recipient X handle format', code: 'INVALID_HANDLE' },
+        { error: 'Invalid recipient: expected an X handle or a valid wallet address', code: 'INVALID_HANDLE' },
         400
       );
     }
+    const cleanHandle = recipient.value;
 
     if (isNaN(Number(body.amount)) || Number(body.amount) <= 0) {
       return c.json<ErrorResponse>(
@@ -233,19 +259,23 @@ paymentsRouter.post('/quote', async (c) => {
     const holdingAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
 
     // Check if recipient is already registered with an active NEAR intent account
+    // (only meaningful for X-handle recipients; wallet addresses never map to
+    // an x_identities row).
     let recipientNearAccount: string | null = null;
     let isRegistered = false;
-    try {
-      const existing = await c.env.DB.prepare(
-        'SELECT near_account FROM x_identities WHERE LOWER(x_handle) = ?'
-      )
-        .bind(cleanHandle)
-        .first<{ near_account: string | null }>();
-      if (existing?.near_account) {
-        recipientNearAccount = existing.near_account;
-        isRegistered = true;
-      }
-    } catch {}
+    if (!recipient.isAddress) {
+      try {
+        const existing = await c.env.DB.prepare(
+          'SELECT near_account FROM x_identities WHERE LOWER(x_handle) = ?'
+        )
+          .bind(cleanHandle)
+          .first<{ near_account: string | null }>();
+        if (existing?.near_account) {
+          recipientNearAccount = existing.near_account;
+          isRegistered = true;
+        }
+      } catch {}
+    }
 
     // When the X user HAS NOT signed up yet:
     // Funds are escrowed to the platform holding wallet (ESCROW_ACCOUNT_ID)
@@ -271,17 +301,20 @@ paymentsRouter.post('/quote', async (c) => {
         asset: body.asset,
         amount: baseUnitsAmount,
         confidentiality: 'advanced',
+        // Sign with the X handle + human amount: that is exactly what
+        // /api/send verifies against.
+        signing: { recipient: cleanHandle, amount: body.amount },
       });
     } catch (proxyErr: any) {
       console.warn('nearProxy.quote fallback to platform escrow holding wallet:', proxyErr);
       const fallbackQuoteId = ulid();
       const fallbackExpiresAt = Date.now() + 15 * 60 * 1000;
-      const secret = c.env.SESSION_SECRET || c.env.INTERNAL_SERVICE_KEY || 'uprail_confidential_master_sig';
+      const secret = requireQuoteSecret(c.env);
       const sigToken = await signQuote(secret, {
         quoteId: fallbackQuoteId,
         asset: body.asset,
         amount: body.amount,
-        recipient: quoteRecipient,
+        recipient: cleanHandle,
         depositAddress: holdingAccount,
         expiresAt: fallbackExpiresAt,
       });
@@ -302,7 +335,7 @@ paymentsRouter.post('/quote', async (c) => {
 
     return c.json<QuoteResponse>({
       quoteId: quoteResult.quoteId,
-      recipientHandle: `@${cleanHandle}`,
+      recipientHandle: recipient.isAddress ? cleanHandle : `@${cleanHandle}`,
       asset: body.asset,
       amount: body.amount,
       confidentiality: 'advanced',
@@ -354,16 +387,17 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       );
     }
 
-    const cleanHandle = normalizeHandle(body.recipientHandle);
-    if (!isValidXHandle(cleanHandle)) {
+    const recipient = classifyRecipient(body.recipientHandle);
+    if (!recipient.isAddress && !isValidXHandle(recipient.value)) {
       return c.json<ErrorResponse>(
-        { error: 'Invalid recipient handle format', code: 'INVALID_HANDLE' },
+        { error: 'Invalid recipient: expected an X handle or a valid wallet address', code: 'INVALID_HANDLE' },
         400
       );
     }
+    const cleanHandle = recipient.value;
 
     // Cryptographically verify quote signature authenticity and exact binding
-    const quoteSecret = c.env.SESSION_SECRET || c.env.INTERNAL_SERVICE_KEY || 'uprail_confidential_master_sig';
+    const quoteSecret = requireQuoteSecret(c.env);
     const quoteVerification = await verifyQuoteToken(quoteSecret, body.quoteSignature, {
       asset: body.asset,
       amount: body.amount,
@@ -387,6 +421,27 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     const expiryDays = parseInt(c.env.PAYMENT_EXPIRY_DAYS || '30', 10);
     const expiresAt = now + expiryDays * 86400 * 1000;
 
+    // Resolve the recipient's immutable X identity (if already registered) so
+    // claim authorization never depends on a mutable handle. NULL when the
+    // recipient has not signed up yet — claim falls back to the handle and
+    // backfills this column atomically. Wallet-address recipients never map
+    // to an x_identities row and stay NULL.
+    let recipientXId: string | null = null;
+    if (!recipient.isAddress) {
+      try {
+        const row = await c.env.DB.prepare(
+          'SELECT x_id FROM x_identities WHERE LOWER(x_handle) = ?'
+        )
+          .bind(cleanHandle)
+          .first<{ x_id: string }>();
+        recipientXId = row?.x_id ?? null;
+      } catch (lookupErr) {
+        console.warn('[send] recipient x_id lookup failed:', lookupErr);
+      }
+    }
+
+    const memo = typeof (body as any).memo === 'string' ? (body as any).memo.trim().slice(0, 280) : null;
+
     // 0.8% platform fee to fees.uprail.near on every send
     const feePercent = parseFloat(c.env.FEE_PERCENT || '0.008');
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
@@ -400,11 +455,13 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       sender_x_id: session?.x_id ?? null,
       sender_x_handle: session?.x_handle ?? null,
       recipient_handle: cleanHandle,
+      recipient_x_id: recipientXId,
       asset: body.asset,
       amount: body.amount,
       fee: protocolFee,
       fee_recipient: feeRecipient,
       invite_code: inviteCode,
+      memo,
       status: PaymentStatus.DEPOSIT_WAITING,
       deposit_address: body.depositAddress,
       intent_hash: null,
@@ -448,11 +505,13 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           sender_x_id,
           sender_x_handle,
           recipient_handle,
+          recipient_x_id,
           asset,
           amount,
           fee,
           fee_recipient,
           invite_code,
+          memo,
           status,
           deposit_address,
           intent_hash,
@@ -461,7 +520,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           created_at,
           expires_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
       `
       )
         .bind(
@@ -469,11 +528,13 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           payment.sender_x_id,
           payment.sender_x_handle,
           payment.recipient_handle,
+          payment.recipient_x_id,
           payment.asset,
           payment.amount,
           payment.fee,
           payment.fee_recipient,
           payment.invite_code,
+          payment.memo,
           payment.status,
           payment.deposit_address,
           payment.created_at,
@@ -488,7 +549,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     // 2. Initialize EscrowDO instance
     await callEscrowDO(c.env, paymentId, 'init', payment);
 
-    const appOrigin = c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+    const appOrigin = resolveOrigin(c.env);
     const shareLink = `${appOrigin}/claim/${paymentId}?invite=${inviteCode}`;
 
     return c.json<SendResponse>(
@@ -609,20 +670,19 @@ paymentsRouter.get('/payments/:id', async (c) => {
     const isSender = Boolean(session && payment.sender_x_id && payment.sender_x_id === session.x_id);
     const isRecipient = Boolean(
       session &&
-        payment.recipient_handle &&
-        session.x_handle.toLowerCase() === payment.recipient_handle.toLowerCase()
+        ((payment.recipient_x_id && payment.recipient_x_id === session.x_id) ||
+          (payment.recipient_handle &&
+            session.x_handle.toLowerCase() === payment.recipient_handle.toLowerCase()))
     );
 
     if (isSender || isRecipient) {
       return c.json({ payment, isAuthorizedParty: true });
     }
 
-    // Public / unauthenticated preview: sanitize sensitive fields to prevent IDOR data leakage
+    // Public preview: only non-sensitive fields. See PublicPaymentPreview.
     const publicPreview: PublicPaymentPreview = {
       id: payment.id,
-      recipient_handle: payment.recipient_handle,
       asset: payment.asset,
-      amount: payment.amount,
       status: payment.status,
       created_at: payment.created_at,
       expires_at: payment.expires_at,

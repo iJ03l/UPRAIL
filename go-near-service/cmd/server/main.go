@@ -68,15 +68,24 @@ func main() {
 	}
 
 	// 7. Initialize business services
-	transferService := escrow.NewTransferService(signer, relayClient)
-	refundService := escrow.NewRefundService(signer, relayClient)
-	accountService := account.NewService(signer, relayClient)
+	// Shared at-most-once guard: a payment can neither double-settle nor both
+	// settle and refund concurrently.
+	settlementGuard := escrow.NewGuard()
+	transferService := escrow.NewTransferService(signer, relayClient, settlementGuard, oneClickClient)
+	refundService := escrow.NewRefundService(signer, relayClient, settlementGuard)
+	accountService := account.NewService(signer, relayClient, cfg.AllowedAccountParents, cfg.DeniedAccountIDs)
 	authService := auth.NewService(cfg.APIBase, httpClient)
 
 	// 8. Create Chi router with middlewares
 	r := chi.NewRouter()
 	r.Use(middleware.Logging(logger))
 	r.Use(middleware.Recovery(logger))
+	// Defense in depth for the internal surface: bounded bodies and a simple
+	// per-IP throttle so a compromised or runaway caller cannot exhaust the
+	// container. Rate limiting is keyed on the TCP peer, never spoofable
+	// headers.
+	r.Use(middleware.BodyLimit)
+	r.Use(middleware.RateLimit(600))
 
 	// 9. Register API routes
 	deps := handler.RouterDependencies{

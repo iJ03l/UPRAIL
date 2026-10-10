@@ -171,6 +171,48 @@ export function useClaimFlow(initialCode?: string) {
     }
   };
 
+  // ── Withdraw shielded balance to an external address with Passkey ───────
+  // Sends a WebAuthn assertion (same tx_auth flow as claim) with the call to
+  // POST /api/claim/withdraw, which is gated by requirePasskeyAuth().
+  const withdrawShieldedWithPasskey = async (
+    balanceIndex: number,
+    destinationAddress: string,
+    amount?: string
+  ): Promise<{ success: boolean; txHash: string } | undefined> => {
+    const balance = shieldedBalances[balanceIndex];
+    const destination = destinationAddress.trim();
+    if (!balance || !destination) {
+      setError('Select a balance with funds and enter a destination address');
+      return;
+    }
+
+    try {
+      setIsClaiming(true);
+      setError(null);
+
+      // Passkey authorization (identical to claim: tx_auth challenge + assertion)
+      const handle = user?.handle || 'wallet';
+      const assertion = await webauthn.authenticatePasskey(handle);
+
+      const result = await api.withdraw({
+        destinationAddress: destination,
+        asset: balance.token.id,
+        amount: amount || 'all',
+        passkeyAssertion: assertion.authPayload,
+      });
+
+      // Refresh balances so the UI reflects the settled withdrawal
+      await loadShieldedBalances();
+      return { success: result.success, txHash: result.txHash };
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : 'Withdrawal failed. Please try again.';
+      setError(msg);
+      throw err;
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
   // ── Claim ALL pending payments in one touch ──────────────────────────────
   const claimAllWithPasskey = async () => {
     if (pendingPayments.length === 0) {
@@ -236,6 +278,7 @@ export function useClaimFlow(initialCode?: string) {
     loadPendingPayments,
     claimPaymentWithPasskey,
     claimAllWithPasskey,
+    withdrawShieldedWithPasskey,
     clearError: () => setError(null),
     resetSuccess: () => setClaimSuccess(false),
   };

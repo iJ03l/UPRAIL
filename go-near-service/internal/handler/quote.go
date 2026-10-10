@@ -60,7 +60,7 @@ func (h *QuoteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	quote, err := h.client.GetQuote(r.Context(), req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeUpstreamError(w, "quote", err)
 		return
 	}
 

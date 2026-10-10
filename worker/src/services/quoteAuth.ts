@@ -1,7 +1,8 @@
 /**
  * Cryptographic Quote Signing and Verification
  * Enforces authenticated, non-repudiable quote binding for payment intents.
- * Zero dummy signatures permitted.
+ * Every token MUST be `<base64url(payload)>.<hex(HMAC)>` produced by this
+ * worker's own key — there is no signatureless or foreign-signature path.
  */
 
 export interface QuoteAuthPayload {
@@ -97,29 +98,11 @@ export async function verifyQuoteToken(
     return { valid: false, reason: 'Missing quote signature' };
   }
 
-  // Explicitly reject known dummy strings
-  const lower = tokenStr.trim().toLowerCase();
-  if (
-    lower === 'near_intent_quote_sig' ||
-    lower === 'escrow_platform_holding_sig' ||
-    lower === 'confidential_solver_sig' ||
-    lower === 'dummy' ||
-    lower === 'mock' ||
-    lower === 'sig' ||
-    lower === 'test'
-  ) {
-    return {
-      valid: false,
-      reason: 'Dummy, mock, or fallback signatures are forbidden in production.',
-    };
-  }
-
+  // The only accepted format is `<base64url(payload)>.<hex(HMAC-SHA256)>`.
+  // Bare hex strings, dummy tokens, and any other shape are rejected — an
+  // unauthenticated signature can never authorize a payment.
   const parts = tokenStr.trim().split('.');
   if (parts.length !== 2) {
-    // If not a signed token format, check if it is a 64+ char solver hex signature
-    if (/^[0-9a-fA-F]{64,}$/.test(tokenStr.trim())) {
-      return { valid: true };
-    }
     return { valid: false, reason: 'Malformed quote signature format' };
   }
 
@@ -158,21 +141,30 @@ export async function verifyQuoteToken(
     };
   }
 
-  // 4. Recipient binding check
+  // 4. Recipient binding check — exact, no .near / holding-wallet bypass.
   const cleanExpected = expected.recipientHandle.replace(/^@/, '').toLowerCase();
   const cleanPayloadRecipient = payload.recipient.replace(/^@/, '').toLowerCase();
-  if (
-    cleanPayloadRecipient !== cleanExpected &&
-    !cleanPayloadRecipient.endsWith('.near') &&
-    cleanPayloadRecipient !== 'escrow.uprail.near'
-  ) {
+  if (cleanPayloadRecipient !== cleanExpected) {
     return {
       valid: false,
       reason: `Quote recipient mismatch: expected ${cleanExpected}, got ${cleanPayloadRecipient}`,
     };
   }
 
-  // 5. HMAC verification (constant-time)
+  // 5. Deposit address binding — the address recorded on the payment must be
+  //    the address the quote was signed for.
+  if (
+    expected.depositAddress &&
+    payload.depositAddress &&
+    payload.depositAddress !== expected.depositAddress
+  ) {
+    return {
+      valid: false,
+      reason: 'Quote deposit address mismatch',
+    };
+  }
+
+  // 6. HMAC verification (constant-time)
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',

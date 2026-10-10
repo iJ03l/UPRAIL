@@ -6,17 +6,22 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 0.1
   },
+  // ---------------------------------------------------------------------------
+  // NON-SECRET configuration only.
+  //
+  // Secrets must never be committed here. Configure them with:
+  //   Production : wrangler secret put <NAME>      (see .dev.vars.example)
+  //   Local dev  : cp .dev.vars.example .dev.vars  then fill in real values
+  //
+  // The worker FAILS CLOSED when a required secret is missing — requests that
+  // need it return an error instead of falling back to a default value.
+  // ---------------------------------------------------------------------------
   "vars": {
     "X_CLIENT_ID": "UHZFT2JxeEhZeEFqWTc2QzUxY2E6MTpjaQ",
-    "X_CLIENT_SECRET": "Uzwwmc2W6Yd5MaQXxTXXZyRnz42kIsmygR7fGV2EdD_FccBRjr",
-    "SESSION_SECRET": "d083cdb5bc9d70c9e0e5f70ad08ed1858e3c0a4b097281564a60b493e9d8fdb9",
-    "INTERNAL_SERVICE_KEY": "uprail_confidential_master_sig_2026",
-    "ESCROW_PRIVATE_KEY": "ed25519:3tgX4A9y7J55RUf1JMtvqBWdPNRk8BNLtNucwmSBz3Rgj4ELzs1pgya17u7wTuuJJkJTPESpWWsQukVr2AExFWkQ",
     "NEAR_API_BASE": "https://1click.chaindefuser.com",
     "SOLVER_RELAY_URL": "https://solver-relay-v2.chaindefuser.com/rpc",
-    "NEAR_RPC_URL": "https://nameless-practical-liquid.near-mainnet.quiknode.pro/764c7b41d38ccdf55377d79578d11c41efa0a3b8/",
     "INTENTS_CONTRACT_ID": "intents.near",
     "ESCROW_ACCOUNT_ID": "escrow.uprail.near",
     "MASTER_ACCOUNT_ID": "uprail.near",
@@ -27,6 +32,9 @@
     "WEBAUTHN_RP_NAME": "UPRAIL",
     "WEBAUTHN_ORIGIN": "https://app.uprail.world"
   },
+  // Secrets (set via `wrangler secret put NAME`, never committed):
+  //   X_CLIENT_SECRET, SESSION_SECRET, INTERNAL_SERVICE_KEY,
+  //   ESCROW_PRIVATE_KEY, NEAR_RPC_URL, DATABASE_URL
   "triggers": {
     "crons": ["0 * * * *"]
   },

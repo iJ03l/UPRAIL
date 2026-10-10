@@ -151,7 +151,6 @@ export class EscrowDO extends DurableObject<Env> {
       asset: state.asset,
       amount: state.amount,
       escrowAccountId: this.env.ESCROW_ACCOUNT_ID,
-      escrowPrivateKey: this.env.ESCROW_PRIVATE_KEY,
       intentHash: state.intent_hash,
       paymentId: state.id,
     });
@@ -217,7 +216,6 @@ export class EscrowDO extends DurableObject<Env> {
           asset: state.asset,
           amount: state.amount,
           escrowAccountId: this.env.ESCROW_ACCOUNT_ID,
-          escrowPrivateKey: this.env.ESCROW_PRIVATE_KEY,
           intentHash: state.intent_hash,
           paymentId: state.id,
         });

@@ -64,19 +64,19 @@ export const rateLimit = (options?: RateLimitOptions): MiddlewareHandler<AppCont
       return await next();
     }
 
-    // 3. Higher allowance for authenticated sessions
-    const hasSessionCookie = !!c.req.header('cookie')?.includes('uprail_session');
-    const effectiveLimit = hasSessionCookie ? Math.max(defaultLimit, 600) : defaultLimit;
-
-    // Extract client IP address
-    const ip =
-      c.req.header('cf-connecting-ip') ||
-      c.req.header('x-real-ip') ||
-      c.req.header('x-forwarded-for')?.split(',')[0].trim() ||
-      '127.0.0.1';
+    // 3. Key on the VERIFIED session identity whenever one is present.
+    //    sessionMiddleware() runs upstream and HMAC-verifies the cookie, so
+    //    session.x_id cannot be spoofed by the client. Anonymous traffic falls
+    //    back to the edge IP that Cloudflare sets — never to client-supplied
+    //    forwarding headers (x-real-ip / x-forwarded-for are spoofable).
+    const session = c.get('session');
+    const subject = session?.x_id
+      ? `u:${session.x_id}`
+      : `ip:${c.req.header('cf-connecting-ip') || 'unknown'}`;
+    const effectiveLimit = session ? Math.max(defaultLimit, 600) : defaultLimit;
 
     const now = Date.now();
-    const key = `rl:${prefix}:${ip}`;
+    const key = `rl:${prefix}:${subject}`;
 
     let record = rateLimitMap.get(key);
 

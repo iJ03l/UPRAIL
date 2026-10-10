@@ -14,18 +14,35 @@ import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
 import { signPayload, verifyAndUnpack } from '../utils/crypto';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
+import { getSessionSecret, requireSessionSecret } from '../utils/secrets';
+import { resolveOrigin, resolveRpId } from '../services/webauthnConfig';
 
 export const authRouter = new Hono<AppContext>();
 
-function getSecret(c: any): string {
-  return c.env.SESSION_SECRET || 'uprail_master_signed_session_edge_2026';
+/**
+ * Restricts the OAuth `return_to` value to a same-site absolute path.
+ *
+ * Without this, `/auth/login?return_to=https://evil.example` would turn the
+ * post-login redirect into an open redirect used for phishing. Protocol-relative
+ * (`//host`) and backslash tricks are rejected too, since browsers normalize
+ * `https://app.example/\evil.com` to `https://evil.com`.
+ */
+function sanitizeReturnTo(value: unknown): string {
+  if (typeof value !== 'string') return '/login';
+  const v = value.trim();
+  if (v.length === 0 || v.length > 512) return '/login';
+  if (!v.startsWith('/') || v.startsWith('//')) return '/login';
+  if (v.includes('\\') || v.includes('\u0000')) return '/login';
+  if (/[\u0000-\u001f\u007f]/.test(v)) return '/login';
+  if (/^\/[a-z][a-z0-9+.-]*:/i.test(v)) return '/login';
+  return v;
 }
 
 /**
  * Initiates X OAuth 2.0 PKCE flow, sets signed cookie state, and generates canonical authorize URL
  */
 async function initiateXAuth(c: any): Promise<{ authorizeUrl: string; state: string }> {
-  const returnTo = c.req.query('return_to') || '/login';
+  const returnTo = sanitizeReturnTo(c.req.query('return_to'));
   const inviteCode = c.req.query('invite') || null;
   const { codeVerifier, codeChallenge } = await generatePKCE();
   const state = crypto.randomUUID();
@@ -46,7 +63,7 @@ async function initiateXAuth(c: any): Promise<{ authorizeUrl: string; state: str
   });
 
   // 1. Set signed HttpOnly cookie for stateless edge resolution
-  const secret = getSecret(c);
+  const secret = requireSessionSecret(c.env);
   const signedToken = await signPayload(oauthData, secret);
   const cookieOptions: any = {
     path: '/',
@@ -157,7 +174,7 @@ authRouter.get('/callback', async (c) => {
     const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
     const appOrigin = isLocal
       ? (c.req.header('x-forwarded-host') ? `http://${c.req.header('x-forwarded-host')}` : 'http://localhost:3000')
-      : (c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world');
+      : (resolveOrigin(c.env));
 
     if (error) {
       console.warn('X OAuth error received:', error, errorDescription);
@@ -172,8 +189,8 @@ authRouter.get('/callback', async (c) => {
     let rawData: string | null = null;
     const cookieState = getCookie(c, 'uprail_oauth_state');
     if (cookieState) {
-      const secret = getSecret(c);
-      const unpacked = await verifyAndUnpack(cookieState, secret);
+      const secret = getSessionSecret(c.env);
+      const unpacked = secret ? await verifyAndUnpack(cookieState, secret) : null;
       if (unpacked) {
         try {
           const parsed = JSON.parse(unpacked);
@@ -222,13 +239,15 @@ authRouter.get('/callback', async (c) => {
     if ((c.env as any).DATABASE_URL || (c.env as any).HYPERDRIVE) {
       try {
         const sql = getDb(c.env);
-        const identity = await upsertXIdentity(sql, {
-          x_id: xUser.id,
-          x_handle: xUser.username.toLowerCase(),
-          x_name: xUser.name,
-        });
-        nearAccount = identity.near_account || null;
-        identityPersisted = true;
+        if (sql) {
+          const identity = await upsertXIdentity(sql, {
+            x_id: xUser.id,
+            x_handle: xUser.username.toLowerCase(),
+            x_name: xUser.name,
+          });
+          nearAccount = identity.near_account || null;
+          identityPersisted = true;
+        }
       } catch (pgErr) {
         console.warn('Postgres identity upsert failed, using D1:', pgErr);
       }
@@ -322,9 +341,13 @@ authRouter.get('/callback', async (c) => {
     } else if (!isActivated) {
       destination = `${appOrigin}/parking`;
     } else {
-      destination = returnTo && returnTo !== '/' && returnTo !== '/login'
-        ? (returnTo.startsWith('/') ? `${appOrigin}${returnTo}` : returnTo)
-        : `${appOrigin}/app`;
+      // Re-sanitized here: the cookie payload is signed, but defense in depth
+      // costs nothing and keeps the redirect on this origin unconditionally.
+      const safeReturnTo = sanitizeReturnTo(returnTo);
+      destination =
+        safeReturnTo !== '/' && safeReturnTo !== '/login'
+          ? `${appOrigin}${safeReturnTo}`
+          : `${appOrigin}/app`;
     }
 
     return c.redirect(destination);
@@ -334,7 +357,7 @@ authRouter.get('/callback', async (c) => {
     const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
     const appOrigin = isLocal
       ? (c.req.header('x-forwarded-host') ? `http://${c.req.header('x-forwarded-host')}` : 'http://localhost:3000')
-      : (c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world');
+      : (resolveOrigin(c.env));
     return c.redirect(`${appOrigin}/login?error=${encodeURIComponent(err.message || 'Authentication with 𝕏 failed')}`);
   }
 });
@@ -438,7 +461,7 @@ authRouter.post('/logout', async (c) => {
  */
 authRouter.get('/passkey/login-options', async (c) => {
   try {
-    const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
+    const rpId = resolveRpId(c.env);
     const options = await webauthnService.generateAuthenticationOptions({ rpId });
 
     // Store challenge via challengeService (zero KV writes)
@@ -449,7 +472,9 @@ authRouter.get('/passkey/login-options', async (c) => {
       ttlSeconds: 300,
     });
 
-    return c.json(options);
+    // rpId is not part of the WebAuthn spec response but the client needs it
+    // so authentication uses the same relying party as registration.
+    return c.json({ ...options, rpId });
   } catch (err: any) {
     console.error('Passkey login options error:', err);
     return c.json<ErrorResponse>(
@@ -502,10 +527,12 @@ authRouter.post('/passkey/login-verify', async (c) => {
     let passkeyRow: { x_id: string; public_key: string; counter: number } | null = null;
     try {
       const sql = getDb(c.env);
-      const [row] = await sql<any[]>`
-        SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ${assertion.id}
-      `;
-      if (row) passkeyRow = row;
+      if (sql) {
+        const [row] = await sql<any[]>`
+          SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ${assertion.id}
+        `;
+        if (row) passkeyRow = row;
+      }
     } catch {
       if (c.env.DB) {
         passkeyRow = await c.env.DB.prepare(
@@ -523,8 +550,8 @@ authRouter.post('/passkey/login-verify', async (c) => {
       );
     }
 
-    const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
-    const expectedOrigin = c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+    const rpId = resolveRpId(c.env);
+    const expectedOrigin = resolveOrigin(c.env);
 
     const verification = await webauthnService.verifyAuthentication({
       assertion,
@@ -546,8 +573,10 @@ authRouter.post('/passkey/login-verify', async (c) => {
     let userProfile: { x_id: string; x_handle: string; x_name: string; near_account?: string | null } | null = null;
     try {
       const sql = getDb(c.env);
-      const identity = await getXIdentity(sql, passkeyRow.x_id);
-      if (identity) userProfile = identity;
+      if (sql) {
+        const identity = await getXIdentity(sql, passkeyRow.x_id);
+        if (identity) userProfile = identity;
+      }
     } catch {
       if (c.env.DB) {
         userProfile = await c.env.DB.prepare(
@@ -593,7 +622,7 @@ authRouter.post('/passkey/login-verify', async (c) => {
  */
 authRouter.get('/export-key-challenge', requireAuth(), async (c) => {
   const session = c.get('session')!;
-  const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
+  const rpId = resolveRpId(c.env);
 
   let passkey: any = null;
   if (c.env.DB) {
@@ -620,7 +649,7 @@ authRouter.get('/export-key-challenge', requireAuth(), async (c) => {
       x_id: session.x_id,
       exp: Date.now() + 5 * 60 * 1000,
     }),
-    getSecret(c)
+    requireSessionSecret(c.env)
   );
 
   return c.json({ options, challengeToken });
@@ -644,7 +673,8 @@ authRouter.post('/export-key', requireAuth(), async (c) => {
   }
 
   // Verify challenge token
-  const payloadStr = await verifyAndUnpack(challengeToken, getSecret(c));
+  const verifySecret = getSessionSecret(c.env);
+  const payloadStr = verifySecret ? await verifyAndUnpack(challengeToken, verifySecret) : null;
   if (!payloadStr) {
     return c.json<ErrorResponse>(
       { error: 'Challenge expired or invalid', code: 'CHALLENGE_EXPIRED' },
@@ -677,8 +707,8 @@ authRouter.post('/export-key', requireAuth(), async (c) => {
     );
   }
 
-  const rpId = c.env.WEBAUTHN_RP_ID || 'uprail.world';
-  const expectedOrigin = c.env.WEBAUTHN_ORIGIN || 'https://app.uprail.world';
+  const rpId = resolveRpId(c.env);
+  const expectedOrigin = resolveOrigin(c.env);
 
   try {
     const verification = await webauthnService.verifyAuthentication({

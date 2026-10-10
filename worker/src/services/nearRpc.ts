@@ -8,7 +8,7 @@
 
 import type { Env } from '../types';
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { base58Decode, base58Encode } from './nativeIntents';
+import { base58Decode, base58Encode } from '../utils/base58';
 import { getOnchainIcon } from './onchainIcons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -61,14 +61,16 @@ export interface IntentTx {
   status: 'success' | 'pending' | 'failed';
 }
 
-const DEFAULT_NEAR_RPC_URL = 'https://nameless-practical-liquid.near-mainnet.quiknode.pro/764c7b41d38ccdf55377d79578d11c41efa0a3b8/';
 
 async function nearRpc(
   rpcUrl: string,
   method: string,
   params: Record<string, unknown>
 ): Promise<any> {
-  const targetUrl = rpcUrl || DEFAULT_NEAR_RPC_URL;
+  if (!rpcUrl) {
+    throw new Error('NEAR_RPC_URL is not configured');
+  }
+  const targetUrl = rpcUrl;
   const resp = await fetch(targetUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1229,8 +1231,10 @@ export async function getIntentHistory(
     if (resp.ok) {
       const data = await resp.json() as any;
       const list = Array.isArray(data) ? data : (data.transactions || data.items || []);
-      return list.map((tx: any) => ({
-        id: tx.id || tx.hash || tx.transaction_hash || crypto.randomUUID(),
+      const txs = list.map((tx: any) => ({
+        // Real upstream transaction hash only — entries without one are
+        // dropped below rather than given a synthetic (fabricated) id.
+        id: tx.id || tx.hash || tx.transaction_hash || '',
         intent_type: tx.type || tx.intent_type || 'transfer',
         defuse_asset_id_in: tx.asset_in || tx.defuse_asset_id_in,
         defuse_asset_id_out: tx.asset_out || tx.defuse_asset_id_out,
@@ -1239,11 +1243,12 @@ export async function getIntentHistory(
         receiver_id: tx.receiver_id || tx.recipient || tx.to,
         sender_id: tx.sender_id || tx.sender || tx.from,
         block_height: Number(tx.block_height || 0),
-        block_timestamp: Number(tx.block_timestamp || tx.timestamp || Date.now()),
+        block_timestamp: Number(tx.block_timestamp || tx.timestamp || 0),
         status: tx.status === 'SUCCESS' || tx.status === 'success' ? 'success'
           : tx.status === 'FAILED' || tx.status === 'failed' ? 'failed'
           : 'pending',
       })) as IntentTx[];
+      return txs.filter((tx) => !!tx.id);
     }
   } catch (err) {
     console.warn('[nearRpc] getIntentHistory via 1click failed:', err);
@@ -1367,7 +1372,10 @@ export async function createOnchainSubAccount(
     return { success: false, error: 'ESCROW_PRIVATE_KEY is missing' };
   }
 
-  const rpcUrl = env.NEAR_RPC_URL || DEFAULT_NEAR_RPC_URL;
+  const rpcUrl = env.NEAR_RPC_URL;
+  if (!rpcUrl) {
+    return { success: false, error: 'NEAR_RPC_URL is not configured' };
+  }
 
   try {
     // 1. Fetch latest block hash
@@ -1494,28 +1502,22 @@ export async function resolveUserNearAccount(
   env: Env,
   session: { x_id: string; x_handle: string; near_account?: string | null }
 ): Promise<string> {
-  const masterAccount = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+  // 1. Derive deterministic NEAR keypair and sub-account from active root key
+  const derived = await deriveUserNearKeypair(env, session.x_id);
+  const accountId = derived.accountId;
 
-  if (session.near_account && session.near_account.endsWith(`.${masterAccount}`)) {
-    return session.near_account;
-  }
-
-  // 1. Check x_identities in D1
+  // 2. Check if identity in DB is already aligned with current root derivation
+  let needsDbUpdate = true;
   if (env.DB) {
     try {
       const identity = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
         .bind(session.x_id)
         .first<{ near_account: string | null }>();
-      if (identity?.near_account && identity.near_account.endsWith(`.${masterAccount}`)) {
-        session.near_account = identity.near_account;
-        return identity.near_account;
+      if (identity?.near_account === accountId) {
+        needsDbUpdate = false;
       }
     } catch {}
   }
-
-  // 2. Derive deterministic NEAR keypair and sub-account
-  const derived = await deriveUserNearKeypair(env, session.x_id);
-  const accountId = derived.accountId;
 
   // 3. Try onchain creation if account does not exist
   try {
@@ -1524,8 +1526,8 @@ export async function resolveUserNearAccount(
     console.warn('[nearRpc] createOnchainSubAccount non-blocking notice:', createErr);
   }
 
-  // Persist to x_identities
-  if (env.DB) {
+  // 4. Persist newly derived account to x_identities if not yet updated
+  if (needsDbUpdate && env.DB) {
     try {
       await env.DB.prepare('UPDATE x_identities SET near_account = ?, updated_at = ? WHERE x_id = ?')
         .bind(accountId, Date.now(), session.x_id)
