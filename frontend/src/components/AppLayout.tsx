@@ -31,45 +31,45 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-stone-100">
         <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Left: Brand with Cinematic Glitch */}
-          <GlitchLogo href="/app" size="md" />
+          <GlitchLogo href="/app" size="md" className="flex-shrink-0" />
 
           {/* Center: Subtle Protocol Status (Desktop) */}
-          <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-stone-50 border border-stone-200 text-[10px] font-mono text-stone-600">
+          <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-stone-50 border border-stone-200 text-[10px] font-mono text-stone-600 flex-shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
             <span>NEAR Intents Active</span>
           </div>
 
           {/* Right: User Pill / Sign In + Invites + Settings */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-shrink-0">
             {user ? (
               <>
                 {/* Invite Button Badge */}
                 <button
                   type="button"
                   onClick={() => setIsInviteModalOpen(true)}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer text-xs font-mono font-bold text-stone-900 group"
+                  className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer text-xs font-mono font-bold text-stone-900 group flex-shrink-0"
                   title="View & Share your 1 Personal Invite Code"
                 >
-                  <Users className="w-3.5 h-3.5 text-stone-700 group-hover:text-black" />
+                  <Users className="w-3.5 h-3.5 text-stone-700 group-hover:text-black flex-shrink-0" />
                   <span>Invite</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-stone-900 flex-shrink-0" />
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setIsSettingsOpen(true)}
-                  className="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer group"
+                  className="flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer group flex-shrink-0"
                   title="Account Settings"
                 >
                   <img
                     src={user.avatarUrl || `https://unavatar.io/twitter/${user.handle}`}
                     alt={user.handle}
-                    className="w-4 h-4 rounded-full border border-stone-300"
+                    className="w-4 h-4 rounded-full border border-stone-300 flex-shrink-0"
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
                   />
-                  <span className="text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors">
+                  <span className="text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors max-w-[80px] sm:max-w-[130px] truncate">
                     @{user.handle}
                   </span>
                 </button>
@@ -77,7 +77,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             ) : (
               <Link
                 to="/login"
-                className="px-3.5 py-1.5 rounded-full bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors shadow-xs"
+                className="px-3.5 py-1.5 rounded-full bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors shadow-xs flex-shrink-0"
               >
                 Sign In
               </Link>

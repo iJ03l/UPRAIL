@@ -10,15 +10,16 @@ export interface GlitchLogoProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
   /** Color variant: 'light' (black wordmark on light bg) or 'dark' (white wordmark on dark bg) */
   variant?: 'light' | 'dark' | 'auto';
-  /** Display mode: 'cycle' (cinematic glitch between full & icon), 'icon-only', or 'full-only' */
+  /** Display mode: 'cycle' (cinematic glitch burst every interval), 'icon-only', or 'full-only' */
   mode?: 'cycle' | 'icon-only' | 'full-only';
   /** Optional badge text next to the logo (e.g. 'APP') */
   badge?: string;
   /** Extra CSS classes */
   className?: string;
-  /** Cycle duration in ms for the full logo display before glitching (default: 5500) */
+  /** Glitch burst interval in ms (default: 6500) */
+  interval?: number;
+  /** Cycle duration in ms for backward compatibility */
   fullDuration?: number;
-  /** Cycle duration in ms for the icon-only display before glitching back (default: 3800) */
   iconDuration?: number;
   /** Enable hover and touch interactive glitch triggers (default: true) */
   interactive?: boolean;
@@ -31,93 +32,78 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   mode = 'cycle',
   badge,
   className = '',
-  fullDuration = 5500,
-  iconDuration = 3800,
+  interval = 6500,
+  fullDuration,
+  iconDuration,
   interactive = true,
 }) => {
-  // Start with full logo unless mode is explicitly icon-only
-  const [showWordmark, setShowWordmark] = useState<boolean>(mode !== 'icon-only');
   const [isGlitching, setIsGlitching] = useState<boolean>(false);
   const glitchTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const cycleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Trigger a brief cinematic glitch sequence (approx 480ms)
-  const triggerGlitch = (callback?: () => void) => {
+  const burstInterval = interval || fullDuration || 6500;
+
+  // Trigger a brief cinematic glitch sequence (450ms) - strictly zero layout reflow
+  const triggerGlitch = () => {
+    if (isGlitching) return;
     setIsGlitching(true);
 
     if (glitchTimerRef.current) {
       clearTimeout(glitchTimerRef.current);
     }
 
-    // Midway through the glitch (~200ms), perform the state transition
-    const midTimer = setTimeout(() => {
-      if (callback) callback();
-    }, 200);
-
     glitchTimerRef.current = setTimeout(() => {
-      clearTimeout(midTimer);
       setIsGlitching(false);
-    }, 480);
+    }, 450);
   };
 
-  // Autonomous cinematic glitch cycle
+  // Autonomous cinematic glitch interval
   useEffect(() => {
-    if (mode !== 'cycle') {
-      setShowWordmark(mode === 'full-only');
-      return;
-    }
+    if (mode === 'icon-only' || mode === 'full-only') return;
 
-    const scheduleNextTransition = () => {
-      const waitTime = showWordmark ? fullDuration : iconDuration;
-
-      cycleTimerRef.current = setTimeout(() => {
-        triggerGlitch(() => {
-          setShowWordmark((prev) => !prev);
-        });
-      }, waitTime);
-    };
-
-    scheduleNextTransition();
+    intervalTimerRef.current = setInterval(() => {
+      triggerGlitch();
+    }, burstInterval);
 
     return () => {
-      if (cycleTimerRef.current) clearTimeout(cycleTimerRef.current);
+      if (intervalTimerRef.current) clearInterval(intervalTimerRef.current);
       if (glitchTimerRef.current) clearTimeout(glitchTimerRef.current);
     };
-  }, [mode, showWordmark, fullDuration, iconDuration]);
+  }, [mode, burstInterval]);
 
   // Interactive handler for hover or tap
   const handleInteraction = () => {
     if (!interactive || isGlitching) return;
-    triggerGlitch(() => {
-      if (mode === 'cycle') {
-        setShowWordmark((prev) => !prev);
-      }
-    });
+    triggerGlitch();
   };
 
-  // Dimensional scale classes
+  // Dimensional scale classes - locked container widths guarantee 0 layout shift
   const dimensions = {
     sm: {
-      icon: 'h-6 w-6 sm:h-6 sm:w-6',
-      wordmark: 'h-5 sm:h-5 max-w-[85px]',
+      container: mode === 'icon-only' ? 'w-6 h-6' : 'w-[102px] h-6',
+      icon: 'h-6 w-6',
+      wordmark: 'h-4.5 max-w-[70px]',
       gap: 'space-x-1.5',
       badge: 'text-[9px] px-1 py-0.2',
     },
     md: {
+      container: mode === 'icon-only' ? 'w-7 sm:w-8 h-7 sm:h-8' : 'w-[124px] sm:w-[145px] h-7 sm:h-8',
       icon: 'h-7 w-7 sm:h-8 sm:w-8',
-      wordmark: 'h-6 sm:h-7 max-w-[110px] sm:max-w-[125px]',
+      wordmark: 'h-5.5 sm:h-6.5 max-w-[88px] sm:max-w-[105px]',
       gap: 'space-x-2 sm:space-x-2.5',
       badge: 'text-[10px] px-1.5 py-0.5',
     },
     lg: {
+      container: mode === 'icon-only' ? 'w-9 sm:w-10 h-9 sm:h-10' : 'w-[155px] sm:w-[180px] h-9 sm:h-10',
       icon: 'h-9 w-9 sm:h-10 sm:w-10',
-      wordmark: 'h-8 sm:h-9 max-w-[140px] sm:max-w-[160px]',
+      wordmark: 'h-7.5 sm:h-8.5 max-w-[115px] sm:max-w-[135px]',
       gap: 'space-x-2.5 sm:space-x-3',
       badge: 'text-xs px-2 py-0.5',
     },
     xl: {
+      container: mode === 'icon-only' ? 'w-11 sm:w-12 h-11 sm:h-12' : 'w-[190px] sm:w-[220px] h-11 sm:h-12',
       icon: 'h-11 w-11 sm:h-12 sm:w-12',
-      wordmark: 'h-10 sm:h-11 max-w-[180px] sm:max-w-[200px]',
+      wordmark: 'h-9.5 sm:h-10.5 max-w-[140px] sm:max-w-[165px]',
       gap: 'space-x-3 sm:space-x-3.5',
       badge: 'text-xs px-2 py-1',
     },
@@ -128,9 +114,11 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
       ? '/brand/uprail-wordmark-white.png'
       : '/brand/uprail-wordmark.png';
 
-  const content = (
+  const showWordmark = mode !== 'icon-only';
+
+  const innerContent = (
     <div
-      className={`relative inline-flex items-center select-none ${dimensions.gap} ${className}`}
+      className={`relative inline-flex items-center flex-shrink-0 select-none ${dimensions.gap} ${dimensions.container} ${className}`}
       onMouseEnter={handleInteraction}
       onTouchStart={handleInteraction}
       title="UPRAIL"
@@ -139,14 +127,14 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
         === PRIMARY LAYER === 
       */}
       <div
-        className={`relative z-10 flex items-center ${dimensions.gap} transition-transform duration-150 ${
+        className={`relative z-10 flex items-center ${dimensions.gap} flex-shrink-0 transition-transform duration-150 ${
           isGlitching ? 'glitch-anim-active' : ''
         }`}
       >
         {/* Brand Icon (Universal Orange Track) */}
         <div
           className={`relative flex-shrink-0 ${dimensions.icon} flex items-center justify-center transition-all duration-300 ${
-            !showWordmark && !isGlitching ? 'icon-beacon-glow' : ''
+            isGlitching ? 'icon-beacon-glow scale-105' : ''
           }`}
         >
           <img
@@ -157,31 +145,25 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
           />
         </div>
 
-        {/* Collapsible Wordmark ("uprail ™") */}
-        <div
-          className={`overflow-hidden flex items-center transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-            showWordmark
-              ? `${dimensions.wordmark} opacity-100 scale-100 translate-x-0`
-              : 'max-w-0 opacity-0 scale-90 -translate-x-3 pointer-events-none'
-          }`}
-        >
-          <img
-            src={wordmarkSrc}
-            alt="uprail"
-            className="h-full w-auto object-contain flex-shrink-0"
-            draggable={false}
-          />
-        </div>
-
-        {/* Optional Badge (e.g. "APP") */}
-        {badge && (
+        {/* Wordmark ("uprail ™") - Always stable in box, zero layout shift */}
+        {showWordmark && (
           <div
-            className={`overflow-hidden flex items-center transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-              showWordmark
-                ? 'max-w-[60px] opacity-100'
-                : 'max-w-0 opacity-0 pointer-events-none'
+            className={`flex items-center flex-shrink-0 transition-opacity duration-200 ${
+              isGlitching ? 'opacity-90' : 'opacity-100'
             }`}
           >
+            <img
+              src={wordmarkSrc}
+              alt="uprail"
+              className={`${dimensions.wordmark} w-auto object-contain flex-shrink-0`}
+              draggable={false}
+            />
+          </div>
+        )}
+
+        {/* Optional Badge (e.g. "APP") */}
+        {badge && showWordmark && (
+          <div className="flex items-center flex-shrink-0">
             <span
               className={`font-mono font-bold bg-stone-100 text-stone-800 border border-stone-200 rounded-md uppercase tracking-wider flex-shrink-0 ${dimensions.badge}`}
             >
@@ -211,17 +193,15 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
                 className="w-full h-full object-contain"
               />
             </div>
-            <div
-              className={`overflow-hidden flex items-center ${
-                showWordmark ? dimensions.wordmark : 'max-w-0 opacity-0'
-              }`}
-            >
-              <img
-                src={wordmarkSrc}
-                alt=""
-                className="h-full w-auto object-contain flex-shrink-0"
-              />
-            </div>
+            {showWordmark && (
+              <div className="flex items-center flex-shrink-0">
+                <img
+                  src={wordmarkSrc}
+                  alt=""
+                  className={`${dimensions.wordmark} w-auto object-contain flex-shrink-0`}
+                />
+              </div>
+            )}
           </div>
 
           {/* Slice Tearing Layer 2 (Cyan/Blue chromatic split) */}
@@ -239,17 +219,15 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
                 className="w-full h-full object-contain"
               />
             </div>
-            <div
-              className={`overflow-hidden flex items-center ${
-                showWordmark ? dimensions.wordmark : 'max-w-0 opacity-0'
-              }`}
-            >
-              <img
-                src={wordmarkSrc}
-                alt=""
-                className="h-full w-auto object-contain flex-shrink-0"
-              />
-            </div>
+            {showWordmark && (
+              <div className="flex items-center flex-shrink-0">
+                <img
+                  src={wordmarkSrc}
+                  alt=""
+                  className={`${dimensions.wordmark} w-auto object-contain flex-shrink-0`}
+                />
+              </div>
+            )}
           </div>
 
           {/* Scanning Laser Beam */}
@@ -269,15 +247,15 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   );
 
   if (href === false || !href) {
-    return content;
+    return innerContent;
   }
 
   return (
     <Link
       to={href}
-      className="inline-flex items-center group cursor-pointer focus:outline-none"
+      className={`inline-flex items-center flex-shrink-0 ${dimensions.container} group cursor-pointer focus:outline-none`}
     >
-      {content}
+      {innerContent}
     </Link>
   );
 };

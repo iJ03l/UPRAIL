@@ -43,27 +43,14 @@ export const LandingPage: React.FC = () => {
       <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-white/80 backdrop-blur-md">
         <div className="w-full px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between">
           {/* Brand with Cinematic Glitch */}
-          <GlitchLogo href="/" size="md" />
-
-          {/* Section Navigation (Desktop) */}
-          <nav className="hidden md:flex items-center space-x-7 text-xs font-mono uppercase tracking-widest text-stone-500">
-            <a href="#manifesto" className="hover:text-black transition-colors">
-              // Manifesto
-            </a>
-            <a href="#schematic" className="hover:text-black transition-colors">
-              // How It Works
-            </a>
-            <a href="#simulator" className="hover:text-black transition-colors">
-              // Simulator
-            </a>
-          </nav>
+          <GlitchLogo href="/" size="md" className="flex-shrink-0" />
 
           {/* Launch App Button - Strictly opens app.uprail.world in new tab */}
           <a
             href={appSubdomainUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="px-4 py-2 sm:px-6 sm:py-2.5 rounded-xl bg-black text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-800 transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95"
+            className="flex-shrink-0 px-4 py-2 sm:px-6 sm:py-2.5 rounded-xl bg-black text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-800 transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95"
           >
             <span>Launch App</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -74,20 +61,20 @@ export const LandingPage: React.FC = () => {
       {/* Main Flow: Balanced spacing */}
       <main className="relative z-20 w-full pt-4 sm:pt-7 md:pt-9 lg:pt-10 pb-16 sm:pb-24 space-y-10 sm:space-y-16 md:space-y-20">
         {/* 
-          1. Hero Section: Full width end to end
+          1. Hero Section: Full width end to end, text size halved, vertical space maintained
         */}
-        <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-4 sm:space-y-6 text-left py-2 sm:py-4 md:py-6">
-          <h1 className="w-full text-5xl sm:text-7xl md:text-8xl lg:text-9xl xl:text-[10rem] 2xl:text-[11.5rem] font-display font-extrabold tracking-tight leading-[1.0] sm:leading-[0.9] text-stone-950">
+        <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-6 sm:space-y-8 text-left py-12 sm:py-16 md:py-20 lg:py-24 min-h-[44vh] sm:min-h-[50vh] flex flex-col justify-center">
+          <h1 className="w-full text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.08] sm:leading-[1.0] text-stone-950">
             Send money
             <br />
             to anyone on{' '}
-            <span className="underline decoration-black decoration-4 sm:decoration-8 underline-offset-8 inline-block">
+            <span className="underline decoration-black decoration-2 sm:decoration-4 underline-offset-4 sm:underline-offset-6 inline-block">
               𝕏
             </span>
             <span className="text-black">.</span>
           </h1>
 
-          <p className="text-lg sm:text-2xl md:text-3xl text-stone-600 max-w-3xl font-sans leading-relaxed">
+          <p className="text-base sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
             Confidential by design. Claimed by touch.
           </p>
 
