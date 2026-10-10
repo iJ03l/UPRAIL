@@ -98,19 +98,49 @@ async function callEscrowDO(
 paymentsRouter.get('/tokens', async (c) => {
   try {
     const tokens = await nearRpc.getSupportedTokens(c.env);
-    const mapped = tokens.map((t) => ({
-      id: t.defuse_asset_id,
-      symbol: t.symbol,
-      name: t.name,
-      iconUrl: t.icon || '',
-      decimals: t.decimals,
-      nearContractId: t.nearContractId,
-      chain: t.chain,
-      chainId: t.chainId,
-      badge: t.chain === 'near' ? 'Confidential' : 'Cross-chain',
-      balance: '0.00', // balance is fetched separately via /api/onchain/balances
-      priceUsd: t.priceUsd ?? 1.0,
-    }));
+    const mapped = tokens.map((t) => {
+      const symUpper = t.symbol.toUpperCase();
+      let badge = 'Cross-chain';
+      if (t.chain === 'near' && (symUpper === 'NEAR' || symUpper === 'WNEAR')) {
+        badge = 'Native Shield';
+      } else if (t.chain === 'near' && (symUpper === 'USDC' || symUpper === 'USDT')) {
+        badge = 'Confidential';
+      } else if (t.chain === 'base') {
+        badge = 'Base L2';
+      } else if (t.chain === 'arbitrum' || t.chain === 'arb') {
+        badge = 'Arbitrum L2';
+      } else if (t.chain === 'sol') {
+        badge = 'Solana SPL';
+      } else if (t.chain === 'eth') {
+        badge = 'Ethereum L1';
+      } else if (t.chain === 'btc') {
+        badge = 'Bitcoin Native';
+      }
+
+      let category: 'popular' | 'stables' | 'l1' | 'all' = 'all';
+      if (['NEAR', 'USDC', 'USDT', 'ETH', 'BTC', 'SOL'].includes(symUpper)) {
+        category = 'popular';
+      } else if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
+        category = 'stables';
+      } else if (['NEAR', 'ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((s) => symUpper.includes(s))) {
+        category = 'l1';
+      }
+
+      return {
+        id: t.defuse_asset_id,
+        symbol: t.symbol,
+        name: t.name,
+        iconUrl: t.icon || '',
+        decimals: t.decimals,
+        nearContractId: t.nearContractId,
+        chain: t.chain,
+        chainId: t.chainId,
+        badge,
+        category,
+        balance: '0.00',
+        priceUsd: t.priceUsd ?? 1.0,
+      };
+    });
     return c.json({ tokens: mapped });
   } catch (err: any) {
     console.error('[/api/tokens] onchain fetch failed:', err);

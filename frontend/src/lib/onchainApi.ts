@@ -54,6 +54,25 @@ export interface DepositAddress {
   address: string;
   memo?: string;
   expiresAt?: number;
+  token?: string;
+  minAmount?: string;
+  minAmountFormatted?: string;
+  minAmountUsd?: string;
+  isOneTime?: boolean;
+}
+
+export interface DepositStatusResponse {
+  status: string; // PENDING_DEPOSIT, INCOMPLETE_DEPOSIT, PROCESSING, SUCCESS, REFUNDED
+  depositedAmount: string;
+  depositedAmountFormatted: string;
+  depositedAmountUsd: string;
+  amountInFormatted?: string;
+  amountOutFormatted?: string;
+  timeEstimate?: number | null;
+  txHashes: string[];
+  updatedAt?: string | null;
+  isSettled: boolean;
+  error?: string;
 }
 
 export interface DepositAddressResponse {
@@ -131,18 +150,58 @@ export async function fetchOnchainBalances(): Promise<OnchainBalancesResponse | 
 }
 
 /**
- * Fetches the deposit address for a specific chain for the authenticated user.
+ * Fetches the deposit address for a specific chain and token for the authenticated user.
  * Ephemeral addresses are fetched live and cached at the edge. Pass refresh=true to regenerate.
  */
-export async function fetchDepositAddress(chain: string, refresh = false): Promise<DepositAddress | null> {
-  const query = refresh ? `chain=${encodeURIComponent(chain)}&refresh=true` : `chain=${encodeURIComponent(chain)}`;
-  const res = await fetch(url(`/api/onchain/deposit-address?${query}`), {
+export async function fetchDepositAddress(
+  chain: string,
+  refresh = false,
+  token?: string
+): Promise<DepositAddress | null> {
+  const params = new URLSearchParams();
+  params.set('chain', chain);
+  if (refresh) params.set('refresh', 'true');
+  if (token) params.set('token', token);
+
+  const res = await fetch(url(`/api/onchain/deposit-address?${params.toString()}`), {
     credentials: 'include',
   });
   if (res.status === 400 || res.status === 404) return null;
   if (!res.ok) throw new Error(`Failed to fetch deposit address for ${chain}: ${res.status}`);
   const data = await res.json() as DepositAddressResponse;
   return data.address || null;
+}
+
+/**
+ * Polls the real-time deposit status from the solver bridge for a deposit address.
+ */
+export async function fetchDepositStatus(address: string): Promise<DepositStatusResponse> {
+  try {
+    const res = await fetch(url(`/api/onchain/deposit-status?address=${encodeURIComponent(address)}`), {
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      return {
+        status: 'PENDING_DEPOSIT',
+        depositedAmount: '0',
+        depositedAmountFormatted: '0',
+        depositedAmountUsd: '0',
+        txHashes: [],
+        isSettled: false,
+      };
+    }
+    return await res.json();
+  } catch (err: any) {
+    return {
+      status: 'PENDING_DEPOSIT',
+      depositedAmount: '0',
+      depositedAmountFormatted: '0',
+      depositedAmountUsd: '0',
+      txHashes: [],
+      isSettled: false,
+      error: err.message,
+    };
+  }
 }
 
 /**

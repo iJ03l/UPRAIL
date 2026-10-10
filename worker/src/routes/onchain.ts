@@ -183,27 +183,29 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
 
 // ─── GET /api/onchain/deposit-address ─────────────────────────────────────────
 /**
- * Returns the user's deposit address for a specific chain (or all chains).
+ * Returns the user's deposit address for a specific chain and token.
  * These addresses are EPHEMERAL — generated per-user by the intents solver network
  * and must always be fetched fresh. Never use a cached/hardcoded deposit address.
  *
  * Query params:
- *   chain  — optional, e.g. "eth", "sol", "near", "btc"
- *             If omitted, returns addresses for all chains.
+ *   chain  — optional, e.g. "base", "arbitrum", "sol", "near", "eth", "btc"
+ *   token  — optional, e.g. "USDC", "USDT", "NEAR", "ETH", "SOL", "BTC"
+ *   refresh — optional boolean to bypass cache and derive a new 1-time address
  */
 onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
   const session = c.get('session')!;
   const chain = c.req.query('chain');
+  const token = c.req.query('token');
   const bypassCache = c.req.query('refresh') === 'true';
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
   try {
     if (chain) {
-      // Single chain
-      const address = await nearRpc.getDepositAddress(c.env, nearAccount, chain, bypassCache);
+      // Single chain (with optional token)
+      const address = await nearRpc.getDepositAddress(c.env, nearAccount, chain, bypassCache, token);
       if (!address) {
         return c.json<ErrorResponse>(
-          { error: `No deposit address available for chain: ${chain}`, code: 'NO_DEPOSIT_ADDRESS' },
+          { error: `No deposit address available for chain: ${chain}${token ? ` (${token})` : ''}`, code: 'NO_DEPOSIT_ADDRESS' },
           404
         );
       }
@@ -219,6 +221,80 @@ onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
       { error: `Failed to fetch deposit address: ${err.message}`, code: 'DEPOSIT_ADDRESS_ERROR' },
       500
     );
+  }
+});
+
+// ─── GET /api/onchain/deposit-status ──────────────────────────────────────────
+/**
+ * Real-time deposit tracker: checks 1Click status for a specific deposit address.
+ * Enables live UI updates: PENDING_DEPOSIT -> PROCESSING -> SUCCESS.
+ */
+onchainRouter.get('/deposit-status', async (c) => {
+  const address = c.req.query('address');
+  if (!address) {
+    return c.json<ErrorResponse>({ error: 'Missing address query param', code: 'INVALID_REQUEST' }, 400);
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const resp = await fetch(
+      `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(address)}`,
+      {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+          Accept: 'application/json',
+        },
+      }
+    );
+    clearTimeout(timeoutId);
+
+    if (!resp.ok) {
+      return c.json({
+        status: 'PENDING_DEPOSIT',
+        depositedAmount: '0',
+        depositedAmountFormatted: '0',
+        depositedAmountUsd: '0',
+        txHashes: [],
+        updatedAt: null,
+        isSettled: false,
+      });
+    }
+
+    const data = (await resp.json()) as any;
+    const swapDetails = data.swapDetails;
+    const txHashes = [
+      ...(swapDetails?.nearTxHashes || []),
+      ...(swapDetails?.originChainTxHashes || []),
+      ...(swapDetails?.destinationChainTxHashes || []),
+    ];
+
+    const depAmt = parseFloat(swapDetails?.depositedAmountFormatted || '0');
+    const isSettled = data.status === 'SUCCESS' || depAmt > 0;
+
+    return c.json({
+      status: data.status || 'PENDING_DEPOSIT',
+      depositedAmount: swapDetails?.depositedAmount || '0',
+      depositedAmountFormatted: swapDetails?.depositedAmountFormatted || '0',
+      depositedAmountUsd: swapDetails?.depositedAmountUsd || '0',
+      amountInFormatted: swapDetails?.amountInFormatted || swapDetails?.depositedAmountFormatted || '0',
+      amountOutFormatted: swapDetails?.amountOutFormatted || null,
+      timeEstimate: data.quoteResponse?.quote?.timeEstimate || null,
+      txHashes,
+      updatedAt: data.updatedAt || null,
+      isSettled,
+    });
+  } catch (err: any) {
+    return c.json({
+      status: 'PENDING_DEPOSIT',
+      depositedAmount: '0',
+      depositedAmountFormatted: '0',
+      depositedAmountUsd: '0',
+      txHashes: [],
+      isSettled: false,
+      error: err.message,
+    });
   }
 });
 

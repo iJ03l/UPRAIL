@@ -40,6 +40,11 @@ export interface DepositAddress {
   address: string;
   memo?: string;
   expiresAt?: number;
+  token?: string;
+  minAmount?: string;
+  minAmountFormatted?: string;
+  minAmountUsd?: string;
+  isOneTime?: boolean;
 }
 
 export interface IntentTx {
@@ -175,47 +180,96 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
     if (resp.ok) {
       const list = (await resp.json()) as any[];
       if (Array.isArray(list) && list.length > 0) {
-        const tokens: OnchainToken[] = list.map((t: any) => {
+        // Known verified tokens metadata dictionary for clean display
+        const VERIFIED_META: Record<string, { symbol: string; name: string; priority: number; chain?: string }> = {
+          'nep141:wrap.near': { symbol: 'NEAR', name: 'NEAR Protocol', priority: 1, chain: 'near' },
+          'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': { symbol: 'USDC', name: 'USD Coin', priority: 2, chain: 'near' },
+          'nep141:usdt.tether-token.near': { symbol: 'USDT', name: 'Tether USD', priority: 3, chain: 'near' },
+          'nep141:eth.bridge.near': { symbol: 'ETH', name: 'Ethereum', priority: 4, chain: 'near' },
+          'nep141:2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near': { symbol: 'BTC', name: 'Bitcoin', priority: 5, chain: 'near' },
+          'nep141:sol.omft.near': { symbol: 'SOL', name: 'Solana', priority: 6, chain: 'sol' },
+          'nep141:btc.omft.near': { symbol: 'BTC', name: 'Bitcoin', priority: 7, chain: 'btc' },
+          'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near': { symbol: 'USDC', name: 'USD Coin (Base)', priority: 8, chain: 'base' },
+          'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near': { symbol: 'USDC', name: 'USD Coin (Arbitrum)', priority: 9, chain: 'arbitrum' },
+          'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near': { symbol: 'USDC', name: 'USD Coin (Ethereum)', priority: 10, chain: 'eth' },
+          'nep141:853d955acef822db058eb8505911ed77f175b99e.factory.bridge.near': { symbol: 'FRAX', name: 'Frax Stablecoin', priority: 11, chain: 'near' },
+          'nep141:aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near': { symbol: 'AURORA', name: 'Aurora', priority: 12, chain: 'near' },
+        };
+
+        const tokens: OnchainToken[] = [];
+        const seenAssetKeys = new Set<string>();
+
+        for (const t of list) {
           const assetId = t.assetId || t.defuse_asset_id || '';
-          const { chain, contractId: parsedContractId } = parseDefuseAssetId(assetId);
+          if (!assetId) continue;
+
+          const { chain: parsedChain, contractId: parsedContractId } = parseDefuseAssetId(assetId);
           const contractAddress = t.contractAddress || parsedContractId;
           const rawSymbol = (t.symbol || '').trim();
+
+          // Filter out low quality, meme, or spam assets with no liquidity
+          const isSpam =
+            !rawSymbol ||
+            rawSymbol.length > 12 ||
+            contractAddress?.includes('meme-cooking') ||
+            contractAddress?.includes('0xshitzu') ||
+            contractAddress?.includes('blackdragon') ||
+            rawSymbol.toLowerCase().includes('meme') ||
+            (typeof t.price === 'number' && t.price < 0.0001 && !VERIFIED_META[assetId]);
+
+          if (isSpam && !VERIFIED_META[assetId]) continue;
+
+          const verified = VERIFIED_META[assetId];
           const isNear =
             rawSymbol.toLowerCase() === 'wnear' ||
             rawSymbol.toLowerCase() === 'near' ||
             contractAddress === 'wrap.near';
 
-          const symbol = isNear ? 'NEAR' : rawSymbol || 'UNKNOWN';
-          const name = isNear ? 'NEAR Protocol' : (t.name || symbol);
+          let symbol = verified?.symbol || (isNear ? 'NEAR' : rawSymbol.toUpperCase());
+          let name = verified?.name || (isNear ? 'NEAR Protocol' : (t.name || symbol));
+
+          // Clean up symbol and name for common assets
+          if (symbol === 'WNEAR') symbol = 'NEAR';
+          if (symbol === 'WBTC') { symbol = 'BTC'; name = 'Bitcoin'; }
+          if (symbol === 'WETH') { symbol = 'ETH'; name = 'Ethereum'; }
+          if (symbol === 'USDC.E') { name = 'USD Coin (Bridged)'; }
+
+          // Deduplicate identical asset symbols on the same chain
+          const dedupKey = `${symbol}_${verified?.chain || t.blockchain || parsedChain}`;
+          if (seenAssetKeys.has(dedupKey) && !VERIFIED_META[assetId]) continue;
+          seenAssetKeys.add(dedupKey);
+
           const onchainIcon =
             (isNear ? getOnchainIcon('near') : undefined) ||
+            getOnchainIcon(symbol.toLowerCase()) ||
             t.icon ||
             getOnchainIcon(contractAddress) ||
-            getOnchainIcon(symbol.toLowerCase()) ||
             getOnchainIcon(rawSymbol.toLowerCase());
 
-          return {
+          tokens.push({
             defuse_asset_id: assetId,
             symbol,
             name,
             decimals: Number(t.decimals ?? (isNear ? 24 : 18)),
             icon: onchainIcon,
             nearContractId: contractAddress,
-            chain: t.blockchain || chain,
+            chain: verified?.chain || t.blockchain || parsedChain,
             priceUsd: typeof t.price === 'number' ? t.price : 1.0,
-          } satisfies OnchainToken;
-        });
+          });
+        }
 
-        // Priority sorting: NEAR, USDC, USDT, ETH, BTC first
+        // Priority sorting: NEAR, USDC, USDT, ETH, BTC, SOL first
         const priorityOrder: Record<string, number> = {
           NEAR: 1,
           USDC: 2,
           USDT: 3,
           ETH: 4,
-          WBTC: 5,
-          BTC: 6,
+          BTC: 5,
+          WBTC: 6,
           SOL: 7,
           DAI: 8,
+          FRAX: 9,
+          AURORA: 10,
         };
 
         tokens.sort((a, b) => {
@@ -418,135 +472,248 @@ export async function getIntentBalances(
 // ─── Deposit Addresses (per-user, per-chain, live onchain) ───────────────────
 
 interface ChainDepositConfig {
+  key: string;
   chain: string;
   chainName: string;
+  token: string;
   originAsset: string;
   destinationAsset: string;
   amount: string;
+  minAmountFormatted: string;
+  minAmountUsd: string;
   refundTo: string;
   symbol: string;
 }
 
 export const SUPPORTED_CHAINS = [
-  { chain: 'eth', chainName: 'Ethereum' },
-  { chain: 'btc', chainName: 'Bitcoin' },
-  { chain: 'sol', chainName: 'Solana' },
-  { chain: 'base', chainName: 'Base' },
-  { chain: 'arbitrum', chainName: 'Arbitrum' },
-  { chain: 'near', chainName: 'NEAR' },
-  { chain: 'robinhood', chainName: 'Robinhood' },
+  { chain: 'base', chainName: 'Base', badge: 'L2 Sub-Cent' },
+  { chain: 'arbitrum', chainName: 'Arbitrum', badge: 'L2 Rollup' },
+  { chain: 'sol', chainName: 'Solana', badge: 'SPL / Native' },
+  { chain: 'near', chainName: 'NEAR', badge: 'Instant Finality' },
+  { chain: 'eth', chainName: 'Ethereum', badge: 'Mainnet L1' },
+  { chain: 'btc', chainName: 'Bitcoin', badge: 'Native SegWit' },
 ];
 
 const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
-  eth: {
-    chain: 'eth',
-    chainName: 'Ethereum',
-    originAsset: 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '1000000',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
-    symbol: 'ETH/USDC',
-  },
-  ethereum: {
-    chain: 'eth',
-    chainName: 'Ethereum',
-    originAsset: 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '1000000',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
-    symbol: 'ETH/USDC',
-  },
-  base: {
+  // USDC configs
+  'base_usdc': {
+    key: 'base_usdc',
     chain: 'base',
     chainName: 'Base',
+    token: 'USDC',
     originAsset: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
     destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '1000000',
+    amount: '150000',
+    minAmountFormatted: '0.15 USDC',
+    minAmountUsd: '$0.15',
     refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
     symbol: 'USDC',
   },
-  arbitrum: {
+  'arbitrum_usdc': {
+    key: 'arbitrum_usdc',
     chain: 'arbitrum',
     chainName: 'Arbitrum',
+    token: 'USDC',
     originAsset: 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near',
     destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '1000000',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
     refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
     symbol: 'USDC',
   },
-  arb: {
-    chain: 'arbitrum',
-    chainName: 'Arbitrum',
-    originAsset: 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near',
+  'sol_usdc': {
+    key: 'sol_usdc',
+    chain: 'sol',
+    chainName: 'Solana',
+    token: 'USDC',
+    originAsset: 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near',
     destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '1000000',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+    symbol: 'USDC',
+  },
+  'eth_usdc': {
+    key: 'eth_usdc',
+    chain: 'eth',
+    chainName: 'Ethereum',
+    token: 'USDC',
+    originAsset: 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '2000000',
+    minAmountFormatted: '2.00 USDC',
+    minAmountUsd: '$2.00',
     refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
     symbol: 'USDC',
   },
-  btc: {
-    chain: 'btc',
-    chainName: 'Bitcoin',
-    originAsset: 'nep141:btc.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '10000',
-    refundTo: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
-    symbol: 'BTC',
-  },
-  bitcoin: {
-    chain: 'btc',
-    chainName: 'Bitcoin',
-    originAsset: 'nep141:btc.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '10000',
-    refundTo: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
-    symbol: 'BTC',
-  },
-  sol: {
-    chain: 'sol',
-    chainName: 'Solana',
-    originAsset: 'nep141:sol.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '10000000',
-    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-    symbol: 'SOL',
-  },
-  solana: {
-    chain: 'sol',
-    chainName: 'Solana',
-    originAsset: 'nep141:sol.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '10000000',
-    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
-    symbol: 'SOL',
-  },
-  near: {
+  'near_usdc': {
+    key: 'near_usdc',
     chain: 'near',
     chainName: 'NEAR',
-    originAsset: 'nep141:wrap.near',
+    token: 'USDC',
+    originAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
     destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: 'escrow.uprail.near',
+    symbol: 'USDC',
+  },
+
+  // USDT configs
+  'arbitrum_usdt': {
+    key: 'arbitrum_usdt',
+    chain: 'arbitrum',
+    chainName: 'Arbitrum',
+    token: 'USDT',
+    originAsset: 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near',
+    destinationAsset: 'nep141:usdt.tether-token.near',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDT',
+    minAmountUsd: '$0.10',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'USDT',
+  },
+  'sol_usdt': {
+    key: 'sol_usdt',
+    chain: 'sol',
+    chainName: 'Solana',
+    token: 'USDT',
+    originAsset: 'nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near',
+    destinationAsset: 'nep141:usdt.tether-token.near',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDT',
+    minAmountUsd: '$0.10',
+    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+    symbol: 'USDT',
+  },
+  'eth_usdt': {
+    key: 'eth_usdt',
+    chain: 'eth',
+    chainName: 'Ethereum',
+    token: 'USDT',
+    originAsset: 'nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near',
+    destinationAsset: 'nep141:usdt.tether-token.near',
+    amount: '2000000',
+    minAmountFormatted: '2.00 USDT',
+    minAmountUsd: '$2.00',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'USDT',
+  },
+  'near_usdt': {
+    key: 'near_usdt',
+    chain: 'near',
+    chainName: 'NEAR',
+    token: 'USDT',
+    originAsset: 'nep141:usdt.tether-token.near',
+    destinationAsset: 'nep141:usdt.tether-token.near',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDT',
+    minAmountUsd: '$0.10',
+    refundTo: 'escrow.uprail.near',
+    symbol: 'USDT',
+  },
+
+  // Native NEAR
+  'near_near': {
+    key: 'near_near',
+    chain: 'near',
+    chainName: 'NEAR',
+    token: 'NEAR',
+    originAsset: 'nep141:wrap.near',
+    destinationAsset: 'nep141:wrap.near',
     amount: '10000000000000000000000',
+    minAmountFormatted: '0.01 NEAR',
+    minAmountUsd: '$0.05',
     refundTo: 'escrow.uprail.near',
     symbol: 'NEAR',
   },
-  robinhood: {
-    chain: 'robinhood',
-    chainName: 'Robinhood',
-    originAsset: 'nep141:hood-0x5fc5360d0400a0fd4f2af552add042d716f1d168.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '1000000',
+
+  // ETH configs
+  'base_eth': {
+    key: 'base_eth',
+    chain: 'base',
+    chainName: 'Base',
+    token: 'ETH',
+    originAsset: 'nep141:base.omft.near',
+    destinationAsset: 'nep141:eth.bridge.near',
+    amount: '50000000000000',
+    minAmountFormatted: '0.00005 ETH',
+    minAmountUsd: '$0.12',
     refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
-    symbol: 'USDG/ETH',
+    symbol: 'ETH',
   },
-  hood: {
-    chain: 'robinhood',
-    chainName: 'Robinhood',
-    originAsset: 'nep141:hood-0x5fc5360d0400a0fd4f2af552add042d716f1d168.omft.near',
-    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    amount: '1000000',
+  'arbitrum_eth': {
+    key: 'arbitrum_eth',
+    chain: 'arbitrum',
+    chainName: 'Arbitrum',
+    token: 'ETH',
+    originAsset: 'nep141:arb.omft.near',
+    destinationAsset: 'nep141:eth.bridge.near',
+    amount: '50000000000000',
+    minAmountFormatted: '0.00005 ETH',
+    minAmountUsd: '$0.12',
     refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
-    symbol: 'USDG/ETH',
+    symbol: 'ETH',
+  },
+  'eth_eth': {
+    key: 'eth_eth',
+    chain: 'eth',
+    chainName: 'Ethereum',
+    token: 'ETH',
+    originAsset: 'nep141:eth.omft.near',
+    destinationAsset: 'nep141:eth.bridge.near',
+    amount: '800000000000000',
+    minAmountFormatted: '0.0008 ETH',
+    minAmountUsd: '$2.00',
+    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    symbol: 'ETH',
+  },
+
+  // SOL config
+  'sol_sol': {
+    key: 'sol_sol',
+    chain: 'sol',
+    chainName: 'Solana',
+    token: 'SOL',
+    originAsset: 'nep141:sol.omft.near',
+    destinationAsset: 'nep141:sol.omft.near',
+    amount: '1000000',
+    minAmountFormatted: '0.001 SOL',
+    minAmountUsd: '$0.11',
+    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+    symbol: 'SOL',
+  },
+
+  // BTC config
+  'btc_btc': {
+    key: 'btc_btc',
+    chain: 'btc',
+    chainName: 'Bitcoin',
+    token: 'BTC',
+    originAsset: 'nep141:btc.omft.near',
+    destinationAsset: 'nep141:btc.omft.near',
+    amount: '8300',
+    minAmountFormatted: '0.000083 BTC',
+    minAmountUsd: '$6.80',
+    refundTo: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
+    symbol: 'BTC',
   },
 };
+
+// Aliases for chain-only fallback queries
+CHAIN_DEPOSIT_CONFIGS['base'] = CHAIN_DEPOSIT_CONFIGS['base_usdc'];
+CHAIN_DEPOSIT_CONFIGS['arbitrum'] = CHAIN_DEPOSIT_CONFIGS['arbitrum_usdc'];
+CHAIN_DEPOSIT_CONFIGS['arb'] = CHAIN_DEPOSIT_CONFIGS['arbitrum_usdc'];
+CHAIN_DEPOSIT_CONFIGS['sol'] = CHAIN_DEPOSIT_CONFIGS['sol_sol'];
+CHAIN_DEPOSIT_CONFIGS['solana'] = CHAIN_DEPOSIT_CONFIGS['sol_sol'];
+CHAIN_DEPOSIT_CONFIGS['eth'] = CHAIN_DEPOSIT_CONFIGS['eth_usdc'];
+CHAIN_DEPOSIT_CONFIGS['ethereum'] = CHAIN_DEPOSIT_CONFIGS['eth_usdc'];
+CHAIN_DEPOSIT_CONFIGS['near'] = CHAIN_DEPOSIT_CONFIGS['near_near'];
+CHAIN_DEPOSIT_CONFIGS['btc'] = CHAIN_DEPOSIT_CONFIGS['btc_btc'];
+CHAIN_DEPOSIT_CONFIGS['bitcoin'] = CHAIN_DEPOSIT_CONFIGS['btc_btc'];
 
 /**
  * Calls 1Click quote endpoint to generate a live, cross-chain deposit address.
@@ -561,7 +728,11 @@ async function fetch1ClickDepositAddress(
   try {
     const resp = await fetch(`${apiBase}/v0/quote`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+      },
       body: JSON.stringify({
         dry: false,
         swapType: 'EXACT_INPUT',
@@ -580,7 +751,7 @@ async function fetch1ClickDepositAddress(
 
     if (!resp.ok) {
       const errText = await resp.text();
-      console.warn(`[nearRpc] 1Click quote failed (${resp.status}) for ${cfg.chain}:`, errText);
+      console.warn(`[nearRpc] 1Click quote failed (${resp.status}) for ${cfg.chain}/${cfg.token}:`, errText);
       return null;
     }
 
@@ -596,9 +767,14 @@ async function fetch1ClickDepositAddress(
       address: quote.depositAddress,
       memo: quote.depositMemo || undefined,
       expiresAt: quote.deadline ? new Date(quote.deadline).getTime() : undefined,
+      token: cfg.token,
+      minAmount: cfg.amount,
+      minAmountFormatted: cfg.minAmountFormatted,
+      minAmountUsd: cfg.minAmountUsd,
+      isOneTime: true,
     };
   } catch (err) {
-    console.warn(`[nearRpc] fetch1ClickDepositAddress error for ${cfg.chain}:`, err);
+    console.warn(`[nearRpc] fetch1ClickDepositAddress error for ${cfg.chain}/${cfg.token}:`, err);
     return null;
   }
 }
@@ -609,7 +785,7 @@ async function fetch1ClickDepositAddress(
 async function getCachedDepositAddress(
   db: D1Database | undefined,
   nearAccount: string,
-  chain: string
+  chainKey: string
 ): Promise<DepositAddress | null> {
   if (!db) return null;
   try {
@@ -617,7 +793,7 @@ async function getCachedDepositAddress(
       .prepare(
         'SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses WHERE account_id = ? AND chain = ? AND (expires_at IS NULL OR expires_at > ?)'
       )
-      .bind(nearAccount, chain, Date.now() + 10 * 60 * 1000)
+      .bind(nearAccount, chainKey, Date.now() + 10 * 60 * 1000)
       .first<{
         chain: string;
         chain_name: string;
@@ -627,12 +803,18 @@ async function getCachedDepositAddress(
       }>();
 
     if (row && row.address) {
+      const cfg = CHAIN_DEPOSIT_CONFIGS[chainKey] || CHAIN_DEPOSIT_CONFIGS[row.chain];
       return {
-        chain: row.chain,
-        chainName: row.chain_name || row.chain,
+        chain: cfg?.chain || row.chain,
+        chainName: cfg?.chainName || row.chain_name || row.chain,
         address: row.address,
         memo: row.memo || undefined,
         expiresAt: row.expires_at || undefined,
+        token: cfg?.token,
+        minAmount: cfg?.amount,
+        minAmountFormatted: cfg?.minAmountFormatted,
+        minAmountUsd: cfg?.minAmountUsd,
+        isOneTime: true,
       };
     }
   } catch (err) {
@@ -647,9 +829,11 @@ async function getCachedDepositAddress(
 async function saveDepositAddress(
   db: D1Database | undefined,
   nearAccount: string,
-  addr: DepositAddress
+  addr: DepositAddress,
+  chainKey?: string
 ): Promise<void> {
   if (!db || !addr.address) return;
+  const key = chainKey || (addr.token ? `${addr.chain}_${addr.token.toLowerCase()}` : addr.chain);
   try {
     await db
       .prepare(
@@ -664,7 +848,7 @@ async function saveDepositAddress(
       )
       .bind(
         nearAccount,
-        addr.chain,
+        key,
         addr.chainName,
         addr.address,
         addr.memo || null,
@@ -678,29 +862,32 @@ async function saveDepositAddress(
 }
 
 /**
- * Fetches the user's deposit address for a given chain from the 1Click/intents API.
+ * Fetches the user's deposit address for a given chain (and token) from the 1Click/intents API.
  * Uses D1 cache for ultra-fast response, with fresh onchain generation on demand.
  */
 export async function getDepositAddress(
   env: Env,
   nearAccount: string,
   chainId: string,
-  bypassCache = false
+  bypassCache = false,
+  tokenSymbol?: string
 ): Promise<DepositAddress | null> {
   const cleanChain = chainId.toLowerCase();
-  const cfg = CHAIN_DEPOSIT_CONFIGS[cleanChain] || CHAIN_DEPOSIT_CONFIGS['near'];
+  const cleanToken = (tokenSymbol || '').toLowerCase();
+  const directKey = cleanToken ? `${cleanChain}_${cleanToken}` : cleanChain;
+  const cfg = CHAIN_DEPOSIT_CONFIGS[directKey] || CHAIN_DEPOSIT_CONFIGS[cleanChain] || CHAIN_DEPOSIT_CONFIGS['near_near'];
   const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
 
   // 1. Check D1 cache if not bypassing
   if (!bypassCache) {
-    const cached = await getCachedDepositAddress(env.DB, nearAccount, cfg.chain);
+    const cached = await getCachedDepositAddress(env.DB, nearAccount, cfg.key);
     if (cached) return cached;
   }
 
   // 2. Fetch fresh address via 1Click quote
   const fresh = await fetch1ClickDepositAddress(apiBase, nearAccount, cfg);
   if (fresh) {
-    await saveDepositAddress(env.DB, nearAccount, fresh);
+    await saveDepositAddress(env.DB, nearAccount, fresh, cfg.key);
     return fresh;
   }
 
@@ -708,27 +895,35 @@ export async function getDepositAddress(
   if (env.DB) {
     try {
       const stale = await env.DB
-        .prepare('SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses WHERE account_id = ? AND chain = ?')
-        .bind(nearAccount, cfg.chain)
+        .prepare('SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses WHERE account_id = ? AND (chain = ? OR chain = ?)')
+        .bind(nearAccount, cfg.key, cfg.chain)
         .first<any>();
       if (stale?.address) {
         return {
-          chain: stale.chain,
+          chain: cfg.chain,
           chainName: stale.chain_name || cfg.chainName,
           address: stale.address,
           memo: stale.memo || undefined,
           expiresAt: stale.expires_at || undefined,
+          token: cfg.token,
+          minAmountFormatted: cfg.minAmountFormatted,
+          minAmountUsd: cfg.minAmountUsd,
+          isOneTime: true,
         };
       }
     } catch {}
   }
 
   // 4. Clean fallback for native NEAR
-  if (cfg.chain === 'near') {
+  if (cfg.chain === 'near' && cfg.token === 'NEAR') {
     return {
       chain: 'near',
       chainName: 'NEAR',
       address: nearAccount,
+      token: 'NEAR',
+      minAmountFormatted: '0.01 NEAR',
+      minAmountUsd: '$0.05',
+      isOneTime: true,
     };
   }
 

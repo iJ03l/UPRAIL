@@ -225,7 +225,9 @@ export const api = {
               decimals: t.decimals ?? (isNear ? 24 : 18),
               priceUsd: t.priceUsd ?? 1.0,
               nearContractId: t.nearContractId || 'wrap.near',
-              badge: isNear || t.chain === 'near' ? 'Native Shield' : 'Cross-chain',
+              chain: t.chain || (isNear ? 'near' : 'near'),
+              badge: t.badge || (isNear || t.chain === 'near' ? 'Native Shield' : 'Cross-chain'),
+              category: t.category || (priorityOrder[symbol.toUpperCase()] <= 6 ? 'popular' : 'all'),
               balance: t.balance || '0.00',
             };
           });

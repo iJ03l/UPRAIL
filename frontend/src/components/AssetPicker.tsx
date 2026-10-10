@@ -20,6 +20,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<'popular' | 'stables' | 'l1' | 'all'>('popular');
 
   // Close on Escape key
   useEffect(() => {
@@ -32,11 +33,34 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  const filteredTokens = tokens.filter(
-    (t) =>
-      t.symbol.toLowerCase().includes(search.toLowerCase()) ||
-      t.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredTokens = tokens.filter((t) => {
+    const symLower = t.symbol.toLowerCase();
+    const nameLower = t.name.toLowerCase();
+    const chainLower = (t.chain || '').toLowerCase();
+    const sLower = search.toLowerCase().trim();
+
+    // If searching, check symbol, name, or chain
+    if (sLower) {
+      return (
+        symLower.includes(sLower) ||
+        nameLower.includes(sLower) ||
+        chainLower.includes(sLower) ||
+        (t.badge && t.badge.toLowerCase().includes(sLower))
+      );
+    }
+
+    // Tab-based filtering when no active search text
+    if (activeTab === 'popular') {
+      return ['near', 'usdc', 'usdt', 'eth', 'btc', 'sol'].includes(symLower);
+    }
+    if (activeTab === 'stables') {
+      return ['usdc', 'usdt', 'dai', 'frax', 'usdg'].some((s) => symLower.includes(s));
+    }
+    if (activeTab === 'l1') {
+      return ['near', 'eth', 'btc', 'sol', 'avax', 'bnb', 'aurora'].some((s) => symLower.includes(s));
+    }
+    return true;
+  });
 
   return (
     <>
@@ -53,9 +77,16 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
           iconUrl={selectedToken.iconUrl}
           size="md"
         />
-        <span className="text-xs sm:text-sm font-bold text-stone-950 font-mono tracking-tight">
-          {selectedToken.symbol}
-        </span>
+        <div className="flex flex-col">
+          <span className="text-xs sm:text-sm font-bold text-stone-950 font-mono tracking-tight leading-none">
+            {selectedToken.symbol}
+          </span>
+          {selectedToken.chain && selectedToken.chain !== 'near' && (
+            <span className="text-[9px] font-mono text-stone-400 capitalize">
+              {selectedToken.chain}
+            </span>
+          )}
+        </div>
         <ChevronDown className="w-3.5 h-3.5 text-stone-400 ml-0.5 flex-shrink-0" />
       </button>
 
@@ -73,15 +104,15 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
           />
 
           {/* Modal Panel (Completely outside the input container) */}
-          <div className="relative w-full max-w-sm bg-white rounded-3xl border border-stone-200 shadow-2xl p-5 z-[101] animate-fade-in space-y-4 font-sans">
+          <div className="relative w-full max-w-sm bg-white rounded-3xl border border-stone-200 shadow-2xl p-5 z-[101] animate-fade-in space-y-3.5 font-sans">
             {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+            <div className="flex items-center justify-between pb-2.5 border-b border-stone-100">
               <div>
                 <h3 className="font-display font-extrabold text-base text-stone-950">
                   Select Asset
                 </h3>
                 <p className="text-[11px] font-mono text-stone-400">
-                  Confidential & cross-chain tokens
+                  Confidential & cross-chain solver liquidity
                 </p>
               </div>
               <button
@@ -94,6 +125,54 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
               </button>
             </div>
 
+            {/* Filter Tabs */}
+            <div className="flex p-0.5 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono font-bold">
+              <button
+                type="button"
+                onClick={() => { setActiveTab('popular'); setSearch(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                  activeTab === 'popular' && !search
+                    ? 'bg-white text-stone-950 shadow-2xs font-bold'
+                    : 'text-stone-500 hover:text-black'
+                }`}
+              >
+                Popular
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveTab('stables'); setSearch(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                  activeTab === 'stables' && !search
+                    ? 'bg-white text-stone-950 shadow-2xs font-bold'
+                    : 'text-stone-500 hover:text-black'
+                }`}
+              >
+                Stables
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveTab('l1'); setSearch(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                  activeTab === 'l1' && !search
+                    ? 'bg-white text-stone-950 shadow-2xs font-bold'
+                    : 'text-stone-500 hover:text-black'
+                }`}
+              >
+                L1s
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveTab('all'); setSearch(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                  activeTab === 'all' && !search
+                    ? 'bg-white text-stone-950 shadow-2xs font-bold'
+                    : 'text-stone-500 hover:text-black'
+                }`}
+              >
+                All
+              </button>
+            </div>
+
             {/* Search Input */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-stone-400" />
@@ -101,9 +180,9 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name or symbol..."
+                placeholder="Search symbol, network, name..."
                 autoFocus
-                className="w-full bg-stone-50 rounded-xl pl-9 pr-3 py-2.5 text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono transition-colors"
+                className="w-full bg-stone-50 rounded-xl pl-9 pr-3 py-2 text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono transition-colors"
               />
             </div>
 

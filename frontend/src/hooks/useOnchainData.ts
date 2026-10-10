@@ -40,9 +40,9 @@ export interface UseOnchainDataResult {
 
   // Deposit addresses (always fresh from onchain — ephemeral!)
   depositAddresses: DepositAddress[];
-  getDepositAddress: (chain: string) => DepositAddress | undefined;
+  getDepositAddress: (chain: string, token?: string) => DepositAddress | undefined;
   isLoadingAddresses: boolean;
-  refreshDepositAddress: (chain: string) => Promise<DepositAddress | null>;
+  refreshDepositAddress: (chain: string, token?: string) => Promise<DepositAddress | null>;
 
   // Onchain transaction history
   transactions: OnchainTx[];
@@ -244,30 +244,39 @@ export function useOnchainData(): UseOnchainDataResult {
     return () => { mounted = false; };
   }, [loadTokens, loadBalances, loadDepositAddresses, loadHistory]);
 
-  // ── Get deposit address for a specific chain ───────────────────────────────
+  // ── Get deposit address for a specific chain & token ───────────────────────
   const getDepositAddress = useCallback(
-    (chain: string): DepositAddress | undefined => {
-      return depositAddresses.find((a) => a.chain === chain || a.chainName?.toLowerCase() === chain.toLowerCase());
+    (chain: string, token?: string): DepositAddress | undefined => {
+      return depositAddresses.find(
+        (a) =>
+          (a.chain === chain || a.chainName?.toLowerCase() === chain.toLowerCase()) &&
+          (!token || !a.token || a.token.toLowerCase() === token.toLowerCase())
+      );
     },
     [depositAddresses]
   );
 
-  // ── Refresh deposit address for a single chain (always fresh) ─────────────
-  const refreshDepositAddress = useCallback(async (chain: string): Promise<DepositAddress | null> => {
-    try {
-      const fresh = await fetchDepositAddress(chain, true);
-      if (fresh) {
-        setDepositAddresses((prev) => {
-          const filtered = prev.filter((a) => a.chain !== chain);
-          return [...filtered, fresh];
-        });
+  // ── Refresh deposit address for a single chain & token (always fresh) ─────
+  const refreshDepositAddress = useCallback(
+    async (chain: string, token?: string): Promise<DepositAddress | null> => {
+      try {
+        const fresh = await fetchDepositAddress(chain, true, token);
+        if (fresh) {
+          setDepositAddresses((prev) => {
+            const filtered = prev.filter(
+              (a) => !(a.chain === chain && (!token || !a.token || a.token.toLowerCase() === token.toLowerCase()))
+            );
+            return [...filtered, fresh];
+          });
+        }
+        return fresh;
+      } catch (err: any) {
+        console.warn(`[useOnchainData] refreshDepositAddress(${chain}, ${token}):`, err);
+        return null;
       }
-      return fresh;
-    } catch (err: any) {
-      console.warn(`[useOnchainData] refreshDepositAddress(${chain}):`, err);
-      return null;
-    }
-  }, []);
+    },
+    []
+  );
 
   // ── Compute total balance USD ─────────────────────────────────────────────
   const totalBalanceUsd = balances.reduce(

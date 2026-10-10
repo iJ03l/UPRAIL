@@ -24,7 +24,10 @@ export interface Token {
   decimals: number;
   priceUsd: number;
   nearContractId: string;
+  chain?: string;
+  chainId?: string;
   badge?: string;
+  category?: 'popular' | 'stables' | 'l1' | 'all';
   balance?: string; // Available sender balance in active wallet/shielded pool
 }
 
