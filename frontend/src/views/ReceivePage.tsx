@@ -75,8 +75,9 @@ export const ReceivePage: React.FC = () => {
   const { hasIntentAccount, nearAccount, refreshBalances, refreshHistory } = useOnchainData();
 
   const [tokens, setTokens] = useState<TokenOption[]>(TOKEN_OPTIONS);
-  const [selectedToken, setSelectedToken] = useState<string>('USDC');
-  const [selectedChain, setSelectedChain] = useState<string>('base');
+  // Start BLANK — do not derive until both token and chain are selected
+  const [selectedToken, setSelectedToken] = useState<string>('');
+  const [selectedChain, setSelectedChain] = useState<string>('');
   const [currentAddress, setCurrentAddress] = useState<DepositAddress | null>(null);
   const [isDeriving, setIsDeriving] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
@@ -156,11 +157,13 @@ export const ReceivePage: React.FC = () => {
 
   // Currently active token definition
   const activeTokenObj = useMemo(() => {
-    return tokens.find((t) => t.symbol.toUpperCase() === selectedToken.toUpperCase()) || tokens[0] || TOKEN_OPTIONS[0];
+    if (!selectedToken) return null;
+    return tokens.find((t) => t.symbol.toUpperCase() === selectedToken.toUpperCase()) || null;
   }, [tokens, selectedToken]);
 
   // Available chains for the active token
   const availableChains = useMemo(() => {
+    if (!activeTokenObj) return [];
     const list = activeTokenObj.chains
       .map((c) => CHAIN_DEFINITIONS[c] || { id: c, name: c.toUpperCase(), icon: '⬡', badge: 'Route', time: '~15s' })
       .filter(Boolean);
@@ -169,11 +172,11 @@ export const ReceivePage: React.FC = () => {
 
   // Active chain definition
   const activeChainDef = useMemo(() => {
+    if (!selectedChain) return null;
     return (
       availableChains.find((c) => c.id === selectedChain) ||
       CHAIN_DEFINITIONS[selectedChain] ||
-      availableChains[0] ||
-      CHAIN_DEFINITIONS.base
+      null
     );
   }, [availableChains, selectedChain]);
 
@@ -184,11 +187,11 @@ export const ReceivePage: React.FC = () => {
     setTokenSearch('');
 
     const tokenObj = tokens.find((t) => t.symbol.toUpperCase() === tokenSym.toUpperCase());
-    if (tokenObj && !tokenObj.chains.includes(selectedChain)) {
-      // Pick best chain for this token (prioritize recommended)
-      const recommendedChain = tokenObj.chains.find((c) => CHAIN_DEFINITIONS[c]?.recommended);
-      setSelectedChain(recommendedChain || tokenObj.chains[0] || 'base');
+    // If selectedChain is not valid for this new token, clear it so user picks
+    if (tokenObj && selectedChain && !tokenObj.chains.includes(selectedChain)) {
+      setSelectedChain('');
     }
+    setCurrentAddress(null);
     setDepositStatus(null);
     setSettledSuccess(false);
   };
@@ -202,10 +205,10 @@ export const ReceivePage: React.FC = () => {
     setSettledSuccess(false);
   };
 
-  // Derive deposit address from backend
+  // Derive deposit address from backend ONLY when both token and chain are selected
   const loadAddress = useCallback(
     async (refresh = false) => {
-      if (!hasIntentAccount) return;
+      if (!hasIntentAccount || !selectedToken || !selectedChain) return;
       setIsDeriving(true);
       try {
         const addr = await fetchDepositAddress(selectedChain, refresh, selectedToken);
@@ -221,10 +224,16 @@ export const ReceivePage: React.FC = () => {
     [hasIntentAccount, selectedChain, selectedToken]
   );
 
-  // Load address on token or chain change
+  // Trigger address derivation ONLY when both token and chain are explicitly selected
   useEffect(() => {
-    loadAddress(false);
-  }, [loadAddress]);
+    if (selectedToken && selectedChain) {
+      loadAddress(false);
+    } else {
+      setCurrentAddress(null);
+      setDepositStatus(null);
+      setSettledSuccess(false);
+    }
+  }, [selectedToken, selectedChain, loadAddress]);
 
   // Real-time Polling for Deposit Status (every 2.5s)
   useEffect(() => {
@@ -313,17 +322,13 @@ export const ReceivePage: React.FC = () => {
         <span>Back to Dashboard</span>
       </Link>
 
-      {/* Header */}
+      {/* Header — "Confidential Cross-Chain Ingress" removed as requested */}
       <div className="text-center space-y-2 mb-6">
-        <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono font-medium mb-1">
-          <Shield className="w-3.5 h-3.5 text-stone-900" />
-          <span>Confidential Cross-Chain Ingress</span>
-        </div>
         <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
           Receive to Private Vault
         </h1>
         <p className="text-sm text-stone-600 max-w-md mx-auto">
-          Pick your token and source chain. A confidential 1-time address is derived that automatically shields funds into your passkey vault upon receipt.
+          Pick your token and source chain. A single-use confidential address is derived that automatically shields funds into your passkey vault upon receipt.
         </p>
       </div>
 
@@ -352,27 +357,45 @@ export const ReceivePage: React.FC = () => {
               }}
               className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-stone-50 hover:bg-stone-100/80 border border-stone-200 transition-all text-left cursor-pointer focus:outline-none focus:border-black"
             >
-              <div className="flex items-center space-x-3">
-                <TokenIcon symbol={activeTokenObj.symbol} size="lg" />
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-mono text-sm font-extrabold text-stone-950">
-                      {activeTokenObj.symbol}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-200/80 text-stone-800 font-mono font-bold">
-                      {activeTokenObj.badge}
-                    </span>
-                  </div>
-                  <div className="text-xs text-stone-500 font-sans">
-                    {activeTokenObj.name} · {availableChains.length} networks
+              {activeTokenObj ? (
+                <div className="flex items-center space-x-3">
+                  <TokenIcon symbol={activeTokenObj.symbol} size="lg" />
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-mono text-sm font-extrabold text-stone-950">
+                        {activeTokenObj.symbol}
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-200/80 text-stone-800 font-mono font-bold">
+                        {activeTokenObj.badge}
+                      </span>
+                    </div>
+                    <div className="text-xs text-stone-500 font-sans">
+                      {activeTokenObj.name} · {availableChains.length} networks
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex items-center space-x-3 text-stone-400">
+                  <div className="w-9 h-9 rounded-xl border border-dashed border-stone-300 flex items-center justify-center text-stone-400 font-mono text-base font-bold bg-white">
+                    +
+                  </div>
+                  <div>
+                    <span className="font-mono text-sm font-bold text-stone-900 block">
+                      Select an Asset to Receive...
+                    </span>
+                    <span className="text-xs text-stone-400 font-sans">
+                      {tokens.length} cross-chain intent assets supported
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center space-x-3 text-right">
-                <span className="font-mono text-xs font-bold text-stone-900">
-                  ${activeTokenObj.priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
+                {activeTokenObj && (
+                  <span className="font-mono text-xs font-bold text-stone-900">
+                    ${activeTokenObj.priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                )}
                 <ChevronDown className={`w-4 h-4 text-stone-400 transition-transform duration-200 ${isTokenDropdownOpen ? 'rotate-180 text-stone-900' : ''}`} />
               </div>
             </button>
@@ -454,7 +477,7 @@ export const ReceivePage: React.FC = () => {
               <span>Select Source Blockchain</span>
             </label>
             <span className="text-[11px] font-mono text-stone-400">
-              {availableChains.length} route{availableChains.length > 1 ? 's' : ''} for {activeTokenObj.symbol}
+              {activeTokenObj ? `${availableChains.length} route${availableChains.length > 1 ? 's' : ''} for ${activeTokenObj.symbol}` : 'Pick an asset first'}
             </span>
           </div>
 
@@ -462,39 +485,66 @@ export const ReceivePage: React.FC = () => {
             {/* Trigger Button */}
             <button
               type="button"
+              disabled={!selectedToken}
               onClick={() => {
+                if (!selectedToken) {
+                  setIsTokenDropdownOpen(true);
+                  return;
+                }
                 setIsChainDropdownOpen(!isChainDropdownOpen);
                 setIsTokenDropdownOpen(false);
               }}
-              className="w-full flex items-center justify-between p-3.5 rounded-2xl bg-stone-50 hover:bg-stone-100/80 border border-stone-200 transition-all text-left cursor-pointer focus:outline-none focus:border-black"
+              className={`w-full flex items-center justify-between p-3.5 rounded-2xl border transition-all text-left focus:outline-none focus:border-black ${
+                !selectedToken
+                  ? 'bg-stone-50/50 border-stone-200/70 text-stone-400 cursor-not-allowed opacity-75'
+                  : 'bg-stone-50 hover:bg-stone-100/80 border-stone-200 cursor-pointer'
+              }`}
             >
-              <div className="flex items-center space-x-3">
-                <span className="text-2xl">{activeChainDef.icon}</span>
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-mono text-sm font-extrabold text-stone-950">
-                      {activeChainDef.name}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-200/80 text-stone-800 font-mono font-bold">
-                      {activeChainDef.badge}
-                    </span>
-                  </div>
-                  <div className="text-xs text-stone-500 font-sans">
-                    Finality: <strong className="font-mono text-stone-700">{activeChainDef.time}</strong>
+              {activeChainDef ? (
+                <div className="flex items-center space-x-3">
+                  <span className="text-2xl">{activeChainDef.icon}</span>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-mono text-sm font-extrabold text-stone-950">
+                        {activeChainDef.name}
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-200/80 text-stone-800 font-mono font-bold">
+                        {activeChainDef.badge}
+                      </span>
+                    </div>
+                    <div className="text-xs text-stone-500 font-sans">
+                      Finality: <strong className="font-mono text-stone-700">{activeChainDef.time}</strong>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="flex items-center space-x-3 text-stone-400">
+                  <div className="w-9 h-9 rounded-xl border border-dashed border-stone-300 flex items-center justify-center text-stone-400 font-mono text-base font-bold bg-white">
+                    ⬡
+                  </div>
+                  <div>
+                    <span className="font-mono text-sm font-bold text-stone-800 block">
+                      {selectedToken ? `Select source network for ${selectedToken}...` : 'Select an asset first in Step 1'}
+                    </span>
+                    <span className="text-xs text-stone-400 font-sans">
+                      {selectedToken ? `${availableChains.length} supported networks` : 'Networks unlock once asset is selected'}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center space-x-3 text-right">
-                <span className="font-mono text-xs font-bold text-stone-500">
-                  {activeChainDef.time}
-                </span>
+                {activeChainDef && (
+                  <span className="font-mono text-xs font-bold text-stone-500">
+                    {activeChainDef.time}
+                  </span>
+                )}
                 <ChevronDown className={`w-4 h-4 text-stone-400 transition-transform duration-200 ${isChainDropdownOpen ? 'rotate-180 text-stone-900' : ''}`} />
               </div>
             </button>
 
             {/* Dropdown Popover */}
-            {isChainDropdownOpen && (
+            {isChainDropdownOpen && selectedToken && (
               <div className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl border border-stone-200 shadow-xl z-50 p-2 space-y-2 animate-fade-in font-sans">
                 {/* Search Bar */}
                 <div className="relative px-1 pt-1">
@@ -569,229 +619,255 @@ export const ReceivePage: React.FC = () => {
               <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">3</span>
               <span>Confidential Receive Gateway</span>
             </label>
-            <button
-              type="button"
-              onClick={handleGenerateFresh}
-              disabled={isDeriving}
-              className="text-[11px] font-mono text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
-              title="Derive a fresh 1-time address"
-            >
-              <RefreshCw className={`w-3 h-3 ${isDeriving ? 'animate-spin' : ''}`} />
-              <span>Derive New Address</span>
-            </button>
+            {selectedToken && selectedChain && (
+              <button
+                type="button"
+                onClick={handleGenerateFresh}
+                disabled={isDeriving}
+                className="text-[11px] font-mono text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                title="Derive a fresh 1-time address"
+              >
+                <RefreshCw className={`w-3 h-3 ${isDeriving ? 'animate-spin' : ''}`} />
+                <span>Derive New Address</span>
+              </button>
+            )}
           </div>
 
-          {/* 1-Time Notice Banner */}
-          <div className="p-3.5 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-start space-x-2.5 text-xs text-amber-950">
-            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="space-y-0.5 font-sans leading-relaxed">
-              <div className="font-bold flex items-center space-x-1.5">
-                <span>Single-Use Confidential Address</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 font-mono uppercase">
-                  1-Time Ingress
+          {!selectedToken || !selectedChain ? (
+            /* Blank state awaiting user selection */
+            <div className="p-8 sm:p-10 rounded-2xl bg-stone-50 border border-dashed border-stone-300 text-center space-y-3 animate-fade-in">
+              <div className="w-12 h-12 rounded-2xl bg-white border border-stone-200 text-stone-700 flex items-center justify-center mx-auto shadow-2xs">
+                <Radio className="w-6 h-6 text-stone-400" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-mono font-bold text-stone-900 uppercase tracking-wider">
+                  Awaiting Selection
+                </h4>
+                <p className="text-xs text-stone-500 max-w-sm mx-auto font-sans leading-relaxed">
+                  Choose your asset in <strong className="text-stone-800 font-semibold">Step 1</strong> and destination network in <strong className="text-stone-800 font-semibold">Step 2</strong> above to derive your single-use confidential receive address.
+                </p>
+              </div>
+              <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-stone-100 text-[11px] font-mono text-stone-500">
+                <Zap className="w-3.5 h-3.5 text-stone-600" />
+                <span>Minimum deposit $0.10 · Single-use ephemeral gateway</span>
+              </div>
+            </div>
+          ) : (
+            /* Derived Address Content */
+            <>
+              {/* 1-Time Notice Banner */}
+              <div className="p-3.5 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-start space-x-2.5 text-xs text-amber-950 animate-fade-in">
+                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-0.5 font-sans leading-relaxed">
+                  <div className="font-bold flex items-center space-x-1.5">
+                    <span>Single-Use Confidential Address</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 font-mono uppercase">
+                      1-Time Ingress
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-900">
+                    This address is ephemeral and generated exclusively for receiving <strong className="font-semibold">{selectedToken}</strong> on <strong className="font-semibold">{activeChainDef?.name || selectedChain}</strong>. Funds are automatically bridged and shielded into your confidential passkey vault upon receipt. Please do not send to this address more than once.
+                  </p>
+                </div>
+              </div>
+
+              {/* Minimum Deposit Notice */}
+              <div className="px-4 py-2.5 bg-stone-100/80 border border-stone-200 rounded-xl flex items-center justify-between text-xs font-mono">
+                <span className="text-stone-500">Minimum Deposit:</span>
+                <span className="font-bold text-stone-950 flex items-center space-x-1">
+                  <span>{minAmountDisplay}</span>
+                  <span className="text-stone-500 font-normal">({minUsdDisplay})</span>
                 </span>
               </div>
-              <p className="text-[11px] text-amber-900">
-                This address is ephemeral and generated exclusively for receiving <strong className="font-semibold">{selectedToken}</strong> on <strong className="font-semibold">{activeChainDef.name}</strong>. Funds are automatically bridged and shielded into your confidential passkey vault upon receipt. Please do not send to this address more than once.
-              </p>
-            </div>
-          </div>
 
-          {/* Minimum Deposit Notice */}
-          <div className="px-4 py-2.5 bg-stone-100/80 border border-stone-200 rounded-xl flex items-center justify-between text-xs font-mono">
-            <span className="text-stone-500">Minimum Deposit:</span>
-            <span className="font-bold text-stone-950 flex items-center space-x-1">
-              <span>{minAmountDisplay}</span>
-              <span className="text-stone-500 font-normal">({minUsdDisplay})</span>
-            </span>
-          </div>
-
-          {/* Address Display Box */}
-          <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
-            {!hasIntentAccount ? (
-              <div className="p-4 bg-white rounded-xl border border-stone-200 text-center space-y-2">
-                <p className="text-xs font-mono text-stone-600">
-                  You need an onchain intent account before generating deposit addresses.
-                </p>
-                <Link
-                  to="/app/claim"
-                  className="inline-block px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono"
-                >
-                  Register Passkey Vault
-                </Link>
-              </div>
-            ) : isDeriving && !depositAddressValue ? (
-              <div className="py-12 flex flex-col items-center justify-center space-y-2.5 text-stone-500 font-mono text-xs">
-                <Loader2 className="w-6 h-6 animate-spin text-stone-900" />
-                <span>Deriving live confidential address from solvers...</span>
-              </div>
-            ) : (
-              <>
-                {/* Address Row */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={depositAddressValue || 'Deriving address...'}
-                      className="flex-1 bg-white rounded-xl px-3.5 py-3 text-xs sm:text-sm text-stone-900 font-mono border border-stone-200 focus:outline-none select-all shadow-2xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCopy}
-                      disabled={!depositAddressValue}
-                      className="px-4 py-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 disabled:opacity-40"
+              {/* Address Display Box */}
+              <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
+                {!hasIntentAccount ? (
+                  <div className="p-4 bg-white rounded-xl border border-stone-200 text-center space-y-2">
+                    <p className="text-xs font-mono text-stone-600">
+                      You need an onchain intent account before generating deposit addresses.
+                    </p>
+                    <Link
+                      to="/app/claim"
+                      className="inline-block px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono"
                     >
-                      {copied ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Copied</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy</span>
-                        </>
-                      )}
-                    </button>
+                      Register Passkey Vault
+                    </Link>
                   </div>
-
-                  <div className="flex items-center justify-between text-[11px] font-mono text-stone-400 pt-1">
-                    <span>Network: {activeChainDef.name}</span>
-                    <span>Expected finality: {activeChainDef.time}</span>
+                ) : isDeriving && !depositAddressValue ? (
+                  <div className="py-12 flex flex-col items-center justify-center space-y-2.5 text-stone-500 font-mono text-xs">
+                    <Loader2 className="w-6 h-6 animate-spin text-stone-900" />
+                    <span>Deriving live confidential address from solvers...</span>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    {/* Address Row */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          readOnly
+                          value={depositAddressValue || 'Deriving address...'}
+                          className="flex-1 bg-white rounded-xl px-3.5 py-3 text-xs sm:text-sm text-stone-900 font-mono border border-stone-200 focus:outline-none select-all shadow-2xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleCopy}
+                          disabled={!depositAddressValue}
+                          className="px-4 py-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 disabled:opacity-40"
+                        >
+                          {copied ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
 
-                {/* Memo Notice if required */}
-                {currentAddress?.memo && (
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-mono text-amber-900 flex items-start space-x-2">
-                    <Info className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold">Required Memo:</span>{' '}
-                      <span className="font-bold underline">{currentAddress.memo}</span>
-                      <p className="text-[11px] text-amber-800 mt-0.5">
-                        You must include this memo with your transaction.
-                      </p>
+                      <div className="flex items-center justify-between text-[11px] font-mono text-stone-400 pt-1">
+                        <span>Network: {activeChainDef?.name || selectedChain}</span>
+                        <span>Expected finality: {activeChainDef?.time || '~15s'}</span>
+                      </div>
                     </div>
-                  </div>
-                )}
 
-                {/* QR Code */}
-                {showQr && depositAddressValue && (
-                  <div className="p-4 bg-white rounded-2xl border border-stone-200 flex flex-col items-center justify-center animate-fade-in shadow-2xs">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                        depositAddressValue
-                      )}`}
-                      alt="Deposit QR"
-                      className="w-36 h-36 object-contain"
-                    />
-                    <span className="text-[11px] text-stone-500 font-mono mt-2.5">
-                      Scan to deposit {selectedToken} on {activeChainDef.name}
+                    {/* Memo Notice if required */}
+                    {currentAddress?.memo && (
+                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-mono text-amber-900 flex items-start space-x-2">
+                        <Info className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold">Required Memo:</span>{' '}
+                          <span className="font-bold underline">{currentAddress.memo}</span>
+                          <p className="text-[11px] text-amber-800 mt-0.5">
+                            You must include this memo with your transaction.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* QR Code */}
+                    {showQr && depositAddressValue && (
+                      <div className="p-4 bg-white rounded-2xl border border-stone-200 flex flex-col items-center justify-center animate-fade-in shadow-2xs">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                            depositAddressValue
+                          )}`}
+                          alt="Deposit QR"
+                          className="w-36 h-36 object-contain"
+                        />
+                        <span className="text-[11px] text-stone-500 font-mono mt-2.5">
+                          Scan to deposit {selectedToken} on {activeChainDef?.name || selectedChain}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between text-xs text-stone-500 pt-1 border-t border-stone-200/60 font-mono">
+                      <button
+                        type="button"
+                        onClick={() => setShowQr(!showQr)}
+                        className="text-stone-900 hover:underline font-bold flex items-center space-x-1 cursor-pointer"
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        <span>{showQr ? 'Hide QR' : 'Show QR'}</span>
+                      </button>
+                      <span className="text-[11px] text-stone-400">
+                        Expires in ~3 days
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* ── STEP 4: REAL-TIME LIVE DEPOSIT TRACKER ── */}
+              {depositAddressValue && (
+                <div className="pt-2 border-t border-stone-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
+                      <Radio className="w-3.5 h-3.5 text-stone-900 animate-pulse" />
+                      <span>Live Deposit Tracker</span>
+                    </label>
+                    <span className="text-[11px] font-mono text-stone-400 flex items-center space-x-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                      <span>Monitoring {activeChainDef?.name || selectedChain}</span>
                     </span>
                   </div>
-                )}
 
-                <div className="flex items-center justify-between text-xs text-stone-500 pt-1 border-t border-stone-200/60 font-mono">
-                  <button
-                    type="button"
-                    onClick={() => setShowQr(!showQr)}
-                    className="text-stone-900 hover:underline font-bold flex items-center space-x-1 cursor-pointer"
-                  >
-                    <QrCode className="w-3.5 h-3.5" />
-                    <span>{showQr ? 'Hide QR' : 'Show QR'}</span>
-                  </button>
-                  <span className="text-[11px] text-stone-400">
-                    Expires in ~3 days
-                  </span>
+                  {/* Status State Cards */}
+                  {settledSuccess ? (
+                    /* Success Card */
+                    <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-3 animate-fade-in shadow-xs">
+                      <div className="flex items-center space-x-2.5 font-bold text-emerald-900 text-sm">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                        <span>Deposit Received & Shielded!</span>
+                      </div>
+                      <p className="text-xs text-emerald-800 leading-relaxed font-sans">
+                        Your funds have been swept by solvers and credited to your confidential passkey vault. Your updated balance is now available for private transfers.
+                      </p>
+                      {depositStatus?.depositedAmountFormatted && (
+                        <div className="p-3 bg-white/80 rounded-xl border border-emerald-200 flex items-center justify-between font-mono text-xs">
+                          <span className="text-stone-500">Credited Amount:</span>
+                          <span className="font-bold text-emerald-900">
+                            {depositStatus.depositedAmountFormatted} {selectedToken}
+                            {depositStatus.depositedAmountUsd ? ` (~$${depositStatus.depositedAmountUsd})` : ''}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center space-x-3 pt-1">
+                        <Link
+                          to="/app"
+                          className="px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono hover:bg-stone-800 transition-colors"
+                        >
+                          View in Dashboard
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={handleGenerateFresh}
+                          className="px-4 py-2 rounded-xl bg-white border border-stone-200 text-stone-900 text-xs font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
+                        >
+                          Receive Another
+                        </button>
+                      </div>
+                    </div>
+                  ) : depositStatus?.status === 'PROCESSING' || parseFloat(depositStatus?.depositedAmountFormatted || '0') > 0 ? (
+                    /* Detected onchain / Routing */
+                    <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2.5 animate-fade-in">
+                      <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
+                        <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                        <span>Deposit Detected Onchain! Routing via Intents...</span>
+                      </div>
+                      <p className="text-[11px] text-blue-800 leading-relaxed font-sans">
+                        Received <strong className="font-bold">{depositStatus?.depositedAmountFormatted} {selectedToken}</strong> on {activeChainDef?.name || selectedChain}. Solver network is executing settlement into your vault.
+                      </p>
+                      {depositStatus?.txHashes && depositStatus.txHashes.length > 0 && (
+                        <div className="text-[11px] font-mono text-blue-700 truncate flex items-center space-x-1">
+                          <span>Tx Hash:</span>
+                          <span className="underline font-bold">{depositStatus.txHashes[0].slice(0, 16)}...</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* Waiting state */
+                    <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-xs text-stone-600">
+                      <div className="w-3 h-3 rounded-full bg-stone-400 animate-ping flex-shrink-0" />
+                      <div className="font-sans">
+                        <span>Waiting for incoming transaction on </span>
+                        <strong className="text-stone-900 font-semibold">{activeChainDef?.name || selectedChain}</strong>.
+                        <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
+                          Send at least {minAmountDisplay} to the address above.
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </>
-            )}
-          </div>
+              )}
+            </>
+          )}
         </div>
-
-        {/* ── STEP 4: REAL-TIME LIVE DEPOSIT TRACKER ── */}
-        {depositAddressValue && (
-          <div className="pt-2 border-t border-stone-100 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
-                <Radio className="w-3.5 h-3.5 text-stone-900 animate-pulse" />
-                <span>Live Deposit Tracker</span>
-              </label>
-              <span className="text-[11px] font-mono text-stone-400 flex items-center space-x-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                <span>Monitoring {activeChainDef.name}</span>
-              </span>
-            </div>
-
-            {/* Status State Cards */}
-            {settledSuccess ? (
-              /* Success Card */
-              <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-3 animate-fade-in shadow-xs">
-                <div className="flex items-center space-x-2.5 font-bold text-emerald-900 text-sm">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-                  <span>Deposit Received & Shielded!</span>
-                </div>
-                <p className="text-xs text-emerald-800 leading-relaxed font-sans">
-                  Your funds have been swept by solvers and credited to your confidential passkey vault. Your updated balance is now available for private transfers.
-                </p>
-                {depositStatus?.depositedAmountFormatted && (
-                  <div className="p-3 bg-white/80 rounded-xl border border-emerald-200 flex items-center justify-between font-mono text-xs">
-                    <span className="text-stone-500">Credited Amount:</span>
-                    <span className="font-bold text-emerald-900">
-                      {depositStatus.depositedAmountFormatted} {selectedToken}
-                      {depositStatus.depositedAmountUsd ? ` (~$${depositStatus.depositedAmountUsd})` : ''}
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-center space-x-3 pt-1">
-                  <Link
-                    to="/app"
-                    className="px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono hover:bg-stone-800 transition-colors"
-                  >
-                    View in Dashboard
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={handleGenerateFresh}
-                    className="px-4 py-2 rounded-xl bg-white border border-stone-200 text-stone-900 text-xs font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
-                  >
-                    Receive Another
-                  </button>
-                </div>
-              </div>
-            ) : depositStatus?.status === 'PROCESSING' || parseFloat(depositStatus?.depositedAmountFormatted || '0') > 0 ? (
-              /* Detected onchain / Routing */
-              <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2.5 animate-fade-in">
-                <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
-                  <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                  <span>Deposit Detected Onchain! Routing via Intents...</span>
-                </div>
-                <p className="text-[11px] text-blue-800 leading-relaxed font-sans">
-                  Received <strong className="font-bold">{depositStatus?.depositedAmountFormatted} {selectedToken}</strong> on {activeChainDef.name}. Solver network is executing settlement into your vault.
-                </p>
-                {depositStatus?.txHashes && depositStatus.txHashes.length > 0 && (
-                  <div className="text-[11px] font-mono text-blue-700 truncate flex items-center space-x-1">
-                    <span>Tx Hash:</span>
-                    <span className="underline font-bold">{depositStatus.txHashes[0].slice(0, 16)}...</span>
-                  </div>
-                )}
-              </div>
-            ) : (
-              /* Waiting state */
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-xs text-stone-600">
-                <div className="w-3 h-3 rounded-full bg-stone-400 animate-ping flex-shrink-0" />
-                <div className="font-sans">
-                  <span>Waiting for incoming transaction on </span>
-                  <strong className="text-stone-900 font-semibold">{activeChainDef.name}</strong>.
-                  <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
-                    Send at least {minAmountDisplay} to the address above.
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Explainer */}
         <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-700 space-y-1.5 leading-relaxed">
@@ -800,7 +876,7 @@ export const ReceivePage: React.FC = () => {
             <span>How Confidential Intents Custody Works</span>
           </div>
           <p>
-            When you transfer to the ephemeral gateway, the NEAR Intents solver network detects the transaction on {activeChainDef.name}, confirms economic finality, and credits the balance to your hardware passkey vault (<span className="font-mono text-stone-900 font-semibold">{nearAccount || 'u_...uprail.near'}</span>). Zero seed phrases, non-custodial, and 100% private.
+            When you transfer to the ephemeral gateway, the NEAR Intents solver network detects the transaction on your selected chain, confirms economic finality, and credits the balance to your hardware passkey vault (<span className="font-mono text-stone-900 font-semibold">{nearAccount || 'u_...uprail.near'}</span>). Zero seed phrases, non-custodial, and 100% private.
           </p>
         </div>
       </div>

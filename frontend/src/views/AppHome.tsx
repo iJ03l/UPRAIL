@@ -21,6 +21,7 @@ import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { api } from '../lib/api';
 import type { PaymentIntent } from '../types';
+import { FlowPulseWidget } from '../components/FlowPulseWidget';
 
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
@@ -319,6 +320,11 @@ export const AppHome: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── FLOW TELEMETRY & ACTIVITY PULSE WIDGET (Under everything) ── */}
+      <div className="mt-8">
+        <FlowPulseWidget history={history} transactions={transactions} />
       </div>
     </div>
   );
