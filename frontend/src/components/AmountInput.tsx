@@ -25,7 +25,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
   const estimatedUsd = (numericAmount * selectedToken.priceUsd).toFixed(2);
 
   const handleQuickPercent = (pct: number) => {
-    const totalBalance = parseFloat(selectedToken.balance || '100');
+    const totalBalance = parseFloat(selectedToken.balance || '0');
     const calc = ((totalBalance * pct) / 100).toFixed(
       selectedToken.decimals > 6 ? 4 : 2
     );

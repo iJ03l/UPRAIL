@@ -102,8 +102,8 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
           <span className="text-xs sm:text-sm font-bold text-stone-950 font-mono tracking-tight leading-none">
             {selectedToken.symbol}
           </span>
-          {selectedToken.chain && selectedToken.chain !== 'near' && (
-            <span className="text-[9px] font-mono text-stone-400 capitalize">
+          {selectedToken.chain && (
+            <span className="text-[9px] font-mono text-stone-400 uppercase">
               {selectedToken.chain}
             </span>
           )}
@@ -240,13 +240,9 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                         <div>
                           <div className="text-xs font-bold text-stone-950 flex items-center space-x-1.5 font-mono">
                             <span>{token.symbol}</span>
-                            {token.chain && token.chain !== 'near' ? (
+                            {token.chain && (
                               <span className="text-[9px] px-1.5 py-0.2 rounded bg-stone-100 border border-stone-200 text-stone-700 font-mono font-bold uppercase">
                                 {token.chain}
-                              </span>
-                            ) : (
-                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 font-mono font-medium">
-                                Native
                               </span>
                             )}
                           </div>

@@ -61,14 +61,14 @@ export const webauthn = {
   /**
    * 1-Click Sign In with hardware WebAuthn Passkey (Touch ID, Face ID, Windows Hello, YubiKey)
    */
-  async loginWithPasskey(): Promise<{ success: boolean; user: XUser }> {
+  async loginWithPasskey(handle?: string): Promise<{ success: boolean; user: XUser }> {
     const isSupported = browserSupportsWebAuthn();
     if (!isSupported) {
       throw new Error('WebAuthn Passkeys are not supported on this browser or platform.');
     }
 
-    // 1. Fetch challenge and options from backend
-    const options = await api.getPasskeyLoginOptions();
+    // 1. Fetch challenge and options from backend (optionally scoped to known handle)
+    const options = await api.getPasskeyLoginOptions(handle);
 
     // 2. Perform native browser WebAuthn ceremony
     const assertion = await startAuthentication(options);

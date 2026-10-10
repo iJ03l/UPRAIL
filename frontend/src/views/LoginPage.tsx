@@ -64,8 +64,43 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     }
   }, []);
 
+  // Check if this device has previously completed signup / registered a passkey
+  const [hasSignedUp, setHasSignedUp] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      localStorage.getItem('uprail_has_signed_up') === 'true' ||
+      webauthn.hasLocalPasskey() ||
+      !!localStorage.getItem('uprail_last_handle')
+    );
+  });
+
+  const [lastHandle, setLastHandle] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('uprail_last_handle') || null;
+  });
+
+  const [lastName, setLastName] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('uprail_last_name') || null;
+  });
+
+  const [lastAvatar, setLastAvatar] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('uprail_last_avatar') || null;
+  });
+
+  // When returning after signup, passkey is primary by default!
+  const [loginMethod, setLoginMethod] = useState<'passkey' | 'x'>(() => {
+    if (typeof window === 'undefined') return 'passkey';
+    const returning =
+      localStorage.getItem('uprail_has_signed_up') === 'true' ||
+      webauthn.hasLocalPasskey() ||
+      !!localStorage.getItem('uprail_last_handle');
+    return returning ? 'passkey' : 'x';
+  });
+
   // Determine user progression stage:
-  // Stage 1: Connect 𝕏 (if !user)
+  // Stage 1: Connect 𝕏 or Passkey Unlock (if !user)
   // Stage 2: Create Device Passkey (if user exists, but hasPasskey is false)
   // Stage 3: Fully onboarded (has 𝕏 and passkey) -> route to /parking or /app
   const isStep1 = !isLoading && !user;
@@ -75,6 +110,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   // If already complete, forward immediately to destination
   useEffect(() => {
     if (isComplete && user) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('uprail_has_signed_up', 'true');
+        localStorage.setItem('uprail_last_handle', user.handle);
+        if (user.name) localStorage.setItem('uprail_last_name', user.name);
+        if (user.avatarUrl) localStorage.setItem('uprail_last_avatar', user.avatarUrl);
+      }
       if (user.isActivated === false) {
         navigate('/parking', { replace: true });
       } else {
@@ -108,6 +149,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         setIsSuccess(true);
         setSuccessStepMessage('Device Passkey created! Confidential vault secured.');
 
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('uprail_has_signed_up', 'true');
+          localStorage.setItem('uprail_last_handle', user.handle);
+          if (user.name) localStorage.setItem('uprail_last_name', user.name);
+          if (user.avatarUrl) localStorage.setItem('uprail_last_avatar', user.avatarUrl);
+          setHasSignedUp(true);
+          setLastHandle(user.handle);
+          setLastName(user.name || null);
+          setLastAvatar(user.avatarUrl || null);
+          setLoginMethod('passkey');
+        }
+
         // Refresh user session to pick up new passkey & near account
         const status = await api.getAuthStatus();
         await refreshSession();
@@ -133,16 +186,27 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     }
   };
 
-  // Quick Passkey Sign In for returning users who already set up both
-  const handleQuickPasskeyLogin = async () => {
+  // Primary Passkey Sign In for returning users who already signed up
+  const handlePasskeyLogin = async () => {
     try {
       setIsPasskeyLoading(true);
       setError(null);
 
-      const result = await webauthn.loginWithPasskey();
+      const targetHandle = lastHandle || undefined;
+      const result = await webauthn.loginWithPasskey(targetHandle);
       if (result.success) {
         setIsSuccess(true);
         setSuccessStepMessage('Passkey verified! Welcome back.');
+
+        if (typeof window !== 'undefined' && result.user?.handle) {
+          localStorage.setItem('uprail_has_signed_up', 'true');
+          localStorage.setItem('uprail_last_handle', result.user.handle);
+          if (result.user.name) localStorage.setItem('uprail_last_name', result.user.name);
+          if (result.user.avatarUrl) localStorage.setItem('uprail_last_avatar', result.user.avatarUrl);
+          setHasSignedUp(true);
+          setLastHandle(result.user.handle);
+        }
+
         await refreshSession();
 
         setTimeout(() => {
@@ -154,11 +218,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         }, 500);
       }
     } catch (err: any) {
-      console.error('Quick passkey login error:', err);
+      console.error('Passkey login error:', err);
       if (err?.name === 'NotAllowedError') {
         setError('Passkey prompt was cancelled on your device.');
       } else {
-        setError('Passkey not recognized on this device. Please connect with 𝕏 first.');
+        setError(err?.message || 'Passkey not recognized on this device. Please sign in with 𝕏.');
       }
     } finally {
       setIsPasskeyLoading(false);
@@ -185,6 +249,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     );
   }
 
+  const isPasskeyHero = isStep1 && loginMethod === 'passkey';
+
   return (
     <div className="min-h-[100dvh] w-full bg-stone-50 text-stone-900 flex flex-col justify-center items-center px-4 py-8 sm:px-6 sm:py-12 selection:bg-black selection:text-white relative overflow-hidden font-sans">
       {/* Interactive Background Canvas */}
@@ -198,15 +264,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           <GlitchLogo href="/" size="lg" />
 
           <div className="space-y-1">
-            <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 border border-stone-200 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-600 mb-1">
-              <span>{isStep1 ? 'Step 1 of 2: Identity' : 'Step 2 of 2: Security'}</span>
+            <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-stone-100 border border-stone-200 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-600 mb-1">
+              {isPasskeyHero ? (
+                <>
+                  <Fingerprint className="w-3.5 h-3.5 text-stone-800" />
+                  <span>Passkey Biometrics</span>
+                </>
+              ) : isStep1 ? (
+                <span>Step 1 of 2: Identity</span>
+              ) : (
+                <span>Step 2 of 2: Security</span>
+              )}
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950 tracking-tight">
-              {isStep1 ? 'Connect with 𝕏' : 'Set Up Device Passkey'}
+              {isPasskeyHero ? 'Welcome Back' : isStep1 ? 'Connect with 𝕏' : 'Set Up Device Passkey'}
             </h1>
             <p className="text-xs sm:text-sm text-stone-500 font-sans">
-              {isStep1
+              {isPasskeyHero
+                ? 'Sign in with your hardware passkey (Face ID, Touch ID, or Security Key).'
+                : isStep1
                 ? 'Sign in with your Twitter handle to link confidential payments.'
                 : 'Create your hardware biometric key to secure your NEAR vault.'}
             </p>
@@ -240,67 +317,117 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         )}
 
         {/* ============================================================== */}
-        {/* STEP 1: Connect with 𝕏 */}
+        {/* STEP 1: Passkey Primary OR 𝕏 OAuth */}
         {/* ============================================================== */}
         {isStep1 && (
           <div className="space-y-4 pt-1">
-            {/* Primary Action: 𝕏 OAuth */}
-            <button
-              type="button"
-              onClick={handleXLogin}
-              disabled={isInteracting}
-              className="group relative w-full h-14 px-4 sm:px-5 rounded-2xl bg-black hover:bg-stone-900 active:scale-[0.99] text-white font-display font-bold text-sm sm:text-base tracking-wide transition-all duration-150 flex items-center justify-between shadow-sm hover:shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed select-none"
-            >
-              {isXLoading ? (
-                <div className="w-full flex items-center justify-center space-x-2.5">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span className="font-mono text-xs uppercase tracking-wider">Connecting to 𝕏...</span>
-                </div>
-              ) : (
-                <>
-                  <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24" aria-hidden="true">
+            {isPasskeyHero ? (
+              <>
+                {/* Returning User Profile Badge (if known) */}
+                {lastHandle && (
+                  <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <img
+                        src={lastAvatar || `https://unavatar.io/twitter/${lastHandle}`}
+                        alt={lastHandle}
+                        className="w-9 h-9 rounded-full border border-stone-300 object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://unavatar.io/twitter/${lastHandle}`;
+                        }}
+                      />
+                      <div className="text-left">
+                        {lastName && <div className="text-xs font-bold font-sans text-stone-900">{lastName}</div>}
+                        <div className="text-xs font-mono font-bold text-stone-800">@{lastHandle}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-1 text-[10px] font-mono text-emerald-700 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Passkey Ready</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Primary Hero Action: Sign In with Passkey */}
+                <button
+                  type="button"
+                  onClick={handlePasskeyLogin}
+                  disabled={isInteracting}
+                  className="group relative w-full h-14 px-4 sm:px-5 rounded-2xl bg-black hover:bg-stone-900 active:scale-[0.99] text-white font-display font-bold text-sm sm:text-base tracking-wide transition-all duration-150 flex items-center justify-between shadow-md hover:shadow-lg cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed select-none"
+                >
+                  {isPasskeyLoading ? (
+                    <div className="w-full flex items-center justify-center space-x-2.5">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="font-mono text-xs uppercase tracking-wider">Verifying Biometrics...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
+                        <Fingerprint className="w-4 h-4 text-white" />
+                      </div>
+                      <span className="font-display font-bold text-sm sm:text-base tracking-tight text-white flex-1 text-center pr-1 sm:pr-2">
+                        Sign In with Passkey
+                      </span>
+                      <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                    </>
+                  )}
+                </button>
+
+                {/* Secondary Option: Connect with X */}
+                <div className="pt-1 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setLoginMethod('x')}
+                    className="text-xs text-stone-500 hover:text-stone-900 font-mono transition-colors cursor-pointer inline-flex items-center space-x-1.5 mx-auto py-1"
+                  >
+                    <span>Or connect with</span>
+                    <svg className="w-3.5 h-3.5 fill-current inline-block" viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                     </svg>
-                  </div>
-                  <span className="font-display font-bold text-sm sm:text-base tracking-tight text-white flex-1 text-center pr-1 sm:pr-2">
-                    1. Connect with 𝕏
-                  </span>
-                  <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-shrink-0" />
-                </>
-              )}
-            </button>
-
-            {/* Subtle Divider for Returning Users */}
-            <div className="relative flex items-center justify-center py-1">
-              <div className="w-full h-px bg-stone-200" />
-              <span className="absolute bg-white px-3 text-[10px] font-mono font-medium text-stone-400 uppercase tracking-widest select-none">
-                or
-              </span>
-            </div>
-
-            {/* Quick Unlock for Returning Users who already set up both */}
-            <button
-              type="button"
-              onClick={handleQuickPasskeyLogin}
-              disabled={isInteracting}
-              className="group relative w-full h-12 px-4 rounded-2xl bg-stone-50 hover:bg-stone-100 active:scale-[0.99] border border-stone-200 text-stone-700 font-sans font-semibold text-xs tracking-wide transition-all duration-150 flex items-center justify-between cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed select-none"
-            >
-              {isPasskeyLoading ? (
-                <div className="w-full flex items-center justify-center space-x-2">
-                  <div className="w-3.5 h-3.5 border-2 border-stone-900 border-t-transparent rounded-full animate-spin" />
-                  <span className="font-mono text-xs">Checking passkey...</span>
+                  </button>
                 </div>
-              ) : (
-                <>
-                  <div className="flex items-center space-x-2">
-                    <Fingerprint className="w-4 h-4 text-stone-600" />
-                    <span>Already signed up? Quick unlock</span>
-                  </div>
-                  <ArrowRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-700 transition-colors" />
-                </>
-              )}
-            </button>
+              </>
+            ) : (
+              <>
+                {/* Primary Action: 𝕏 OAuth */}
+                <button
+                  type="button"
+                  onClick={handleXLogin}
+                  disabled={isInteracting}
+                  className="group relative w-full h-14 px-4 sm:px-5 rounded-2xl bg-black hover:bg-stone-900 active:scale-[0.99] text-white font-display font-bold text-sm sm:text-base tracking-wide transition-all duration-150 flex items-center justify-between shadow-sm hover:shadow-md cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed select-none"
+                >
+                  {isXLoading ? (
+                    <div className="w-full flex items-center justify-center space-x-2.5">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="font-mono text-xs uppercase tracking-wider">Connecting to 𝕏...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center flex-shrink-0">
+                        <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                        </svg>
+                      </div>
+                      <span className="font-display font-bold text-sm sm:text-base tracking-tight text-white flex-1 text-center pr-1 sm:pr-2">
+                        1. Connect with 𝕏
+                      </span>
+                      <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                    </>
+                  )}
+                </button>
+
+                {/* Secondary Option: Switch to Passkey */}
+                <div className="pt-1 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setLoginMethod('passkey')}
+                    className="text-xs text-stone-600 hover:text-stone-900 font-mono transition-colors cursor-pointer inline-flex items-center space-x-1.5 mx-auto py-1"
+                  >
+                    <Fingerprint className="w-3.5 h-3.5 text-stone-600" />
+                    <span>{hasSignedUp ? 'Switch back to Passkey' : 'Already have a passkey? Sign in with Passkey'}</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

@@ -462,7 +462,30 @@ authRouter.post('/logout', async (c) => {
 authRouter.get('/passkey/login-options', async (c) => {
   try {
     const rpId = resolveRpId(c.env);
-    const options = await webauthnService.generateAuthenticationOptions({ rpId });
+    const handleParam = c.req.query('handle')?.trim().replace(/^@/, '').toLowerCase();
+    let credentialIds: string[] | undefined;
+
+    if (handleParam && c.env.DB) {
+      try {
+        const userRow = await c.env.DB.prepare(
+          'SELECT x_id FROM x_identities WHERE LOWER(x_handle) = LOWER(?)'
+        ).bind(handleParam).first<{ x_id: string }>();
+
+        if (userRow?.x_id) {
+          const passkeys = await c.env.DB.prepare(
+            'SELECT credential_id FROM passkeys WHERE x_id = ? ORDER BY created_at DESC'
+          ).bind(userRow.x_id).all<{ credential_id: string }>();
+
+          if (passkeys.results && passkeys.results.length > 0) {
+            credentialIds = passkeys.results.map((r: any) => r.credential_id);
+          }
+        }
+      } catch (dbErr) {
+        console.warn('login-options D1 handle lookup error:', dbErr);
+      }
+    }
+
+    const options = await webauthnService.generateAuthenticationOptions({ credentialIds, rpId });
 
     // Store challenge via challengeService (zero KV writes)
     await storeChallenge(c.env, {
@@ -525,20 +548,32 @@ authRouter.post('/passkey/login-verify', async (c) => {
 
     // Look up passkey credential from Postgres (or D1)
     let passkeyRow: { x_id: string; public_key: string; counter: number } | null = null;
-    try {
-      const sql = getDb(c.env);
-      if (sql) {
-        const [row] = await sql<any[]>`
-          SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ${assertion.id}
-        `;
-        if (row) passkeyRow = row;
+    if ((c.env as any).DATABASE_URL || (c.env as any).HYPERDRIVE) {
+      try {
+        const sql = getDb(c.env);
+        if (sql) {
+          const [row] = await sql<any[]>`
+            SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ${assertion.id}
+          `;
+          if (row) passkeyRow = row;
+        }
+      } catch (err) {
+        console.warn('Postgres passkey query error:', err);
       }
-    } catch {
-      if (c.env.DB) {
+    }
+
+    if (!passkeyRow && c.env.DB) {
+      passkeyRow = await c.env.DB.prepare(
+        'SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ?'
+      )
+        .bind(assertion.id)
+        .first<any>();
+
+      if (!passkeyRow && assertion.rawId && assertion.rawId !== assertion.id) {
         passkeyRow = await c.env.DB.prepare(
           'SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ?'
         )
-          .bind(assertion.id)
+          .bind(assertion.rawId)
           .first<any>();
       }
     }
@@ -553,11 +588,26 @@ authRouter.post('/passkey/login-verify', async (c) => {
     const rpId = resolveRpId(c.env);
     const expectedOrigin = resolveOrigin(c.env);
 
+    const expectedOrigins = Array.from(new Set([
+      expectedOrigin,
+      'https://app.uprail.world',
+      'https://uprail.world',
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:8787',
+    ].filter(Boolean)));
+
+    const expectedRPIDs = Array.from(new Set([
+      rpId,
+      'uprail.world',
+      'localhost',
+    ].filter(Boolean)));
+
     const verification = await webauthnService.verifyAuthentication({
       assertion,
       expectedChallenge: challenge,
-      expectedOrigin,
-      expectedRPID: rpId,
+      expectedOrigin: expectedOrigins,
+      expectedRPID: expectedRPIDs,
       credential: {
         id: assertion.id,
         publicKey: passkeyRow.public_key,
@@ -570,25 +620,38 @@ authRouter.post('/passkey/login-verify', async (c) => {
     }
 
     // Fetch user profile from Postgres / D1
-    let userProfile: { x_id: string; x_handle: string; x_name: string; near_account?: string | null } | null = null;
-    try {
-      const sql = getDb(c.env);
-      if (sql) {
-        const identity = await getXIdentity(sql, passkeyRow.x_id);
-        if (identity) userProfile = identity;
+    let userProfile: { x_id: string; x_handle: string; x_name: string; near_account?: string | null; is_activated?: number | null; personal_invite_code?: string | null } | null = null;
+    if ((c.env as any).DATABASE_URL || (c.env as any).HYPERDRIVE) {
+      try {
+        const sql = getDb(c.env);
+        if (sql) {
+          const identity = await getXIdentity(sql, passkeyRow.x_id);
+          if (identity) userProfile = identity as any;
+        }
+      } catch (err) {
+        console.warn('Postgres user lookup error:', err);
       }
-    } catch {
-      if (c.env.DB) {
-        userProfile = await c.env.DB.prepare(
-          'SELECT x_id, x_handle, x_name, near_account FROM x_identities WHERE x_id = ?'
-        )
-          .bind(passkeyRow.x_id)
-          .first<any>();
-      }
+    }
+
+    if (!userProfile && c.env.DB) {
+      userProfile = await c.env.DB.prepare(
+        'SELECT x_id, x_handle, x_name, near_account, is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
+      )
+        .bind(passkeyRow.x_id)
+        .first<any>();
     }
 
     if (!userProfile) {
       return c.json<ErrorResponse>({ error: 'User profile not found', code: 'USER_NOT_FOUND' }, 404);
+    }
+
+    // Update counter in D1
+    const newCounter = (verification as any).authenticationInfo?.newCounter ?? 0;
+    if (c.env.DB) {
+      await c.env.DB.prepare('UPDATE passkeys SET counter = ? WHERE credential_id = ?')
+        .bind(newCounter, assertion.id)
+        .run()
+        .catch(() => {});
     }
 
     // Create session and set cookie (zero KV writes)
@@ -599,6 +662,9 @@ authRouter.post('/passkey/login-verify', async (c) => {
       near_account: userProfile.near_account,
     });
 
+    const isActivated = userProfile.is_activated === 1 || session.is_activated;
+    const personalInviteCode = userProfile.personal_invite_code || session.personal_invite_code;
+
     return c.json({
       success: true,
       user: {
@@ -607,6 +673,9 @@ authRouter.post('/passkey/login-verify', async (c) => {
         name: session.x_name,
         avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
         nearAccount: session.near_account,
+        hasPasskey: true,
+        isActivated: !!isActivated,
+        personalInviteCode: personalInviteCode || null,
       },
     });
   } catch (err: any) {

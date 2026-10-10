@@ -162,61 +162,66 @@ const API_BASE =
 
 import { getOnchainIcon } from './onchainIcons';
 
-// Built-in supported tokens for NEAR Confidential Intents (clean initial state: 0.00)
+// Built-in supported tokens for NEAR Confidential Intents
 export const SUPPORTED_TOKENS: Token[] = [
   {
-    id: 'near',
+    id: 'nep141:wrap.near',
     symbol: 'NEAR',
     name: 'NEAR Protocol',
     iconUrl: getOnchainIcon('near') || '',
     decimals: 24,
-    priceUsd: 4.75,
+    priceUsd: 5.42,
     nearContractId: 'wrap.near',
-    badge: 'Native Shield',
+    chain: 'near',
+    badge: 'NEAR',
     balance: '0.00',
   },
   {
-    id: 'usdc',
+    id: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
     symbol: 'USDC',
     name: 'USD Coin',
     iconUrl: getOnchainIcon('usdc') || '',
     decimals: 6,
     priceUsd: 1.0,
     nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    badge: 'Confidential',
+    chain: 'near',
+    badge: 'NEAR',
     balance: '0.00',
   },
   {
-    id: 'usdt',
+    id: 'nep141:usdt.tether-token.near',
     symbol: 'USDT',
     name: 'Tether USD',
     iconUrl: getOnchainIcon('usdt') || '',
     decimals: 6,
     priceUsd: 1.0,
     nearContractId: 'usdt.tether-token.near',
-    badge: 'Confidential',
+    chain: 'near',
+    badge: 'NEAR',
     balance: '0.00',
   },
   {
-    id: 'eth',
+    id: 'nep141:eth.bridge.near',
     symbol: 'ETH',
     name: 'Ethereum',
     iconUrl: getOnchainIcon('eth') || '',
     decimals: 18,
     priceUsd: 2500.0,
     nearContractId: 'eth.bridge.near',
-    badge: 'Cross-chain',
+    chain: 'near',
+    badge: 'NEAR',
     balance: '0.00',
   },
   {
-    id: 'btc',
+    id: 'nep141:2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near',
     symbol: 'BTC',
     name: 'Bitcoin',
     iconUrl: getOnchainIcon('wbtc') || '',
     decimals: 8,
     priceUsd: 82000.0,
     nearContractId: '2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near',
-    badge: 'Cross-chain',
+    chain: 'near',
+    badge: 'NEAR',
     balance: '0.00',
   },
 ];
@@ -228,26 +233,40 @@ const STORAGE_KEYS = {
   PASSKEYS: 'uprail_passkeys',
 };
 
-// Every localStorage key the app writes. logout() clears all of them so no
-// authenticated user's data survives sign-out on a shared device.
+// Every localStorage key the app writes.
 export const ALL_APP_STORAGE_KEYS = [
   STORAGE_KEYS.USER,
   STORAGE_KEYS.PAYMENTS,
   STORAGE_KEYS.SHIELDED,
-  STORAGE_KEYS.PASSKEYS,
   'uprail_user_cache_v1', // useXAuth global user cache
   'uprail_user', // legacy user cache key (still read back as a fallback)
   'uprail_pending_payments_cache', // useClaimFlow pending list cache
-  'uprail_registered_passkeys', // webauthn.ts stored passkey metadata
   'uprail_onchain_cache', // useOnchainData tokens/balances/history snapshot
 ];
 
-/** Removes every app-owned localStorage entry (used on logout and manual cache clear). */
-export function clearAppStorage(): void {
+/** Keys related to device hardware passkeys, kept across logout for 1-click returning login */
+export const DEVICE_PASSKEY_STORAGE_KEYS = [
+  STORAGE_KEYS.PASSKEYS,
+  'uprail_registered_passkeys',
+  'uprail_has_signed_up',
+  'uprail_last_handle',
+  'uprail_last_name',
+  'uprail_last_avatar',
+];
+
+/** Removes session & cache localStorage entries on logout, optionally clearing passkey device records */
+export function clearAppStorage(clearPasskeys: boolean = false): void {
   for (const key of ALL_APP_STORAGE_KEYS) {
     try {
       localStorage.removeItem(key);
     } catch {}
+  }
+  if (clearPasskeys) {
+    for (const key of DEVICE_PASSKEY_STORAGE_KEYS) {
+      try {
+        localStorage.removeItem(key);
+      } catch {}
+    }
   }
 }
 
@@ -319,8 +338,9 @@ export const api = {
   },
 
   // Passkey Login Endpoints
-  async getPasskeyLoginOptions() {
-    const url = API_BASE ? `${API_BASE}/auth/passkey/login-options` : '/auth/passkey/login-options';
+  async getPasskeyLoginOptions(handle?: string) {
+    const query = handle ? `?handle=${encodeURIComponent(handle)}` : '';
+    const url = API_BASE ? `${API_BASE}/auth/passkey/login-options${query}` : `/auth/passkey/login-options${query}`;
     const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -384,7 +404,7 @@ export const api = {
               getOnchainIcon(rawSym.toLowerCase()) ||
               '';
             return {
-              id: t.id || t.defuse_asset_id,
+              id: t.id || t.defuse_asset_id || (isNativeNear ? 'nep141:wrap.near' : rawSym.toLowerCase()),
               symbol,
               name,
               iconUrl,
@@ -392,7 +412,7 @@ export const api = {
               priceUsd: t.priceUsd ?? 1.0,
               nearContractId: t.nearContractId || (isNativeNear ? 'wrap.near' : ''),
               chain: tokenChain,
-              badge: t.badge || (isNativeNear ? 'Native Shield' : `${tokenChain.toUpperCase()}`),
+              badge: t.badge || tokenChain.toUpperCase(),
               category: t.category || (isNativeNear ? 'popular' : 'all'),
               balance: t.balance || '0.00',
             };

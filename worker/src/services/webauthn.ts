@@ -99,6 +99,28 @@ export async function verifyRegistration(params: {
 }
 
 /**
+ * Convert public key string (hex or base64url) or buffer into Uint8Array
+ */
+export function pubKeyToBuffer(key: string | Uint8Array): Uint8Array {
+  if (key instanceof Uint8Array) return key;
+  const clean = (key || '').trim();
+  if (/^[0-9a-fA-F]+$/.test(clean) && clean.length % 2 === 0) {
+    return hexToBuffer(clean);
+  }
+  try {
+    const b64 = clean.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    return bytes;
+  } catch {
+    return hexToBuffer(clean);
+  }
+}
+
+/**
  * Generate WebAuthn authentication assertion options
  */
 export async function generateAuthenticationOptions(params: {
@@ -124,18 +146,15 @@ export async function generateAuthenticationOptions(params: {
 export async function verifyAuthentication(params: {
   assertion: AuthenticationResponseJSON;
   expectedChallenge: string;
-  expectedOrigin: string;
-  expectedRPID: string;
+  expectedOrigin: string | string[];
+  expectedRPID: string | string[];
   credential: {
     id: string;
     publicKey: string | Uint8Array;
     counter: number;
   };
 }) {
-  const pubKeyBytes =
-    typeof params.credential.publicKey === 'string'
-      ? hexToBuffer(params.credential.publicKey)
-      : params.credential.publicKey;
+  const pubKeyBytes = pubKeyToBuffer(params.credential.publicKey);
 
   const verification = await verifyAuthenticationResponse({
     response: params.assertion,

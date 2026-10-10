@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Token, PaymentQuote, PaymentIntent } from '../types';
 import { api, SUPPORTED_TOKENS, normalizeRecipientInput } from '../lib/api';
 import { usePasskeyTxAuth } from './usePasskeyTxAuth';
+import { useOnchainData } from './useOnchainData';
 
 export function usePayments() {
   const { authorizeWithPasskey } = usePasskeyTxAuth();
-  const [tokens, setTokens] = useState<Token[]>(SUPPORTED_TOKENS);
-  const [selectedToken, setSelectedToken] = useState<Token>(SUPPORTED_TOKENS[0]);
+  const { tokens: onchainTokens, balances } = useOnchainData();
+
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -15,18 +16,67 @@ export function usePayments() {
   const [history, setHistory] = useState<PaymentIntent[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // Load tokens
-  useEffect(() => {
-    let mounted = true;
-    api.getTokens().then((toks) => {
-      if (mounted && toks.length > 0) {
-        setTokens(toks);
-        setSelectedToken(toks[0]);
-      }
-    });
-    return () => {
-      mounted = false;
+  // Combine onchain tokens with live user balances & filter out raw un-defused native token
+  const tokens = useMemo<Token[]>(() => {
+    if (!onchainTokens || onchainTokens.length === 0) {
+      return SUPPORTED_TOKENS;
+    }
+
+    const priorityOrder: Record<string, number> = {
+      NEAR: 1,
+      USDC: 2,
+      USDT: 3,
+      ETH: 4,
+      BTC: 5,
+      WBTC: 6,
+      SOL: 7,
+      DAI: 8,
+      FRAX: 9,
+      AURORA: 10,
     };
+
+    const mapped = onchainTokens
+      .filter((ot) => ot.id !== 'near' && ot.id !== 'native') // remove raw un-defused native token
+      .map((ot) => {
+        const balRecord = balances.find(
+          (b) =>
+            b.defuse_asset_id?.toLowerCase() === ot.id.toLowerCase() ||
+            (ot.nearContractId && b.nearContractId?.toLowerCase() === ot.nearContractId.toLowerCase()) ||
+            b.symbol.toLowerCase() === ot.symbol.toLowerCase()
+        );
+        return {
+          id: ot.id,
+          symbol: ot.symbol,
+          name: ot.name,
+          iconUrl: ot.iconUrl,
+          decimals: ot.decimals,
+          priceUsd: (ot as any).priceUsd || (ot.symbol === 'NEAR' ? 5.42 : ot.symbol === 'ETH' ? 2500 : ot.symbol === 'BTC' ? 82000 : 1.0),
+          nearContractId: ot.nearContractId,
+          chain: ot.chain || 'near',
+          badge: (ot.chain || 'near').toUpperCase(),
+          category: (['NEAR', 'USDC', 'USDT', 'ETH', 'BTC', 'SOL'].includes(ot.symbol) ? 'popular' : 'all') as any,
+          balance: balRecord?.amountFormatted || balRecord?.amount || '0.00',
+        };
+      });
+
+    mapped.sort((a, b) => {
+      const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
+      const pB = priorityOrder[b.symbol.toUpperCase()] ?? 999;
+      if (pA !== pB) return pA - pB;
+      return a.symbol.localeCompare(b.symbol);
+    });
+
+    return mapped.length > 0 ? mapped : SUPPORTED_TOKENS;
+  }, [onchainTokens, balances]);
+
+  const [selectedTokenId, setSelectedTokenId] = useState<string>(SUPPORTED_TOKENS[0].id);
+
+  const selectedToken = useMemo<Token>(() => {
+    return tokens.find((t) => t.id === selectedTokenId) || tokens[0] || SUPPORTED_TOKENS[0];
+  }, [tokens, selectedTokenId]);
+
+  const setSelectedToken = useCallback((t: Token) => {
+    setSelectedTokenId(t.id);
   }, []);
 
   // Update quote
@@ -114,6 +164,10 @@ export function usePayments() {
       setIsLoadingHistory(false);
     }
   }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const resetCreatedPayment = () => {
     setCreatedPayment(null);
