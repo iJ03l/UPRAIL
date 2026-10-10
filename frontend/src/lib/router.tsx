@@ -92,13 +92,9 @@ export const Navigate: React.FC<{ to: string; replace?: boolean; state?: any }> 
   return null;
 };
 
-const DefaultSuspenseFallback = () => (
-  <div className="min-h-screen bg-stone-50 flex items-center justify-center">
-    <div className="w-12 h-12 rounded-2xl bg-black text-white flex items-center justify-center shadow-xs">
-      <span className="font-display font-black text-base tracking-tight">UP</span>
-    </div>
-  </div>
-);
+import { BrandLoadingScreen } from '../components/BrandLoadingScreen';
+
+const DefaultSuspenseFallback = () => <BrandLoadingScreen />;
 
 /**
  * Suspense boundary every page must wrap its content with: Next.js requires one
