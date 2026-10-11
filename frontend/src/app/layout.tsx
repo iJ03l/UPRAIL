@@ -8,7 +8,10 @@ export const metadata: Metadata = {
   description:
     'Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion.',
   icons: {
-    icon: '/brand/uprail-icon.png',
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/brand/uprail-icon.png', type: 'image/png' },
+    ],
     apple: '/brand/apple-touch-icon.png',
   },
   openGraph: {
@@ -56,6 +59,8 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="UPRAIL" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" href="/brand/uprail-icon.png" />
         <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
 
         {/* Primary Meta Tags for Social Previews */}

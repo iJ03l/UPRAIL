@@ -22,6 +22,7 @@ import { useOnchainData } from '../hooks/useOnchainData';
 import { fetchDepositAddress, fetchDepositStatus, DepositAddress, DepositStatusResponse } from '../lib/onchainApi';
 import { api, formatUsd } from '../lib/api';
 import { TokenIcon } from '../components/TokenIcon';
+import { ChainLogo } from '../components/ChainLogo';
 
 export interface TokenOption {
   symbol: string;
@@ -509,7 +510,7 @@ export const ReceivePage: React.FC = () => {
             >
               {activeChainDef ? (
                 <div className="flex items-center space-x-3">
-                  <span className="text-2xl">{activeChainDef.icon}</span>
+                  <ChainLogo chainId={activeChainDef.id} className="w-8 h-8" />
                   <div>
                     <div className="flex items-center space-x-2">
                       <span className="font-mono text-sm font-extrabold text-stone-950">
@@ -587,7 +588,7 @@ export const ReceivePage: React.FC = () => {
                           }`}
                         >
                           <div className="flex items-center space-x-2.5">
-                            <span className="text-lg">{chain.icon}</span>
+                            <ChainLogo chainId={chain.id} className="w-6 h-6" />
                             <div>
                               <div className="flex items-center space-x-1.5 font-mono text-xs">
                                 <span className={isSelected ? 'text-white font-bold' : 'text-stone-950 font-bold'}>
@@ -876,17 +877,6 @@ export const ReceivePage: React.FC = () => {
               )}
             </>
           )}
-        </div>
-
-        {/* Explainer */}
-        <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-700 space-y-1.5 leading-relaxed">
-          <div className="flex items-center space-x-1.5 font-bold text-stone-900">
-            <Info className="w-3.5 h-3.5 text-stone-900" />
-            <span>How Confidential Intents Custody Works</span>
-          </div>
-          <p>
-            When you transfer to the ephemeral gateway, the NEAR Intents solver network detects the transaction on your selected chain, confirms economic finality, and credits the balance to your hardware passkey vault (<span className="font-mono text-stone-900 font-semibold">{nearAccount || 'u_...uprail.near'}</span>). Zero seed phrases, non-custodial, and 100% private.
-          </p>
         </div>
       </div>
     </div>

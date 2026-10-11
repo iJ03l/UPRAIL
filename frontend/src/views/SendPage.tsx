@@ -97,13 +97,6 @@ export const SendPage: React.FC = () => {
     }
   };
 
-  // NEAR & Memes rail: the recipient receives into their confidential vault.
-  // The only exit from that vault is a passkey-authorized withdrawal to a main
-  // wallet, settled through confidential NEAR Intents — say so up front.
-  const isNearOrMemeRail =
-    selectedToken.category === 'memes' ||
-    selectedToken.symbol.toUpperCase() === 'NEAR';
-
   const isFormValid =
     (sendMode === 'handle' ? recipient.trim().length >= 2 : walletAddress.trim().length >= 5) &&
     parseFloat(amount) > 0 &&
@@ -227,20 +220,6 @@ export const SendPage: React.FC = () => {
             onSelectToken={setSelectedToken}
             disabled={isSubmitting}
           />
-
-          {sendMode === 'handle' && isNearOrMemeRail && (
-            <div className="rounded-2xl bg-stone-950 border border-stone-800 p-4 space-y-1.5 text-[11px] font-mono text-stone-300">
-              <div className="flex items-center space-x-2 text-white font-bold text-xs">
-                <Wallet className="w-3.5 h-3.5" />
-                <span>NEAR &amp; Memes rail</span>
-              </div>
-              <p>
-                {selectedToken.symbol} lands in the recipient's confidential vault. To spend it
-                they withdraw to a main wallet with their passkey — settled through confidential
-                NEAR Intents.
-              </p>
-            </div>
-          )}
 
           {/* Optional Memo */}
           <div className="space-y-1.5">

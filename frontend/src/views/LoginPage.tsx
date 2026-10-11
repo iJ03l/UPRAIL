@@ -244,19 +244,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   const isInteracting = isXLoading || isPasskeyLoading || isSuccess;
 
-  // Show clean branded splash while resolving auth status
+  // Show clean minimal spinner while resolving auth status
   if (isLoading) {
     return (
       <div className="min-h-[100dvh] w-full bg-stone-50 text-stone-900 flex flex-col justify-center items-center px-4 font-sans">
-        <QuantusInteractiveCanvas fullScreenRoam={true} />
-        <div className="relative z-10 w-full max-w-sm bg-white border border-stone-200/90 rounded-3xl p-8 shadow-xl text-center space-y-4">
-          <div className="flex justify-center pb-1">
-            <GlitchLogo href="/" size="lg" />
-          </div>
-          <div className="flex items-center justify-center space-x-2 text-stone-500 font-mono text-xs">
-            <Loader2 className="w-4 h-4 animate-spin text-stone-900" />
-            <span>Verifying session...</span>
-          </div>
+        <div className="flex items-center justify-center space-x-2 text-stone-500 font-mono text-xs">
+          <Loader2 className="w-5 h-5 animate-spin text-stone-800" />
         </div>
       </div>
     );
