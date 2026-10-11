@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { getOnchainIcon } from '../lib/onchainIcons';
 
 // NEAR official black & white vector SVG
-const NEAR_SVG_DATA = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none"><rect width="100" height="100" rx="50" fill="%23000000"/><path d="M69.75 30.25L54.75 51.5L71.25 72.5H62.75L49.5 55.75L37.25 72.5H28.75L45.25 50L30.25 30.25H38.75L51 46.25L62.25 30.25H69.75Z" fill="white"/></svg>`;
+const NEAR_SVG_DATA = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="50" fill="%23000000"/><g transform="translate(19,19) scale(0.69)" fill="white"><path d="M72.2,4.6L53.4,32.5c-1.3,1.9,1.2,4.2,3,2.6L74.9,19c0.5-0.4,1.2-0.1,1.2,0.6v50.3c0,0.7-0.9,1-1.3,0.5l-56-67C17,1.2,14.4,0,11.5,0h-2C4.3,0,0,4.3,0,9.6v70.8C0,85.7,4.3,90,9.6,90c3.3,0,6.4-1.7,8.2-4.6l18.8-27.9c1.3-1.9-1.2-4.2-3-2.6l-18.5,16c-0.5,0.4-1.2,0.1-1.2-0.6V20.1c0-0.7,0.9-1,1.3-0.5l56,67c1.8,2.2,4.5,3.4,7.3,3.4h2c5.3,0,9.6-4.3,9.6-9.6V9.6c0-5.3-4.3-9.6-9.6-9.6C77.1,0,74,1.7,72.2,4.6z"/></g></svg>`;
 
 // Color palette for deterministic fallback badges
 const BADGE_COLORS = [

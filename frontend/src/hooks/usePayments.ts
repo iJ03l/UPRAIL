@@ -54,7 +54,7 @@ export function usePayments() {
           nearContractId: ot.nearContractId,
           chain: ot.chain || 'near',
           badge: (ot.chain || 'near').toUpperCase(),
-          category: (['NEAR', 'USDC', 'USDT', 'ETH', 'BTC', 'SOL'].includes(ot.symbol) ? 'popular' : 'all') as any,
+          category: ((ot as any).category || (['NEAR', 'USDC', 'USDT', 'ETH', 'BTC', 'SOL'].includes(ot.symbol) ? 'popular' : 'all')) as any,
           balance: balRecord?.amountFormatted || balRecord?.amount || '0.00',
         };
       });

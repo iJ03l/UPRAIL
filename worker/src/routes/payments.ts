@@ -153,8 +153,10 @@ function mapPublicToken(t: any) {
   let category: 'popular' | 'stables' | 'l1' | 'memes' | 'all' = t.category || 'all';
   if (isNativeCanonical) {
     category = 'popular';
-  } else if (category === 'all') {
-    if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
+  } else if (category === 'all' || category === 'memes') {
+    if (nearRpc.isMemeAsset(symUpper, t.nearContractId || t.defuse_asset_id || '')) {
+      category = 'memes';
+    } else if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
       category = 'stables';
     } else if (['NEAR', 'ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((s) => symUpper.includes(s))) {
       category = 'l1';

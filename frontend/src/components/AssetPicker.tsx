@@ -13,6 +13,30 @@ interface AssetPickerProps {
   disabled?: boolean;
 }
 
+const MEME_SYMBOLS_SET = new Set([
+  'PEPE', 'WIF', '$WIF', 'BOME', 'DOGE', 'TRUMP', 'MELANIA', 'SHITZU',
+  'BLACKDRAGON', 'MOCHI', 'NEIRO', 'BOBO', 'DEGEN', 'POPCAT', 'POP CAT',
+  'FARTCOIN', 'BONK', 'MYRO', 'SLERF', 'BODEN', 'GNEAR', 'NOEAR', 'ABG',
+  'JAMBO', 'PURGE', 'LONK', 'PURR', 'NEKO', 'SLUSH', 'NEARLY', 'BABY',
+  'FLOKI', 'SHIB', 'MOG', 'SPX', 'BRETT', 'GIGA', 'CHILLGUY', 'PENGU',
+  'PNUT', 'GOAT', 'MARCO', 'WOOF', 'BENDOG', 'WEN', 'TURBO', 'MOON',
+  'CHUCK', 'HODL', 'ACT', 'PUPPIES', 'BULL', 'BEAR', 'APE', 'APECOIN',
+]);
+
+const MEME_CONTRACT_HINTS = [
+  'meme-cooking', '0xshitzu', 'blackdragon', 'lonk', 'shitzu', 'neko',
+  'purr', 'slush', 'tkn.near', 'nearlytrade', 'nearlytrader', 'nearlypad',
+  'cookinglabs', 'launchpad', 'pump', 'meme', 'lonkingnearbackto2024',
+];
+
+function isMemeToken(symbol: string, contractId?: string): boolean {
+  const sym = (symbol || '').toUpperCase();
+  const c = (contractId || '').toLowerCase();
+  if (MEME_SYMBOLS_SET.has(sym)) return true;
+  if (sym.includes('MEME') || c.includes('meme')) return true;
+  return MEME_CONTRACT_HINTS.some((h) => c.includes(h));
+}
+
 export const AssetPicker: React.FC<AssetPickerProps> = ({
   tokens,
   selectedToken,
@@ -108,8 +132,12 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
       }
       if (activeTab === 'memes') {
         // The NEAR & Memes rail: native NEAR plus every meme-classified asset
-        // (they used to be filtered out as spam and could not be sent at all).
-        return t.category === 'memes' || symLower === 'near' || symLower === 'wnear';
+        return (
+          t.category === 'memes' ||
+          isMemeToken(t.symbol, t.nearContractId || t.id) ||
+          symLower === 'near' ||
+          symLower === 'wnear'
+        );
       }
       return true;
     });

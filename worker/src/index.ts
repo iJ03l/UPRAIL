@@ -156,11 +156,128 @@ app.onError((err, c) => {
 // are rewritten onto the static claim page, which reads the id from the URL.
 const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
 
+function isBotRequest(userAgent: string | null | undefined): boolean {
+  if (!userAgent) return false;
+  const ua = userAgent.toLowerCase();
+  return (
+    ua.includes('twitterbot') ||
+    ua.includes('facebookexternalhit') ||
+    ua.includes('facebot') ||
+    ua.includes('telegrambot') ||
+    ua.includes('whatsapp') ||
+    ua.includes('discordbot') ||
+    ua.includes('slackbot') ||
+    ua.includes('linkedinbot') ||
+    ua.includes('vkshare') ||
+    ua.includes('bingpreview') ||
+    ua.includes('embedly') ||
+    ua.includes('quora link preview') ||
+    ua.includes('redditbot') ||
+    ua.includes('applebot') ||
+    ua.includes('skypeuripreview')
+  );
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderShareCardHtml(opts: {
+  title: string;
+  description: string;
+  imageUrl: string;
+  url: string;
+}): Response {
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(opts.title)}</title>
+  <meta name="description" content="${escapeHtml(opts.description)}" />
+  
+  <!-- Open Graph -->
+  <meta property="og:site_name" content="UPRAIL" />
+  <meta property="og:title" content="${escapeHtml(opts.title)}" />
+  <meta property="og:description" content="${escapeHtml(opts.description)}" />
+  <meta property="og:image" content="${escapeHtml(opts.imageUrl)}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:url" content="${escapeHtml(opts.url)}" />
+  <meta property="og:type" content="website" />
+
+  <!-- Twitter Card (summary_large_image for full bleed cards on X) -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@uprail_app" />
+  <meta name="twitter:creator" content="@uprail_app" />
+  <meta name="twitter:title" content="${escapeHtml(opts.title)}" />
+  <meta name="twitter:description" content="${escapeHtml(opts.description)}" />
+  <meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}" />
+</head>
+<body style="font-family:system-ui,-apple-system,sans-serif;padding:2rem;text-align:center;background:#000;color:#fff;">
+  <h2>${escapeHtml(opts.title)}</h2>
+  <p style="color:#aaa;">${escapeHtml(opts.description)}</p>
+  <a href="${escapeHtml(opts.url)}" style="color:#fff;text-decoration:underline;">Open in UPRAIL</a>
+</body>
+</html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'public, max-age=300',
+    },
+  });
+}
+
 // 404 / Asset Fallback Handler
 app.notFound(async (c) => {
   if (c.env.ASSETS) {
     const url = new URL(c.req.url);
-    if (c.req.method === 'GET' && CLAIM_DEEP_LINK.test(url.pathname)) {
+    const userAgent = c.req.header('user-agent');
+    const isBot = isBotRequest(userAgent);
+    const claimMatch = url.pathname.match(CLAIM_DEEP_LINK);
+
+    if (claimMatch) {
+      const paymentId = claimMatch[1];
+      if (isBot) {
+        let recipient = '';
+        let amount = '';
+        let asset = '';
+        if (c.env.DB) {
+          try {
+            const p = await c.env.DB.prepare(
+              'SELECT recipient_handle, amount, asset FROM payments WHERE id = ?'
+            )
+              .bind(paymentId)
+              .first<{ recipient_handle: string; amount: string; asset: string }>();
+            if (p) {
+              recipient = p.recipient_handle;
+              amount = p.amount;
+              asset = (p.asset || 'USDC').toUpperCase();
+            }
+          } catch {}
+        }
+        const title = recipient
+          ? `Payment waiting for @${recipient} on UPRAIL`
+          : 'Payment Ready to Claim on UPRAIL';
+        const description = amount && recipient
+          ? `@${recipient}, you have ${amount} ${asset} ready to claim with your device passkey on UPRAIL.`
+          : 'Claim confidential payment on UPRAIL. Instant passkey settlement on NEAR Intents.';
+
+        return renderShareCardHtml({
+          title,
+          description,
+          imageUrl: 'https://app.uprail.world/og/og-send.png',
+          url: url.href,
+        });
+      }
+
       const basePath = url.pathname.startsWith('/app/') ? '/app/claim' : '/claim';
       const target = new URL(basePath, url);
       // Keep ?invite= / ?payment= — the page reads them from the address bar.
@@ -175,6 +292,24 @@ app.notFound(async (c) => {
         return assetResponse;
       }
     }
+
+    if (isBot) {
+      if (url.pathname.includes('refer') || url.pathname.includes('invite')) {
+        return renderShareCardHtml({
+          title: 'Join UPRAIL — The Confidential Value Railway for X',
+          description: 'Send and receive value across all chains directly with X handles. Instant passkey settlement.',
+          imageUrl: 'https://app.uprail.world/og/og-refer.png',
+          url: url.href,
+        });
+      }
+      return renderShareCardHtml({
+        title: 'UPRAIL — The Confidential Value Railway for X',
+        description: 'Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world.',
+        imageUrl: 'https://app.uprail.world/og/og-landing.png',
+        url: url.href,
+      });
+    }
+
     return await c.env.ASSETS.fetch(c.req.raw);
   }
   return c.json<ErrorResponse>(
