@@ -117,73 +117,115 @@ async function callEscrowDO(
 }
 
 /**
+ * Shapes one registry token for the picker: badge, category and the live
+ * price passed through untouched (undefined stays undefined — the UI renders
+ * "—"). Shared by /api/tokens and /api/tokens/search so both lists agree.
+ */
+function mapPublicToken(t: any) {
+  const symUpper = (t.symbol || '').toUpperCase();
+  let badge = 'Cross-chain';
+  if (t.chain === 'near' && (symUpper === 'NEAR' || symUpper === 'WNEAR')) {
+    badge = 'Native Shield';
+  } else if (t.chain === 'near' && (symUpper === 'USDC' || symUpper === 'USDT')) {
+    badge = 'Confidential';
+  } else if (t.chain === 'base') {
+    badge = 'Base L2';
+  } else if (t.chain === 'arbitrum' || t.chain === 'arb') {
+    badge = 'Arbitrum L2';
+  } else if (t.chain === 'sol') {
+    badge = 'Solana SPL';
+  } else if (t.chain === 'eth') {
+    badge = 'Ethereum L1';
+  } else if (t.chain === 'btc') {
+    badge = 'Bitcoin Native';
+  } else if (t.chain === 'near') {
+    badge = 'NEAR Native';
+  }
+
+  const isNativeCanonical =
+    (symUpper === 'NEAR' && (t.chain === 'near' || t.nearContractId === 'wrap.near')) ||
+    (symUpper === 'USDC' && (t.nearContractId?.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1') || t.chain === 'near')) ||
+    (symUpper === 'USDT' && (t.nearContractId?.includes('usdt.tether-token.near') || t.chain === 'near')) ||
+    (symUpper === 'ETH' && (t.nearContractId?.includes('eth.bridge.near') || t.chain === 'near')) ||
+    (symUpper === 'BTC' && (t.nearContractId?.includes('btc.omft.near') || t.chain === 'btc')) ||
+    (symUpper === 'SOL' && (t.nearContractId?.includes('sol.omft.near') || t.chain === 'sol'));
+
+  let category: 'popular' | 'stables' | 'l1' | 'memes' | 'all' = t.category || 'all';
+  if (isNativeCanonical) {
+    category = 'popular';
+  } else if (category === 'all') {
+    if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
+      category = 'stables';
+    } else if (['NEAR', 'ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((s) => symUpper.includes(s))) {
+      category = 'l1';
+    }
+  }
+
+  return {
+    id: t.defuse_asset_id,
+    symbol: t.symbol,
+    name: t.name,
+    iconUrl: t.icon || '',
+    decimals: t.decimals,
+    nearContractId: t.nearContractId,
+    chain: t.chain,
+    chainId: t.chainId,
+    badge,
+    category,
+    balance: '0.00',
+    // Live registry price, passed through untouched. Undefined means the
+    // registry had no quote for this asset — the UI renders "—".
+    priceUsd: t.priceUsd,
+  };
+}
+
+/**
  * GET /api/tokens
- * Returns all tokens supported by NEAR Intents, pulled live from the intents contract.
- * No hardcoded list — every supported asset on every chain is included.
+ * Returns all tokens supported by NEAR Intents, pulled live from the intents
+ * contract, plus a curated head of native NEAR (Rhea/Ref) tokens — including
+ * launchpad memes — that Intents does not cover. No hardcoded list.
  */
 paymentsRouter.get('/tokens', async (c) => {
   try {
     const tokens = await nearRpc.getSupportedTokens(c.env);
-    const mapped = tokens.map((t) => {
-      const symUpper = t.symbol.toUpperCase();
-      let badge = 'Cross-chain';
-      if (t.chain === 'near' && (symUpper === 'NEAR' || symUpper === 'WNEAR')) {
-        badge = 'Native Shield';
-      } else if (t.chain === 'near' && (symUpper === 'USDC' || symUpper === 'USDT')) {
-        badge = 'Confidential';
-      } else if (t.chain === 'base') {
-        badge = 'Base L2';
-      } else if (t.chain === 'arbitrum' || t.chain === 'arb') {
-        badge = 'Arbitrum L2';
-      } else if (t.chain === 'sol') {
-        badge = 'Solana SPL';
-      } else if (t.chain === 'eth') {
-        badge = 'Ethereum L1';
-      } else if (t.chain === 'btc') {
-        badge = 'Bitcoin Native';
-      }
-
-      const isNativeCanonical =
-        (symUpper === 'NEAR' && (t.chain === 'near' || t.nearContractId === 'wrap.near')) ||
-        (symUpper === 'USDC' && (t.nearContractId?.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1') || t.chain === 'near')) ||
-        (symUpper === 'USDT' && (t.nearContractId?.includes('usdt.tether-token.near') || t.chain === 'near')) ||
-        (symUpper === 'ETH' && (t.nearContractId?.includes('eth.bridge.near') || t.chain === 'near')) ||
-        (symUpper === 'BTC' && (t.nearContractId?.includes('btc.omft.near') || t.chain === 'btc')) ||
-        (symUpper === 'SOL' && (t.nearContractId?.includes('sol.omft.near') || t.chain === 'sol'));
-
-      let category: 'popular' | 'stables' | 'l1' | 'memes' | 'all' = t.category || 'all';
-      if (isNativeCanonical) {
-        category = 'popular';
-      } else if (category === 'all') {
-        if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
-          category = 'stables';
-        } else if (['NEAR', 'ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((s) => symUpper.includes(s))) {
-          category = 'l1';
-        }
-      }
-
-      return {
-        id: t.defuse_asset_id,
-        symbol: t.symbol,
-        name: t.name,
-        iconUrl: t.icon || '',
-        decimals: t.decimals,
-        nearContractId: t.nearContractId,
-        chain: t.chain,
-        chainId: t.chainId,
-        badge,
-        category,
-        balance: '0.00',
-        // Live registry price, passed through untouched. Undefined means the
-        // registry had no quote for this asset — the UI renders "—".
-        priceUsd: t.priceUsd,
-      };
-    });
+    const mapped = tokens.map(mapPublicToken);
     return c.json({ tokens: mapped });
   } catch (err: any) {
     console.error('[/api/tokens] onchain fetch failed:', err);
     return c.json<ErrorResponse>(
       { error: `Failed to load token list: ${publicErrorMessage(err)}`, code: 'TOKEN_LIST_ERROR' },
+      500
+    );
+  }
+});
+
+/**
+ * GET /api/tokens/search?q=
+ * Searches the full Rhea (Ref) native NEAR token list — the long tail that
+ * does not fit the curated /api/tokens head (launchpad memes such as
+ * `*.nearlytrade.near`, long-tail NEP-141s). Public, no user data.
+ * Returns at most 25 matches shaped exactly like /api/tokens entries.
+ */
+paymentsRouter.get('/tokens/search', async (c) => {
+  try {
+    const q = (c.req.query('q') || '').trim().toLowerCase();
+    if (q.length < 2) return c.json({ tokens: [] });
+    const rhea = await nearRpc.getRheaTokens(c.env);
+    const matches = rhea
+      .filter(
+        (e) =>
+          e.symbol.toLowerCase().includes(q) ||
+          e.contractId.toLowerCase().includes(q) ||
+          e.name.toLowerCase().includes(q)
+      )
+      .slice(0, 25)
+      .map((e) => nearRpc.rheaToOnchainToken(e))
+      .map(mapPublicToken);
+    return c.json({ tokens: matches });
+  } catch (err: any) {
+    console.error('[/api/tokens/search] error:', err);
+    return c.json<ErrorResponse>(
+      { error: `Token search failed: ${publicErrorMessage(err)}`, code: 'TOKEN_SEARCH_ERROR' },
       500
     );
   }
@@ -301,7 +343,12 @@ paymentsRouter.post('/quote', async (c) => {
     let baseUnitsAmount: string;
     try {
       const tokens = await nearRpc.getSupportedTokens(c.env);
-      const tokenInfo = nearRpc.resolveTokenForAsset(body.asset, tokens);
+      let tokenInfo = nearRpc.resolveTokenForAsset(body.asset, tokens);
+      // Rhea long tail: an asset found via /api/tokens/search may not sit in
+      // the curated head — resolve it straight from the cached Rhea list.
+      if (!tokenInfo) {
+        tokenInfo = await nearRpc.resolveRheaToken(c.env, body.asset);
+      }
       if (!tokenInfo) {
         return c.json<ErrorResponse>(
           { error: `Unsupported asset: ${body.asset}`, code: 'UNSUPPORTED_ASSET' },

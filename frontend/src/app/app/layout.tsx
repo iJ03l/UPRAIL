@@ -1,16 +1,29 @@
-'use client';
+import type { Metadata } from 'next';
+import { AppShell } from '@/components/AppShell';
 
-import React, { Suspense } from 'react';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { AppLayout } from '@/components/AppLayout';
-import { BrandLoadingScreen } from '@/components/BrandLoadingScreen';
+export const metadata: Metadata = {
+  title: 'UPRAIL — Confidential Value Railway',
+  description: 'Manage your confidential intent account. View balances, send payments, and receive from any chain.',
+  openGraph: {
+    title: 'UPRAIL — Confidential Value Railway',
+    description: 'Manage your confidential intent account. View balances, send payments, and receive from any chain.',
+    images: [
+      {
+        url: 'https://app.uprail.world/og/og-app.png',
+        width: 1200,
+        height: 630,
+        alt: 'UPRAIL dashboard',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'UPRAIL — Confidential Value Railway',
+    description: 'Manage your confidential intent account. View balances, send payments, and receive from any chain.',
+    images: ['https://app.uprail.world/og/og-app.png'],
+  },
+};
 
 export default function Layout({ children }: { children: React.ReactNode }) {
-  return (
-    <Suspense fallback={<BrandLoadingScreen message="Loading secure railway..." />}>
-      <ProtectedRoute>
-        <AppLayout>{children}</AppLayout>
-      </ProtectedRoute>
-    </Suspense>
-  );
+  return <AppShell>{children}</AppShell>;
 }

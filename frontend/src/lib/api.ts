@@ -319,6 +319,42 @@ export function clearAppStorage(clearPasskeys: boolean = false): void {
   }
 }
 
+/**
+ * Normalizes one backend token row into a frontend Token. Shared by
+ * getTokens and searchTokens so the curated list and the Rhea long tail
+ * shape identically. A missing price stays missing ("—", never a guess).
+ */
+function mapApiToken(t: any): Token {
+  const rawSym = (t.symbol || '').trim();
+  const tokenChain = (t.chain || t.blockchain || 'near').toLowerCase();
+  const isNativeNear =
+    (rawSym.toLowerCase() === 'wnear' || rawSym.toLowerCase() === 'near') &&
+    (tokenChain === 'near' || t.nearContractId === 'wrap.near' || t.id === 'nep141:wrap.near');
+  const symbol = isNativeNear ? 'NEAR' : rawSym || 'UNKNOWN';
+  const name = isNativeNear ? 'NEAR Protocol' : (t.name || symbol);
+  const iconUrl =
+    (isNativeNear ? getOnchainIcon('near') : undefined) ||
+    t.iconUrl ||
+    t.icon ||
+    getOnchainIcon(t.nearContractId) ||
+    getOnchainIcon(symbol.toLowerCase()) ||
+    getOnchainIcon(rawSym.toLowerCase()) ||
+    '';
+  return {
+    id: t.id || t.defuse_asset_id || (isNativeNear ? 'nep141:wrap.near' : rawSym.toLowerCase()),
+    symbol,
+    name,
+    iconUrl,
+    decimals: t.decimals ?? (isNativeNear ? 24 : 18),
+    priceUsd: t.priceUsd,
+    nearContractId: t.nearContractId || (isNativeNear ? 'wrap.near' : ''),
+    chain: tokenChain,
+    badge: t.badge || tokenChain.toUpperCase(),
+    category: t.category || (isNativeNear ? 'popular' : 'all'),
+    balance: t.balance || '0.00',
+  };
+}
+
 export const api = {
   // Auth endpoints
   async getAuthStatus(): Promise<{ user: XUser | null }> {
@@ -443,36 +479,7 @@ export const api = {
             SOL: 7,
             DAI: 8,
           };
-          const mapped: Token[] = list.map((t: any) => {
-            const rawSym = (t.symbol || '').trim();
-            const tokenChain = (t.chain || t.blockchain || 'near').toLowerCase();
-            const isNativeNear =
-              (rawSym.toLowerCase() === 'wnear' || rawSym.toLowerCase() === 'near') &&
-              (tokenChain === 'near' || t.nearContractId === 'wrap.near' || t.id === 'nep141:wrap.near');
-            const symbol = isNativeNear ? 'NEAR' : rawSym || 'UNKNOWN';
-            const name = isNativeNear ? 'NEAR Protocol' : (t.name || symbol);
-            const iconUrl =
-              (isNativeNear ? getOnchainIcon('near') : undefined) ||
-              t.iconUrl ||
-              t.icon ||
-              getOnchainIcon(t.nearContractId) ||
-              getOnchainIcon(symbol.toLowerCase()) ||
-              getOnchainIcon(rawSym.toLowerCase()) ||
-              '';
-            return {
-              id: t.id || t.defuse_asset_id || (isNativeNear ? 'nep141:wrap.near' : rawSym.toLowerCase()),
-              symbol,
-              name,
-              iconUrl,
-              decimals: t.decimals ?? (isNativeNear ? 24 : 18),
-              priceUsd: t.priceUsd,
-              nearContractId: t.nearContractId || (isNativeNear ? 'wrap.near' : ''),
-              chain: tokenChain,
-              badge: t.badge || tokenChain.toUpperCase(),
-              category: t.category || (isNativeNear ? 'popular' : 'all'),
-              balance: t.balance || '0.00',
-            };
-          });
+          const mapped: Token[] = list.map(mapApiToken);
 
           mapped.sort((a, b) => {
             const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
@@ -496,6 +503,29 @@ export const api = {
       if (onchainTokens.length > 0) return onchainTokens as unknown as Token[];
     } catch {}
     return SUPPORTED_TOKENS;
+  },
+
+  /**
+   * Searches the full Rhea (Ref) native token long tail — launchpad memes
+   * like `*.nearlytrade.near` that do not fit the curated /api/tokens head.
+   * Returns [] for short queries and on any failure (picker keeps local
+   * results; search is additive, never load-bearing).
+   */
+  async searchTokens(query: string): Promise<Token[]> {
+    const q = (query || '').trim();
+    if (q.length < 2) return [];
+    try {
+      const url = API_BASE
+        ? `${API_BASE}/api/tokens/search?q=${encodeURIComponent(q)}`
+        : `/api/tokens/search?q=${encodeURIComponent(q)}`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : (data?.tokens && Array.isArray(data.tokens) ? data.tokens : []);
+      return list.map(mapApiToken);
+    } catch {
+      return [];
+    }
   },
 
   // Payment quote calculation with cryptographic backend binding

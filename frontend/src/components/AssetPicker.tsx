@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronDown, Search, X, Check } from 'lucide-react';
 import { Token } from '../types';
 import { TokenIcon } from './TokenIcon';
-import { formatUsd } from '../lib/api';
+import { api, formatUsd } from '../lib/api';
 
 interface AssetPickerProps {
   tokens: Token[];
@@ -24,6 +24,35 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
   const [activeTab, setActiveTab] = useState<'popular' | 'stables' | 'l1' | 'memes' | 'all'>(
     'popular'
   );
+  // Rhea long tail: the curated list cannot hold 6k launchpad tokens, so a
+  // typed query also searches the server list and merges matches in.
+  const [remoteTokens, setRemoteTokens] = useState<Token[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const latestQuery = React.useRef('');
+
+  useEffect(() => {
+    const q = search.trim();
+    latestQuery.current = q;
+    if (q.length < 2) {
+      setRemoteTokens([]);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const id = window.setTimeout(() => {
+      api
+        .searchTokens(q)
+        .then((found) => {
+          // Ignore responses for a query the user has already moved past.
+          if (latestQuery.current === q) setRemoteTokens(found);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (latestQuery.current === q) setIsSearching(false);
+        });
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [search]);
 
   // Close on Escape key
   useEffect(() => {
@@ -36,19 +65,27 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
+  const mergedTokens = React.useMemo(() => {
+    if (remoteTokens.length === 0) return tokens;
+    const seen = new Set(tokens.map((t) => (t.id || '').toLowerCase()));
+    return [...tokens, ...remoteTokens.filter((t) => !seen.has((t.id || '').toLowerCase()))];
+  }, [tokens, remoteTokens]);
+
   const filteredTokens = React.useMemo(() => {
-    const list = tokens.filter((t) => {
+    const list = mergedTokens.filter((t) => {
       const symLower = t.symbol.toLowerCase();
       const nameLower = t.name.toLowerCase();
       const chainLower = (t.chain || '').toLowerCase();
       const sLower = search.toLowerCase().trim();
 
-      // If searching, check symbol, name, or chain
+      // If searching, check symbol, name, chain, or contract id (so a pasted
+      // `*.nearlytrade.near` contract resolves even with a generic symbol).
       if (sLower) {
         return (
           symLower.includes(sLower) ||
           nameLower.includes(sLower) ||
           chainLower.includes(sLower) ||
+          (t.nearContractId && t.nearContractId.toLowerCase().includes(sLower)) ||
           (t.badge && t.badge.toLowerCase().includes(sLower))
         );
       }
@@ -89,7 +126,23 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
     }
 
     return list;
-  }, [tokens, search, activeTab]);
+  }, [mergedTokens, search, activeTab]);
+
+  // Launchpad tokens share tickers across contracts (SINGULARTY-2 vs -3):
+  // disambiguate those rows with the contract id.
+  const dupSymbols = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of filteredTokens) {
+      const k = (t.symbol || '').toUpperCase();
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }, [filteredTokens]);
+
+  const shortContract = (c?: string) => {
+    if (!c) return '';
+    return c.length > 26 ? `${c.slice(0, 12)}…${c.slice(-8)}` : c;
+  };
 
   return (
     <>
@@ -265,8 +318,11 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-stone-500 font-sans">
+                          <div className="text-[11px] text-stone-500 font-sans" title={token.nearContractId || undefined}>
                             {token.name}
+                            {dupSymbols.has((token.symbol || '').toUpperCase()) && token.nearContractId ? (
+                              <span className="text-stone-400"> · {shortContract(token.nearContractId)}</span>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -294,8 +350,12 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
 
             {/* Footer summary */}
             <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-[10px] font-mono text-stone-400">
-              <span>{tokens.length} Assets Available</span>
-              <span>NEAR Intents Powered</span>
+              <span>
+                {search.trim()
+                  ? `${filteredTokens.length} match${filteredTokens.length === 1 ? '' : 'es'}${isSearching ? '…' : ''}`
+                  : `${tokens.length} Assets Available`}
+              </span>
+              <span>NEAR Intents + Rhea</span>
             </div>
           </div>
         </div>

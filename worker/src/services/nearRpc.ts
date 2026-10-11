@@ -34,7 +34,16 @@ export interface OnchainToken {
  * a match means the asset is classified as a meme instead of being dropped by
  * the old spam filter (which used to hide PEPE/DOGE-class assets entirely).
  */
-const MEME_CONTRACT_HINTS = ['meme-cooking', '0xshitzu', 'blackdragon'];
+const MEME_CONTRACT_HINTS = [
+  'meme-cooking',
+  '0xshitzu',
+  'blackdragon',
+  // Rhea/Ref native meme launchpads (pump-style factories on NEAR)
+  'nearlytrade',
+  'nearlytrader',
+  'nearlypad',
+  'cookinglabs',
+];
 const MEME_SYMBOLS = new Set([
   'PEPE', 'WIF', '$WIF', 'BOME', 'DOGE', 'TRUMP', 'MELANIA', 'SHITZU',
   'BLACKDRAGON', 'MOCHI', 'NEIRO', 'BOBO', 'DEGEN', 'POP CAT', 'POPCAT',
@@ -50,6 +59,126 @@ function isMemeAsset(symbol: string, contractId: string): boolean {
     MEME_CONTRACT_HINTS.some((hint) => contract.includes(hint)) ||
     MEME_SYMBOLS.has(sym)
   );
+}
+
+// ─── Rhea (Ref Finance) native NEAR token list ───────────────────────────────
+/**
+ * The Intents registry only knows assets with solver routes. Native NEAR
+ * NEP-141 tokens — especially Rhea/Ref launchpad memes such as
+ * `*.nearlytrade.near` — live onchain regardless of Intents coverage, so the
+ * send rail merges them in from the Rhea token API.
+ *
+ * The list carries metadata only (no prices), so merged tokens keep `priceUsd`
+ * undefined and the UI renders "—" instead of inventing a number. The payload
+ * is KV-cached (6h) with stale fallback; a feed outage degrades to
+ * "Intents list only", never to an error.
+ */
+const RHEA_LIST_URL = 'https://api.ref.finance/list-token';
+const RHEA_KV_KEY = 'rhea-token-list:v1';
+const RHEA_TTL_MS = 6 * 3600 * 1000;
+/** Curated head merged into the main list; the long tail stays searchable. */
+const RHEA_HEAD_MAX = 300;
+
+export interface RheaTokenEntry {
+  contractId: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  icon: string;
+}
+
+function parseRheaList(raw: unknown): RheaTokenEntry[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const out: RheaTokenEntry[] = [];
+  for (const [contractId, meta] of Object.entries(raw as Record<string, any>)) {
+    if (typeof contractId !== 'string' || !contractId.endsWith('.near')) continue;
+    const m = (meta || {}) as any;
+    const symbol = typeof m.symbol === 'string' ? m.symbol.trim() : '';
+    if (!symbol || symbol.length > 12) continue;
+    const decimals = Number(m.decimals);
+    if (!Number.isFinite(decimals) || decimals < 0 || decimals > 24) continue;
+    out.push({
+      contractId,
+      symbol,
+      name: typeof m.name === 'string' && m.name.trim() ? m.name.trim().slice(0, 64) : symbol,
+      decimals: Math.trunc(decimals),
+      icon: typeof m.icon === 'string' && m.icon.startsWith('https://') ? m.icon : '',
+    });
+  }
+  return out;
+}
+
+export async function getRheaTokens(env: Env): Promise<RheaTokenEntry[]> {
+  let cached: RheaTokenEntry[] | null = null;
+  let cachedAt = 0;
+  try {
+    const raw = env.CACHE ? await env.CACHE.get(RHEA_KV_KEY) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { at?: number; tokens?: RheaTokenEntry[] };
+      if (Array.isArray(parsed?.tokens) && typeof parsed.at === 'number') {
+        cached = parsed.tokens;
+        cachedAt = parsed.at;
+      }
+    }
+  } catch (err) {
+    console.warn('[rhea] KV read failed:', err);
+  }
+
+  if (cached && Date.now() - cachedAt < RHEA_TTL_MS) return cached;
+
+  try {
+    const resp = await fetch(RHEA_LIST_URL, { headers: { Accept: 'application/json' } });
+    if (!resp.ok) throw new Error(`rhea list-token ${resp.status}`);
+    const fresh = parseRheaList(await resp.json());
+    if (fresh.length > 0) {
+      if (env.CACHE) {
+        await env.CACHE.put(RHEA_KV_KEY, JSON.stringify({ at: Date.now(), tokens: fresh }), {
+          expirationTtl: 24 * 3600,
+        }).catch((kvErr) => console.warn('[rhea] KV write failed:', kvErr));
+      }
+      return fresh;
+    }
+  } catch (err) {
+    console.warn('[rhea] token list fetch failed:', err);
+  }
+  return cached ?? [];
+}
+
+export function rheaToOnchainToken(e: RheaTokenEntry): OnchainToken {
+  const symbol = e.symbol.toUpperCase();
+  return {
+    defuse_asset_id: `nep141:${e.contractId}`,
+    symbol,
+    name: e.name || symbol,
+    decimals: e.decimals,
+    icon: e.icon || undefined,
+    nearContractId: e.contractId,
+    chain: 'near',
+    priceUsd: undefined,
+    category: isMemeAsset(e.symbol, e.contractId) ? 'memes' : 'all',
+  };
+}
+
+/**
+ * Looks a single asset up in the full Rhea list (no head cap): used when the
+ * quote/send path meets an asset the curated list does not contain.
+ */
+export async function resolveRheaToken(
+  env: Env,
+  asset: string | null | undefined
+): Promise<OnchainToken | null> {
+  const raw = (asset || '').trim().toLowerCase();
+  if (!raw) return null;
+  const contract = raw.startsWith('nep141:') ? raw.slice(7) : raw;
+  try {
+    const list = await getRheaTokens(env);
+    const hit =
+      list.find((e) => e.contractId.toLowerCase() === contract) ||
+      list.find((e) => e.symbol.toLowerCase() === raw);
+    return hit ? rheaToOnchainToken(hit) : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface IntentAccountBalance {
@@ -375,6 +504,39 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
           }
         } catch (err) {
           console.warn('[nearRpc] asset meta merge failed:', err);
+        }
+
+        // Native NEAR tail: Rhea/Ref NEP-141 tokens (launchpad memes like
+        // `*.nearlytrade.near`) that the Intents registry does not cover.
+        // Merged as a curated, symbol-deduped head so the list stays lean;
+        // the full long tail remains reachable via /api/tokens/search.
+        try {
+          const rhea = await getRheaTokens(env);
+          if (rhea.length > 0) {
+            const knownContracts = new Set(
+              tokens.map((t) => (t.nearContractId || '').toLowerCase())
+            );
+            const knownSymbols = new Set(
+              tokens.map((t) => (t.symbol || '').toUpperCase())
+            );
+            const scored: { entry: RheaTokenEntry; score: number }[] = [];
+            for (const entry of rhea) {
+              const contractLc = entry.contractId.toLowerCase();
+              if (knownContracts.has(contractLc)) continue;
+              const symUpper = entry.symbol.toUpperCase();
+              if (knownSymbols.has(symUpper)) continue;
+              knownSymbols.add(symUpper);
+              // Artwork first, then shorter tickers — keeps the head useful.
+              scored.push({ entry, score: (entry.icon ? 0 : 100) + entry.symbol.length });
+            }
+            scored.sort((a, b) => a.score - b.score);
+            for (const { entry } of scored.slice(0, RHEA_HEAD_MAX)) {
+              tokens.push(rheaToOnchainToken(entry));
+              knownContracts.add(entry.contractId.toLowerCase());
+            }
+          }
+        } catch (err) {
+          console.warn('[nearRpc] rhea merge failed:', err);
         }
 
         tokens.sort((a, b) => {
@@ -1617,10 +1779,22 @@ export async function ensureIntentAccount(
 /**
  * Resolves or deterministically assigns the confidential onchain intent sub-account for a user.
  * Format: u_<hash>.escrow.uprail.near
+ *
+ * Pass `report` to learn what the inline provisioning attempt did — callers
+ * that surface account status (e.g. /api/onchain/account) use it to tell a
+ * user with a fresh passkey but no account yet *why* creation has not landed
+ * instead of leaving a stale "register a passkey" banner on screen.
  */
+export interface ProvisionReport {
+  attempted: boolean;
+  created: boolean;
+  error?: string;
+}
+
 export async function resolveUserNearAccount(
   env: Env,
-  session: { x_id: string; x_handle: string; near_account?: string | null }
+  session: { x_id: string; x_handle: string; near_account?: string | null },
+  report?: ProvisionReport
 ): Promise<string> {
   // 1. Derive deterministic NEAR keypair and sub-account from active root key
   const derived = await deriveUserNearKeypair(env, session.x_id);
@@ -1641,9 +1815,19 @@ export async function resolveUserNearAccount(
 
   // 3. Try onchain creation if account does not exist
   try {
-    await createOnchainSubAccount(env, accountId, derived.publicKey);
-  } catch (createErr) {
+    const provision = await createOnchainSubAccount(env, accountId, derived.publicKey);
+    if (report) {
+      report.attempted = true;
+      report.created = provision.success;
+      report.error = provision.error;
+    }
+  } catch (createErr: any) {
     console.warn('[nearRpc] createOnchainSubAccount non-blocking notice:', createErr);
+    if (report) {
+      report.attempted = true;
+      report.created = false;
+      report.error = createErr?.message || String(createErr);
+    }
   }
 
   // 4. Persist newly derived account to x_identities if not yet updated

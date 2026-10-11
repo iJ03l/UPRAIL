@@ -38,10 +38,12 @@ export const AppHome: React.FC = () => {
     nearAccount,
     hasIntentAccount,
     isLoadingBalances,
+    accountError,
     transactions,
     isLoadingHistory: isLoadingOnchainHistory,
     refreshHistory,
     refresh,
+    refreshBalances,
     error: onchainError,
   } = useOnchainData();
 
@@ -51,6 +53,21 @@ export const AppHome: React.FC = () => {
   const isFirstLoad = isLoadingBalances && totalBalanceUsd === null && balances.length === 0;
   const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
   const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>([]);
+  // One automatic provisioning retry: a fresh signup can land here before the
+  // background account creation settles. Manual retry stays on the button.
+  const autoRetried = React.useRef(false);
+  useEffect(() => {
+    if (
+      !autoRetried.current &&
+      !isLoadingBalances &&
+      !hasIntentAccount &&
+      user?.hasPasskey === true
+    ) {
+      autoRetried.current = true;
+      const id = window.setTimeout(() => void refreshBalances(), 8000);
+      return () => window.clearTimeout(id);
+    }
+  }, [isLoadingBalances, hasIntentAccount, user, refreshBalances]);
 
   // Load payment history and pending claims on mount
   useEffect(() => {
@@ -121,13 +138,30 @@ export const AppHome: React.FC = () => {
                 </div>
               )}
               <div className="flex items-center space-x-2 text-xs font-mono text-stone-500">
-                <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
-                <span>
-                  {hasIntentAccount
-                    ? 'Live · Confidential Intents · Passkey Protected'
-                    : 'No intent account yet — register a passkey to create yours'}
-                </span>
+                <span className={`w-1.5 h-1.5 rounded-full ${hasIntentAccount ? 'bg-stone-900' : 'bg-amber-500 animate-pulse'}`} />
+                {hasIntentAccount ? (
+                  <span>Live · Confidential Intents · Passkey Protected</span>
+                ) : user?.hasPasskey === true ? (
+                  <span className="flex items-center gap-2">
+                    <span>Setting up your confidential vault…</span>
+                    <button
+                      type="button"
+                      onClick={() => void refreshBalances()}
+                      disabled={isLoadingBalances}
+                      className="underline underline-offset-2 hover:text-stone-900 disabled:opacity-50 cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </span>
+                ) : (
+                  <span>No intent account yet — register a passkey to create yours</span>
+                )}
               </div>
+              {!hasIntentAccount && user?.hasPasskey === true && accountError && !isLoadingBalances ? (
+                <p className="text-[11px] font-mono text-stone-400">
+                  Provisioning note: {accountError}
+                </p>
+              ) : null}
             </div>
 
             {/* Live asset breakdown from onchain */}

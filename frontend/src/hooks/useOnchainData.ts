@@ -37,6 +37,8 @@ export interface UseOnchainDataResult {
   nearAccount: string | null;
   hasIntentAccount: boolean;
   isLoadingBalances: boolean;
+  /** Why a missing intent account has not been provisioned yet (if known). */
+  accountError: string | null;
 
   // Deposit addresses (always fresh from onchain — ephemeral!)
   depositAddresses: DepositAddress[];
@@ -155,6 +157,7 @@ export function useOnchainData(): UseOnchainDataResult {
   const [balances, setBalances] = useState<OnchainBalance[]>(globalCache.balances);
   const [nearAccount, setNearAccount] = useState<string | null>(globalCache.nearAccount);
   const [hasIntentAccount, setHasIntentAccount] = useState(globalCache.hasIntentAccount);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [isLoadingBalances, setIsLoadingBalances] = useState(
     globalCache.balances.length === 0 && !globalCache.hasIntentAccount
   );
@@ -196,6 +199,7 @@ export function useOnchainData(): UseOnchainDataResult {
       const account = await fetchIntentAccount();
       setNearAccount(account.nearAccount);
       setHasIntentAccount(account.hasIntentAccount);
+      setAccountError(account.hasIntentAccount ? null : (account.provisionError ?? null));
       persistCache({ nearAccount: account.nearAccount, hasIntentAccount: account.hasIntentAccount });
 
       if (account.hasIntentAccount && account.nearAccount) {
@@ -329,6 +333,7 @@ export function useOnchainData(): UseOnchainDataResult {
     nearAccount,
     hasIntentAccount,
     isLoadingBalances,
+    accountError,
     depositAddresses,
     getDepositAddress,
     isLoadingAddresses,

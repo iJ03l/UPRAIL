@@ -234,10 +234,17 @@ export async function fetchIntentAccount(): Promise<{
   hasIntentAccount: boolean;
   nearAccount: string | null;
   xHandle: string;
+  provisionError?: string;
 }> {
   const res = await fetch(url('/api/onchain/account'), {
     credentials: 'include',
   });
   if (!res.ok) return { hasIntentAccount: false, nearAccount: null, xHandle: '' };
-  return await res.json();
+  const data = await res.json();
+  return {
+    hasIntentAccount: !!data.hasIntentAccount,
+    nearAccount: data.nearAccount ?? null,
+    xHandle: data.xHandle ?? '',
+    provisionError: typeof data.provisionError === 'string' ? data.provisionError : undefined,
+  };
 }

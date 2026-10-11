@@ -1,0 +1,79 @@
+{
+  "name": "UPRAIL \u2014 Confidential Value Railway",
+  "short_name": "UPRAIL",
+  "description": "Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world \u2014 zero mempools, absolute discretion.",
+  "start_url": "/app/home?src=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
+  "orientation": "portrait",
+  "background_color": "#0B0B0C",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/brand/uprail-icon.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/uprail-icon.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/uprail-icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/uprail-icon.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/uprail-icon.png",
+      "sizes": "384x384",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/uprail-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/brand/uprail-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/brand/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/app/home",
+      "description": "View your intent account vault"
+    },
+    {
+      "name": "Send",
+      "short_name": "Send",
+      "url": "/app/send",
+      "description": "Send confidential payments"
+    },
+    {
+      "name": "Receive",
+      "short_name": "Receive",
+      "url": "/app/receive",
+      "description": "Receive from any chain"
+    }
+  ]
+}

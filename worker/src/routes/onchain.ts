@@ -476,7 +476,8 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
  */
 onchainRouter.get('/account', requireAuth(), async (c) => {
   const session = c.get('session')!;
-  const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
+  const report: nearRpc.ProvisionReport = { attempted: false, created: false };
+  const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session, report);
   const exists = await nearRpc.accountExists(c.env, nearAccount);
 
   return c.json({
@@ -484,6 +485,10 @@ onchainRouter.get('/account', requireAuth(), async (c) => {
     nearAccount,
     xHandle: session.x_handle,
     source: 'virtual_escrow',
+    // Only present while the account is missing: lets the dashboard tell a
+    // freshly signed-up user *why* creation has not landed (and offer a
+    // retry) instead of a stale "register a passkey" banner.
+    provisionError: !exists && report.error ? report.error : undefined,
   });
 });
 
