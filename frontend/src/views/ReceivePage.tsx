@@ -23,6 +23,7 @@ import { fetchDepositAddress, fetchDepositStatus, DepositAddress, DepositStatusR
 import { api, formatUsd } from '../lib/api';
 import { TokenIcon } from '../components/TokenIcon';
 import { ChainLogo } from '../components/ChainLogo';
+import { QRCodeDisplay } from '../components/QRCodeDisplay';
 
 export interface TokenOption {
   symbol: string;
@@ -320,7 +321,7 @@ export const ReceivePage: React.FC = () => {
   }, [availableChains, chainSearch]);
 
   return (
-    <div className="w-full space-y-6 max-w-2xl mx-auto">
+    <div className="w-full space-y-6 max-w-5xl mx-auto">
       {/* Back Link */}
       <Link
         to="/app"
@@ -330,18 +331,21 @@ export const ReceivePage: React.FC = () => {
         <span>Back to Dashboard</span>
       </Link>
 
-      {/* Header — "Confidential Cross-Chain Ingress" removed as requested */}
+      {/* Header */}
       <div className="text-center space-y-2 mb-6">
         <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
           Receive to Private Vault
         </h1>
         <p className="text-sm text-stone-600 max-w-md mx-auto">
-          Pick your token and source chain. A single-use confidential address is derived that automatically shields funds into your passkey vault upon receipt.
+          Pick your token and source chain to generate your confidential QR code and single-use deposit address.
         </p>
       </div>
 
-      {/* Main Container */}
-      <div className="rounded-3xl p-6 sm:p-8 bg-white border border-stone-200 shadow-sm space-y-6 relative">
+      {/* 2-Column Responsive Layout: Main Area (Left) + Side Section (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* ── MAIN AREA (Left 7 Columns) ── */}
+        <div className="lg:col-span-7 space-y-6">
+          <div className="rounded-3xl p-6 sm:p-8 bg-white border border-stone-200 shadow-sm space-y-6 relative">
 
         {/* ── STEP 1: ASSET DROPDOWN ── */}
         <div className="space-y-2" ref={tokenDropdownRef}>
@@ -620,263 +624,218 @@ export const ReceivePage: React.FC = () => {
           </div>
         </div>
 
-        {/* ── STEP 3: CONFIDENTIAL 1-TIME ADDRESS CARD ── */}
-        <div className="pt-2 border-t border-stone-100 space-y-4">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
-              <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">3</span>
-              <span>Confidential Receive Gateway</span>
-            </label>
+            {/* Minimum Deposit / Finality Badge when selected */}
             {selectedToken && selectedChain && (
-              <button
-                type="button"
-                onClick={handleGenerateFresh}
-                disabled={isDeriving}
-                className="text-[11px] font-mono text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
-                title="Derive a fresh 1-time address"
-              >
-                <RefreshCw className={`w-3 h-3 ${isDeriving ? 'animate-spin' : ''}`} />
-                <span>Derive New Address</span>
-              </button>
-            )}
-          </div>
-
-          {!selectedToken || !selectedChain ? (
-            /* Blank state awaiting user selection */
-            <div className="p-8 sm:p-10 rounded-2xl bg-stone-50 border border-dashed border-stone-300 text-center space-y-3 animate-fade-in">
-              <div className="w-12 h-12 rounded-2xl bg-white border border-stone-200 text-stone-700 flex items-center justify-center mx-auto shadow-2xs">
-                <Radio className="w-6 h-6 text-stone-400" />
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-sm font-mono font-bold text-stone-900 uppercase tracking-wider">
-                  Awaiting Selection
-                </h4>
-                <p className="text-xs text-stone-500 max-w-sm mx-auto font-sans leading-relaxed">
-                  Choose your asset in <strong className="text-stone-800 font-semibold">Step 1</strong> and destination network in <strong className="text-stone-800 font-semibold">Step 2</strong> above to derive your single-use confidential receive address.
-                </p>
-              </div>
-              <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-stone-100 text-[11px] font-mono text-stone-500">
-                <Zap className="w-3.5 h-3.5 text-stone-600" />
-                <span>Minimum deposit $0.10 · Single-use ephemeral gateway</span>
-              </div>
-            </div>
-          ) : (
-            /* Derived Address Content */
-            <>
-              {/* 1-Time Notice Banner */}
-              <div className="p-3.5 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-start space-x-2.5 text-xs text-amber-950 animate-fade-in">
-                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                <div className="space-y-0.5 font-sans leading-relaxed">
-                  <div className="font-bold flex items-center space-x-1.5">
-                    <span>Single-Use Confidential Address</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 font-mono uppercase">
-                      1-Time Ingress
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-amber-900">
-                    This address is ephemeral and generated exclusively for receiving <strong className="font-semibold">{selectedToken}</strong> on <strong className="font-semibold">{activeChainDef?.name || selectedChain}</strong>. Funds are automatically bridged and shielded into your confidential passkey vault upon receipt. Please do not send to this address more than once.
-                  </p>
-                </div>
-              </div>
-
-              {/* Minimum Deposit Notice */}
-              <div className="px-4 py-2.5 bg-stone-100/80 border border-stone-200 rounded-xl flex items-center justify-between text-xs font-mono">
+              <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs font-mono">
                 <span className="text-stone-500">Minimum Deposit:</span>
                 <span className="font-bold text-stone-950 flex items-center space-x-1">
                   <span>{minAmountDisplay}</span>
                   <span className="text-stone-500 font-normal">({minUsdDisplay})</span>
                 </span>
               </div>
+            )}
+          </div>
 
-              {/* Address Display Box */}
-              <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
-                {!hasIntentAccount ? (
-                  <div className="p-4 bg-white rounded-xl border border-stone-200 text-center space-y-2">
-                    <p className="text-xs font-mono text-stone-600">
-                      You need an onchain intent account before generating deposit addresses.
-                    </p>
-                    <Link
-                      to="/app/claim"
-                      className="inline-block px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono"
-                    >
-                      Register Passkey Vault
-                    </Link>
-                  </div>
-                ) : isDeriving && !depositAddressValue ? (
-                  <div className="py-12 flex flex-col items-center justify-center space-y-2.5 text-stone-500 font-mono text-xs">
-                    <Loader2 className="w-6 h-6 animate-spin text-stone-900" />
-                    <span>Deriving live confidential address from solvers...</span>
-                  </div>
-                ) : (
-                  <>
-                    {/* Address Row */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center space-x-2">
-                        <input
-                          type="text"
-                          readOnly
-                          value={depositAddressValue || 'Deriving address...'}
-                          className="flex-1 bg-white rounded-xl px-3.5 py-3 text-xs sm:text-sm text-stone-900 font-mono border border-stone-200 focus:outline-none select-all shadow-2xs"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleCopy}
-                          disabled={!depositAddressValue}
-                          className="px-4 py-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 disabled:opacity-40"
-                        >
-                          {copied ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>Copied</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5" />
-                              <span>Copy</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
+          {/* Ephemeral Gateway Explainer */}
+          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-600 space-y-1.5 leading-relaxed font-sans">
+            <div className="flex items-center space-x-1.5 font-bold text-stone-900 font-mono">
+              <Shield className="w-3.5 h-3.5 text-stone-900" />
+              <span>Confidential Ephemeral Ingress</span>
+            </div>
+            <p>
+              Your gateway address is ephemeral and generated exclusively for receiving <strong className="text-stone-900">{selectedToken || 'assets'}</strong> on <strong className="text-stone-900">{activeChainDef?.name || selectedChain || 'your selected network'}</strong>. Funds are settled via NEAR Intents directly into your confidential passkey vault (<span className="font-mono text-stone-900 font-semibold">{nearAccount || 'u_...uprail.near'}</span>).
+            </p>
+          </div>
 
-                      <div className="flex items-center justify-between text-[11px] font-mono text-stone-400 pt-1">
-                        <span>Network: {activeChainDef?.name || selectedChain}</span>
-                        <span>Expected finality: {activeChainDef?.time || '~15s'}</span>
-                      </div>
-                    </div>
-
-                    {/* Memo Notice if required */}
-                    {currentAddress?.memo && (
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-mono text-amber-900 flex items-start space-x-2">
-                        <Info className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-bold">Required Memo:</span>{' '}
-                          <span className="font-bold underline">{currentAddress.memo}</span>
-                          <p className="text-[11px] text-amber-800 mt-0.5">
-                            You must include this memo with your transaction.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Deposit address card — rendered fully client-side. No
-                        third-party QR service is used: those services receive
-                        the value being encoded, which would leak the deposit
-                        address. */}
-                    {showQr && depositAddressValue && (
-                      <div className="p-4 bg-white rounded-2xl border border-stone-200 flex flex-col animate-fade-in shadow-2xs">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1.5">
-                          Deposit Address
-                        </span>
-                        <p className="text-[11px] font-mono text-stone-700 break-all bg-stone-50 border border-stone-200 rounded-lg p-2 select-all">
-                          {depositAddressValue}
-                        </p>
-                        <span className="text-[11px] text-stone-500 font-mono mt-2.5">
-                          Deposit {selectedToken} on {activeChainDef?.name || selectedChain}
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between text-xs text-stone-500 pt-1 border-t border-stone-200/60 font-mono">
-                      <button
-                        type="button"
-                        onClick={() => setShowQr(!showQr)}
-                        className="text-stone-900 hover:underline font-bold flex items-center space-x-1 cursor-pointer"
-                      >
-                        <QrCode className="w-3.5 h-3.5" />
-                        <span>{showQr ? 'Hide Address' : 'Show Address'}</span>
-                      </button>
-                      <span className="text-[11px] text-stone-400">
-                        Expires in ~3 days
-                      </span>
-                    </div>
-                  </>
-                )}
+          {/* ── LIVE DEPOSIT TRACKER ── */}
+          {depositAddressValue && (
+            <div className="rounded-3xl p-6 bg-white border border-stone-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
+                  <Radio className="w-3.5 h-3.5 text-stone-900 animate-pulse" />
+                  <span>Live Deposit Tracker</span>
+                </label>
+                <span className="text-[11px] font-mono text-stone-400 flex items-center space-x-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                  <span>Monitoring {activeChainDef?.name || selectedChain}</span>
+                </span>
               </div>
 
-              {/* ── STEP 4: REAL-TIME LIVE DEPOSIT TRACKER ── */}
-              {depositAddressValue && (
-                <div className="pt-2 border-t border-stone-100 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
-                      <Radio className="w-3.5 h-3.5 text-stone-900 animate-pulse" />
-                      <span>Live Deposit Tracker</span>
-                    </label>
-                    <span className="text-[11px] font-mono text-stone-400 flex items-center space-x-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                      <span>Monitoring {activeChainDef?.name || selectedChain}</span>
-                    </span>
+              {/* Status State Cards */}
+              {settledSuccess ? (
+                /* Success Card */
+                <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-3 animate-fade-in shadow-xs">
+                  <div className="flex items-center space-x-2.5 font-bold text-emerald-900 text-sm">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                    <span>Deposit Received &amp; Shielded!</span>
                   </div>
-
-                  {/* Status State Cards */}
-                  {settledSuccess ? (
-                    /* Success Card */
-                    <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-3 animate-fade-in shadow-xs">
-                      <div className="flex items-center space-x-2.5 font-bold text-emerald-900 text-sm">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-                        <span>Deposit Received & Shielded!</span>
-                      </div>
-                      <p className="text-xs text-emerald-800 leading-relaxed font-sans">
-                        Your funds have been swept by solvers and credited to your confidential passkey vault. Your updated balance is now available for private transfers.
-                      </p>
-                      {depositStatus?.depositedAmountFormatted && (
-                        <div className="p-3 bg-white/80 rounded-xl border border-emerald-200 flex items-center justify-between font-mono text-xs">
-                          <span className="text-stone-500">Credited Amount:</span>
-                          <span className="font-bold text-emerald-900">
-                            {depositStatus.depositedAmountFormatted} {selectedToken}
-                            {depositStatus.depositedAmountUsd ? ` (~$${depositStatus.depositedAmountUsd})` : ''}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex items-center space-x-3 pt-1">
-                        <Link
-                          to="/app"
-                          className="px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono hover:bg-stone-800 transition-colors"
-                        >
-                          View in Dashboard
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={handleGenerateFresh}
-                          className="px-4 py-2 rounded-xl bg-white border border-stone-200 text-stone-900 text-xs font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
-                        >
-                          Receive Another
-                        </button>
-                      </div>
+                  <p className="text-xs text-emerald-800 leading-relaxed font-sans">
+                    Your funds have been swept by solvers and credited to your confidential passkey vault. Your updated balance is now available for private transfers.
+                  </p>
+                  {depositStatus?.depositedAmountFormatted && (
+                    <div className="p-3 bg-white/80 rounded-xl border border-emerald-200 flex items-center justify-between font-mono text-xs">
+                      <span className="text-stone-500">Credited Amount:</span>
+                      <span className="font-bold text-emerald-900">
+                        {depositStatus.depositedAmountFormatted} {selectedToken}
+                        {depositStatus.depositedAmountUsd ? ` (~$${depositStatus.depositedAmountUsd})` : ''}
+                      </span>
                     </div>
-                  ) : depositStatus?.status === 'PROCESSING' || parseFloat(depositStatus?.depositedAmountFormatted || '0') > 0 ? (
-                    /* Detected onchain / Routing */
-                    <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2.5 animate-fade-in">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
-                        <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                        <span>Deposit Detected Onchain! Routing via Intents...</span>
-                      </div>
-                      <p className="text-[11px] text-blue-800 leading-relaxed font-sans">
-                        Received <strong className="font-bold">{depositStatus?.depositedAmountFormatted} {selectedToken}</strong> on {activeChainDef?.name || selectedChain}. Solver network is executing settlement into your vault.
-                      </p>
-                      {depositStatus?.txHashes && depositStatus.txHashes.length > 0 && (
-                        <div className="text-[11px] font-mono text-blue-700 truncate flex items-center space-x-1">
-                          <span>Tx Hash:</span>
-                          <span className="underline font-bold">{depositStatus.txHashes[0].slice(0, 16)}...</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    /* Waiting state */
-                    <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-xs text-stone-600">
-                      <div className="w-3 h-3 rounded-full bg-stone-400 animate-ping flex-shrink-0" />
-                      <div className="font-sans">
-                        <span>Waiting for incoming transaction on </span>
-                        <strong className="text-stone-900 font-semibold">{activeChainDef?.name || selectedChain}</strong>.
-                        <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
-                          Send at least {minAmountDisplay} to the address above.
-                        </span>
-                      </div>
+                  )}
+                  <div className="flex items-center space-x-3 pt-1">
+                    <Link
+                      to="/app"
+                      className="px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono hover:bg-stone-800 transition-colors"
+                    >
+                      View in Dashboard
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={handleGenerateFresh}
+                      className="px-4 py-2 rounded-xl bg-white border border-stone-200 text-stone-900 text-xs font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
+                    >
+                      Receive Another
+                    </button>
+                  </div>
+                </div>
+              ) : depositStatus?.status === 'PROCESSING' || parseFloat(depositStatus?.depositedAmountFormatted || '0') > 0 ? (
+                /* Detected onchain / Routing */
+                <div className="p-4 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2.5 animate-fade-in">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                    <span>Deposit Detected Onchain! Routing via Intents...</span>
+                  </div>
+                  <p className="text-[11px] text-blue-800 leading-relaxed font-sans">
+                    Received <strong className="font-bold">{depositStatus?.depositedAmountFormatted} {selectedToken}</strong> on {activeChainDef?.name || selectedChain}. Solver network is executing settlement into your vault.
+                  </p>
+                  {depositStatus?.txHashes && depositStatus.txHashes.length > 0 && (
+                    <div className="text-[11px] font-mono text-blue-700 truncate flex items-center space-x-1">
+                      <span>Tx Hash:</span>
+                      <span className="underline font-bold">{depositStatus.txHashes[0].slice(0, 16)}...</span>
                     </div>
                   )}
                 </div>
+              ) : (
+                /* Waiting state */
+                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-xs text-stone-600">
+                  <div className="w-3 h-3 rounded-full bg-stone-400 animate-ping flex-shrink-0" />
+                  <div className="font-sans">
+                    <span>Waiting for incoming transaction on </span>
+                    <strong className="text-stone-900 font-semibold">{activeChainDef?.name || selectedChain}</strong>.
+                    <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
+                      Send at least {minAmountDisplay} to the address in the side section.
+                    </span>
+                  </div>
+                </div>
               )}
-            </>
+            </div>
           )}
+        </div>
+
+        {/* ── SIDE SECTION: ONE ADDRESS & GENERATED QR CODE (Right 5 Columns) ── */}
+        <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-6">
+          <div className="rounded-3xl p-6 bg-white border border-stone-200 shadow-sm flex flex-col items-center space-y-4">
+            {selectedToken && selectedChain && depositAddressValue ? (
+              <>
+                {/* Active Pair Header */}
+                <div className="w-full flex items-center justify-between pb-2 border-b border-stone-100">
+                  <div className="flex items-center space-x-2">
+                    <TokenIcon symbol={selectedToken} size="sm" />
+                    <ChainLogo chainId={selectedChain} className="w-4 h-4" />
+                    <span className="font-mono text-xs font-bold text-stone-950">
+                      {selectedToken} ({activeChainDef?.name || selectedChain})
+                    </span>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold">
+                    Active
+                  </span>
+                </div>
+
+                {/* Generated QR Code */}
+                <div className="py-1">
+                  <QRCodeDisplay value={depositAddressValue} size={190} />
+                </div>
+
+                {/* ONE Single Address Display with 1-Click Copy */}
+                <div className="w-full space-y-2 text-left">
+                  <div className="flex items-center justify-between text-xs font-mono">
+                    <span className="font-bold uppercase tracking-wider text-stone-600 text-[10px]">
+                      Deposit Address
+                    </span>
+                    <span className="text-[10px] text-stone-400">Single-use</span>
+                  </div>
+                  <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl font-mono text-xs text-stone-900 break-all select-all font-medium">
+                    {depositAddressValue}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="w-full py-2.5 px-4 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold font-mono transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-xs"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Address Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Address</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Memo Display if Required */}
+                {currentAddress?.memo && (
+                  <div className="w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-left space-y-1 font-mono text-xs">
+                    <div className="flex items-center justify-between text-amber-900 font-bold text-[10px] uppercase">
+                      <span>Required Memo:</span>
+                      <span className="text-amber-700 font-normal">Must include</span>
+                    </div>
+                    <span className="font-bold text-amber-950 break-all select-all block">
+                      {currentAddress.memo}
+                    </span>
+                  </div>
+                )}
+
+                <div className="w-full pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-500">
+                  <span>Expires in ~3 days</span>
+                  <button
+                    type="button"
+                    onClick={handleGenerateFresh}
+                    disabled={isDeriving}
+                    className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isDeriving ? 'animate-spin' : ''}`} />
+                    <span>New Address</span>
+                  </button>
+                </div>
+              </>
+            ) : isDeriving ? (
+              <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
+                <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
+                <span>Deriving confidential gateway &amp; QR...</span>
+              </div>
+            ) : (
+              <div className="py-12 px-4 flex flex-col items-center justify-center space-y-3 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-stone-50 border border-dashed border-stone-300 flex items-center justify-center text-stone-400">
+                  <QrCode className="w-8 h-8" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-sm font-mono font-bold text-stone-900 uppercase tracking-wider">
+                    QR &amp; Deposit Address
+                  </h4>
+                  <p className="text-xs text-stone-500 max-w-xs font-sans leading-relaxed">
+                    Select an asset in Step 1 and network in Step 2 to generate your QR code and single-use address.
+                  </p>
+                </div>
+                <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 text-[10px] font-mono text-stone-500">
+                  <Zap className="w-3 h-3 text-stone-500" />
+                  <span>Hardware Passkey Vault Ingress</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

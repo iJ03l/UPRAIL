@@ -92,6 +92,10 @@ export const HandleInput: React.FC<HandleInputProps> = ({
           </div>
         )}
       </div>
+
+      <p className="text-[11px] text-stone-500 font-sans">
+        Double-check the exact handle — transfers are non-reversible.
+      </p>
     </div>
   );
 };

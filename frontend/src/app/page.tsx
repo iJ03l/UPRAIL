@@ -5,8 +5,6 @@ import { LandingPage } from '@/views/LandingPage';
 import { AppHome } from '@/views/AppHome';
 import { ProtectedPage } from '@/components/ProtectedPage';
 
-import { BrandLoadingScreen } from '@/components/BrandLoadingScreen';
-
 /**
  * `/` renders the public landing page everywhere except on the app subdomain,
  * where it is the authenticated dashboard.
@@ -19,7 +17,7 @@ export default function Page() {
   }, []);
 
   if (isAppDomain === null) {
-    return <BrandLoadingScreen />;
+    return null;
   }
 
   return isAppDomain ? (

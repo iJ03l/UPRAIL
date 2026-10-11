@@ -3,7 +3,6 @@
 import React, { Suspense } from 'react';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AppLayout } from '@/components/AppLayout';
-import { BrandLoadingScreen } from '@/components/BrandLoadingScreen';
 
 /**
  * Client shell for every /app/* route: auth gate + app chrome around the
@@ -12,7 +11,7 @@ import { BrandLoadingScreen } from '@/components/BrandLoadingScreen';
  */
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
-    <Suspense fallback={<BrandLoadingScreen message="Loading secure railway..." />}>
+    <Suspense fallback={null}>
       <ProtectedRoute>
         <AppLayout>{children}</AppLayout>
       </ProtectedRoute>

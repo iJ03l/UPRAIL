@@ -244,16 +244,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   const isInteracting = isXLoading || isPasskeyLoading || isSuccess;
 
-  // Show clean minimal spinner while resolving auth status
-  if (isLoading) {
-    return (
-      <div className="min-h-[100dvh] w-full bg-stone-50 text-stone-900 flex flex-col justify-center items-center px-4 font-sans">
-        <div className="flex items-center justify-center space-x-2 text-stone-500 font-mono text-xs">
-          <Loader2 className="w-5 h-5 animate-spin text-stone-800" />
-        </div>
-      </div>
-    );
-  }
+
 
   const isPasskeyHero = isStep1 && loginMethod === 'passkey';
 

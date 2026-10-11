@@ -1,5 +1,3 @@
-import { BrandLoadingScreen } from '@/components/BrandLoadingScreen';
-
 export default function Loading() {
-  return <BrandLoadingScreen message="Loading secure railway..." />;
+  return null;
 }
