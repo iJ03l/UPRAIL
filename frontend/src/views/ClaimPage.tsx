@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useSearchParams, useLocation, Link } from '../lib/router';
 import {
   Fingerprint,
@@ -17,10 +17,12 @@ import { useXAuth } from '../hooks/useXAuth';
 import { PasskeyPrompt } from '../components/PasskeyPrompt';
 import { XAuthBanner } from '../components/XAuthBanner';
 import { TokenIcon } from '../components/TokenIcon';
+import { formatUsd, sumUsd } from '../lib/api';
+import { currentInvite, inviteFromSearch } from '../lib/invite';
 
 // ── Shielded balance withdraw card ──────────────────────────────────────────
 const WithdrawCard: React.FC<{
-  balances: { token: { id: string; symbol: string; iconUrl?: string }; amount: string; amountUsd: number }[];
+  balances: { token: { id: string; symbol: string; iconUrl?: string }; amount: string; amountUsd: number | null }[];
   isClaiming: boolean;
   onWithdraw: (balanceIndex: number, destination: string) => Promise<unknown>;
 }> = ({ balances, isClaiming, onWithdraw }) => {
@@ -110,7 +112,12 @@ export const ClaimPage: React.FC = () => {
 
   const queryPaymentCode =
     searchParams.get('payment') || searchParams.get('code') || pathPaymentCode || '';
-  const urlInvite = searchParams.get('invite') || '';
+  // Remember the invite that arrived with the share link: the recipient is
+  // about to be bounced through login/parking and must not have to retype it.
+  const urlInvite = useMemo(
+    () => inviteFromSearch(searchParams.toString()) || currentInvite() || '',
+    [searchParams]
+  );
 
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
@@ -151,10 +158,7 @@ export const ClaimPage: React.FC = () => {
     }
   };
 
-  const totalPendingUsd = pendingPayments.reduce(
-    (acc, p) => acc + (p.amountUsd || 0),
-    0
-  );
+  const totalPendingUsd = sumUsd(pendingPayments.map((p) => p.amountUsd));
 
   return (
     <div className="w-full space-y-6">
@@ -302,7 +306,7 @@ export const ClaimPage: React.FC = () => {
                     {pendingPayments.length} Payments Waiting
                   </div>
                   <div className="text-[11px] text-stone-500 font-mono">
-                    Total: ≈ ${totalPendingUsd.toFixed(2)} USD
+                    Total: ≈ {formatUsd(totalPendingUsd)} USD
                   </div>
                 </div>
               </div>
@@ -340,7 +344,7 @@ export const ClaimPage: React.FC = () => {
                         {p.amount} {p.token.symbol}
                       </span>
                       <span className="text-xs text-stone-500 font-mono">
-                        ≈ ${p.amountUsd.toFixed(2)} USD
+                        ≈ {formatUsd(p.amountUsd)} USD
                       </span>
                       <span className="text-[9px] font-mono uppercase font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-200">
                         {p.status}

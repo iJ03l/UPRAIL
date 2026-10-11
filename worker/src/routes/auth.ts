@@ -12,6 +12,7 @@ import { getDb, upsertXIdentity, getXIdentity } from '../db/postgres';
 import * as webauthnService from '../services/webauthn';
 import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
+import { background } from '../utils/background';
 import { signPayload, verifyAndUnpack } from '../utils/crypto';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import { getSessionSecret, requireSessionSecret } from '../utils/secrets';
@@ -337,23 +338,48 @@ authRouter.get('/callback', async (c) => {
       personal_invite_code: personalInviteCode,
     });
 
+    // Login == account exists. Provision the confidential intent sub-account
+    // right away so the first deposit/withdraw never has to wait on it.
+    background(
+      c.executionCtx,
+      nearRpc.ensureIntentAccount(c.env, {
+        x_id: xUser.id,
+        x_handle: xUser.username.toLowerCase(),
+        near_account: nearAccount,
+      }),
+      'intent account provisioning (oauth)'
+    );
+
     // Intelligently route user to the right step to prevent bounce loops:
     // 1. If user does not have a passkey yet -> /login (Step 2: Set Up Passkey)
     // 2. If user has passkey but is not activated -> /parking (Comical Parking Gate)
     // 3. If user has both -> /app (or returnTo if custom)
+    // The invite rides along on the redirect so a recipient opened from a
+    // share link still lands on the parking page with the code preloaded even
+    // if the browser lost it somewhere in the OAuth hop.
+    const safeInvite =
+      typeof inviteCode === 'string' && /^[A-Z]{6}$/.test(inviteCode.trim().toUpperCase())
+        ? inviteCode.trim().toUpperCase()
+        : '';
+    const inviteParam = safeInvite ? `invite=${encodeURIComponent(safeInvite)}` : '';
+    const withInviteParam = (target: string) => {
+      if (!inviteParam) return target;
+      return target.includes('invite=') ? target : `${target}${target.includes('?') ? '&' : '?'}${inviteParam}`;
+    };
+
     let destination: string;
     if (!hasPasskey) {
-      destination = `${appOrigin}/login`;
+      destination = withInviteParam(`${appOrigin}/login`);
     } else if (!isActivated) {
-      destination = `${appOrigin}/parking`;
+      destination = withInviteParam(`${appOrigin}/parking`);
     } else {
       // Re-sanitized here: the cookie payload is signed, but defense in depth
       // costs nothing and keeps the redirect on this origin unconditionally.
       const safeReturnTo = sanitizeReturnTo(returnTo);
       destination =
         safeReturnTo !== '/' && safeReturnTo !== '/login'
-          ? `${appOrigin}${safeReturnTo}`
-          : `${appOrigin}/app`;
+          ? withInviteParam(`${appOrigin}${safeReturnTo}`)
+          : withInviteParam(`${appOrigin}/app`);
     }
 
     return c.redirect(destination);

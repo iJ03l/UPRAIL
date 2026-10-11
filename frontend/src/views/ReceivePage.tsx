@@ -20,14 +20,15 @@ import {
 } from 'lucide-react';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { fetchDepositAddress, fetchDepositStatus, DepositAddress, DepositStatusResponse } from '../lib/onchainApi';
-import { api } from '../lib/api';
+import { api, formatUsd } from '../lib/api';
 import { TokenIcon } from '../components/TokenIcon';
 
 export interface TokenOption {
   symbol: string;
   name: string;
   badge: string;
-  priceUsd: number;
+  /** Live registry price; absent means unknown (rendered as —). */
+  priceUsd?: number;
   chains: string[];
 }
 
@@ -41,18 +42,18 @@ export interface ChainOption {
 }
 
 const TOKEN_OPTIONS: TokenOption[] = [
-  { symbol: 'USDC', name: 'USD Coin', badge: 'Most Popular', priceUsd: 1.0, chains: ['base', 'arbitrum', 'sol', 'near', 'pol', 'bsc', 'op', 'avax', 'eth'] },
-  { symbol: 'USDT', name: 'Tether USD', badge: 'Stablecoin', priceUsd: 1.0, chains: ['arbitrum', 'sol', 'near', 'pol', 'bsc', 'op', 'avax', 'eth', 'tron'] },
-  { symbol: 'NEAR', name: 'NEAR Protocol', badge: 'Native Shield', priceUsd: 5.18, chains: ['near', 'bsc', 'sol', 'arbitrum'] },
-  { symbol: 'ETH', name: 'Ethereum', badge: 'Cross-chain', priceUsd: 2500.0, chains: ['base', 'arbitrum', 'eth', 'op', 'scroll'] },
-  { symbol: 'SOL', name: 'Solana', badge: 'Ultra-Fast', priceUsd: 145.0, chains: ['sol', 'near'] },
-  { symbol: 'BTC', name: 'Bitcoin', badge: 'Native SegWit', priceUsd: 82000.0, chains: ['btc', 'near'] },
-  { symbol: 'DOGE', name: 'Dogecoin', badge: 'Meme L1', priceUsd: 0.15, chains: ['doge', 'near'] },
-  { symbol: 'DAI', name: 'Dai Stablecoin', badge: 'Decentralized', priceUsd: 1.0, chains: ['arbitrum', 'eth', 'near'] },
-  { symbol: 'FRAX', name: 'Frax Stablecoin', badge: 'Stablecoin', priceUsd: 1.0, chains: ['near', 'eth'] },
-  { symbol: 'AVAX', name: 'Avalanche', badge: 'EVM L1', priceUsd: 28.0, chains: ['avax', 'near'] },
-  { symbol: 'BNB', name: 'BNB Chain', badge: 'EVM L1', priceUsd: 590.0, chains: ['bsc', 'near'] },
-  { symbol: 'POL', name: 'Polygon', badge: 'PoS L2', priceUsd: 0.45, chains: ['pol', 'near'] },
+  { symbol: 'USDC', name: 'USD Coin', badge: 'Most Popular', chains: ['base', 'arbitrum', 'sol', 'near', 'pol', 'bsc', 'op', 'avax', 'eth'] },
+  { symbol: 'USDT', name: 'Tether USD', badge: 'Stablecoin', chains: ['arbitrum', 'sol', 'near', 'pol', 'bsc', 'op', 'avax', 'eth', 'tron'] },
+  { symbol: 'NEAR', name: 'NEAR Protocol', badge: 'Native Shield', chains: ['near', 'bsc', 'sol', 'arbitrum'] },
+  { symbol: 'ETH', name: 'Ethereum', badge: 'Cross-chain', chains: ['base', 'arbitrum', 'eth', 'op', 'scroll'] },
+  { symbol: 'SOL', name: 'Solana', badge: 'Ultra-Fast', chains: ['sol', 'near'] },
+  { symbol: 'BTC', name: 'Bitcoin', badge: 'Native SegWit', chains: ['btc', 'near'] },
+  { symbol: 'DOGE', name: 'Dogecoin', badge: 'Meme L1', chains: ['doge', 'near'] },
+  { symbol: 'DAI', name: 'Dai Stablecoin', badge: 'Decentralized', chains: ['arbitrum', 'eth', 'near'] },
+  { symbol: 'FRAX', name: 'Frax Stablecoin', badge: 'Stablecoin', chains: ['near', 'eth'] },
+  { symbol: 'AVAX', name: 'Avalanche', badge: 'EVM L1', chains: ['avax', 'near'] },
+  { symbol: 'BNB', name: 'BNB Chain', badge: 'EVM L1', chains: ['bsc', 'near'] },
+  { symbol: 'POL', name: 'Polygon', badge: 'PoS L2', chains: ['pol', 'near'] },
 ];
 
 const CHAIN_DEFINITIONS: Record<string, ChainOption> = {
@@ -95,10 +96,11 @@ export const ReceivePage: React.FC = () => {
   const chainDropdownRef = useRef<HTMLDivElement>(null);
   const pollIntervalRef = useRef<any>(null);
 
-  // Load any additional live tokens supported by NEAR Intents from backend
+  // Load any additional live tokens supported by NEAR Intents from backend.
+  // Repolled while visible so the prices next to each asset stay live.
   useEffect(() => {
     let mounted = true;
-    api.getTokens().then((toks) => {
+    const load = () => api.getTokens().then((toks) => {
       if (!mounted || !toks || toks.length === 0) return;
       const map = new Map<string, TokenOption>();
       // Seed with curated options
@@ -113,21 +115,26 @@ export const ReceivePage: React.FC = () => {
           if (!existing.chains.includes(chain)) {
             existing.chains.push(chain);
           }
-          if (t.priceUsd) existing.priceUsd = t.priceUsd;
+          if (typeof t.priceUsd === 'number') existing.priceUsd = t.priceUsd;
         } else {
           map.set(sym, {
             symbol: sym,
             name: t.name || sym,
             badge: t.badge || 'Cross-chain',
-            priceUsd: t.priceUsd || 1.0,
+            priceUsd: t.priceUsd,
             chains: [chain],
           });
         }
       }
       setTokens(Array.from(map.values()));
     });
+    load();
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load();
+    }, 30_000);
     return () => {
       mounted = false;
+      window.clearInterval(id);
     };
   }, []);
 
@@ -393,7 +400,7 @@ export const ReceivePage: React.FC = () => {
               <div className="flex items-center space-x-3 text-right">
                 {activeTokenObj && (
                   <span className="font-mono text-xs font-bold text-stone-900">
-                    ${activeTokenObj.priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatUsd(activeTokenObj.priceUsd ?? null)}
                   </span>
                 )}
                 <ChevronDown className={`w-4 h-4 text-stone-400 transition-transform duration-200 ${isTokenDropdownOpen ? 'rotate-180 text-stone-900' : ''}`} />
@@ -455,7 +462,7 @@ export const ReceivePage: React.FC = () => {
 
                           <div className="flex items-center space-x-2 text-right font-mono">
                             <span className={`text-xs ${isSelected ? 'text-white' : 'text-stone-900'}`}>
-                              ${token.priceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              {formatUsd(token.priceUsd ?? null)}
                             </span>
                             {isSelected && <Check className="w-3.5 h-3.5 text-white flex-shrink-0" />}
                           </div>

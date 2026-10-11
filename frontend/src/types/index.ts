@@ -22,12 +22,13 @@ export interface Token {
   name: string;
   iconUrl: string;
   decimals: number;
-  priceUsd: number;
+  /** Live USD price from the registry. Absent means "price unknown" — never a guessed number. */
+  priceUsd?: number;
   nearContractId: string;
   chain?: string;
   chainId?: string;
   badge?: string;
-  category?: 'popular' | 'stables' | 'l1' | 'all';
+  category?: 'popular' | 'stables' | 'l1' | 'memes' | 'all';
   balance?: string; // Available sender balance in active wallet/shielded pool
 }
 
@@ -48,9 +49,9 @@ export interface PaymentIntent {
   recipientHandle: string;
   token: Token;
   amount: string;
-  amountUsd: number;
+  amountUsd: number | null;
   fee: string;
-  feeUsd: number;
+  feeUsd: number | null;
   feeRecipient?: string;
   inviteCode?: string;
   memo?: string;
@@ -69,14 +70,14 @@ export interface PaymentIntent {
 export interface PaymentQuote {
   token: Token;
   amount: string;
-  amountUsd: number;
+  amountUsd: number | null;
   networkFee: string;
-  networkFeeUsd: number;
+  networkFeeUsd: number | null;
   protocolFee: string;
-  protocolFeeUsd: number;
+  protocolFeeUsd: number | null;
   protocolFeeRecipient?: string;
   totalAmount: string;
-  totalUsd: number;
+  totalUsd: number | null;
   depositAddress: string;
   estimatedTimeSeconds: number;
   quoteId?: string;
@@ -130,7 +131,7 @@ export interface PasskeyCredential {
 export interface ShieldedBalance {
   token: Token;
   amount: string;
-  amountUsd: number;
+  amountUsd: number | null;
 }
 
 export interface ClaimPaymentRequest {

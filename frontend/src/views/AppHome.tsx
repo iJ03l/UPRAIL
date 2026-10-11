@@ -14,14 +14,15 @@ import {
   RefreshCw,
   ArrowRight,
   AlertCircle,
-  Loader2,
 } from 'lucide-react';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
-import { api, formatRecipientDisplay } from '../lib/api';
+import { api, formatRecipientDisplay, formatUsd, sumUsd } from '../lib/api';
 import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
+import { RollingNumber } from '../components/RollingNumber';
+import { Skeleton } from '../components/Skeleton';
 
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
@@ -45,6 +46,9 @@ export const AppHome: React.FC = () => {
   } = useOnchainData();
 
   const [hideBalance, setHideBalance] = useState<boolean>(false);
+  // First visit has nothing cached: show skeletons. A cached refresh keeps the
+  // last numbers on screen and only swaps them when the fresh data lands.
+  const isFirstLoad = isLoadingBalances && totalBalanceUsd === null && balances.length === 0;
   const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
   const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>([]);
 
@@ -102,14 +106,18 @@ export const AppHome: React.FC = () => {
 
             {/* Big Balance Number */}
             <div className="space-y-1">
-              {isLoadingBalances ? (
-                <div className="flex items-center space-x-2 py-3">
-                  <Loader2 className="w-5 h-5 animate-spin text-stone-400" />
-                  <span className="text-sm font-mono text-stone-400">Loading onchain balance...</span>
+              {isFirstLoad ? (
+                <div className="py-3 space-y-3" aria-hidden="true">
+                  <Skeleton className="h-11 w-56 sm:w-72" />
+                  <Skeleton className="h-3 w-64" />
                 </div>
               ) : (
-                <div className="text-4xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight">
-                  {hideBalance ? '••••••••' : `$${totalBalanceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                <div className="text-4xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums">
+                  <RollingNumber
+                    value={hideBalance ? null : totalBalanceUsd}
+                    format={formatUsd}
+                    fallback={hideBalance ? '••••••••' : '—'}
+                  />
                 </div>
               )}
               <div className="flex items-center space-x-2 text-xs font-mono text-stone-500">
@@ -139,6 +147,12 @@ export const AppHome: React.FC = () => {
                     {b.amountFormatted} {b.symbol}
                   </span>
                 ))
+              ) : isFirstLoad ? (
+                <div className="flex flex-wrap gap-2 pt-0.5" aria-hidden="true">
+                  <Skeleton variant="chip" className="w-24" />
+                  <Skeleton variant="chip" className="w-20" />
+                  <Skeleton variant="chip" className="w-16" />
+                </div>
               ) : (
                 <span className="text-xs font-mono text-stone-400 py-0.5">
                   {isLoadingBalances ? 'Fetching onchain balances...' : 'No balances yet in your intent account'}
@@ -163,7 +177,7 @@ export const AppHome: React.FC = () => {
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                   </div>
                   <div className="text-[11px] text-stone-300 font-mono mt-0.5">
-                    ≈ ${pendingPayments.reduce((acc, p) => acc + (p.amountUsd || 0), 0).toFixed(2)} USD · Tap to claim with your device Passkey
+                    ≈ {formatUsd(sumUsd(pendingPayments.map((p) => p.amountUsd)))} USD · Tap to claim with your device Passkey
                   </div>
                 </div>
               </div>
@@ -250,10 +264,23 @@ export const AppHome: React.FC = () => {
 
             {/* Simple hairline list — intent history takes priority */}
             <div className="divide-y divide-stone-100">
-              {isLoadingOnchainHistory ? (
-                <div className="py-8 text-center text-xs text-stone-400 font-mono flex items-center justify-center space-x-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Fetching onchain history...</span>
+              {(isLoadingHistory || isLoadingOnchainHistory) && history.length === 0 ? (
+                <div className="py-2 space-y-3" aria-hidden="true">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3 px-1 py-1">
+                      <div className="flex items-center space-x-2.5">
+                        <Skeleton variant="circle" className="w-7 h-7" />
+                        <div className="space-y-1.5">
+                          <Skeleton className="w-24" />
+                          <Skeleton className="w-16 h-2.5" />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5 text-right">
+                        <Skeleton className="ml-auto w-20 h-3" />
+                        <Skeleton className="ml-auto w-12 h-2.5" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : history.length === 0 && transactions.length === 0 ? (
                 <div className="py-12 text-center text-xs text-stone-400 font-mono">

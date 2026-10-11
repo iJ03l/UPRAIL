@@ -24,6 +24,7 @@ import * as webauthn from '../services/webauthn';
 import * as nearProxy from '../services/nearProxy';
 import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
+import { background } from '../utils/background';
 import {
   getDb,
   savePasskey,
@@ -293,6 +294,18 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     await updateSession(c, {
       near_account: nearAccount,
     });
+
+    // Signup completes with the first passkey — provision the intent account
+    // now rather than on the user's first balance read.
+    background(
+      c.executionCtx,
+      nearRpc.ensureIntentAccount(c.env, {
+        x_id: session.x_id,
+        x_handle: session.x_handle,
+        near_account: nearAccount,
+      }),
+      'intent account provisioning (passkey)'
+    );
 
     return c.json<RegisterPasskeyResponse>({
       success: true,
@@ -632,11 +645,9 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
       .map(([assetKey, amt]) => {
         const matchedToken = nearRpc.resolveTokenForAsset(assetKey, tokens);
         const symbol = matchedToken?.symbol || assetKey.split(':').pop()?.toUpperCase() || assetKey.toUpperCase();
-        // Only USD-pegged assets get a hard-coded 1.0. Everything else uses
-        // the live registry price and is reported as 0 when unknown — never a
-        // made-up price, which produced confidently wrong totals.
-        const isStable = ['usdc', 'usdt', 'dai', 'frax', 'busd', 'ustc'].includes(symbol.toLowerCase());
-        const priceUsd = matchedToken?.priceUsd ?? (isStable ? 1 : 0);
+        // Live registry price only. No peg pins, no made-up numbers: an asset
+        // without a price reports null and the UI renders it as "—".
+        const priceUsd = matchedToken?.priceUsd;
         return {
           token: {
             id: assetKey,
@@ -649,7 +660,7 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
             nearContractId: matchedToken?.nearContractId || '',
           },
           amount: amt >= 0.01 ? amt.toFixed(2) : String(amt),
-          amountUsd: amt * priceUsd,
+          amountUsd: typeof priceUsd === 'number' ? amt * priceUsd : null,
         };
       });
 
@@ -659,7 +670,11 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
       );
     }
 
-    const totalUsd = shieldedBalances.reduce((acc, b) => acc + (b.amountUsd || 0), 0);
+    // Partial totals are lies: if any holding is unpriced the whole total is
+    // reported as unknown instead of a confidently low number.
+    const totalUsd = shieldedBalances.some((b) => b.amountUsd === null)
+      ? null
+      : shieldedBalances.reduce((acc, b) => acc + (b.amountUsd || 0), 0);
 
     return c.json({
       nearAccount,

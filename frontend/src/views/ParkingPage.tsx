@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Navigate } from '../lib/router';
 import { useXAuth } from '../hooks/useXAuth';
 import { api } from '../lib/api';
+import { currentInvite, inviteFromSearch, takeInvite } from '../lib/invite';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { GlitchLogo } from '../components/GlitchLogo';
 import {
@@ -30,18 +31,11 @@ export const ParkingPage: React.FC = () => {
     message: string;
   } | null>(null);
 
-  // Auto-detect invite/ref code from URL query parameters (e.g. ?invite=UPRAIL or ?ref=UPRAIL)
+  // Preload the ref code: URL param first (fresh signal), otherwise the code
+  // remembered when the share link landed — the recipient never types it.
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const urlInvite = params.get('invite') || params.get('ref') || params.get('code');
-      if (urlInvite) {
-        const cleaned = urlInvite.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6);
-        if (cleaned.length === 6) {
-          setCode(cleaned);
-        }
-      }
-    }
+    const preloaded = inviteFromSearch(window.location.search) || currentInvite();
+    if (preloaded) setCode(preloaded);
   }, []);
 
   // Strict Guard: If user is already activated, forward directly to /app
@@ -82,6 +76,7 @@ export const ParkingPage: React.FC = () => {
 
       // 2. Redeem ref code and activate account
       const res = await api.redeemInvite(code);
+      takeInvite();
       setSuccessData({
         personalInviteCode: res.personalInviteCode,
         message: res.message || 'Access granted! Welcome to UPRAIL.',

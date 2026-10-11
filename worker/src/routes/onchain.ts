@@ -30,7 +30,9 @@ export const onchainRouter = new Hono<AppContext>();
 onchainRouter.get('/tokens', async (c) => {
   try {
     const tokens = await nearRpc.getSupportedTokens(c.env);
-    c.header('Cache-Control', 'public, max-age=300, s-maxage=3600');
+    // Short cache: this payload carries live USD prices, so a long TTL turns
+    // "realtime" into "whatever it was when you first opened the tab".
+    c.header('Cache-Control', 'public, max-age=30, s-maxage=60, stale-while-revalidate=30');
     return c.json({ tokens, source: 'onchain' });
   } catch (err: any) {
     console.error('[onchain/tokens] error:', err);

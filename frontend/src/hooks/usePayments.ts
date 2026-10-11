@@ -50,7 +50,7 @@ export function usePayments() {
           name: ot.name,
           iconUrl: ot.iconUrl,
           decimals: ot.decimals,
-          priceUsd: tokenUsdPrice(ot as any),
+          priceUsd: tokenUsdPrice(ot as any) ?? undefined,
           nearContractId: ot.nearContractId,
           chain: ot.chain || 'near',
           badge: (ot.chain || 'near').toUpperCase(),

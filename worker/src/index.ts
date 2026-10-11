@@ -162,8 +162,11 @@ app.notFound(async (c) => {
     const url = new URL(c.req.url);
     if (c.req.method === 'GET' && CLAIM_DEEP_LINK.test(url.pathname)) {
       const basePath = url.pathname.startsWith('/app/') ? '/app/claim' : '/claim';
+      const target = new URL(basePath, url);
+      // Keep ?invite= / ?payment= — the page reads them from the address bar.
+      target.search = url.search;
       const assetResponse = await c.env.ASSETS.fetch(
-        new Request(new URL(basePath, url), {
+        new Request(target, {
           method: 'GET',
           headers: c.req.raw.headers,
         })

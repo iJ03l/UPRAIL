@@ -26,7 +26,7 @@
     "ESCROW_ACCOUNT_ID": "escrow.uprail.near",
     "MASTER_ACCOUNT_ID": "uprail.near",
     "FEE_ACCOUNT_ID": "fees.uprail.near",
-    "FEE_PERCENT": "0.008",
+    "FEE_PERCENT": "0.05",
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",

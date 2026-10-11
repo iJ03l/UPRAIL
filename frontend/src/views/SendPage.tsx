@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from '../lib/router';
 import {
   Zap,
@@ -16,6 +16,7 @@ import { HandleInput } from '../components/HandleInput';
 import { AmountInput } from '../components/AmountInput';
 import { ShareModal } from '../components/ShareModal';
 import { usePayments } from '../hooks/usePayments';
+import { PROTOCOL_FEE_RATE, formatUsd } from '../lib/api';
 import { PaymentIntent } from '../types';
 
 export const SendPage: React.FC = () => {
@@ -45,6 +46,16 @@ export const SendPage: React.FC = () => {
   useEffect(() => {
     updateQuote(selectedToken.id, amount);
   }, [selectedToken.id, amount, updateQuote]);
+
+  const feePercentLabel = useMemo(() => {
+    const amountNum = parseFloat(amount);
+    const feeNum = parseFloat(quote?.protocolFee ?? '');
+    if (amountNum > 0 && feeNum > 0) {
+      const pct = Math.round((feeNum / amountNum) * 10000) / 100;
+      return `${pct}%`;
+    }
+    return `${PROTOCOL_FEE_RATE * 100}%`;
+  }, [amount, quote?.protocolFee]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,6 +96,13 @@ export const SendPage: React.FC = () => {
       // Error is tracked in hook
     }
   };
+
+  // NEAR & Memes rail: the recipient receives into their confidential vault.
+  // The only exit from that vault is a passkey-authorized withdrawal to a main
+  // wallet, settled through confidential NEAR Intents — say so up front.
+  const isNearOrMemeRail =
+    selectedToken.category === 'memes' ||
+    selectedToken.symbol.toUpperCase() === 'NEAR';
 
   const isFormValid =
     (sendMode === 'handle' ? recipient.trim().length >= 2 : walletAddress.trim().length >= 5) &&
@@ -210,6 +228,20 @@ export const SendPage: React.FC = () => {
             disabled={isSubmitting}
           />
 
+          {sendMode === 'handle' && isNearOrMemeRail && (
+            <div className="rounded-2xl bg-stone-950 border border-stone-800 p-4 space-y-1.5 text-[11px] font-mono text-stone-300">
+              <div className="flex items-center space-x-2 text-white font-bold text-xs">
+                <Wallet className="w-3.5 h-3.5" />
+                <span>NEAR &amp; Memes rail</span>
+              </div>
+              <p>
+                {selectedToken.symbol} lands in the recipient's confidential vault. To spend it
+                they withdraw to a main wallet with their passkey — settled through confidential
+                NEAR Intents.
+              </p>
+            </div>
+          )}
+
           {/* Optional Memo */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
@@ -233,9 +265,9 @@ export const SendPage: React.FC = () => {
           {quote && parseFloat(amount) > 0 && (
             <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 space-y-2 text-xs font-mono">
               <div className="flex items-center justify-between text-stone-500">
-                <span>Platform Fee (0.8%)</span>
+                <span>Platform Fee ({feePercentLabel})</span>
                 <span className="text-stone-900 font-bold">
-                  {quote.protocolFee} {quote.token.symbol} (${quote.protocolFeeUsd.toFixed(2)})
+                  {quote.protocolFee} {quote.token.symbol} (${formatUsd(quote.protocolFeeUsd)})
                 </span>
               </div>
               <div className="flex items-center justify-between text-stone-500 text-[11px]">
@@ -260,7 +292,7 @@ export const SendPage: React.FC = () => {
               <div className="pt-2 border-t border-stone-200 flex items-center justify-between font-bold text-stone-900 text-sm">
                 <span>Total to Send</span>
                 <span className="text-stone-950 font-bold">
-                  {quote.totalAmount} {quote.token.symbol} (${quote.totalUsd.toFixed(2)})
+                  {quote.totalAmount} {quote.token.symbol} (${formatUsd(quote.totalUsd)})
                 </span>
               </div>
             </div>

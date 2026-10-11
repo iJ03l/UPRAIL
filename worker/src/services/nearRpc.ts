@@ -10,8 +10,11 @@ import type { Env } from '../types';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58Decode, base58Encode } from '../utils/base58';
 import { getOnchainIcon } from './onchainIcons';
+import { getAssetMeta } from './assetMeta';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+export type TokenCategory = 'popular' | 'stables' | 'l1' | 'memes' | 'all';
 
 export interface OnchainToken {
   defuse_asset_id: string;   // e.g. "nep141:usdc.token.near"
@@ -23,6 +26,30 @@ export interface OnchainToken {
   chain: string;             // "near" | "eth" | "sol" | "btc" | ...
   chainId?: string;
   priceUsd?: number;
+  category?: TokenCategory;
+}
+
+/**
+ * Assets that ride the "NEAR & Memes" rail. Matched on contract id or symbol;
+ * a match means the asset is classified as a meme instead of being dropped by
+ * the old spam filter (which used to hide PEPE/DOGE-class assets entirely).
+ */
+const MEME_CONTRACT_HINTS = ['meme-cooking', '0xshitzu', 'blackdragon'];
+const MEME_SYMBOLS = new Set([
+  'PEPE', 'WIF', '$WIF', 'BOME', 'DOGE', 'TRUMP', 'MELANIA', 'SHITZU',
+  'BLACKDRAGON', 'MOCHI', 'NEIRO', 'BOBO', 'DEGEN', 'POP CAT', 'POPCAT',
+  'FARTCOIN', 'BONK', 'MYRO', 'SLERF', 'BODEN', 'GNEAR', 'NOEAR', 'ABG',
+  'JAMBO', 'PURGE',
+]);
+
+function isMemeAsset(symbol: string, contractId: string): boolean {
+  const sym = symbol.toUpperCase();
+  const contract = (contractId || '').toLowerCase();
+  return (
+    symbol.toLowerCase().includes('meme') ||
+    MEME_CONTRACT_HINTS.some((hint) => contract.includes(hint)) ||
+    MEME_SYMBOLS.has(sym)
+  );
 }
 
 export interface IntentAccountBalance {
@@ -242,26 +269,28 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
 
         const tokens: OnchainToken[] = [];
         const seenAssetKeys = new Set<string>();
+        const cgIdByAsset: Record<string, string> = {};
 
         for (const t of list) {
           const assetId = t.assetId || t.defuse_asset_id || '';
           if (!assetId) continue;
+          if (typeof t.coingeckoId === 'string' && t.coingeckoId) cgIdByAsset[assetId] = t.coingeckoId;
 
           const { chain: parsedChain, contractId: parsedContractId } = parseDefuseAssetId(assetId);
           const contractAddress = t.contractAddress || parsedContractId;
           const rawSymbol = (t.symbol || '').trim();
 
-          // Filter out low quality, meme, or spam assets with no liquidity
-          const isSpam =
-            !rawSymbol ||
-            rawSymbol.length > 12 ||
-            contractAddress?.includes('meme-cooking') ||
-            contractAddress?.includes('0xshitzu') ||
-            contractAddress?.includes('blackdragon') ||
-            rawSymbol.toLowerCase().includes('meme') ||
-            (typeof t.price === 'number' && t.price < 0.0001 && !VERIFIED_META[assetId]);
-
-          if (isSpam && !VERIFIED_META[assetId]) continue;
+          // Genuine junk still goes: no symbol or an absurdly long one.
+          // Memes are no longer treated as spam — they are classified onto the
+          // "NEAR & Memes" rail below so they can actually be sent.
+          const isMeme = isMemeAsset(rawSymbol, contractAddress || '');
+          if (!rawSymbol || rawSymbol.length > 12) continue;
+          const isDustSpam =
+            !VERIFIED_META[assetId] &&
+            !isMeme &&
+            typeof t.price === 'number' &&
+            t.price < 0.0001;
+          if (isDustSpam) continue;
 
           const verified = VERIFIED_META[assetId];
           const isNear =
@@ -290,6 +319,20 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
             getOnchainIcon(contractAddress) ||
             getOnchainIcon(rawSymbol.toLowerCase());
 
+          const symUpper = symbol.toUpperCase();
+          let category: TokenCategory = 'all';
+          if (isNear || symUpper === 'NEAR') {
+            category = 'popular';
+          } else if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((x) => symUpper.includes(x))) {
+            category = 'stables';
+          } else if (['ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((x) => symUpper === x)) {
+            category = 'l1';
+          } else if (isMeme) {
+            category = 'memes';
+          } else if (VERIFIED_META[assetId]) {
+            category = 'popular';
+          }
+
           tokens.push({
             defuse_asset_id: assetId,
             symbol,
@@ -301,6 +344,7 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
             // Absent price stays absent (undefined) — callers decide
             // whether that means 1.0 (stablecoin) or 0 (unknown).
             priceUsd: typeof t.price === 'number' ? t.price : undefined,
+            category,
           });
         }
 
@@ -317,6 +361,21 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
           FRAX: 9,
           AURORA: 10,
         };
+
+        // Artwork for assets our inline table does not cover comes from the
+        // registry's own coingeckoId (KV-cached). Registry prices stay primary;
+        // the CoinGecko price is only used when the registry had none.
+        try {
+          const meta = await getAssetMeta(env, Object.values(cgIdByAsset));
+          for (const tok of tokens) {
+            const cgId = cgIdByAsset[tok.defuse_asset_id];
+            const cg = cgId ? meta[cgId] : undefined;
+            if (!tok.icon && cg?.image) tok.icon = cg.image;
+            if (typeof tok.priceUsd !== 'number' && typeof cg?.priceUsd === 'number') tok.priceUsd = cg.priceUsd;
+          }
+        } catch (err) {
+          console.warn('[nearRpc] asset meta merge failed:', err);
+        }
 
         tokens.sort((a, b) => {
           const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
@@ -384,7 +443,6 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
       icon: getOnchainIcon('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'),
       chain: 'near',
       nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-      priceUsd: 1.0,
     },
     {
       defuse_asset_id: 'nep141:usdt.tether-token.near',
@@ -394,7 +452,6 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
       icon: getOnchainIcon('usdt.tether-token.near'),
       chain: 'near',
       nearContractId: 'usdt.tether-token.near',
-      priceUsd: 1.0,
     },
     {
       defuse_asset_id: 'nep141:eth.bridge.near',
@@ -1535,6 +1592,24 @@ export async function accountExists(env: Env, accountId: string): Promise<boolea
     });
     return !!res && !res.error;
   } catch {
+    return false;
+  }
+}
+
+/**
+ * Provisions the caller's confidential intent sub-account if it is missing.
+ * Never throws — a provisioning failure is logged and reported as `false` so
+ * the login/registration response is unaffected.
+ */
+export async function ensureIntentAccount(
+  env: Env,
+  session: { x_id: string; x_handle: string; near_account?: string | null }
+): Promise<boolean> {
+  try {
+    const accountId = await resolveUserNearAccount(env, session);
+    return await accountExists(env, accountId);
+  } catch (err) {
+    console.warn('[nearRpc] ensureIntentAccount notice:', err);
     return false;
   }
 }

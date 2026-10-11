@@ -37,11 +37,13 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
     if (Array.isArray(history)) {
       for (const item of history) {
         const amt = parseFloat(item.amount) || 0;
-        const price = item.token?.priceUsd || 1;
+        const price = item.token?.priceUsd;
         const usd =
           typeof item.amountUsd === 'number' && item.amountUsd > 0
             ? item.amountUsd
-            : amt * price;
+            : typeof price === 'number' && price > 0
+              ? amt * price
+              : 0;
 
         const isRecipient =
           Boolean(userHandle) &&
@@ -207,7 +209,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             </div>
             <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-              <span>Biometric passkey signature required · 0.8% protocol fee</span>
+              <span>Biometric passkey signature required · 5% protocol fee</span>
             </div>
           </div>
         </div>

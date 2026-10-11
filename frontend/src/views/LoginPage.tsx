@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { webauthn } from '../lib/webauthn';
+import { currentInvite, sanitizeReturnPath, withInvite } from '../lib/invite';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { LegalModal, LegalTab } from '../components/LegalModal';
@@ -46,11 +47,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     setLegalModalOpen(true);
   };
 
-  // Capture ?invite=CODE, ?error=..., and legal query params if present
+  // Capture ?invite=CODE, ?error=..., and legal query params if present.
+  // The invite is also remembered so it survives the next hop (passkey step,
+  // OAuth round trip, /parking) without the recipient re-entering it.
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const inv = params.get('invite');
+      const inv = params.get('invite') || currentInvite();
       if (inv) setUrlInvite(inv.trim().toUpperCase());
       const err = params.get('error');
       if (err) setError(decodeURIComponent(err));
@@ -107,6 +110,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   const isStep2 = !isLoading && !!user && user.hasPasskey === false;
   const isComplete = !isLoading && !!user && user.hasPasskey === true;
 
+  // Where this session was originally headed (share links send people to
+  // /claim/<id>?invite=... — dropping that sends the recipient back to square one).
+  const pendingReturnPath = () => {
+    if (typeof window === 'undefined') return null;
+    const raw = new URLSearchParams(window.location.search).get('return_to');
+    const safe = sanitizeReturnPath(raw);
+    return safe && safe !== '/login' && safe !== '/parking' ? safe : null;
+  };
+
   // If already complete, forward immediately to destination
   useEffect(() => {
     if (isComplete && user) {
@@ -117,9 +129,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         if (user.avatarUrl) localStorage.setItem('uprail_last_avatar', user.avatarUrl);
       }
       if (user.isActivated === false) {
-        navigate('/parking', { replace: true });
+        navigate(withInvite('/parking'), { replace: true });
       } else {
-        navigate('/app', { replace: true });
+        const target = pendingReturnPath();
+        navigate(target || '/app', { replace: true });
       }
     }
   }, [isComplete, user, navigate]);
@@ -168,9 +181,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         // Redirect after short confirmation
         setTimeout(() => {
           if (!status.user?.isActivated) {
-            navigate('/parking', { replace: true });
+            navigate(withInvite('/parking'), { replace: true });
           } else {
-            navigate('/app', { replace: true });
+            navigate(pendingReturnPath() || '/app', { replace: true });
           }
         }, 800);
       }
@@ -211,9 +224,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
         setTimeout(() => {
           if (result.user.isActivated === false) {
-            navigate('/parking', { replace: true });
+            navigate(withInvite('/parking'), { replace: true });
           } else {
-            navigate('/app', { replace: true });
+            navigate(pendingReturnPath() || '/app', { replace: true });
           }
         }, 500);
       }

@@ -33,7 +33,7 @@ export interface UseOnchainDataResult {
 
   // User's intent account balances (live from onchain)
   balances: OnchainBalance[];
-  totalBalanceUsd: number;
+  totalBalanceUsd: number | null;
   nearAccount: string | null;
   hasIntentAccount: boolean;
   isLoadingBalances: boolean;
@@ -57,40 +57,21 @@ export interface UseOnchainDataResult {
 }
 
 /**
- * Offline-only fallback prices, used when the live token registry gave us
- * nothing. Live registry prices always win — this map used to be THE source,
- * so the dashboard total was pinned to stale numbers (NEAR $5.85, ETH $3450).
+ * Live registry price for a balance, or null when we have none. There is no
+ * oracle table and no peg pin: an unpriced holding must not silently turn
+ * into $0 (which made the dashboard total quietly wrong).
  */
-const PRICE_ORACLE: Record<string, number> = {
-  usdc: 1.0,
-  usdt: 1.0,
-  dai: 1.0,
-  near: 5.85,
-  eth: 3450.0,
-  weth: 3450.0,
-  btc: 68500.0,
-  wbtc: 68500.0,
-  sol: 180.0,
-  bnb: 610.0,
-  matic: 0.85,
-  arb: 0.95,
-  op: 1.8,
-};
-
-const STABLE_SYMBOLS = new Set(['USDC', 'USDT', 'DAI', 'FRAX', 'BUSD', 'USDG', 'PYUSD', 'USDBC']);
-
-function estimateUsd(symbol: string, amountFormatted: string, tokens: OnchainToken[] = []): number {
+function estimateUsd(symbol: string, amountFormatted: string, tokens: OnchainToken[] = []): number | null {
   const amount = parseFloat(amountFormatted) || 0;
   if (amount <= 0) return 0;
   const sym = (symbol || '').trim();
 
   const live = tokens.find((t) => (t.symbol || '').toLowerCase() === sym.toLowerCase())?.priceUsd;
-  if (typeof live === 'number' && isFinite(live) && live > 0) return amount * live;
-  if (STABLE_SYMBOLS.has(sym.toUpperCase())) return amount;
-
-  const fallback = PRICE_ORACLE[sym.toLowerCase()];
-  return amount * (typeof fallback === 'number' ? fallback : 0);
+  return typeof live === 'number' && isFinite(live) && live > 0 ? amount * live : null;
 }
+
+/** Prices are polled so the total on screen tracks the market, not mount time. */
+const PRICE_REFRESH_MS = 30_000;
 
 // ── Shared SWR Module Cache ─────────────────────────────────────────────────
 const CACHE_KEY = 'uprail_onchain_cache';
@@ -290,6 +271,16 @@ export function useOnchainData(): UseOnchainDataResult {
     return () => { mounted = false; };
   }, [loadTokens, loadBalances, loadDepositAddresses, loadHistory]);
 
+  // ── Keep prices live while the tab is open ────────────────────────────────
+  // Balances keep their own cadence; only the token/price payload is repolled
+  // so the number on screen does not freeze at whatever it was on mount.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadTokens();
+    }, PRICE_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [loadTokens]);
+
   // ── Get deposit address for a specific chain & token ───────────────────────
   const getDepositAddress = useCallback(
     (chain: string, token?: string): DepositAddress | undefined => {
@@ -325,10 +316,10 @@ export function useOnchainData(): UseOnchainDataResult {
   );
 
   // ── Compute total balance USD ─────────────────────────────────────────────
-  const totalBalanceUsd = balances.reduce(
-    (acc, b) => acc + estimateUsd(b.symbol, b.amountFormatted, tokens),
-    0
-  );
+  const perBalanceUsd = balances.map((b) => estimateUsd(b.symbol, b.amountFormatted, tokens));
+  const totalBalanceUsd = perBalanceUsd.some((v) => v === null)
+    ? null
+    : perBalanceUsd.reduce<number>((acc, v) => acc + (v as number), 0);
 
   return {
     tokens,

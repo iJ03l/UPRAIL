@@ -3,6 +3,7 @@
 import React from 'react';
 import { Token } from '../types';
 import { AssetPicker } from './AssetPicker';
+import { tokenUsdPrice, formatUsd } from '../lib/api';
 
 interface AmountInputProps {
   amount: string;
@@ -22,7 +23,8 @@ export const AmountInput: React.FC<AmountInputProps> = ({
   disabled = false,
 }) => {
   const numericAmount = parseFloat(amount) || 0;
-  const estimatedUsd = (numericAmount * selectedToken.priceUsd).toFixed(2);
+  const price = tokenUsdPrice(selectedToken);
+  const estimatedUsd = price === null ? null : numericAmount * price;
 
   const handleQuickPercent = (pct: number) => {
     const totalBalance = parseFloat(selectedToken.balance || '0');
@@ -81,7 +83,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
         {/* Sub-row: USD value and Quick % buttons */}
         <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-stone-200/80">
           <span className="text-xs font-mono text-stone-500">
-            ≈ ${Number(estimatedUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+            ≈ {formatUsd(estimatedUsd)} USD
           </span>
 
           <div className="flex items-center space-x-1.5">

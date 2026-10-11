@@ -15,8 +15,9 @@ import {
 } from 'lucide-react';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
-import { formatRecipientDisplay } from '../lib/api';
+import { formatRecipientDisplay, formatUsd } from '../lib/api';
 import { ShareModal } from '../components/ShareModal';
+import { SkeletonList } from '../components/Skeleton';
 import { PaymentIntent } from '../types';
 
 export const HistoryPage: React.FC = () => {
@@ -126,7 +127,9 @@ export const HistoryPage: React.FC = () => {
 
       {/* The Simple List Card */}
       <div className="rounded-3xl p-4 sm:p-6 bg-white border border-stone-200 shadow-sm">
-        {isLoadingHistory ? (
+        {isLoadingHistory && filteredHistory.length === 0 ? (
+          <SkeletonList rows={5} className="py-2" />
+        ) : isLoadingHistory ? (
           <div className="py-16 text-center text-stone-400 space-y-2">
             <RefreshCw className="w-6 h-6 animate-spin text-stone-900 mx-auto" />
             <p className="text-xs font-mono">Loading transactions...</p>
@@ -176,7 +179,7 @@ export const HistoryPage: React.FC = () => {
                       </div>
                       <div className="flex items-center space-x-1.5 justify-end">
                         <span className="text-[10px] text-stone-400 font-mono">
-                          ≈ ${tx.amountUsd.toFixed(2)}
+                          ≈ {formatUsd(tx.amountUsd)}
                         </span>
                         <span
                           className="text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded text-stone-600 bg-stone-100 border border-stone-200"

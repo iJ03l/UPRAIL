@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { PaymentIntent } from '../types';
 import { TokenIcon } from './TokenIcon';
+import { formatUsd } from '../lib/api';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -83,7 +84,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 {payment.amount} {payment.token.symbol}
               </span>
               <span className="text-xs text-stone-500 block font-mono">
-                ≈ ${payment.amountUsd.toFixed(2)} USD
+                ≈ {formatUsd(payment.amountUsd)} USD
               </span>
             </div>
           </div>

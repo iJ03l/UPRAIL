@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronDown, Search, X, Check } from 'lucide-react';
 import { Token } from '../types';
 import { TokenIcon } from './TokenIcon';
+import { formatUsd } from '../lib/api';
 
 interface AssetPickerProps {
   tokens: Token[];
@@ -20,7 +21,9 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'popular' | 'stables' | 'l1' | 'all'>('popular');
+  const [activeTab, setActiveTab] = useState<'popular' | 'stables' | 'l1' | 'memes' | 'all'>(
+    'popular'
+  );
 
   // Close on Escape key
   useEffect(() => {
@@ -65,6 +68,11 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
           (t.chain === 'near' || t.chain === symLower) &&
           ['near', 'eth', 'btc', 'sol', 'avax', 'bnb', 'aurora'].some((s) => symLower.includes(s))
         );
+      }
+      if (activeTab === 'memes') {
+        // The NEAR & Memes rail: native NEAR plus every meme-classified asset
+        // (they used to be filtered out as spam and could not be sent at all).
+        return t.category === 'memes' || symLower === 'near' || symLower === 'wnear';
       }
       return true;
     });
@@ -183,6 +191,17 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
               </button>
               <button
                 type="button"
+                onClick={() => { setActiveTab('memes'); setSearch(''); }}
+                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                  activeTab === 'memes' && !search
+                    ? 'bg-white text-stone-950 shadow-2xs font-bold'
+                    : 'text-stone-500 hover:text-black'
+                }`}
+              >
+                Memes
+              </button>
+              <button
+                type="button"
                 onClick={() => { setActiveTab('all'); setSearch(''); }}
                 className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
                   activeTab === 'all' && !search
@@ -255,10 +274,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                       <div className="flex items-center space-x-2 text-right font-mono">
                         <div>
                           <div className="text-xs font-bold text-stone-950">
-                            ${token.priceUsd.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {formatUsd(token.priceUsd ?? null)}
                           </div>
                           {token.balance && (
                             <div className="text-[10px] text-stone-400">

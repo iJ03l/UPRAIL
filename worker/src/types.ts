@@ -39,7 +39,7 @@ export interface Env {
   MASTER_ACCOUNT_ID?: string;
   MASTER_PRIVATE_KEY?: string;
 
-  // Protocol Fees (0.8% to fees.uprail.near)
+  // Protocol fees (FEE_PERCENT, currently 5%, to fees.uprail.near)
   FEE_ACCOUNT_ID?: string;
   FEE_PERCENT?: string;
 

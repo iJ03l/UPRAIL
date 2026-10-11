@@ -151,13 +151,15 @@ paymentsRouter.get('/tokens', async (c) => {
         (symUpper === 'BTC' && (t.nearContractId?.includes('btc.omft.near') || t.chain === 'btc')) ||
         (symUpper === 'SOL' && (t.nearContractId?.includes('sol.omft.near') || t.chain === 'sol'));
 
-      let category: 'popular' | 'stables' | 'l1' | 'all' = 'all';
+      let category: 'popular' | 'stables' | 'l1' | 'memes' | 'all' = t.category || 'all';
       if (isNativeCanonical) {
         category = 'popular';
-      } else if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
-        category = 'stables';
-      } else if (['NEAR', 'ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((s) => symUpper.includes(s))) {
-        category = 'l1';
+      } else if (category === 'all') {
+        if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((s) => symUpper.includes(s))) {
+          category = 'stables';
+        } else if (['NEAR', 'ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((s) => symUpper.includes(s))) {
+          category = 'l1';
+        }
       }
 
       return {
@@ -172,12 +174,9 @@ paymentsRouter.get('/tokens', async (c) => {
         badge,
         category,
         balance: '0.00',
-        // Stablecoins are dollars by definition; everything else without a
-        // live price reports 0 instead of a fabricated 1.0 (which rendered
-        // 1 NEAR as $1.00 across the dashboard).
-        priceUsd:
-          t.priceUsd ??
-          (['USDC', 'USDT', 'DAI', 'FRAX', 'BUSD', 'USDG', 'PYUSD'].includes(symUpper) ? 1 : 0),
+        // Live registry price, passed through untouched. Undefined means the
+        // registry had no quote for this asset — the UI renders "—".
+        priceUsd: t.priceUsd,
       };
     });
     return c.json({ tokens: mapped });
@@ -352,7 +351,7 @@ paymentsRouter.post('/quote', async (c) => {
       };
     }
 
-    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.008');
+    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
     const numAmount = parseFloat(body.amount) || 0;
     const protocolFee = (numAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
@@ -476,8 +475,8 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
 
     const memo = typeof (body as any).memo === 'string' ? (body as any).memo.trim().slice(0, 280) : null;
 
-    // 0.8% platform fee to fees.uprail.near on every send
-    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.008');
+    // Protocol fee to fees.uprail.near on every send (FEE_PERCENT, 5%)
+    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
     const protocolFee = (parseFloat(body.amount) * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
 
@@ -506,7 +505,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       updated_at: now,
     };
 
-    // Immediately route 0.8% protocol fee to fees.uprail.near (send fee only, 0% on claim)
+    // Immediately route the protocol fee to fees.uprail.near (send fee only, 0% on claim)
     if (parseFloat(protocolFee) > 0) {
       try {
         await nearProxy.transfer(c.env, {
@@ -517,7 +516,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           paymentId: `${paymentId}_fee`,
         });
       } catch (feeErr) {
-        console.warn('[FeeRouting] Immediate 0.8% send fee dispatch notice:', feeErr);
+        console.warn('[FeeRouting] Immediate send fee dispatch notice:', feeErr);
       }
     }
 

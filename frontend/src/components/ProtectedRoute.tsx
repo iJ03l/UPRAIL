@@ -3,6 +3,7 @@
 import React from 'react';
 import { Navigate, useLocation } from '../lib/router';
 import { useXAuth } from '../hooks/useXAuth';
+import { inviteFromSearch, withInvite } from '../lib/invite';
 import { Loader2 } from 'lucide-react';
 
 import { BrandLoadingScreen } from './BrandLoadingScreen';
@@ -27,10 +28,15 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     return <BrandLoadingScreen message="Verifying access clearance..." />;
   }
 
+  // Any invite that arrived with this URL is remembered before we bounce, so
+  // the share link's ref code survives the redirect chain untouched.
+  inviteFromSearch(location.search);
+  const returnTo = encodeURIComponent(location.pathname + location.search);
+
   if (!user) {
     return (
       <Navigate
-        to={`/login?return_to=${encodeURIComponent(location.pathname + location.search)}`}
+        to={withInvite(`/login?return_to=${returnTo}`)}
         replace
         state={{ from: location }}
       />
@@ -39,12 +45,12 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   // If user does not have a passkey setup yet, direct them to complete Passkey setup
   if (user.hasPasskey === false) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={withInvite(`/login?return_to=${returnTo}`)} replace />;
   }
 
   // If first-time user who hasn't redeemed an invite code, direct to comical parking page
   if (user.isActivated === false) {
-    return <Navigate to="/parking" replace />;
+    return <Navigate to={withInvite('/parking')} replace />;
   }
 
   return <>{children}</>;

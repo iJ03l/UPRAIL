@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { KeyRound, CheckCircle2, ArrowRight, Sparkles, Shield, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
+import { currentInvite, inviteFromSearch, takeInvite } from '../lib/invite';
 
 interface InviteGateModalProps {
   isOpen: boolean;
@@ -23,18 +24,11 @@ export const InviteGateModal: React.FC<InviteGateModalProps> = ({
     message: string;
   } | null>(null);
 
-  // Auto-detect invite code from URL query parameters (e.g. ?invite=UPRAIL)
+  // Preload from the share link, falling back to the code remembered on the
+  // way in (the URL is usually long gone by the time this modal opens).
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const urlInvite = params.get('invite');
-      if (urlInvite) {
-        const cleaned = urlInvite.trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6);
-        if (cleaned.length === 6) {
-          setCode(cleaned);
-        }
-      }
-    }
+    const preloaded = inviteFromSearch(window.location.search) || currentInvite();
+    if (preloaded) setCode(preloaded);
   }, []);
 
   if (!isOpen) return null;
@@ -67,6 +61,7 @@ export const InviteGateModal: React.FC<InviteGateModalProps> = ({
 
       // 2. Redeem and activate account
       const res = await api.redeemInvite(code);
+      takeInvite();
       setSuccessData({
         personalInviteCode: res.personalInviteCode,
         message: res.message || 'Account successfully activated!',
