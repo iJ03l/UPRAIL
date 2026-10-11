@@ -107,6 +107,7 @@ export const HistoryPage: React.FC = () => {
             { id: 'pending', label: 'Open Intents' },
             { id: 'expired', label: 'Expired' },
             { id: 'refunded', label: 'Refunded' },
+            { id: 'cancelled', label: 'Cancelled' },
           ].map((tab) => (
             <button
               key={tab.id}

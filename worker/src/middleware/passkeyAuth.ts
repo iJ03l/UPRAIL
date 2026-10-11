@@ -18,7 +18,8 @@ import type { AppContext, ErrorResponse } from '../types';
 import * as webauthnService from '../services/webauthn';
 import { getDb } from '../db/postgres';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
-import { resolveOrigin, resolveRpId, APP_ORIGIN } from '../services/webauthnConfig';
+import { resolveRpId, allowedWebAuthnOrigins, allowedWebAuthnRpIds, APP_ORIGIN } from '../services/webauthnConfig';
+import { publicErrorMessage } from '../utils/errors';
 
 /**
  * Middleware that verifies a WebAuthn passkey assertion is present and valid
@@ -144,16 +145,13 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     }
 
     // Verify the WebAuthn assertion cryptographically
-    const rpId = resolveRpId(c.env);
-    const expectedOrigin = resolveOrigin(c.env);
-
     let verification: { verified: boolean; newCounter?: number };
     try {
       verification = await webauthnService.verifyAuthentication({
         assertion,
         expectedChallenge: challenge,
-        expectedOrigin,
-        expectedRPID: rpId,
+        expectedOrigin: allowedWebAuthnOrigins(c.env),
+        expectedRPID: allowedWebAuthnRpIds(c.env),
         credential: {
           id: assertion.id,
           publicKey: passkeyRow.public_key,
@@ -163,7 +161,7 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     } catch (err: any) {
       console.error('[PasskeyAuth] Verification threw:', err);
       return c.json<ErrorResponse>(
-        { error: `Passkey verification failed: ${err.message}`, code: 'VERIFICATION_FAILED' },
+        { error: `Passkey verification failed: ${publicErrorMessage(err)}`, code: 'VERIFICATION_FAILED' },
         403
       );
     }

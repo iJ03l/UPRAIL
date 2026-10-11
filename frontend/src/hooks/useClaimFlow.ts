@@ -17,11 +17,26 @@ import { useXAuth } from './useXAuth';
 
 const PENDING_CACHE_KEY = 'uprail_pending_payments_cache';
 
-function getCachedPending(): PaymentIntent[] {
+/**
+ * Pending payments are PII (recipient handle, amount, memo). The cache is
+ * scoped to the account that wrote it: without that, a session that expired
+ * without an explicit logout left the previous account's payments visible to
+ * whoever signed in next on the same browser.
+ */
+type PendingCache = { owner: string | null; items: PaymentIntent[] };
+
+function getCachedPending(owner: string | null): PaymentIntent[] {
   if (typeof window === 'undefined') return [];
+  if (!owner) return [];
   try {
     const raw = localStorage.getItem(PENDING_CACHE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as PendingCache;
+    if (!parsed || parsed.owner !== owner) {
+      localStorage.removeItem(PENDING_CACHE_KEY);
+      return [];
+    }
+    return Array.isArray(parsed.items) ? parsed.items : [];
   } catch {
     return [];
   }
@@ -32,7 +47,8 @@ let inFlightPendingPromise: Promise<PaymentIntent[]> | null = null;
 export function useClaimFlow(initialCode?: string) {
   const { user } = useXAuth();
 
-  const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>(getCachedPending);
+  const ownerId = user?.id || null;
+  const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>(() => getCachedPending(ownerId));
   const [selectedPayment, setSelectedPayment] = useState<PaymentIntent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
@@ -64,7 +80,10 @@ export function useClaimFlow(initialCode?: string) {
       const payments = await inFlightPendingPromise;
       setPendingPayments(payments);
       try {
-        localStorage.setItem(PENDING_CACHE_KEY, JSON.stringify(payments));
+        localStorage.setItem(
+          PENDING_CACHE_KEY,
+          JSON.stringify({ owner: user?.id || null, items: payments })
+        );
       } catch {}
 
       // 2. If there's an initialCode (e.g. from deep-link /claim/:id), find or fetch it

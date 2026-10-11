@@ -69,8 +69,8 @@ export async function generateRegistrationOptions(params: {
 export async function verifyRegistration(params: {
   attestation: RegistrationResponseJSON;
   expectedChallenge: string;
-  expectedOrigin: string;
-  expectedRPID: string;
+  expectedOrigin: string | string[];
+  expectedRPID: string | string[];
 }) {
   const verification = await verifyRegistrationResponse({
     response: params.attestation,

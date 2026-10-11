@@ -144,6 +144,48 @@ export function toBaseUnits(amountStr: string, decimals: number): string {
   return trimmed || '0';
 }
 
+/**
+ * Resolves a stored or requested asset value onto a registry token.
+ *
+ * Accepted inputs (all mean the same thing to callers): a defuse asset id
+ * (`nep141:usdc...`), a short token id (`usdc`), a bare symbol (`USDC`), or a
+ * NEAR contract id (`wrap.near`). Returns null when nothing matches — callers
+ * must decide how to degrade instead of silently picking tokens[0].
+ */
+export function resolveTokenForAsset(
+  asset: string | null | undefined,
+  tokens: OnchainToken[]
+): OnchainToken | null {
+  const raw = (asset || '').trim();
+  if (!raw || !Array.isArray(tokens) || tokens.length === 0) return null;
+  const lower = raw.toLowerCase();
+
+  const byId = tokens.find((t) => (t.defuse_asset_id || '').toLowerCase() === lower);
+  if (byId) return byId;
+
+  const bySymbol = tokens.find((t) => (t.symbol || '').toLowerCase() === lower);
+  if (bySymbol) return bySymbol;
+
+  const byContract = tokens.find((t) => (t.nearContractId || '').toLowerCase() === lower);
+  if (byContract) return byContract;
+
+  // Defuse ids carry a chain prefix — match on the unprefixed remainder.
+  const suffix = lower.includes(':') ? lower.slice(lower.indexOf(':') + 1) : lower;
+  return (
+    tokens.find((t) => {
+      const contract = (t.nearContractId || '').toLowerCase();
+      const id = (t.defuse_asset_id || '').toLowerCase();
+      return (
+        contract === suffix ||
+        id === suffix ||
+        id.endsWith(`:${suffix}`) ||
+        contract.endsWith(`.${suffix}`) ||
+        suffix.endsWith(`.${contract}`)
+      );
+    }) || null
+  );
+}
+
 function parseDefuseAssetId(id: string): { chain: string; contractId: string } {
   // Formats: "nep141:usdc.token.near" or "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"
   // or "native:near" or "erc20:eth:0xabc..." or "spl:sol:..."
@@ -256,7 +298,9 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
             icon: onchainIcon,
             nearContractId: contractAddress,
             chain: verified?.chain || t.blockchain || parsedChain,
-            priceUsd: typeof t.price === 'number' ? t.price : 1.0,
+            // Absent price stays absent (undefined) — callers decide
+            // whether that means 1.0 (stablecoin) or 0 (unknown).
+            priceUsd: typeof t.price === 'number' ? t.price : undefined,
           });
         }
 
@@ -331,7 +375,6 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
       icon: getOnchainIcon('near'),
       chain: 'near',
       nearContractId: 'wrap.near',
-      priceUsd: 4.75,
     },
     {
       defuse_asset_id: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
@@ -361,7 +404,6 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
       icon: getOnchainIcon('eth.bridge.near'),
       chain: 'near',
       nearContractId: 'eth.bridge.near',
-      priceUsd: 2500.0,
     },
   ];
 }
@@ -421,7 +463,10 @@ export async function getIntentBalances(
       return Object.entries(balances)
         .map(([assetId, rawAmount]: [string, any]) => {
           const token = tokenMap.get(assetId);
-          const decimals = token?.decimals ?? 6;
+          // Unknown asset: don't assume 6 (that would render a 24-decimal
+          // NEAR-like balance 10^18× too large). NEAR-native wrapped assets
+          // are 24, everything else defaults to the EVM-familiar 18.
+          const decimals = token?.decimals ?? (assetId.includes('wrap.near') ? 24 : 18);
           const amtStr = String(rawAmount ?? '0');
           return {
             defuse_asset_id: assetId,

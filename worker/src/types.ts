@@ -17,6 +17,9 @@ export interface Env {
   DB: D1Database;
   CACHE: KVNamespace;
   ASSETS?: Fetcher;
+  // Optional: only present in deployments that still run the settlement
+  // service as a Worker container. Free-tier deployments leave these unset
+  // and reach the Go service directly through SETTLEMENT_SERVICE_URL.
   ESCROW?: DurableObjectNamespace;
   NEAR_CONTAINER?: DurableObjectNamespace;
 
@@ -46,6 +49,8 @@ export interface Env {
   SESSION_SECRET?: string;
   INTERNAL_SERVICE_KEY?: string;
   DATABASE_URL?: string;
+  /** Base URL of the Go settlement service, e.g. https://go.internal.example */
+  SETTLEMENT_SERVICE_URL?: string;
 }
 
 /**

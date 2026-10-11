@@ -1,9 +1,16 @@
 /**
- * Proxy service to the Go settlement service via the NearContainer Durable Object.
+ * Proxy service to the Go settlement service.
  *
  * The Go service is the ONLY settlement implementation — there is no TypeScript
- * fallback. If the container binding (or the shared secret) is missing, these
- * calls fail closed instead of settling funds some other way.
+ * fallback. Two transports are supported, in order:
+ *
+ *   1. `SETTLEMENT_SERVICE_URL` — direct HTTPS to the Go service. Used by
+ *      free-tier deployments that do not (and cannot) run Worker containers.
+ *   2. `NEAR_CONTAINER` — the Go service behind a Worker container, used by
+ *      deployments that still declare that binding.
+ *
+ * If neither is available (or the shared secret is missing), these calls fail
+ * closed instead of settling funds some other way.
  */
 
 import type { Env, QuoteResponse } from '../types';
@@ -36,21 +43,39 @@ export interface TxResult {
 }
 
 /**
- * Obtain the singleton NearContainer DO stub
+ * Base URL of the external Go settlement service, or null when unset.
+ * Trailing slashes are stripped so callers can append the path directly.
  */
-export function getNearContainer(env: Env) {
-  if (!env.NEAR_CONTAINER) return null;
-  const id = env.NEAR_CONTAINER.idFromName('near-service-singleton');
-  return env.NEAR_CONTAINER.get(id);
+export function getSettlementBaseUrl(env: Env): string | null {
+  const raw = (env.SETTLEMENT_SERVICE_URL || '').trim();
+  if (!raw) return null;
+  if (!/^https?:\/\//i.test(raw)) {
+    throw new Error('SETTLEMENT_SERVICE_URL must be an absolute http(s) URL');
+  }
+  return raw.replace(/\/+$/, '');
 }
 
-/** Fails closed: settlement requires the Go container binding. */
-function requireContainer(env: Env) {
-  const container = getNearContainer(env);
-  if (!container) {
-    throw new Error('Settlement service unavailable: NEAR_CONTAINER binding is not configured');
+/**
+ * Sends a signed internal request to the Go settlement service.
+ *
+ * The signature covers only `METHOD . path . body-hash`, so re-targeting the
+ * host here does not invalidate it.
+ */
+async function settlementFetch(env: Env, request: Request): Promise<Response> {
+  const baseUrl = getSettlementBaseUrl(env);
+  if (baseUrl) {
+    const { pathname, search } = new URL(request.url);
+    return await fetch(new Request(`${baseUrl}${pathname}${search}`, request));
   }
-  return container;
+
+  if (env.NEAR_CONTAINER) {
+    const id = env.NEAR_CONTAINER.idFromName('near-service-singleton');
+    return await env.NEAR_CONTAINER.get(id).fetch(request);
+  }
+
+  throw new Error(
+    'Settlement service unavailable: SETTLEMENT_SERVICE_URL is not configured'
+  );
 }
 
 /**
@@ -72,7 +97,6 @@ export async function quote(
     signing?: { recipient: string; amount: string };
   }
 ): Promise<QuoteResponse> {
-  const container = requireContainer(env);
 
   const request = await signedInternalRequest(env, '/internal/quote', {
     originAsset: params.asset,
@@ -82,7 +106,7 @@ export async function quote(
     confidentiality: params.confidentiality || 'advanced',
   });
 
-  const response = await container.fetch(request);
+  const response = await settlementFetch(env, request);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -125,7 +149,6 @@ export async function quote(
  * Execute confidential NEAR transfer to recipient passkey account
  */
 export async function transfer(env: Env, params: TransferParams): Promise<TxResult> {
-  const container = requireContainer(env);
 
   const request = await signedInternalRequest(env, '/internal/transfer', {
     recipient: params.recipientNearAccount,
@@ -137,7 +160,7 @@ export async function transfer(env: Env, params: TransferParams): Promise<TxResu
     paymentId: params.paymentId,
   });
 
-  const response = await container.fetch(request);
+  const response = await settlementFetch(env, request);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -156,7 +179,6 @@ export async function transfer(env: Env, params: TransferParams): Promise<TxResu
  * Execute confidential NEAR refund upon expiry (30-day alarm)
  */
 export async function refund(env: Env, params: RefundParams): Promise<TxResult> {
-  const container = requireContainer(env);
 
   // Fail closed: a refund must go back to the original sender's account.
   // Defaulting to the escrow account would strand the funds (the settlement
@@ -175,7 +197,7 @@ export async function refund(env: Env, params: RefundParams): Promise<TxResult> 
     paymentId: params.paymentId,
   });
 
-  const response = await container.fetch(request);
+  const response = await settlementFetch(env, request);
 
   if (!response.ok) {
     const errorText = await response.text();

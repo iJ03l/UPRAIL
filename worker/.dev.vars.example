@@ -13,9 +13,16 @@ X_CLIENT_SECRET=""
 # Must be a long random string, e.g. `openssl rand -hex 32`
 SESSION_SECRET=""
 
-# Shared secret between this worker and the Go settlement service
-# (header `X-Internal-Secret`). Must match the Go service's INTERNAL_SERVICE_KEY.
+# Shared secret between this worker and the Go settlement service.
+# Used to sign every internal request (X-Internal-Timestamp / -Nonce /
+# -Signature HMAC scheme) — a bare X-Internal-Secret header is rejected.
+# Must match the Go service's INTERNAL_SERVICE_KEY.
 INTERNAL_SERVICE_KEY=""
+
+# Base URL of the Go settlement service, e.g. https://go.internal.example
+# The worker calls it directly when no NEAR_CONTAINER binding exists.
+# Set with: wrangler secret put SETTLEMENT_SERVICE_URL
+SETTLEMENT_SERVICE_URL=""
 
 # Escrow root key (`ed25519:...`). Derives every user's vault key via
 # HMAC(ESCROW_PRIVATE_KEY, "near_vault_key:" + x_id). Rotating it invalidates

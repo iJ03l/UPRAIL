@@ -19,7 +19,7 @@ import {
 import { requireAuth } from '../middleware/session';
 import { updateSession } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
-import { resolveOrigin, resolveRpId } from '../services/webauthnConfig';
+import { resolveOrigin, resolveRpId, allowedWebAuthnOrigins, allowedWebAuthnRpIds } from '../services/webauthnConfig';
 import * as webauthn from '../services/webauthn';
 import * as nearProxy from '../services/nearProxy';
 import * as nearRpc from '../services/nearRpc';
@@ -39,6 +39,7 @@ import {
   get1ClickWithdrawalQuote,
   submit1ClickDeposit,
 } from '../services/oneclickWithdraw';
+import { publicErrorMessage } from '../utils/errors';
 
 export const claimRouter = new Hono<AppContext>();
 
@@ -101,8 +102,7 @@ claimRouter.get('/pending', requireAuth(), async (c) => {
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
-      WHERE recipient_x_id = ?
-         OR LOWER(recipient_handle) = ?
+      WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = ?)
         AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED')
       ORDER BY created_at DESC
     `
@@ -204,15 +204,13 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       );
     }
 
-    const rpId = resolveRpId(c.env);
-    const expectedOrigin = resolveOrigin(c.env);
-
-    // Verify attestation and extract P-256 public key
+    // Verify attestation with the same origin/rpId policy used for login:
+    // the configured origin exactly (localhost ports allowed in local dev).
     const verification = await webauthn.verifyRegistration({
       attestation: body.attestation,
       expectedChallenge,
-      expectedOrigin,
-      expectedRPID: rpId,
+      expectedOrigin: allowedWebAuthnOrigins(c.env),
+      expectedRPID: allowedWebAuthnRpIds(c.env),
     });
 
     // Derive deterministic, blinded confidential sub-account from passkey public key
@@ -305,7 +303,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     console.error('Passkey registration error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Passkey registration failed: ${err.message || 'Internal error'}`,
+        error: `Passkey registration failed: ${publicErrorMessage(err, 'Internal error')})`,
         code: 'REGISTRATION_FAILED',
       },
       500
@@ -526,7 +524,7 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
         results.push({
           paymentId,
           status: payment?.status || PaymentStatus.ESCROWED,
-          error: err.message || 'Claim transfer failed',
+          error: publicErrorMessage(err, 'Claim transfer failed'),
         });
       }
     }
@@ -535,7 +533,7 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
   } catch (err: any) {
     console.error('Execute claims error:', err);
     return c.json<ErrorResponse>(
-      { error: err.message || 'Claim execution failed', code: 'CLAIM_FAILED' },
+      { error: publicErrorMessage(err, 'Claim execution failed'), code: 'CLAIM_FAILED' },
       500
     );
   }
@@ -587,15 +585,29 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
       }
     }
 
+    // Format into ShieldedBalance[] expected by frontend.
+    const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => [] as nearRpc.OnchainToken[]);
+
+    // Canonical key so `usdc`, `USDC` and `nep141:1720…` collapse into one
+    // entry instead of being counted as separate assets (which both hid
+    // balances and double-counted the same funds).
+    const canonicalKey = (asset: string): string => {
+      const matched = nearRpc.resolveTokenForAsset(asset, tokens);
+      return (matched?.defuse_asset_id || asset || '').toLowerCase();
+    };
+
     // Net balance calculation per asset
     const netBalances: Record<string, number> = {};
+    const addAmount = (asset: string, delta: number) => {
+      const key = canonicalKey(asset);
+      if (!key) return;
+      netBalances[key] = Math.max(0, (netBalances[key] || 0) + delta);
+    };
     for (const r of claimedRows) {
-      const a = (r.asset || 'usdc').toLowerCase();
-      netBalances[a] = (netBalances[a] || 0) + (parseFloat(r.amount) || 0);
+      addAmount(r.asset || 'usdc', parseFloat(r.amount) || 0);
     }
     for (const w of withdrawnRows) {
-      const a = (w.asset || 'usdc').toLowerCase();
-      netBalances[a] = Math.max(0, (netBalances[a] || 0) - (parseFloat(w.amount) || 0));
+      addAmount(w.asset || 'usdc', -(parseFloat(w.amount) || 0));
     }
 
     // 3. Query onchain balances if available
@@ -605,43 +617,38 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     } catch {}
 
     for (const ob of onchainBalances) {
-      const sym = ob.symbol.toLowerCase();
       const amt = parseFloat(ob.amountFormatted) || 0;
-      if (amt > (netBalances[sym] || 0)) {
-        netBalances[sym] = amt;
+      if (amt <= 0) continue;
+      // Merge by canonical id, not by symbol: symbol-keyed rows never met the
+      // id-keyed rows above, so the same asset was reported twice.
+      const key = canonicalKey(ob.defuse_asset_id || ob.symbol);
+      if (amt > (netBalances[key] || 0)) {
+        netBalances[key] = amt;
       }
     }
-
-    // Format into ShieldedBalance[] expected by frontend
-    const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => []);
-    const tokenMap = new Map(tokens.map((t) => [t.symbol.toLowerCase(), t]));
 
     let shieldedBalances = Object.entries(netBalances)
       .filter(([_, amt]) => amt > 0)
       .map(([assetKey, amt]) => {
-        const matchedToken = tokenMap.get(assetKey);
-        const symbol = matchedToken?.symbol || assetKey.toUpperCase();
-        const priceUsd =
-          matchedToken?.priceUsd ||
-          (assetKey === 'usdc' || assetKey === 'usdt' ? 1.0 : assetKey === 'near' ? 5.85 : 1.0);
+        const matchedToken = nearRpc.resolveTokenForAsset(assetKey, tokens);
+        const symbol = matchedToken?.symbol || assetKey.split(':').pop()?.toUpperCase() || assetKey.toUpperCase();
+        // Only USD-pegged assets get a hard-coded 1.0. Everything else uses
+        // the live registry price and is reported as 0 when unknown — never a
+        // made-up price, which produced confidently wrong totals.
+        const isStable = ['usdc', 'usdt', 'dai', 'frax', 'busd', 'ustc'].includes(symbol.toLowerCase());
+        const priceUsd = matchedToken?.priceUsd ?? (isStable ? 1 : 0);
         return {
           token: {
             id: assetKey,
             symbol,
-            name: matchedToken?.name || (symbol === 'USDC' ? 'USD Coin' : symbol),
-            decimals: matchedToken?.decimals || 6,
-            iconUrl:
-              matchedToken?.icon ||
-              (assetKey === 'near'
-                ? 'https://cryptologos.cc/logos/near-protocol-near-logo.png'
-                : 'https://assets.coingecko.com/coins/images/6319/large/usdc.png'),
+            name: matchedToken?.name || symbol,
+            decimals: matchedToken?.decimals ?? (assetKey.includes('wrap.near') ? 24 : 18),
+            iconUrl: matchedToken?.icon || '',
             priceUsd,
             chain: matchedToken?.chain || 'near',
-            nearContractId:
-              matchedToken?.nearContractId ||
-              (assetKey === 'near' ? 'wrap.near' : '17208628f84f5d63102dcae484dae36a3998f54c.factory.bridge.near'),
+            nearContractId: matchedToken?.nearContractId || '',
           },
-          amount: amt.toFixed(2),
+          amount: amt >= 0.01 ? amt.toFixed(2) : String(amt),
           amountUsd: amt * priceUsd,
         };
       });
@@ -665,7 +672,7 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     console.error('Balance read error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Failed to read confidential balance: ${err.message || 'Internal error'}`,
+        error: `Failed to read confidential balance: ${publicErrorMessage(err, 'Internal error')})`,
         code: 'BALANCE_ERROR',
       },
       500
@@ -889,7 +896,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
   } catch (err: any) {
     console.error('Withdrawal error:', err);
     return c.json<ErrorResponse>(
-      { error: `Withdrawal failed: ${err.message || 'Internal error'}`, code: 'WITHDRAWAL_FAILED' },
+      { error: `Withdrawal failed: ${publicErrorMessage(err, 'Internal error')})`, code: 'WITHDRAWAL_FAILED' },
       500
     );
   }

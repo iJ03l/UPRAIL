@@ -12,6 +12,7 @@ import {
   redeemInvite,
   isUserActivated,
 } from '../services/inviteService';
+import { publicErrorMessage } from '../utils/errors';
 
 export const invitesRouter = new Hono<AppContext>();
 
@@ -28,7 +29,7 @@ invitesRouter.get('/my-invite', requireAuth(), async (c) => {
   } catch (err: any) {
     console.error('Failed to get user invite:', err);
     return c.json<ErrorResponse>(
-      { error: err.message || 'Failed to retrieve invite details', code: 'INVITE_GET_ERROR' },
+      { error: publicErrorMessage(err, 'Failed to retrieve invite details'), code: 'INVITE_GET_ERROR' },
       500
     );
   }
@@ -52,7 +53,7 @@ invitesRouter.get('/status', async (c) => {
     });
   } catch (err: any) {
     return c.json<ErrorResponse>(
-      { error: err.message || 'Failed to check status', code: 'STATUS_ERROR' },
+      { error: publicErrorMessage(err, 'Failed to check status'), code: 'STATUS_ERROR' },
       500
     );
   }
@@ -87,7 +88,7 @@ invitesRouter.post('/validate', async (c) => {
     });
   } catch (err: any) {
     return c.json<ErrorResponse>(
-      { error: err.message || 'Validation error', code: 'VALIDATION_ERROR' },
+      { error: publicErrorMessage(err, 'Validation error'), code: 'VALIDATION_ERROR' },
       500
     );
   }
@@ -123,7 +124,7 @@ invitesRouter.post('/redeem', requireAuth(), async (c) => {
   } catch (err: any) {
     console.error('Invite redemption error:', err);
     return c.json<ErrorResponse>(
-      { error: err.message || 'Failed to redeem invite code', code: 'REDEEM_ERROR' },
+      { error: publicErrorMessage(err, 'Failed to redeem invite code'), code: 'REDEEM_ERROR' },
       400
     );
   }

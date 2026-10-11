@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Token, PaymentQuote, PaymentIntent } from '../types';
-import { api, SUPPORTED_TOKENS, normalizeRecipientInput } from '../lib/api';
+import { api, SUPPORTED_TOKENS, normalizeRecipientInput, tokenUsdPrice } from '../lib/api';
 import { usePasskeyTxAuth } from './usePasskeyTxAuth';
 import { useOnchainData } from './useOnchainData';
 
@@ -50,7 +50,7 @@ export function usePayments() {
           name: ot.name,
           iconUrl: ot.iconUrl,
           decimals: ot.decimals,
-          priceUsd: (ot as any).priceUsd || (ot.symbol === 'NEAR' ? 5.42 : ot.symbol === 'ETH' ? 2500 : ot.symbol === 'BTC' ? 82000 : 1.0),
+          priceUsd: tokenUsdPrice(ot as any),
           nearContractId: ot.nearContractId,
           chain: ot.chain || 'near',
           badge: (ot.chain || 'near').toUpperCase(),
@@ -152,6 +152,65 @@ export function usePayments() {
     }
   };
 
+  /**
+   * "Send to Wallet": settles from the caller's OWN shielded balance to an
+   * external chain address (NEAR / EVM / Solana / Bitcoin) through the 1Click
+   * withdrawal path.
+   *
+   * Deliberately NOT createPayment(): a payment addressed to a raw wallet
+   * address has no recipient handle and no x_identities row, so nothing could
+   * ever claim it — the funds would sit in escrow until expiry.
+   */
+  const sendToWallet = async (
+    destinationAddress: string,
+    amount: string,
+    asset?: string
+  ): Promise<{ txHash: string; withdrawalId?: string; destinationAddress: string }> => {
+    try {
+      setIsSubmitting(true);
+      setError(null);
+
+      const destination = (destinationAddress || '').trim();
+      if (destination.length < 5) {
+        throw new Error('Please enter a valid wallet address');
+      }
+      if (!amount || parseFloat(amount) <= 0) {
+        throw new Error('Please enter a valid amount to send');
+      }
+
+      const tokenId = asset || selectedToken.id;
+      let assertion: unknown = undefined;
+      try {
+        assertion = await authorizeWithPasskey(
+          `Send ${amount} ${selectedToken.symbol} to ${destination}`
+        );
+      } catch (authErr: any) {
+        const msg = authErr?.message || 'Passkey authorization cancelled';
+        setError(msg);
+        throw new Error(msg);
+      }
+
+      const result = await api.withdraw({
+        destinationAddress: destination,
+        asset: tokenId,
+        amount,
+        passkeyAssertion: assertion,
+      });
+
+      return {
+        txHash: result.txHash,
+        withdrawalId: result.withdrawalId,
+        destinationAddress: result.destinationAddress,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Wallet send failed';
+      setError(msg);
+      throw err;
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Load history
   const loadHistory = useCallback(async () => {
     try {
@@ -186,6 +245,7 @@ export function usePayments() {
     isLoadingHistory,
     updateQuote,
     sendPayment,
+    sendToWallet,
     loadHistory,
     resetCreatedPayment,
     clearError: () => setError(null),

@@ -56,8 +56,11 @@ export interface UseOnchainDataResult {
   error: string | null;
 }
 
-// Simple USD price oracle for display (real prices should come from a price feed)
-// Using approximate market prices; in production connect to a price feed
+/**
+ * Offline-only fallback prices, used when the live token registry gave us
+ * nothing. Live registry prices always win — this map used to be THE source,
+ * so the dashboard total was pinned to stale numbers (NEAR $5.85, ETH $3450).
+ */
 const PRICE_ORACLE: Record<string, number> = {
   usdc: 1.0,
   usdt: 1.0,
@@ -74,16 +77,26 @@ const PRICE_ORACLE: Record<string, number> = {
   op: 1.8,
 };
 
-function estimateUsd(symbol: string, amountFormatted: string): number {
-  const price = PRICE_ORACLE[symbol.toLowerCase()] ?? 0;
+const STABLE_SYMBOLS = new Set(['USDC', 'USDT', 'DAI', 'FRAX', 'BUSD', 'USDG', 'PYUSD', 'USDBC']);
+
+function estimateUsd(symbol: string, amountFormatted: string, tokens: OnchainToken[] = []): number {
   const amount = parseFloat(amountFormatted) || 0;
-  return amount * price;
+  if (amount <= 0) return 0;
+  const sym = (symbol || '').trim();
+
+  const live = tokens.find((t) => (t.symbol || '').toLowerCase() === sym.toLowerCase())?.priceUsd;
+  if (typeof live === 'number' && isFinite(live) && live > 0) return amount * live;
+  if (STABLE_SYMBOLS.has(sym.toUpperCase())) return amount;
+
+  const fallback = PRICE_ORACLE[sym.toLowerCase()];
+  return amount * (typeof fallback === 'number' ? fallback : 0);
 }
 
 // ── Shared SWR Module Cache ─────────────────────────────────────────────────
 const CACHE_KEY = 'uprail_onchain_cache';
 
 interface OnchainCache {
+  owner: string | null;
   tokens: OnchainToken[];
   balances: OnchainBalance[];
   nearAccount: string | null;
@@ -92,7 +105,26 @@ interface OnchainCache {
   transactions: OnchainTx[];
 }
 
+/**
+ * Balances are PII for a privacy product. The snapshot is tagged with the
+ * account that wrote it and dropped on read when a different account (or no
+ * account) is signed in — an expired session that never hit "logout" used to
+ * leave the previous user's balances on screen for the next sign-in.
+ */
+function cacheOwnerId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('uprail_x_user') || localStorage.getItem('uprail_user_cache_v1');
+    if (!raw) return null;
+    const u = JSON.parse(raw);
+    return u && u.id ? String(u.id) : null;
+  } catch {
+    return null;
+  }
+}
+
 let globalCache: OnchainCache = {
+  owner: null,
   tokens: [],
   balances: [],
   nearAccount: null,
@@ -107,13 +139,27 @@ try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed) globalCache = { ...globalCache, ...parsed };
+      const owner = cacheOwnerId();
+      if (parsed && parsed.owner === owner) {
+        globalCache = { ...globalCache, ...parsed };
+      } else {
+        // Not ours (or no account signed in) — never surface it.
+        localStorage.removeItem(CACHE_KEY);
+      }
     }
   }
 } catch {}
 
 function persistCache(patch: Partial<OnchainCache>) {
-  globalCache = { ...globalCache, ...patch };
+  const owner = cacheOwnerId();
+  // Never persist across accounts: a snapshot written by user A must not be
+  // readable after user B signs in on the same browser.
+  if (globalCache.owner && owner && globalCache.owner !== owner) {
+    globalCache = { owner, tokens: [], balances: [], nearAccount: null, hasIntentAccount: false, depositAddresses: [], transactions: [] };
+  } else if (!globalCache.owner && owner) {
+    globalCache = { ...globalCache, owner };
+  }
+  globalCache = { ...globalCache, ...patch, owner };
   try {
     if (typeof window !== 'undefined') {
       localStorage.setItem(CACHE_KEY, JSON.stringify(globalCache));
@@ -280,7 +326,7 @@ export function useOnchainData(): UseOnchainDataResult {
 
   // ── Compute total balance USD ─────────────────────────────────────────────
   const totalBalanceUsd = balances.reduce(
-    (acc, b) => acc + estimateUsd(b.symbol, b.amountFormatted),
+    (acc, b) => acc + estimateUsd(b.symbol, b.amountFormatted, tokens),
     0
   );
 

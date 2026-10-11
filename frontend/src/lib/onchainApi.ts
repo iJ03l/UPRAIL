@@ -30,6 +30,8 @@ export interface OnchainToken {
   chainId?: string;
   badge?: string;
   balance?: string;
+  /** Live USD price from the token registry; absent when unknown. */
+  priceUsd?: number;
 }
 
 export interface OnchainBalance {
@@ -127,6 +129,7 @@ export async function fetchOnchainTokens(): Promise<OnchainToken[]> {
     chainId: t.chainId,
     badge: t.badge,
     balance: '0.00',
+    priceUsd: typeof t.priceUsd === 'number' ? t.priceUsd : undefined,
   }));
 }
 

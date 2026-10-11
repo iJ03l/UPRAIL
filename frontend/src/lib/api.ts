@@ -140,9 +140,9 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
     recipientHandle: p.recipient_handle || '',
     token,
     amount: p.amount,
-    amountUsd: numAmount * token.priceUsd,
+    amountUsd: numAmount * tokenUsdPrice(token),
     fee,
-    feeUsd: (parseFloat(fee) || 0) * token.priceUsd,
+    feeUsd: (parseFloat(fee) || 0) * tokenUsdPrice(token),
     feeRecipient: p.fee_recipient || 'fees.uprail.near',
     inviteCode: p.invite_code || undefined,
     memo: p.memo || '',
@@ -155,6 +155,21 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
   };
 }
 
+/**
+ * USD price to display for a token.
+ *
+ * Uses the live registry price when the backend supplied one. Stablecoins are
+ * pinned to 1.0 (they ARE dollars). Anything else with no price reports 0 —
+ * never a made-up number, which used to render 1 NEAR as $1.00 and made the
+ * dashboard totals confidently wrong.
+ */
+const STABLE_SYMBOLS = new Set(['USDC', 'USDT', 'DAI', 'FRAX', 'BUSD', 'USDG', 'PYUSD', 'USDBC']);
+export function tokenUsdPrice(token: { symbol?: string; priceUsd?: number } | null | undefined): number {
+  const p = token?.priceUsd;
+  if (typeof p === 'number' && isFinite(p) && p > 0) return p;
+  return STABLE_SYMBOLS.has((token?.symbol || '').trim().toUpperCase()) ? 1 : 0;
+}
+
 const API_BASE =
   (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL) ||
   (typeof process !== 'undefined' && process.env?.API_URL) ||
@@ -162,7 +177,12 @@ const API_BASE =
 
 import { getOnchainIcon } from './onchainIcons';
 
-// Built-in supported tokens for NEAR Confidential Intents
+/**
+ * Offline fallback token list, used ONLY when both `/api/tokens` and the
+ * onchain registry are unreachable. Prices here are deliberate last-resort
+ * estimates for rendering something instead of `$NaN` — live registry prices
+ * always win (see `tokenUsdPrice()`).
+ */
 export const SUPPORTED_TOKENS: Token[] = [
   {
     id: 'nep141:wrap.near',
@@ -409,7 +429,7 @@ export const api = {
               name,
               iconUrl,
               decimals: t.decimals ?? (isNativeNear ? 24 : 18),
-              priceUsd: t.priceUsd ?? 1.0,
+              priceUsd: t.priceUsd ?? (STABLE_SYMBOLS.has((t.symbol || '').trim().toUpperCase()) ? 1 : 0),
               nearContractId: t.nearContractId || (isNativeNear ? 'wrap.near' : ''),
               chain: tokenChain,
               badge: t.badge || tokenChain.toUpperCase(),
@@ -448,7 +468,7 @@ export const api = {
     const numAmount = parseFloat(amount) || 0;
     const tokens = await api.getTokens();
     const token = tokens.find((t) => t.id === tokenId || t.symbol.toLowerCase() === tokenId.toLowerCase()) || tokens[0] || SUPPORTED_TOKENS[0];
-    const amountUsd = numAmount * (token.priceUsd || 1.0);
+    const amountUsd = numAmount * tokenUsdPrice(token);
 
     try {
       const url = API_BASE ? `${API_BASE}/api/quote` : '/api/quote';
@@ -465,9 +485,9 @@ export const api = {
       if (res.ok) {
         const q = await res.json();
         const networkFee = q.estimatedFees || (token.id.includes('near') ? '0.005' : '0.01');
-        const networkFeeUsd = parseFloat(networkFee) * (token.priceUsd || 1.0);
+        const networkFeeUsd = parseFloat(networkFee) * tokenUsdPrice(token);
         const protocolFee = q.protocolFee !== undefined ? q.protocolFee : (numAmount * 0.008).toFixed(6).replace(/\.?0+$/, '') || '0';
-        const protocolFeeUsd = parseFloat(protocolFee) * (token.priceUsd || 1.0);
+        const protocolFeeUsd = parseFloat(protocolFee) * tokenUsdPrice(token);
         const protocolFeeRecipient = q.feeRecipient || 'fees.uprail.near';
         const totalAmount = (numAmount + parseFloat(networkFee) + parseFloat(protocolFee)).toFixed(token.decimals > 6 ? 4 : 2);
         const totalUsd = amountUsd + networkFeeUsd + protocolFeeUsd;
@@ -495,9 +515,9 @@ export const api = {
     }
 
     const networkFee = token.id.includes('near') ? '0.005' : '0.01';
-    const networkFeeUsd = parseFloat(networkFee) * (token.priceUsd || 1.0);
+    const networkFeeUsd = parseFloat(networkFee) * tokenUsdPrice(token);
     const protocolFee = (numAmount * 0.008).toFixed(6).replace(/\.?0+$/, '') || '0';
-    const protocolFeeUsd = parseFloat(protocolFee) * (token.priceUsd || 1.0);
+    const protocolFeeUsd = parseFloat(protocolFee) * tokenUsdPrice(token);
     const protocolFeeRecipient = 'fees.uprail.near';
     const totalAmount = (numAmount + parseFloat(networkFee) + parseFloat(protocolFee)).toFixed(token.decimals > 6 ? 4 : 2);
     const totalUsd = amountUsd + networkFeeUsd + protocolFeeUsd;
@@ -531,6 +551,9 @@ export const api = {
       const q = await api.getQuote(params.tokenId, params.amount, cleanHandle);
       quoteSignature = q.quoteSignature;
       depositAddress = q.depositAddress;
+      // Send exactly the asset id the quote was signed for — /api/send
+      // verifies the signature with an exact (non-fuzzy) asset comparison.
+      params = { ...params, tokenId: q.token.id };
     }
 
     if (!quoteSignature) {
@@ -565,9 +588,9 @@ export const api = {
         recipientHandle: cleanHandle,
         token,
         amount: params.amount,
-        amountUsd: numAmount * (token.priceUsd || 1.0),
+        amountUsd: numAmount * tokenUsdPrice(token),
         fee: backendData.fee || '0',
-        feeUsd: (parseFloat(backendData.fee || '0')) * (token.priceUsd || 1.0),
+        feeUsd: (parseFloat(backendData.fee || '0')) * tokenUsdPrice(token),
         feeRecipient: backendData.feeRecipient || 'fees.uprail.near',
         inviteCode: backendData.inviteCode,
         memo: params.memo || '',

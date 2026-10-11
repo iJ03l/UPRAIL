@@ -23,6 +23,7 @@ import { healthRouter } from './routes/health';
 import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
 import { issueTxChallenge } from './middleware/passkeyAuth';
+import { publicErrorMessage } from './utils/errors';
 
 // Export Durable Object classes for runtime
 export { EscrowDO } from './durable-objects/escrow';
@@ -143,7 +144,7 @@ app.onError((err, c) => {
   console.error('[Unhandled Error]:', err);
   return c.json<ErrorResponse>(
     {
-      error: err.message || 'Internal Server Error',
+      error: publicErrorMessage(err, 'Internal Server Error'),
       code: 'INTERNAL_SERVER_ERROR',
     },
     500

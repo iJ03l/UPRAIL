@@ -31,3 +31,39 @@ export function resolveOrigin(env: WebAuthnEnv | Env): string {
   const value = env.WEBAUTHN_ORIGIN?.trim();
   return value && value.length > 0 ? value.replace(/\/+$/, '') : DEFAULT_ORIGIN;
 }
+
+/** True when the configured origin points at a local dev server. */
+function isLocalOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Origins a WebAuthn assertion may legitimately come from.
+ *
+ * Production: exactly the configured origin — nothing else. Hardcoding extra
+ * hosts (other subdomains, the apex, localhost) would let an assertion minted
+ * anywhere else be accepted as a login.
+ *
+ * Local development: the configured localhost port plus the ports the dev
+ * servers actually run on, since the browser fixes a passkey's rpId/origin at
+ * creation time and the operator may run the frontend on a different port.
+ */
+export function allowedWebAuthnOrigins(env: WebAuthnEnv | Env): string[] {
+  const origin = resolveOrigin(env);
+  if (!isLocalOrigin(origin)) return [origin];
+  const host = new URL(origin).hostname;
+  return Array.from(new Set([origin, `http://${host}:3000`, `http://${host}:5173`, `http://${host}:8787`]));
+}
+
+/** rpIds accepted when verifying an assertion — mirrors allowedWebAuthnOrigins. */
+export function allowedWebAuthnRpIds(env: WebAuthnEnv | Env): string[] {
+  const rpId = resolveRpId(env);
+  const origin = resolveOrigin(env);
+  if (!isLocalOrigin(origin)) return [rpId];
+  return Array.from(new Set([rpId, 'localhost', '127.0.0.1']));
+}

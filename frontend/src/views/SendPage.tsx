@@ -27,6 +27,7 @@ export const SendPage: React.FC = () => {
     isSubmitting,
     error,
     sendPayment,
+    sendToWallet,
     updateQuote,
     clearError,
   } = usePayments();
@@ -55,13 +56,26 @@ export const SendPage: React.FC = () => {
     if (!amount || parseFloat(amount) <= 0) return;
 
     try {
+      if (sendMode === 'wallet') {
+        // Withdraw own shielded balance to the destination chain — never a
+        // payment row, which no one would be able to claim.
+        const result = await sendToWallet(target, amount, selectedToken.id);
+        setCreatedPayment(null);
+        setSuccessToast(
+          `Sent ${amount} ${selectedToken.symbol} to ${target.slice(0, 12)}… · tx ${result.txHash.slice(0, 10)}…`
+        );
+        setRecipient('');
+        setWalletAddress('');
+        setAmount('');
+        setMemo('');
+        return;
+      }
+
       const payment = await sendPayment(target, amount, memo);
       setCreatedPayment(payment);
       setShowShareModal(true);
       setSuccessToast(
-        sendMode === 'handle'
-          ? `Successfully sent ${payment.amount} ${payment.token.symbol} to @${payment.recipientHandle}!`
-          : `Intent executed! Sent ${payment.amount} ${payment.token.symbol} to ${target.slice(0, 10)}...`
+        `Successfully sent ${payment.amount} ${payment.token.symbol} to @${payment.recipientHandle}!`
       );
       setRecipient('');
       setWalletAddress('');
@@ -105,7 +119,7 @@ export const SendPage: React.FC = () => {
             <CheckCircle2 className="w-4 h-4 text-stone-900 flex-shrink-0" />
             <span className="font-medium">{successToast}</span>
           </div>
-          {createdPayment && (
+          {createdPayment && sendMode === 'handle' && (
             <button
               onClick={() => setShowShareModal(true)}
               className="ml-3 font-bold text-stone-900 underline hover:text-black cursor-pointer"

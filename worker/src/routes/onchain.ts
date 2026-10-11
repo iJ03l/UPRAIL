@@ -17,6 +17,7 @@ import { Hono } from 'hono';
 import type { AppContext, ErrorResponse, Session } from '../types';
 import { requireAuth } from '../middleware/session';
 import * as nearRpc from '../services/nearRpc';
+import { publicErrorMessage } from '../utils/errors';
 
 export const onchainRouter = new Hono<AppContext>();
 
@@ -34,7 +35,7 @@ onchainRouter.get('/tokens', async (c) => {
   } catch (err: any) {
     console.error('[onchain/tokens] error:', err);
     return c.json<ErrorResponse>(
-      { error: `Failed to fetch onchain token list: ${err.message}`, code: 'ONCHAIN_TOKENS_ERROR' },
+      { error: `Failed to fetch onchain token list: ${publicErrorMessage(err)}`, code: 'ONCHAIN_TOKENS_ERROR' },
       500
     );
   }
@@ -87,21 +88,35 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
           netVirtual[a] = Math.max(0, (netVirtual[a] || 0) - (parseFloat(row.amount) || 0));
         }
 
+        // Virtual balances must carry the SAME id/symbol/decimals as the real
+        // onchain entry, otherwise the asset shows up twice (once real, once
+        // synthetic) and NEAR was rendered with 6 decimals instead of 24.
+        const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => [] as nearRpc.OnchainToken[]);
         for (const [asset, netAmt] of Object.entries(netVirtual)) {
           if (netAmt <= 0) continue;
+          const token = nearRpc.resolveTokenForAsset(asset, tokens);
+          const defuseId = (token?.defuse_asset_id || asset).toLowerCase();
+          const symbol = (token?.symbol || asset).toUpperCase();
+
           const existing = balances.find(
-            (b) => b.symbol?.toLowerCase() === asset || b.defuse_asset_id?.toLowerCase().includes(asset)
+            (b) =>
+              (b.defuse_asset_id || '').toLowerCase() === defuseId ||
+              (b.symbol || '').toLowerCase() === symbol.toLowerCase()
           );
-          if (!existing) {
-            balances.push({
-              defuse_asset_id: asset === 'near' ? 'wrap.near' : `nep141:${asset}.token.near`,
-              symbol: asset.toUpperCase(),
-              amount: (netAmt * 1000000).toString(),
-              amountFormatted: netAmt.toFixed(2),
-              decimals: 6,
-              nearContractId: asset === 'near' ? 'wrap.near' : `${asset}.token.near`,
-            });
-          }
+          if (existing) continue;
+
+          const decimals = token?.decimals ?? (defuseId.includes('wrap.near') ? 24 : 18);
+          const baseUnits = nearRpc.toBaseUnits(netAmt.toFixed(Math.min(decimals, 18)), decimals);
+
+          balances.push({
+            defuse_asset_id: defuseId,
+            symbol,
+            amount: baseUnits,
+            amountFormatted: netAmt.toFixed(2),
+            decimals,
+            nearContractId: token?.nearContractId || '',
+            ...(token?.icon ? { icon: token.icon } : {}),
+          });
         }
       } catch (dbErr) {
         console.warn('[onchain/balances] D1 virtual balance lookup error:', dbErr);
@@ -177,7 +192,7 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
   } catch (err: any) {
     console.error('[onchain/balances] error:', err);
     return c.json<ErrorResponse>(
-      { error: `Failed to fetch onchain balances: ${err.message}`, code: 'ONCHAIN_BALANCE_ERROR' },
+      { error: `Failed to fetch onchain balances: ${publicErrorMessage(err)}`, code: 'ONCHAIN_BALANCE_ERROR' },
       500
     );
   }
@@ -220,7 +235,7 @@ onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
   } catch (err: any) {
     console.error('[onchain/deposit-address] error:', err);
     return c.json<ErrorResponse>(
-      { error: `Failed to fetch deposit address: ${err.message}`, code: 'DEPOSIT_ADDRESS_ERROR' },
+      { error: `Failed to fetch deposit address: ${publicErrorMessage(err)}`, code: 'DEPOSIT_ADDRESS_ERROR' },
       500
     );
   }
@@ -261,7 +276,7 @@ onchainRouter.get('/deposit-status', requireAuth(), async (c) => {
       depositedAmountUsd: '0',
       txHashes: [],
       isSettled: false,
-      error: err.message,
+      error: publicErrorMessage(err),
     });
   }
 });
@@ -361,7 +376,7 @@ async function probeDepositStatus(address: string): Promise<Response> {
       depositedAmountUsd: '0',
       txHashes: [],
       isSettled: false,
-      error: err.message,
+      error: publicErrorMessage(err),
     });
   } finally {
     clearTimeout(timeoutId);
@@ -446,7 +461,7 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
   } catch (err: any) {
     console.error('[onchain/history] error:', err);
     return c.json<ErrorResponse>(
-      { error: `Failed to fetch onchain history: ${err.message}`, code: 'ONCHAIN_HISTORY_ERROR' },
+      { error: `Failed to fetch onchain history: ${publicErrorMessage(err)}`, code: 'ONCHAIN_HISTORY_ERROR' },
       500
     );
   }

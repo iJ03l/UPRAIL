@@ -121,12 +121,11 @@ export async function verifyQuoteToken(
     return { valid: false, reason: 'Quote signature has expired' };
   }
 
-  // 2. Asset binding check
-  if (
-    payload.asset.toLowerCase() !== expected.asset.toLowerCase() &&
-    !payload.asset.toLowerCase().includes(expected.asset.toLowerCase()) &&
-    !expected.asset.toLowerCase().includes(payload.asset.toLowerCase())
-  ) {
+  // 2. Asset binding check — exact after normalization. Substring matching was
+  //    removed: it let a quote for one asset satisfy a payment for a different
+  //    asset whose id merely contained the other as a prefix/suffix.
+  const normAsset = (v: unknown) => String(v ?? '').trim().toLowerCase();
+  if (normAsset(payload.asset) !== normAsset(expected.asset)) {
     return {
       valid: false,
       reason: `Quote asset mismatch: expected ${expected.asset}, got ${payload.asset}`,

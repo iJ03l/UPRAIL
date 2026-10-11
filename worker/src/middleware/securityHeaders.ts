@@ -6,6 +6,35 @@
 import { MiddlewareHandler } from 'hono';
 import type { AppContext } from '../types';
 
+/**
+ * Content-Security-Policy for the app.
+ *
+ * Deliberate trade-offs:
+ *  - `script-src 'unsafe-inline'` is required because Next's static export
+ *    ships its hydration bootstrap as inline scripts; a nonce cannot be added
+ *    to static HTML. This still blocks cross-origin script loads, and the
+ *    `connect-src`/`img-src`/`frame-ancestors` directives contain most of the
+ *    damage an injected script could do. Tightening to hashes is a follow-up.
+ *  - `img-src ... https:` because token icons are served from whatever CDN
+ *    the live token registry reports (`image.mitte.gg`, `1click…`, etc).
+ *  - Styles come from Next + `<link>` fonts hosted on Google/Fontshare.
+ */
+export const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://api.fontshare.com",
+  "font-src 'self' data: https://fonts.gstatic.com https://api.fontshare.com",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self'",
+  "media-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self' blob:",
+].join('; ');
+
 export const securityHeaders = (): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
     await next();
@@ -27,6 +56,9 @@ export const securityHeaders = (): MiddlewareHandler<AppContext> => {
       }
       if (!headers.has('Strict-Transport-Security')) {
         headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+      }
+      if (!headers.has('Content-Security-Policy')) {
+        headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
       }
     };
 

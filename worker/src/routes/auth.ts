@@ -15,7 +15,13 @@ import { redeemInvite } from '../services/inviteService';
 import { signPayload, verifyAndUnpack } from '../utils/crypto';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import { getSessionSecret, requireSessionSecret } from '../utils/secrets';
-import { resolveOrigin, resolveRpId } from '../services/webauthnConfig';
+import {
+  resolveOrigin,
+  resolveRpId,
+  allowedWebAuthnOrigins,
+  allowedWebAuthnRpIds,
+} from '../services/webauthnConfig';
+import { publicErrorMessage } from '../utils/errors';
 
 export const authRouter = new Hono<AppContext>();
 
@@ -358,7 +364,7 @@ authRouter.get('/callback', async (c) => {
     const appOrigin = isLocal
       ? (c.req.header('x-forwarded-host') ? `http://${c.req.header('x-forwarded-host')}` : 'http://localhost:3000')
       : (resolveOrigin(c.env));
-    return c.redirect(`${appOrigin}/login?error=${encodeURIComponent(err.message || 'Authentication with 𝕏 failed')}`);
+    return c.redirect(`${appOrigin}/login?error=${encodeURIComponent(publicErrorMessage(err, 'Authentication with 𝕏 failed'))}`);
   }
 });
 
@@ -585,23 +591,12 @@ authRouter.post('/passkey/login-verify', async (c) => {
       );
     }
 
-    const rpId = resolveRpId(c.env);
-    const expectedOrigin = resolveOrigin(c.env);
-
-    const expectedOrigins = Array.from(new Set([
-      expectedOrigin,
-      'https://app.uprail.world',
-      'https://uprail.world',
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:8787',
-    ].filter(Boolean)));
-
-    const expectedRPIDs = Array.from(new Set([
-      rpId,
-      'uprail.world',
-      'localhost',
-    ].filter(Boolean)));
+    // Same strict expectations used at registration: the configured origin/rpId
+    // only (plus localhost ports in local dev). Never a hardcoded host list —
+    // that would accept an assertion minted on an unrelated site sharing the
+    // registrable domain.
+    const expectedOrigins = allowedWebAuthnOrigins(c.env);
+    const expectedRPIDs = allowedWebAuthnRpIds(c.env);
 
     const verification = await webauthnService.verifyAuthentication({
       assertion,
@@ -680,7 +675,7 @@ authRouter.post('/passkey/login-verify', async (c) => {
     });
   } catch (err: any) {
     console.error('Passkey login verify error:', err);
-    return c.json<ErrorResponse>({ error: err.message || 'Passkey login failed', code: 'LOGIN_FAILED' }, 500);
+    return c.json<ErrorResponse>({ error: publicErrorMessage(err, 'Passkey login failed'), code: 'LOGIN_FAILED' }, 500);
   }
 });
 
@@ -776,15 +771,15 @@ authRouter.post('/export-key', requireAuth(), async (c) => {
     );
   }
 
-  const rpId = resolveRpId(c.env);
-  const expectedOrigin = resolveOrigin(c.env);
+  const expectedOrigins = allowedWebAuthnOrigins(c.env);
+  const expectedRPIDs = allowedWebAuthnRpIds(c.env);
 
   try {
     const verification = await webauthnService.verifyAuthentication({
       assertion,
       expectedChallenge: payload.challenge,
-      expectedOrigin,
-      expectedRPID: rpId,
+      expectedOrigin: expectedOrigins,
+      expectedRPID: expectedRPIDs,
       credential: {
         id: assertion.id,
         publicKey: passkeyRow.public_key,

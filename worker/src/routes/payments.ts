@@ -33,6 +33,7 @@ import {
   getUserPayments,
   updatePaymentStatus,
 } from '../db/postgres';
+import { publicErrorMessage } from '../utils/errors';
 
 export const paymentsRouter = new Hono<AppContext>();
 
@@ -171,14 +172,19 @@ paymentsRouter.get('/tokens', async (c) => {
         badge,
         category,
         balance: '0.00',
-        priceUsd: t.priceUsd ?? 1.0,
+        // Stablecoins are dollars by definition; everything else without a
+        // live price reports 0 instead of a fabricated 1.0 (which rendered
+        // 1 NEAR as $1.00 across the dashboard).
+        priceUsd:
+          t.priceUsd ??
+          (['USDC', 'USDT', 'DAI', 'FRAX', 'BUSD', 'USDG', 'PYUSD'].includes(symUpper) ? 1 : 0),
       };
     });
     return c.json({ tokens: mapped });
   } catch (err: any) {
     console.error('[/api/tokens] onchain fetch failed:', err);
     return c.json<ErrorResponse>(
-      { error: `Failed to load token list: ${err.message}`, code: 'TOKEN_LIST_ERROR' },
+      { error: `Failed to load token list: ${publicErrorMessage(err)}`, code: 'TOKEN_LIST_ERROR' },
       500
     );
   }
@@ -217,7 +223,7 @@ paymentsRouter.post('/resolve', async (c) => {
     });
   } catch (err: any) {
     return c.json<ErrorResponse>(
-      { error: err.message || 'Resolve failed', code: 'RESOLVE_ERROR' },
+      { error: publicErrorMessage(err, 'Resolve failed'), code: 'RESOLVE_ERROR' },
       500
     );
   }
@@ -281,18 +287,36 @@ paymentsRouter.post('/quote', async (c) => {
     // Funds are escrowed to the platform holding wallet (ESCROW_ACCOUNT_ID)
     const quoteRecipient = isRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
 
-    // Look up token decimals for base unit conversion
-    let baseUnitsAmount = body.amount;
+    // `body.amount` is ALWAYS a human-readable decimal string ("5", "0.005").
+    // Convert to base units with the token's decimals. Integer-looking values
+    // must not be treated as already-converted base units: "5" used to be
+    // passed through verbatim and quote 5e-6 tokens instead of 5.
+    const amountStr = String(body.amount ?? '').trim();
+    if (!/^\d{1,15}(\.\d{1,15})?$/.test(amountStr) || Number(amountStr) <= 0) {
+      return c.json<ErrorResponse>(
+        { error: 'Invalid amount: expected a positive decimal number', code: 'INVALID_AMOUNT' },
+        400
+      );
+    }
+
+    let baseUnitsAmount: string;
     try {
       const tokens = await nearRpc.getSupportedTokens(c.env);
-      const tokenInfo = tokens.find(
-        (t) =>
-          t.defuse_asset_id.toLowerCase() === body.asset.toLowerCase() ||
-          t.symbol.toLowerCase() === body.asset.toLowerCase()
+      const tokenInfo = nearRpc.resolveTokenForAsset(body.asset, tokens);
+      if (!tokenInfo) {
+        return c.json<ErrorResponse>(
+          { error: `Unsupported asset: ${body.asset}`, code: 'UNSUPPORTED_ASSET' },
+          400
+        );
+      }
+      baseUnitsAmount = nearRpc.toBaseUnits(amountStr, tokenInfo.decimals);
+    } catch (tokenErr) {
+      console.warn('[send] token registry unavailable, cannot convert amount:', tokenErr);
+      return c.json<ErrorResponse>(
+        { error: 'Unable to resolve asset metadata; try again', code: 'TOKEN_REGISTRY_UNAVAILABLE' },
+        502
       );
-      const decimals = tokenInfo?.decimals ?? 18;
-      baseUnitsAmount = /^\d+$/.test(body.amount) ? body.amount : nearRpc.toBaseUnits(body.amount, decimals);
-    } catch {}
+    }
 
     let quoteResult: any = null;
     try {
@@ -350,7 +374,7 @@ paymentsRouter.post('/quote', async (c) => {
     console.error('Quote generation error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Failed to retrieve confidential quote: ${err.message || 'Internal error'}`,
+        error: `Failed to retrieve confidential quote: ${publicErrorMessage(err, 'Internal error')})`,
         code: 'QUOTE_ERROR',
       },
       500
@@ -395,6 +419,16 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       );
     }
     const cleanHandle = recipient.value;
+
+    // Amount is stored and signed as a human-readable decimal; reject anything
+    // that would turn into NaN/Infinity downstream (fee math, base-unit math).
+    const amountStr = String(body.amount ?? '').trim();
+    if (!/^\d{1,15}(\.\d{1,15})?$/.test(amountStr) || Number(amountStr) <= 0) {
+      return c.json<ErrorResponse>(
+        { error: 'Invalid amount: expected a positive decimal number', code: 'INVALID_AMOUNT' },
+        400
+      );
+    }
 
     // Cryptographically verify quote signature authenticity and exact binding
     const quoteSecret = requireQuoteSecret(c.env);
@@ -569,7 +603,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     console.error('Send payment error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Failed to create payment: ${err.message || 'Internal error'}`,
+        error: `Failed to create payment: ${publicErrorMessage(err, 'Internal error')})`,
         code: 'SEND_PAYMENT_ERROR',
       },
       500
@@ -789,7 +823,7 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
   } catch (err: any) {
     console.error('Cancel payment error:', err);
     return c.json<ErrorResponse>(
-      { error: err.message || 'Failed to cancel payment', code: 'CANCEL_ERROR' },
+      { error: publicErrorMessage(err, 'Failed to cancel payment'), code: 'CANCEL_ERROR' },
       500
     );
   }

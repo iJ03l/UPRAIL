@@ -65,4 +65,3 @@ func TestSignerWithPostQuantumMasterKey(t *testing.T) {
 		t.Errorf("expected public key %s, got %s", expectedPub, signer.PublicKey())
 	}
 }
-

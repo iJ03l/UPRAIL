@@ -7,8 +7,9 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
 - **Runtime:** Cloudflare Workers (V8 isolate)
 - **Router:** Hono v4
 - **State & Storage:**
-  - **Durable Objects:** Per-payment escrow state machine with local SQLite storage (`EscrowDO`), container lifecycle controller (`NearContainer`)
   - **D1 Database:** All relational state (`x_identities`, `passkeys`, `payments`, `invites`, `withdrawals`, `auth_challenges`, `deposit_addresses`). Schema is owned by `src/db/migrations/*.sql`.
+  - **Postgres (optional):** used when `DATABASE_URL` (or a Hyperdrive binding) is configured; every call site falls back to D1 when it is not.
+  - **No Durable Objects:** the worker deploys without `durable_objects`/`containers` (free tier cannot run Worker containers). Escrow state lives in D1 and settlement runs in the external Go service.
   - **Sessions:** Stateless HMAC-SHA256 signed cookies (`src/middleware/session.ts`) — zero KV writes. The `CACHE` KV binding is only read to upgrade legacy session cookies.
   - **Challenges:** Single-use WebAuthn/OAuth challenges stored in D1 + in-memory.
   - **Rate limiting:** In-memory per isolate, keyed on the verified session `x_id` (falls back to `cf-connecting-ip` for anonymous traffic).
@@ -24,11 +25,14 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
 
 ## Routes
 
-### Authentication (`/auth/*`)
-- `GET /auth/x/login` - Initiate X OAuth 2.0 PKCE authorization (sanitized `return_to` allowlist)
-- `GET /auth/x/callback` - OAuth callback, fetches `/2/users/me`, creates D1 profile + signed session cookie
-- `GET /auth/x/session` - Return current authenticated session
-- `POST /auth/logout` - Clear session cookie
+### Authentication (`/auth/*`, legacy alias `/auth/x/*`)
+- `GET /auth/init` / `GET /auth/authorize-url` - Start X OAuth 2.0 PKCE (`return_to` is sanitized to a same-site path)
+- `GET /auth/login` - Begin login (issue-then-verify passkey flow)
+- `GET /auth/callback` - OAuth callback, fetches `/2/users/me`, creates profile + signed session cookie
+- `GET /auth/session` / `GET /auth/status` - Current authenticated session
+- `POST /auth/logout` - Clear session cookie and browser caches
+- `GET /auth/passkey/login-options`, `POST /auth/passkey/login-verify` - Passkey sign-in
+- `GET /auth/export-key-challenge`, `POST /auth/export-key` - Passkey-gated key export
 
 ### Payments (`/api/*`)
 - `POST /api/resolve` - Format validation for X handles (server-side resolution occurs at claim)
@@ -39,7 +43,8 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
 - `POST /api/payments/:id/cancel` - Cancel payment before deposit confirmation
 
 ### Claim Flow (`/api/claim/*`)
-- `GET /api/claim/pending` - Pending payments matching logged-in user's X handle
+- `GET /api/claim/pending` - Pending payments matching the caller's X id **or** handle (status-filtered)
+- `GET /api/claim/register-options`, `POST /api/claim/register` - Register the claim passkey
 - `GET|POST /api/auth-challenge` - Issue single-use `tx_auth` WebAuthn challenge (see `/api/auth-challenge`)
 - `POST /api/claim/execute` - Execute payment claims (session + passkey assertion required)
 - `POST /api/claim/withdraw` - Withdraw shielded balance to an external address (session + passkey assertion required)
@@ -55,4 +60,13 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
 - Authenticated, per-user live data: balances, token list, intent history, deposit addresses, `deposit-status` (caller must own the deposit address)
 
 ### Health (`/health`)
-- `GET /health` - System status and configuration check
+- `GET /health` - System status and configuration check (never exposes key material)
+
+## Security headers
+
+Every response (including static assets, thanks to `run_worker_first`) gets
+`Content-Security-Policy`, `Strict-Transport-Security`, `X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy` and `Permissions-Policy`
+from `src/middleware/securityHeaders.ts`. Error responses pass through
+`publicErrorMessage()` (`src/utils/errors.ts`) so internal URLs and upstream
+bodies never reach a client.

@@ -32,8 +32,10 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         WEBAUTHN_ORIGIN: 'https://app.uprail.world',
         SESSION_SECRET: 'test_session_secret_do_not_use_in_production',
         INTERNAL_SERVICE_KEY: 'test_internal_service_key',
+        // Throwaway ed25519 key generated for this test run. It is NOT a
+        // real escrow key and must never appear in .dev.vars or a deployment.
         ESCROW_PRIVATE_KEY:
-          'ed25519:5KoVbWDSA7QmnFbGrMVa6oPdxdKa1bbN1LQW3d2dVBbM4Ap7CY6gXPvQUoF1aRxVwPVzrqnJmX1oPkVpKqZ1Qq1',
+          'ed25519:3bPadi6kwbpV3pkzKEcG8NDp74yof3CYGS2aXZECvV8Wggv37W1HfxTvA7EuvhBzFoadXeHtPK62pRywWqryzYU3',
         NEAR_RPC_URL: 'https://near.invalid',
       },
     });
