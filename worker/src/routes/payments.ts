@@ -556,7 +556,24 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     let escrowDepositTxHash: string | null = null;
     const holdingAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
 
-    if (isRecipientRegistered && recipientNearAccount) {
+    // Plain-balance path: tokens received directly into the sender's own pk
+    // sub-account move into intents with ft_transfer_call(msg = credit target)
+    // — the recipient's platform account when registered, the escrow holding
+    // account otherwise (exactly the targets the signed-intent path uses).
+    const creditTarget =
+      isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
+    const plainDeposit = await nearRpc.depositPlainBalanceToIntents(
+      c.env,
+      session!.x_id,
+      body.asset,
+      body.amount,
+      creditTarget
+    );
+
+    if (plainDeposit.deposited && plainDeposit.txHash) {
+      if (isRecipientRegistered) claimTxHash = plainDeposit.txHash;
+      else escrowDepositTxHash = plainDeposit.txHash;
+    } else if (isRecipientRegistered && recipientNearAccount) {
       try {
         const transferResult = await nearRpc.executeTransferIntent(
           c.env,

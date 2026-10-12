@@ -61,6 +61,31 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
       console.warn('[onchain/balances] RPC getIntentBalances error:', rpcErr);
     }
 
+    // Direct receives sit as plain balances on the user's pk sub-account —
+    // merge them in so tokens sent straight to the account are visible.
+    try {
+      const plain = await nearRpc.getPlainBalances(c.env, nearAccount);
+      for (const p of plain) {
+        const existing = balances.find(
+          (b) =>
+            (b.defuse_asset_id || '').toLowerCase() === (p.defuse_asset_id || '').toLowerCase() ||
+            (b.symbol || '').toUpperCase() === (p.symbol || '').toUpperCase()
+        );
+        if (existing) {
+          const sum = BigInt(existing.amount || '0') + BigInt(p.amount || '0');
+          existing.amount = sum.toString();
+          existing.amountFormatted = nearRpc.formatAmount(
+            existing.amount,
+            existing.decimals ?? p.decimals
+          );
+        } else {
+          balances.push(p);
+        }
+      }
+    } catch (plainErr) {
+      console.warn('[onchain/balances] plain balance merge skipped:', plainErr);
+    }
+
     // Include virtual escrow balances claimed by user, minus active sent payments and withdrawals
     if (c.env.DB) {
       try {

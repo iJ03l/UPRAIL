@@ -2375,6 +2375,310 @@ export async function executeTransferIntent(
   }
 }
 
+// ─── Plain balances on the pk sub-account (direct receives) ──────────────
+
+/** Plain NEP-141 balance of `accountId` on `contractId` (0n on any failure). */
+async function getPlainFtBalance(
+  rpcUrl: string,
+  contractId: string,
+  accountId: string
+): Promise<bigint> {
+  try {
+    const res = await viewFunction(rpcUrl, contractId, 'ft_balance_of', { account_id: accountId });
+    return BigInt(res || '0');
+  } catch {
+    return 0n;
+  }
+}
+
+/** Plain native NEAR balance in yoctoNEAR (0n on any failure). */
+async function getPlainNearBalance(rpcUrl: string, accountId: string): Promise<bigint> {
+  try {
+    const res: any = await nearRpc(rpcUrl, 'query', {
+      request_type: 'view_account',
+      finality: 'final',
+      account_id: accountId,
+    });
+    return BigInt(res?.amount ?? res?.result?.amount ?? '0');
+  } catch {
+    return 0n;
+  }
+}
+
+/**
+ * Signs and broadcasts a single-action FunctionCall transaction.
+ * Mirrors the Borsh + ed25519 flow used by createOnchainSubAccount.
+ */
+async function signAndBroadcastFunctionCall(opts: {
+  rpcUrl: string;
+  signerId: string;
+  signerPrivKey: Uint8Array;
+  signerPubKey: Uint8Array;
+  receiverId: string;
+  method: string;
+  args: string;
+  gas: bigint;
+  deposit: bigint;
+}): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  const { rpcUrl, signerId, signerPrivKey, signerPubKey, receiverId, method, args, gas, deposit } = opts;
+  try {
+    const statusRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'fc_status', method: 'status', params: [] }),
+    });
+    const statusData = (await statusRes.json()) as any;
+    const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
+    if (!latestBlockHash.length) return { ok: false, error: 'Failed to fetch latest block hash' };
+
+    const signerPubKeyB58 = `ed25519:${base58Encode(signerPubKey)}`;
+    const keyRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'fc_nonce',
+        method: 'query',
+        params: {
+          request_type: 'view_access_key',
+          finality: 'final',
+          account_id: signerId,
+          public_key: signerPubKeyB58,
+        },
+      }),
+    });
+    const keyData = (await keyRes.json()) as any;
+    if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) {
+      return { ok: false, error: `Access key query failed for ${signerId}` };
+    }
+    const nonce = BigInt(keyData.result.nonce) + 1n;
+
+    const w = new BorshWriter();
+    w.writeString(signerId);
+    w.writePublicKey(signerPubKey);
+    w.writeU64(nonce);
+    w.writeString(receiverId);
+    w.writeBytes(latestBlockHash);
+    w.writeU32(1); // 1 action
+    w.writeU8(2);  // FunctionCall
+    w.writeString(method);
+    const argsBytes = new TextEncoder().encode(args);
+    w.writeU32(argsBytes.length);
+    w.writeBytes(argsBytes);
+    w.writeU64(gas);
+    w.writeU128(deposit);
+
+    const txBytes = w.toBytes();
+    const digest = await crypto.subtle.digest('SHA-256', txBytes);
+    const sig = ed25519.sign(new Uint8Array(digest), signerPrivKey);
+
+    const signedW = new BorshWriter();
+    signedW.writeBytes(txBytes);
+    signedW.writeU8(0);
+    signedW.writeBytes(sig);
+    const signedBytes = signedW.toBytes();
+
+    let binary = '';
+    for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
+
+    const txRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'fc_tx',
+        method: 'broadcast_tx_commit',
+        params: [btoa(binary)],
+      }),
+    });
+    const txResult = (await txRes.json()) as any;
+    const ok =
+      txResult?.result?.status?.SuccessValue !== undefined ||
+      txResult?.result?.status?.SuccessReceiptId !== undefined;
+    if (!ok) {
+      const errMsg =
+        txResult?.error?.message ||
+        JSON.stringify(txResult?.result?.status?.Failure || txResult?.result || txResult);
+      return { ok: false, error: errMsg };
+    }
+    return { ok: true, txHash: txResult?.result?.transaction?.hash };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * All plain balances held directly on the user's pk sub-account — i.e. tokens
+ * someone sent straight to the account (the Receive flow) before any deposit
+ * into intents. Scans the registry's NEP-141 contracts in parallel chunks plus
+ * native NEAR; KV-cached for 20s to keep /balances snappy.
+ */
+export async function getPlainBalances(
+  env: Env,
+  nearAccount: string
+): Promise<IntentAccountBalance[]> {
+  if (!nearAccount) return [];
+  const cacheKey = `plain_bal:${nearAccount}`;
+  const cache = (env as any).CACHE;
+  try {
+    const hit = await cache?.get(cacheKey, 'json');
+    if (Array.isArray(hit)) return hit as IntentAccountBalance[];
+  } catch {
+    /* cache miss */
+  }
+
+  try {
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const tokens = (await getSupportedTokens(env)).filter((t) => t.nearContractId);
+    const out: IntentAccountBalance[] = [];
+    const chunkSize = 25;
+    for (let i = 0; i < tokens.length; i += chunkSize) {
+      const chunk = tokens.slice(i, i + chunkSize);
+      const results = await Promise.all(
+        chunk.map((t) => getPlainFtBalance(rpcUrl, t.nearContractId as string, nearAccount))
+      );
+      for (let j = 0; j < chunk.length; j++) {
+        const bal = results[j];
+        if (bal <= 0n) continue;
+        const t = chunk[j];
+        out.push({
+          defuse_asset_id: t.defuse_asset_id || `nep141:${t.nearContractId}`,
+          symbol: t.symbol,
+          amount: bal.toString(),
+          amountFormatted: formatAmount(bal.toString(), t.decimals || 18),
+          decimals: t.decimals || 18,
+          nearContractId: t.nearContractId as string,
+          ...(t.icon ? { icon: t.icon } : {}),
+        });
+      }
+    }
+
+    const native = await getPlainNearBalance(rpcUrl, nearAccount);
+    if (native > 0n) {
+      out.push({
+        defuse_asset_id: 'nep141:wrap.near',
+        symbol: 'NEAR',
+        amount: native.toString(),
+        amountFormatted: formatAmount(native.toString(), 24),
+        decimals: 24,
+        nearContractId: 'wrap.near',
+      });
+    }
+
+    try {
+      await cache?.put(cacheKey, JSON.stringify(out), { expirationTtl: 20 });
+    } catch {
+    }
+    return out;
+  } catch (err) {
+    console.warn('[nearRpc] getPlainBalances error:', err);
+    return [];
+  }
+}
+
+/**
+ * Moves `amount` of `asset` from the user's own pk sub-account (plain,
+ * directly-received balance) into intents.near with a memo:
+ * `ft_transfer_call(receiver_id='intents.near', msg=creditAddress)`.
+ * intents credits `creditAddress` — the recipient's platform account, the
+ * escrow holding account for unregistered recipients, or the sender's own
+ * account (withdraw path). Native NEAR is first wrapped to wNEAR via
+ * wrap.near `near_deposit`, then transferred like any NEP-141.
+ *
+ * Returns `deposited:false, reason:'INSUFFICIENT_PLAIN_BALANCE'` when the
+ * plain balance cannot cover it — callers fall back to the signed-intent path
+ * (which spends balances already held inside intents).
+ */
+export async function depositPlainBalanceToIntents(
+  env: Env,
+  senderXId: string,
+  asset: string,
+  amount: string,
+  creditAddress: string
+): Promise<{ deposited: boolean; txHash?: string; reason?: string }> {
+  try {
+    if (!creditAddress) return { deposited: false, reason: 'Missing credit address' };
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token) return { deposited: false, reason: `Unsupported asset: ${asset}` };
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { deposited: false, reason: `Invalid amount: ${amount}` };
+    }
+
+    const sender = await deriveUserNearKeypair(env, senderXId);
+    await createOnchainSubAccount(env, sender.accountId, sender.publicKey, sender.privateKey);
+
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+    const contractId = token.nearContractId;
+    if (!contractId) return { deposited: false, reason: `No NEAR contract for asset: ${asset}` };
+    const isNearNative =
+      (token.defuse_asset_id || '').toLowerCase() === 'nep141:wrap.near' ||
+      token.symbol.toUpperCase() === 'NEAR';
+
+    const senderKey = {
+      rpcUrl,
+      signerId: sender.accountId,
+      signerPrivKey: sender.privateKey,
+      signerPubKey: sender.publicKey,
+    };
+
+    // 1. Plain NEP-141 balance on the token contract covers it → single tx.
+    const plainFt = await getPlainFtBalance(rpcUrl, contractId, sender.accountId);
+    if (plainFt >= BigInt(baseUnits)) {
+      const res = await signAndBroadcastFunctionCall({
+        ...senderKey,
+        receiverId: contractId,
+        method: 'ft_transfer_call',
+        args: JSON.stringify({ receiver_id: intentsId, amount: baseUnits, msg: creditAddress }),
+        gas: 100_000_000_000_000n,
+        deposit: 1n,
+      });
+      return res.ok
+        ? { deposited: true, txHash: res.txHash }
+        : { deposited: false, reason: res.error || 'ft_transfer_call failed' };
+    }
+
+    // 2. Plain native NEAR (NEAR asset only): wrap to wNEAR first, then the
+    //    same ft_transfer_call — keeping a gas reserve for both transactions.
+    if (isNearNative && contractId === 'wrap.near') {
+      const plainNear = await getPlainNearBalance(rpcUrl, sender.accountId);
+      const gasReserve = 30000000000000000000000n; // 0.03 NEAR
+      if (plainNear >= BigInt(baseUnits) + gasReserve) {
+        const wrap = await signAndBroadcastFunctionCall({
+          ...senderKey,
+          receiverId: 'wrap.near',
+          method: 'near_deposit',
+          args: '{}',
+          gas: 10_000_000_000_000n,
+          deposit: BigInt(baseUnits),
+        });
+        if (!wrap.ok) {
+          return { deposited: false, reason: wrap.error || 'near_deposit (wrap.near) failed' };
+        }
+        const res = await signAndBroadcastFunctionCall({
+          ...senderKey,
+          receiverId: 'wrap.near',
+          method: 'ft_transfer_call',
+          args: JSON.stringify({ receiver_id: intentsId, amount: baseUnits, msg: creditAddress }),
+          gas: 100_000_000_000_000n,
+          deposit: 1n,
+        });
+        return res.ok
+          ? { deposited: true, txHash: res.txHash }
+          : { deposited: false, reason: res.error || 'ft_transfer_call (wNEAR) failed' };
+      }
+    }
+
+    return { deposited: false, reason: 'INSUFFICIENT_PLAIN_BALANCE' };
+  } catch (err: any) {
+    return { deposited: false, reason: err?.message || String(err) };
+  }
+}
+
 /**
  * Signs and settles an authentic onchain transfer intent from escrow.uprail.near to recipient on intents.near.
  * Used when releasing escrowed funds to an unregistered X user upon claiming.
@@ -2679,6 +2983,28 @@ export async function getUserAvailableBalance(
     }
   } catch (err) {
     console.warn('[getUserAvailableBalance] onchain query error:', err);
+  }
+
+  // Plain tokens sitting on the user's own pk sub-account (direct receives)
+  // are spendable too — send/withdraw deposits them into intents first.
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(targetAsset, tokens);
+    if (!token) token = await resolveRheaToken(env, targetAsset);
+    if (token) {
+      const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+      const plainFt = await getPlainFtBalance(rpcUrl, token.nearContractId, nearAccount);
+      onchainAmount += Number(plainFt) / Math.pow(10, token.decimals || 18);
+      const isNearAsset =
+        (token.defuse_asset_id || '').toLowerCase() === 'nep141:wrap.near' ||
+        token.symbol.toUpperCase() === 'NEAR';
+      if (isNearAsset) {
+        const plainNear = await getPlainNearBalance(rpcUrl, nearAccount);
+        onchainAmount += Number(plainNear) / 1e24;
+      }
+    }
+  } catch (err) {
+    console.warn('[getUserAvailableBalance] plain balance query error:', err);
   }
 
   let virtualClaimedAmount = 0;

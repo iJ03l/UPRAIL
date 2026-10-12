@@ -14,7 +14,6 @@ import {
   CheckCircle2,
   ChevronDown,
   Search,
-  ArrowRight,
 } from 'lucide-react';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { fetchDepositAddress, fetchDepositStatus, DepositAddress, DepositStatusResponse } from '../lib/onchainApi';
@@ -23,6 +22,8 @@ import { TokenIcon } from '../components/TokenIcon';
 import { ChainLogo } from '../components/ChainLogo';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { BackBar } from '../components/BackBar';
+import { AssetPicker } from '../components/AssetPicker';
+import { Token } from '../types';
 
 export interface TokenOption {
   symbol: string;
@@ -73,23 +74,17 @@ const CHAIN_DEFINITIONS: Record<string, ChainOption> = {
   scroll: { id: 'scroll', name: 'Scroll', icon: '📜', badge: 'zkEVM', time: '~30s' },
 };
 
-export interface NearNativeTokenOption {
-  symbol: string;
-  name: string;
-  badge: string;
-  isNative?: boolean;
-}
-
-const NEAR_NATIVE_TOKENS: NearNativeTokenOption[] = [
-  { symbol: 'NEAR', name: 'NEAR Protocol', badge: 'Native Coin', isNative: true },
-  { symbol: 'USDC', name: 'USD Coin', badge: 'Bridged NEP-141' },
-  { symbol: 'USDT', name: 'Tether USD', badge: 'Bridged NEP-141' },
-  { symbol: 'SHITZU', name: 'Shitzu', badge: 'Meme' },
-  { symbol: 'BLACKDRAGON', name: 'Black Dragon', badge: 'Meme' },
-];
-// LONK/NEKO are intentionally absent: they are not in the intents registry and
-// the backend now fails closed on unresolvable tokens instead of silently
-// quoting a different asset. Long-tail coverage comes from the search picker.
+/** Pre-selected token for the Receive dropdown; the destination is always
+ * the user's platform passkey account regardless of token. */
+const NEAR_RECEIVE_TOKEN: Token = {
+  id: 'nep141:wrap.near',
+  symbol: 'NEAR',
+  name: 'NEAR Protocol',
+  iconUrl: '',
+  decimals: 24,
+  nearContractId: 'wrap.near',
+  chain: 'near',
+};
 
 /**
  * Shared deposit-status poller for the Receive tabs. Runs an immediate check,
@@ -158,19 +153,11 @@ export const ReceivePage: React.FC = () => {
 
   // Tab state: cross-chain bridge vs direct NEAR native & memes
   const [activeTab, setActiveTab] = useState<'crosschain' | 'defuse'>('crosschain');
-  // Tab 2 — NEAR-native deposits ride the same 1Click derive/QR/status
-  // pipeline as the cross-chain tab, pinned to chain="near".
-  const [nearSelectedToken, setNearSelectedToken] = useState<string>('NEAR');
-  const [nearAmount, setNearAmount] = useState<string>('');
-  const [nearAddress, setNearAddress] = useState<DepositAddress | null>(null);
-  const [nearDeriving, setNearDeriving] = useState<boolean>(false);
-  const [nearStatus, setNearStatus] = useState<DepositStatusResponse | null>(null);
-  const [nearSettled, setNearSettled] = useState<boolean>(false);
-  const [nearError, setNearError] = useState<string | null>(null);
+  // Tab 2 — direct receive: pick any token from the full NEAR index; the
+  // destination is always the user's own platform passkey account.
+  const [nearAsset, setNearAsset] = useState<Token>(NEAR_RECEIVE_TOKEN);
+  const [registryTokens, setRegistryTokens] = useState<Token[]>([]);
   const [nearCopiedAddress, setNearCopiedAddress] = useState<boolean>(false);
-  const [nearCopiedAmount, setNearCopiedAmount] = useState<boolean>(false);
-  const [isNearSearchOpen, setIsNearSearchOpen] = useState(false);
-  const [nearSearch, setNearSearch] = useState('');
 
   // Dropdown states
   const [isTokenDropdownOpen, setIsTokenDropdownOpen] = useState(false);
@@ -180,7 +167,6 @@ export const ReceivePage: React.FC = () => {
 
   const tokenDropdownRef = useRef<HTMLDivElement>(null);
   const chainDropdownRef = useRef<HTMLDivElement>(null);
-  const nearSearchRef = useRef<HTMLDivElement>(null);
 
   // Preset quick-select amounts based on active token
   const presetAmounts = useMemo(() => {
@@ -212,6 +198,7 @@ export const ReceivePage: React.FC = () => {
     let mounted = true;
     const load = () => api.getTokens().then((toks) => {
       if (!mounted || !toks || toks.length === 0) return;
+      setRegistryTokens(toks);
       const map = new Map<string, TokenOption>();
       // Seed with curated options
       for (const t of TOKEN_OPTIONS) {
@@ -257,15 +244,11 @@ export const ReceivePage: React.FC = () => {
       if (chainDropdownRef.current && !chainDropdownRef.current.contains(e.target as Node)) {
         setIsChainDropdownOpen(false);
       }
-      if (nearSearchRef.current && !nearSearchRef.current.contains(e.target as Node)) {
-        setIsNearSearchOpen(false);
-      }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setIsTokenDropdownOpen(false);
         setIsChainDropdownOpen(false);
-        setIsNearSearchOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -385,14 +368,6 @@ export const ReceivePage: React.FC = () => {
     refreshBalances,
     refreshHistory,
   });
-  useDepositPoll({
-    address: activeTab === 'defuse' ? nearAddress?.address : undefined,
-    settled: nearSettled,
-    onStatus: setNearStatus,
-    onSettled: () => setNearSettled(true),
-    refreshBalances,
-    refreshHistory,
-  });
 
   const handleCopyAddress = () => {
     if (!currentAddress?.address) return;
@@ -415,84 +390,16 @@ export const ReceivePage: React.FC = () => {
     loadAddress(true);
   };
 
-  // ── Tab 2: NEAR-native deposits — derive/QR/status like cross-chain ─────────
-  const loadNearAddress = useCallback(
-    async (refresh = false, overrideAmount?: string) => {
-      if (!hasIntentAccount || !nearSelectedToken) return;
-      const amt = (overrideAmount !== undefined ? overrideAmount : nearAmount).trim();
-      if (amt && (isNaN(parseFloat(amt)) || parseFloat(amt) <= 0)) return;
-      setNearDeriving(true);
-      setNearError(null);
-      try {
-        // No amount → the backend quotes its default minimum; a typed amount
-        // requests an exact-amount quote (which always bypasses the D1 cache).
-        const addr = await fetchDepositAddress('near', refresh, nearSelectedToken, amt || undefined);
-        if (addr) {
-          setNearAddress(addr);
-          setNearStatus(null);
-          setNearSettled(false);
-        } else {
-          setNearAddress(null);
-          setNearError(`${nearSelectedToken} deposits on NEAR aren't supported yet.`);
-        }
-      } catch (err) {
-        console.error('[ReceivePage] Failed to fetch NEAR deposit address:', err);
-        setNearAddress(null);
-        setNearError('Could not derive a deposit address. Please try again.');
-      } finally {
-        setNearDeriving(false);
-      }
-    },
-    [hasIntentAccount, nearSelectedToken, nearAmount]
-  );
-
-  const handleSelectNearToken = (tokenSym: string) => {
-    setNearSelectedToken(tokenSym);
-    setIsNearSearchOpen(false);
-    setNearSearch('');
-    setNearAddress(null);
-    setNearStatus(null);
-    setNearSettled(false);
-    setNearError(null);
+  // ── Tab 2: direct receive — destination is always the user's pk account ─────
+  const handleSelectNearToken = (token: Token) => {
+    setNearAsset(token);
   };
-
-  const handleNearSelectPreset = (presetVal: string) => {
-    setNearAmount(presetVal);
-    loadNearAddress(true, presetVal);
-  };
-
-  // Debounced derivation while typing an amount; opening the tab or picking a
-  // token derives the default quote.
-  useEffect(() => {
-    if (activeTab !== 'defuse' || !nearSelectedToken) return;
-    const amt = nearAmount.trim();
-    if (amt && (isNaN(parseFloat(amt)) || parseFloat(amt) <= 0)) {
-      setNearAddress(null);
-      setNearStatus(null);
-      setNearSettled(false);
-      return;
-    }
-    const timer = setTimeout(() => {
-      loadNearAddress(false, amt);
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [activeTab, nearSelectedToken, nearAmount, loadNearAddress]);
 
   const handleNearCopyAddress = () => {
-    if (!nearAddress?.address) return;
-    navigator.clipboard.writeText(nearAddress.address);
+    if (!nearAccount) return;
+    navigator.clipboard.writeText(nearAccount);
     setNearCopiedAddress(true);
     setTimeout(() => setNearCopiedAddress(false), 2000);
-  };
-
-  const handleNearCopyAmount = () => {
-    const amtToCopy = nearAddress?.minAmountFormatted
-      ? nearAddress.minAmountFormatted.split(' ')[0]
-      : nearAmount.trim();
-    if (!amtToCopy) return;
-    navigator.clipboard.writeText(amtToCopy);
-    setNearCopiedAmount(true);
-    setTimeout(() => setNearCopiedAmount(false), 2000);
   };
 
   const depositAddressValue = currentAddress?.address || '';
@@ -500,9 +407,7 @@ export const ReceivePage: React.FC = () => {
     currentAddress?.minAmountFormatted ||
     (depositAmount && selectedToken ? `${depositAmount} ${selectedToken}` : selectedToken === 'USDC' ? '0.10 USDC' : selectedToken === 'NEAR' ? '0.01 NEAR' : `0.10 ${selectedToken}`);
   const minUsdDisplay = currentAddress?.minAmountUsd || (depositAmount ? `$${parseFloat(depositAmount || '0').toFixed(2)}` : '$0.10');
-  const nearSendDisplay =
-    nearAddress?.minAmountFormatted ||
-    (nearAmount.trim() && nearSelectedToken ? `${nearAmount.trim()} ${nearSelectedToken}` : '');
+
 
   // Filtered lists for dropdown search
   const filteredTokens = useMemo(() => {
@@ -521,22 +426,7 @@ export const ReceivePage: React.FC = () => {
     );
   }, [availableChains, chainSearch]);
 
-  // Tab 2 quick-amount presets: stables in whole units, everything else small.
-  const nearPresetAmounts = useMemo(() => {
-    const sym = (nearSelectedToken || '').toUpperCase();
-    if (['USDC', 'USDT'].includes(sym)) return ['5', '10', '25', '50', '100'];
-    return ['1', '5', '10', '25', '50'];
-  }, [nearSelectedToken]);
 
-  // Tab 2 long-tail picker: NEAR-network assets from the live registry.
-  const nearSearchResults = useMemo(() => {
-    const base = tokens.filter((t) => t.chains.includes('near'));
-    const q = nearSearch.toLowerCase().trim();
-    if (!q) return base.slice(0, 25);
-    return base
-      .filter((t) => t.symbol.toLowerCase().includes(q) || t.name.toLowerCase().includes(q))
-      .slice(0, 25);
-  }, [tokens, nearSearch]);
 
   return (
     <div className="w-full space-y-6 max-w-5xl mx-auto">
@@ -1167,11 +1057,11 @@ export const ReceivePage: React.FC = () => {
         </div>
       </div>
       ) : (
-        /* ── DIRECT NEAR NATIVE & MEMES TAB — same 1Click pipeline, chain=near ── */
+        /* ── DIRECT NEAR NATIVE & MEMES TAB — pick token, receive to pk account ── */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
           {/* ── LEFT COLUMN (7 Cols) ── */}
           <div className="lg:col-span-7 space-y-6">
-            <div className="rounded-3xl p-6 sm:p-8 bg-white border border-stone-200 shadow-sm space-y-6 relative">
+            <div className="rounded-3xl p-6 sm:p-8 bg-white border border-stone-200 shadow-sm space-y-6">
               {/* Badge & Title */}
               <div className="space-y-2">
                 <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-bold">
@@ -1179,222 +1069,31 @@ export const ReceivePage: React.FC = () => {
                   <span>NEAR Protocol Direct Ingress</span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-stone-950">
-                  NEAR Native &amp; Meme Deposit
+                  Receive any NEAR token
                 </h2>
-                <p className="text-xs sm:text-sm text-stone-600 leading-relaxed font-sans">
-                  Scan, send from any NEAR wallet, done. One-time deposit addresses for native NEAR and NEP-141 tokens — memes included — settle straight into your passkey vault via NEAR Intents.
-                </p>
               </div>
 
-              {/* Step 1: Select Token or Meme */}
+              {/* Step 1: full token index dropdown */}
               <div className="space-y-3 pt-4 border-t border-stone-100">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-2">
                     <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">1</span>
-                    <span>Select Token or Meme</span>
+                    <span>Select Token to Receive</span>
                   </label>
-                  <span className="text-[11px] font-mono text-stone-400">NEAR Ecosystem</span>
+                  <span className="text-[11px] font-mono text-stone-400">All NEAR tokens</span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                  {NEAR_NATIVE_TOKENS.map((token) => {
-                    const isSelected = nearSelectedToken === token.symbol;
-                    return (
-                      <button
-                        key={token.symbol}
-                        type="button"
-                        onClick={() => handleSelectNearToken(token.symbol)}
-                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
-                          isSelected
-                            ? 'bg-black text-white border-black shadow-xs'
-                            : 'bg-stone-50 hover:bg-stone-100/80 border-stone-200 text-stone-900'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <TokenIcon symbol={token.symbol} size="md" />
-                          <span
-                            className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                              isSelected ? 'bg-white/20 text-white' : 'bg-stone-200/80 text-stone-700'
-                            }`}
-                          >
-                            {token.badge}
-                          </span>
-                        </div>
-                        <div>
-                          <div className={`font-mono text-xs font-extrabold truncate ${isSelected ? 'text-white' : 'text-stone-950'}`}>
-                            {token.symbol}
-                          </div>
-                          <div className={`text-[10px] truncate ${isSelected ? 'text-stone-300' : 'text-stone-500'}`}>
-                            {token.name}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-
-                  {/* Search any NEP-141 — registry long tail */}
-                  <button
-                    type="button"
-                    onClick={() => setIsNearSearchOpen(!isNearSearchOpen)}
-                    className={`p-3 rounded-2xl border border-dashed text-left transition-all cursor-pointer flex flex-col justify-between space-y-2 ${
-                      isNearSearchOpen
-                        ? 'bg-black text-white border-black shadow-xs'
-                        : 'bg-stone-50 hover:bg-stone-100/80 border-stone-300 text-stone-900'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="w-9 h-9 rounded-xl border border-stone-300 flex items-center justify-center">
-                        <Search className="w-4 h-4" />
-                      </div>
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                          isNearSearchOpen ? 'bg-white/20 text-white' : 'bg-stone-200/80 text-stone-700'
-                        }`}
-                      >
-                        Any NEP-141
-                      </span>
-                    </div>
-                    <div>
-                      <div className={`font-mono text-xs font-extrabold truncate ${isNearSearchOpen ? 'text-white' : 'text-stone-950'}`}>
-                        Search
-                      </div>
-                      <div className={`text-[10px] truncate ${isNearSearchOpen ? 'text-stone-300' : 'text-stone-500'}`}>
-                        Full token list
-                      </div>
-                    </div>
-                  </button>
-                </div>
-
-                {/* Search dropdown over the live registry */}
-                {isNearSearchOpen && (
-                  <div className="relative animate-fade-in" ref={nearSearchRef}>
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-3.5 top-3.5 text-stone-400" />
-                      <input
-                        type="text"
-                        value={nearSearch}
-                        onChange={(e) => setNearSearch(e.target.value)}
-                        placeholder="Search any NEAR token or meme..."
-                        autoFocus
-                        className="w-full bg-stone-50 rounded-xl pl-9 pr-3 py-2 text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono transition-colors"
-                      />
-                    </div>
-                    <div className="max-h-56 overflow-y-auto space-y-1 mt-2 pr-1">
-                      {nearSearchResults.length === 0 ? (
-                        <p className="text-xs text-stone-400 text-center py-5 font-mono">
-                          No NEAR tokens match "{nearSearch}"
-                        </p>
-                      ) : (
-                        nearSearchResults.map((token) => {
-                          const isSelected = nearSelectedToken.toUpperCase() === token.symbol.toUpperCase();
-                          return (
-                            <button
-                              key={token.symbol}
-                              type="button"
-                              onClick={() => handleSelectNearToken(token.symbol)}
-                              className={`w-full flex items-center justify-between p-2.5 rounded-xl transition-colors text-left cursor-pointer ${
-                                isSelected ? 'bg-black text-white font-bold' : 'hover:bg-stone-50 text-stone-800'
-                              }`}
-                            >
-                              <div className="flex items-center space-x-2.5">
-                                <TokenIcon symbol={token.symbol} size="md" />
-                                <div>
-                                  <div className="flex items-center space-x-1.5 font-mono text-xs">
-                                    <span className={isSelected ? 'text-white font-bold' : 'text-stone-950 font-bold'}>
-                                      {token.symbol}
-                                    </span>
-                                    <span className={`text-[9px] px-1.5 py-0.2 rounded ${isSelected ? 'bg-white/20 text-white' : 'bg-stone-100 text-stone-600'}`}>
-                                      {token.badge}
-                                    </span>
-                                  </div>
-                                  <div className={`text-[10px] ${isSelected ? 'text-stone-300' : 'text-stone-400'}`}>
-                                    {token.name}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center space-x-2 text-right font-mono">
-                                <span className={`text-xs ${isSelected ? 'text-white' : 'text-stone-900'}`}>
-                                  {formatUsd(token.priceUsd ?? null)}
-                                </span>
-                                {isSelected && <Check className="w-3.5 h-3.5 text-white flex-shrink-0" />}
-                              </div>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Step 2: Deposit Amount */}
-              <div className="space-y-3 pt-4 border-t border-stone-100">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-2">
-                    <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">2</span>
-                    <span>Enter Deposit Amount</span>
-                  </label>
-                  <span className="text-[11px] font-mono text-stone-400">Optional — defaults to quoted minimum</span>
-                </div>
-
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={nearAmount}
-                    onChange={(e) => setNearAmount(e.target.value)}
-                    placeholder={`Amount of ${nearSelectedToken} (empty = quoted minimum)`}
-                    className="w-full p-3.5 pr-24 rounded-2xl border font-mono text-base font-bold transition-all focus:outline-none focus:border-black bg-stone-50 hover:bg-stone-100/80 border-stone-200 text-stone-950"
-                  />
-                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
-                    <span className="text-xs font-mono font-extrabold px-2 py-1 rounded-lg bg-stone-200/80 text-stone-800">
-                      {nearSelectedToken}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="text-[11px] font-mono text-stone-400">Quick select preset amounts:</div>
-                  <div className="flex flex-wrap gap-2">
-                    {nearPresetAmounts.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => handleNearSelectPreset(p)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
-                          nearAmount === p
-                            ? 'bg-black text-white shadow-xs'
-                            : 'bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-200/60'
-                        }`}
-                      >
-                        {p} {nearSelectedToken}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 text-[11px] text-stone-600 leading-relaxed space-y-1 font-sans">
-                  <div className="flex items-center space-x-1.5 font-bold text-stone-900 font-mono">
-                    <Zap className="w-3.5 h-3.5 text-amber-600" />
-                    <span>How it settles</span>
-                  </div>
-                  <p>
-                    Send the quoted amount to the one-time address — no memo, no CLI. The solver network shields it into your passkey vault (<span className="font-mono text-stone-900 font-semibold">{nearAccount || 'u_...uprail.near'}</span>), usually within seconds of arrival.
-                  </p>
-                </div>
+                <AssetPicker
+                  tokens={registryTokens}
+                  selectedToken={nearAsset}
+                  onSelectToken={handleSelectNearToken}
+                />
               </div>
             </div>
 
-            {/* Ephemeral Gateway Explainer */}
-            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-600 space-y-1.5 leading-relaxed font-sans">
-              <div className="flex items-center space-x-1.5 font-bold text-stone-900 font-mono">
-                <Shield className="w-3.5 h-3.5 text-stone-900" />
-                <span>Confidential Ephemeral Ingress</span>
-              </div>
-              <p>
-                Your gateway address is ephemeral and generated exclusively for receiving <strong className="text-stone-900">{nearSelectedToken}</strong> on NEAR. Works from Meteor, Sender, HERE, Mintbase, or an exchange withdrawal — funds settle via NEAR Intents directly into your confidential passkey vault.
-              </p>
+            {/* One-line note */}
+            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-600 font-sans leading-relaxed">
+              Send <strong className="text-stone-900 font-semibold">{nearAsset.symbol}</strong> from any wallet or exchange to your vault address — it settles into your passkey-shielded vault automatically.
             </div>
           </div>
 
@@ -1404,10 +1103,10 @@ export const ReceivePage: React.FC = () => {
               {/* Active Pair Header */}
               <div className="w-full flex items-center justify-between pb-2 border-b border-stone-100 gap-2">
                 <div className="flex items-center space-x-2 min-w-0">
-                  <TokenIcon symbol={nearSelectedToken} size="sm" />
+                  <TokenIcon symbol={nearAsset.symbol} size="sm" />
                   <ChainLogo chainId="near" className="w-4 h-4 flex-shrink-0" />
                   <span className="font-mono text-xs font-bold text-stone-950 truncate">
-                    {nearSelectedToken} (NEAR Network)
+                    {nearAsset.symbol} (NEAR Network)
                   </span>
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold flex-shrink-0">
@@ -1415,123 +1114,23 @@ export const ReceivePage: React.FC = () => {
                 </span>
               </div>
 
-              {nearAddress?.address ? (
+              {nearAccount ? (
                 <>
-                  {/* Send Exactly Box with 1-Click Copy Amount */}
-                  <div className="w-full p-3.5 rounded-2xl bg-stone-950 text-white flex items-center justify-between shadow-xs">
-                    <div className="min-w-0">
-                      <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400">Send Exactly</div>
-                      <div className="text-base sm:text-lg font-mono font-black text-white truncate">
-                        {nearSendDisplay || `Any amount of ${nearSelectedToken}`}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleNearCopyAmount}
-                      disabled={!nearSendDisplay}
-                      className="py-1.5 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all cursor-pointer flex items-center space-x-1.5 border border-white/10 flex-shrink-0 ml-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {nearCopiedAmount ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Amount</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Generated QR Code */}
+                  {/* QR of the platform passkey account */}
                   <div className="py-1">
-                    <QRCodeDisplay value={nearAddress.address} size={190} />
+                    <QRCodeDisplay value={nearAccount} size={190} />
                   </div>
 
-                  {/* Standby Waiting / Live Deposit Status (Under QR code) */}
-                  {nearSettled ? (
-                    <div className="w-full p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-2.5 animate-fade-in shadow-xs text-left">
-                      <div className="flex items-center space-x-2 font-bold text-emerald-900 text-xs">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                        <span>Deposit Received &amp; Shielded!</span>
-                      </div>
-                      <p className="text-[11px] text-emerald-800 leading-relaxed font-sans">
-                        Your funds have arrived and been credited to your confidential passkey vault.
-                      </p>
-                      {nearStatus?.depositedAmountFormatted && (
-                        <div className="p-2.5 bg-white/80 rounded-xl border border-emerald-200 flex items-center justify-between font-mono text-[11px]">
-                          <span className="text-stone-500">Credited:</span>
-                          <span className="font-bold text-emerald-900">
-                            {nearStatus.depositedAmountFormatted}
-                            {nearStatus.depositedAmountUsd ? ` (~$${nearStatus.depositedAmountUsd})` : ''}
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex items-center space-x-2 pt-1">
-                        <Link
-                          to="/app"
-                          className="px-3 py-1.5 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors"
-                        >
-                          View in Dashboard
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => loadNearAddress(true)}
-                          className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
-                        >
-                          Receive Another
-                        </button>
-                      </div>
-                    </div>
-                  ) : nearStatus?.status === 'PROCESSING' || parseFloat(nearStatus?.depositedAmountFormatted || '0') > 0 ? (
-                    <div className="w-full p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2 animate-fade-in text-left">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
-                        <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
-                        <span>Deposit Detected Onchain! Routing via Intents...</span>
-                      </div>
-                      <p className="text-[11px] text-blue-800 leading-relaxed font-sans">
-                        Received <strong className="font-bold">{nearStatus?.depositedAmountFormatted}</strong> on NEAR. Solver network executing vault settlement.
-                      </p>
-                      {nearStatus?.txHashes && nearStatus.txHashes.length > 0 && (
-                        <div className="text-[10px] font-mono text-blue-700 truncate flex items-center space-x-1">
-                          <span>Tx:</span>
-                          <span className="underline font-bold">{nearStatus.txHashes[0].slice(0, 16)}...</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="w-full p-3.5 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-left">
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping flex-shrink-0" />
-                      <div className="font-sans text-xs text-stone-600">
-                        <div>
-                          <span>Standby: Waiting for incoming deposit on </span>
-                          <strong className="text-stone-900 font-semibold">NEAR</strong>
-                        </div>
-                        <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
-                          Transfer{' '}
-                          {nearSendDisplay ? (
-                            <strong className="text-stone-700 font-bold">{nearSendDisplay}</strong>
-                          ) : (
-                            `any amount of ${nearSelectedToken}`
-                          )}{' '}
-                          to the address below.
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* One-Time Address Display with 1-Click Copy */}
+                  {/* Vault Address with 1-Click Copy */}
                   <div className="w-full space-y-2 text-left">
                     <div className="flex items-center justify-between text-xs font-mono">
                       <span className="font-bold uppercase tracking-wider text-stone-600 text-[10px]">
-                        Deposit Address
+                        Vault Address
                       </span>
-                      <span className="text-[10px] text-stone-400">Single-use</span>
+                      <span className="text-[10px] text-stone-400">Reusable</span>
                     </div>
                     <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl font-mono text-xs text-stone-900 break-all select-all font-medium">
-                      {nearAddress.address}
+                      {nearAccount}
                     </div>
                     <button
                       type="button"
@@ -1552,66 +1151,18 @@ export const ReceivePage: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Memo Display if Required */}
-                  {nearAddress.memo && (
-                    <div className="w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-left space-y-1 font-mono text-xs">
-                      <div className="flex items-center justify-between text-amber-900 font-bold text-[10px] uppercase">
-                        <span>Required Memo:</span>
-                        <span className="text-amber-700 font-normal">Must include</span>
-                      </div>
-                      <span className="font-bold text-amber-950 break-all select-all block">{nearAddress.memo}</span>
+                  {/* Standby */}
+                  <div className="w-full p-3.5 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-left">
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping flex-shrink-0" />
+                    <div className="font-sans text-xs text-stone-600">
+                      <span>Standby: Waiting for incoming {nearAsset.symbol} on NEAR</span>
                     </div>
-                  )}
-
-                  <div className="w-full pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-500">
-                    <span>Expires in ~3 days</span>
-                    <button
-                      type="button"
-                      onClick={() => loadNearAddress(true)}
-                      disabled={nearDeriving}
-                      className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${nearDeriving ? 'animate-spin' : ''}`} />
-                      <span>New Address</span>
-                    </button>
                   </div>
                 </>
-              ) : nearDeriving ? (
+              ) : (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
                   <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
-                  <span>
-                    Deriving confidential gateway &amp; QR for {nearAmount || 'quoted'} {nearSelectedToken}...
-                  </span>
-                </div>
-              ) : nearError ? (
-                <div className="py-8 px-4 flex flex-col items-center justify-center space-y-3 text-center animate-fade-in">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center">
-                    <AlertTriangle className="w-6 h-6 text-amber-600" />
-                  </div>
-                  <p className="text-xs text-stone-600 max-w-xs font-sans leading-relaxed">{nearError}</p>
-                  <button
-                    type="button"
-                    onClick={() => loadNearAddress(true)}
-                    className="px-4 py-2 rounded-xl bg-black text-white text-xs font-bold font-mono hover:bg-stone-800 transition-colors cursor-pointer"
-                  >
-                    Try Again
-                  </button>
-                </div>
-              ) : (
-                <div className="py-12 px-4 flex flex-col items-center justify-center space-y-3 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-stone-50 border border-dashed border-stone-300 flex items-center justify-center text-stone-400">
-                    <QrCode className="w-8 h-8" />
-                  </div>
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-mono font-bold text-stone-900 uppercase tracking-wider">QR &amp; Deposit Address</h4>
-                    <p className="text-xs text-stone-500 max-w-xs font-sans leading-relaxed">
-                      Your one-time {nearSelectedToken} deposit address &amp; QR code will appear here.
-                    </p>
-                  </div>
-                  <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 text-[10px] font-mono text-stone-500">
-                    <Shield className="w-3 h-3 text-stone-500" />
-                    <span>Hardware Passkey Vault Ingress</span>
-                  </div>
+                  <span>Loading your vault account...</span>
                 </div>
               )}
             </div>

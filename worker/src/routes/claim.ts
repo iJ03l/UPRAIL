@@ -777,6 +777,23 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       );
     }
 
+    // Plain balance on the sender's own pk account is deposited into intents
+    // first — ft_transfer_call with the user's own address as memo — so the
+    // 1Click withdrawal can spend directly-received tokens. No-op when the
+    // balance already lives inside intents.
+    try {
+      const nearAccountForDeposit = await nearRpc.resolveUserNearAccount(c.env, session);
+      await nearRpc.depositPlainBalanceToIntents(
+        c.env,
+        session.x_id,
+        asset,
+        String(withdrawAmount),
+        nearAccountForDeposit
+      );
+    } catch (plainErr) {
+      console.warn('[withdraw] plain-balance deposit skipped:', plainErr);
+    }
+
     // 2. Atomically reserve the withdrawal.
     const withdrawalId = 'wth_' + crypto.randomUUID();
     const now = Date.now();
