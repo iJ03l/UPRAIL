@@ -195,21 +195,9 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       expectedRPID: allowedWebAuthnRpIds(c.env),
     });
 
-    // Derive deterministic, blinded confidential sub-account from passkey public key
-    // Zero linkage to 𝕏 handle onchain — 100% confidential
-    const masterAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
-    const confidentialAccount = await nearRpc.deriveConfidentialAccountId(
-      verification.publicKeyHex,
-      masterAccount
-    );
-
-    let nearAccount = confidentialAccount;
-    // Provision authentic onchain subaccount under escrow.uprail.near
-    try {
-      await nearRpc.createOnchainSubAccount(c.env, nearAccount);
-    } catch (createErr) {
-      console.warn('createOnchainSubAccount notice:', createErr);
-    }
+    // Resolve deterministic, authentic confidential sub-account for user
+    // Fully provisions subaccount and registers authentic keys on intents.near
+    const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
     const now = Date.now();
     const passkeyId = crypto.randomUUID();
 
@@ -262,7 +250,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       await c.env.DB.prepare(
         `
         UPDATE x_identities
-        SET near_account = ?,
+        SET near_account = COALESCE(near_account, ?),
             updated_at = ?
         WHERE x_id = ?
       `

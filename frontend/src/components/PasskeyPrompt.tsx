@@ -7,6 +7,7 @@ import {
   X,
   Smartphone,
   KeyRound,
+  AlertCircle,
 } from 'lucide-react';
 
 interface PasskeyPromptProps {
@@ -16,6 +17,8 @@ interface PasskeyPromptProps {
   handle: string;
   isClaiming?: boolean;
   hasExistingPasskey?: boolean;
+  error?: string | null;
+  onClearError?: () => void;
 }
 
 export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
@@ -25,16 +28,18 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
   handle,
   isClaiming = false,
   hasExistingPasskey = false,
+  error = null,
+  onClearError,
 }) => {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       <div className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl p-6 sm:p-7 overflow-hidden">
-        {/* Close Button */}
+        {/* Close Button — always enabled when an error is present or not claiming */}
         <button
           onClick={onClose}
-          disabled={isClaiming}
+          disabled={isClaiming && !error}
           className="absolute top-5 right-5 p-1 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -90,6 +95,25 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
             </div>
           </div>
         </div>
+
+        {/* In-Modal Error Alert */}
+        {error && (
+          <div className="mb-4 p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center justify-between animate-fade-in">
+            <div className="flex items-center space-x-2 min-w-0 pr-2">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+              <span className="break-words font-mono text-[11px]">{error}</span>
+            </div>
+            {onClearError && (
+              <button
+                type="button"
+                onClick={onClearError}
+                className="text-red-500 hover:text-red-800 text-xs font-mono font-bold flex-shrink-0 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Confirm Button */}
         <button

@@ -2326,7 +2326,18 @@ export async function executeTransferIntent(
     }
 
     const senderDerived = await deriveUserNearKeypair(env, senderXId);
-    const senderId = senderDerived.accountId;
+    let senderId = senderDerived.accountId;
+
+    if (env.DB) {
+      try {
+        const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+          .bind(senderXId)
+          .first<{ near_account: string | null }>();
+        if (idRow?.near_account) {
+          senderId = idRow.near_account;
+        }
+      } catch {}
+    }
 
     // Ensure sender subaccount is live & key registered onchain
     await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
@@ -2609,7 +2620,21 @@ export async function depositPlainBalanceToIntents(
     }
 
     const sender = await deriveUserNearKeypair(env, senderXId);
-    await createOnchainSubAccount(env, sender.accountId, sender.publicKey, sender.privateKey);
+    let senderAccountId = sender.accountId;
+    // creditAddress is the caller-resolved nearAccount — use it as hint
+    if (creditAddress && creditAddress.endsWith('.escrow.uprail.near')) {
+      senderAccountId = creditAddress;
+    } else if (env.DB) {
+      try {
+        const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+          .bind(senderXId)
+          .first<{ near_account: string | null }>();
+        if (idRow?.near_account) {
+          senderAccountId = idRow.near_account;
+        }
+      } catch {}
+    }
+    await createOnchainSubAccount(env, senderAccountId, sender.publicKey, sender.privateKey);
 
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
     const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
@@ -2621,13 +2646,13 @@ export async function depositPlainBalanceToIntents(
 
     const senderKey = {
       rpcUrl,
-      signerId: sender.accountId,
+      signerId: senderAccountId,
       signerPrivKey: sender.privateKey,
       signerPubKey: sender.publicKey,
     };
 
     // 1. Plain NEP-141 balance on the token contract covers it → single tx.
-    const plainFt = await getPlainFtBalance(rpcUrl, contractId, sender.accountId);
+    const plainFt = await getPlainFtBalance(rpcUrl, contractId, senderAccountId);
     if (plainFt >= BigInt(baseUnits)) {
       const res = await signAndBroadcastFunctionCall({
         ...senderKey,
@@ -2645,7 +2670,7 @@ export async function depositPlainBalanceToIntents(
     // 2. Plain native NEAR (NEAR asset only): wrap to wNEAR first, then the
     //    same ft_transfer_call — keeping a gas reserve for both transactions.
     if (isNearNative && contractId === 'wrap.near') {
-      const plainNear = await getPlainNearBalance(rpcUrl, sender.accountId);
+      const plainNear = await getPlainNearBalance(rpcUrl, senderAccountId);
       const gasReserve = 30000000000000000000000n; // 0.03 NEAR
       if (plainNear >= BigInt(baseUnits) + gasReserve) {
         const wrap = await signAndBroadcastFunctionCall({
@@ -2785,7 +2810,18 @@ export async function executeWithdrawIntent(
     }
 
     const senderDerived = await deriveUserNearKeypair(env, senderXId);
-    const senderId = senderDerived.accountId;
+    let senderId = senderDerived.accountId;
+
+    if (env.DB) {
+      try {
+        const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+          .bind(senderXId)
+          .first<{ near_account: string | null }>();
+        if (idRow?.near_account) {
+          senderId = idRow.near_account;
+        }
+      } catch {}
+    }
 
     // Ensure sender subaccount is live & key registered onchain
     await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
@@ -2872,24 +2908,30 @@ export async function resolveUserNearAccount(
   session: { x_id: string; x_handle: string; near_account?: string | null },
   report?: ProvisionReport
 ): Promise<string> {
-  // 1. Derive deterministic NEAR keypair and sub-account from active root key
-  const derived = await deriveUserNearKeypair(env, session.x_id);
-  const accountId = derived.accountId;
+  // 1. Prefer the account already stored in the session (set during login/claim)
+  let accountId = session.near_account || null;
 
-  // 2. Check if identity in DB is already aligned with current root derivation
-  let needsDbUpdate = true;
-  if (env.DB) {
+  // 2. If not in session, look up the DB — this is the authoritative source and
+  //    may differ from the HMAC derivation when the user registered via passkey.
+  if (!accountId && env.DB) {
     try {
       const identity = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
         .bind(session.x_id)
         .first<{ near_account: string | null }>();
-      if (identity?.near_account === accountId) {
-        needsDbUpdate = false;
+      if (identity?.near_account) {
+        accountId = identity.near_account;
       }
     } catch {}
   }
 
-  // 3. Try onchain creation if account does not exist
+  // 3. Fall back to deterministic HMAC derivation only for brand-new users
+  //    who have never registered a passkey or been assigned an account.
+  const derived = await deriveUserNearKeypair(env, session.x_id);
+  if (!accountId) {
+    accountId = derived.accountId;
+  }
+
+  // 4. Try onchain creation / key registration if account does not exist
   try {
     const provision = await createOnchainSubAccount(env, accountId, derived.publicKey, derived.privateKey);
     if (report) {
@@ -2906,10 +2948,12 @@ export async function resolveUserNearAccount(
     }
   }
 
-  // 4. Persist newly derived account to x_identities if not yet updated
-  if (needsDbUpdate && env.DB) {
+  // 5. Persist account to x_identities only if it was never set (COALESCE)
+  if (env.DB) {
     try {
-      await env.DB.prepare('UPDATE x_identities SET near_account = ?, updated_at = ? WHERE x_id = ?')
+      await env.DB.prepare(
+        'UPDATE x_identities SET near_account = COALESCE(near_account, ?), updated_at = ? WHERE x_id = ?'
+      )
         .bind(accountId, Date.now(), session.x_id)
         .run();
     } catch {}

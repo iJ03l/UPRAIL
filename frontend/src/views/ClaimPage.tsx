@@ -152,9 +152,10 @@ export const ClaimPage: React.FC = () => {
       } else if (activeClaimId) {
         await claimPaymentWithPasskey(activeClaimId);
       }
-      setShowPasskeyModal(false);
     } catch {
-      // Error handled in hook
+      // Error is set in the hook — it will display inside PasskeyPrompt
+    } finally {
+      setShowPasskeyModal(false);
     }
   };
 
@@ -419,6 +420,8 @@ export const ClaimPage: React.FC = () => {
         handle={user?.handle || 'your account'}
         isClaiming={isClaiming}
         hasExistingPasskey={hasPasskey}
+        error={error}
+        onClearError={clearError}
       />
     </div>
   );

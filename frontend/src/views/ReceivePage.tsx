@@ -158,6 +158,11 @@ export const ReceivePage: React.FC = () => {
   const [nearAsset, setNearAsset] = useState<Token>(NEAR_RECEIVE_TOKEN);
   const [registryTokens, setRegistryTokens] = useState<Token[]>([]);
   const [nearCopiedAddress, setNearCopiedAddress] = useState<boolean>(false);
+  const [nearDepositAddress, setNearDepositAddress] = useState<DepositAddress | null>(null);
+  const [isNearDeriving, setIsNearDeriving] = useState<boolean>(false);
+  const [nearDepositStatus, setNearDepositStatus] = useState<DepositStatusResponse | null>(null);
+  const [nearSettledSuccess, setNearSettledSuccess] = useState<boolean>(false);
+  const [showDirectVault, setShowDirectVault] = useState<boolean>(false);
 
   // Dropdown states
   const [isTokenDropdownOpen, setIsTokenDropdownOpen] = useState(false);
@@ -358,13 +363,41 @@ export const ReceivePage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [selectedToken, selectedChain, depositAmount, loadAddress]);
 
+  const loadNearAddress = useCallback(
+    async (refresh = false) => {
+      if (!hasIntentAccount || !nearAsset?.symbol) return;
+      setIsNearDeriving(true);
+      try {
+        const data = await fetchDepositAddress('near', refresh, nearAsset.symbol);
+        setNearDepositAddress(data);
+      } catch (err) {
+        console.warn('Failed to load NEAR deposit address:', err);
+      } finally {
+        setIsNearDeriving(false);
+      }
+    },
+    [hasIntentAccount, nearAsset]
+  );
+
+  useEffect(() => {
+    if (activeTab === 'defuse') {
+      loadNearAddress(false);
+    }
+  }, [activeTab, nearAsset, loadNearAddress]);
+
   // Real-time deposit polling (every 2.5s) — one instance per tab, active tab
   // only. Both tabs share the same /api/onchain/deposit-status pipeline.
   useDepositPoll({
-    address: activeTab === 'crosschain' ? currentAddress?.address : undefined,
-    settled: settledSuccess,
-    onStatus: setDepositStatus,
-    onSettled: () => setSettledSuccess(true),
+    address: activeTab === 'crosschain' ? currentAddress?.address : nearDepositAddress?.address,
+    settled: activeTab === 'crosschain' ? settledSuccess : nearSettledSuccess,
+    onStatus: (status) => {
+      if (activeTab === 'crosschain') setDepositStatus(status);
+      else setNearDepositStatus(status);
+    },
+    onSettled: () => {
+      if (activeTab === 'crosschain') setSettledSuccess(true);
+      else setNearSettledSuccess(true);
+    },
     refreshBalances,
     refreshHistory,
   });
@@ -390,19 +423,27 @@ export const ReceivePage: React.FC = () => {
     loadAddress(true);
   };
 
-  // ── Tab 2: direct receive — destination is always the user's pk account ─────
+  // ── Tab 2: NEAR native receive ─────────────────────────────────────────────
   const handleSelectNearToken = (token: Token) => {
     setNearAsset(token);
+    setNearSettledSuccess(false);
+    setNearDepositStatus(null);
   };
 
   const handleNearCopyAddress = () => {
-    if (!nearAccount) return;
-    navigator.clipboard.writeText(nearAccount);
+    const addr = nearDepositAddress?.address || nearAccount;
+    if (!addr) return;
+    navigator.clipboard.writeText(addr);
     setNearCopiedAddress(true);
     setTimeout(() => setNearCopiedAddress(false), 2000);
   };
 
+  const handleGenerateFreshNear = () => {
+    loadNearAddress(true);
+  };
+
   const depositAddressValue = currentAddress?.address || '';
+  const nearDepositAddressValue = nearDepositAddress?.address || '';
   const minAmountDisplay =
     currentAddress?.minAmountFormatted ||
     (depositAmount && selectedToken ? `${depositAmount} ${selectedToken}` : selectedToken === 'USDC' ? '0.10 USDC' : selectedToken === 'NEAR' ? '0.01 NEAR' : `0.10 ${selectedToken}`);
@@ -1114,23 +1155,73 @@ export const ReceivePage: React.FC = () => {
                 </span>
               </div>
 
-              {nearAccount ? (
+              {isNearDeriving ? (
+                <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
+                  <span>Deriving shielded deposit address for {nearAsset.symbol}...</span>
+                </div>
+              ) : nearDepositAddressValue ? (
                 <>
-                  {/* QR of the platform passkey account */}
+                  {/* QR of the single-use shielded ingress address */}
                   <div className="py-1">
-                    <QRCodeDisplay value={nearAccount} size={190} />
+                    <QRCodeDisplay value={nearDepositAddressValue} size={190} />
                   </div>
 
-                  {/* Vault Address with 1-Click Copy */}
+                  {/* Status Banner */}
+                  {nearSettledSuccess ? (
+                    <div className="w-full p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-2.5 animate-fade-in shadow-xs text-left">
+                      <div className="flex items-center space-x-2 font-bold text-emerald-900 text-xs">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                        <span>Deposit Received &amp; Shielded!</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-800 leading-relaxed font-sans">
+                        Your {nearAsset.symbol} has arrived and been credited to your passkey vault.
+                      </p>
+                      <div className="flex items-center space-x-2 pt-1">
+                        <Link
+                          to="/app"
+                          className="px-3 py-1.5 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors"
+                        >
+                          View in Dashboard
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={handleGenerateFreshNear}
+                          className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
+                        >
+                          Receive Another
+                        </button>
+                      </div>
+                    </div>
+                  ) : nearDepositStatus?.status === 'PROCESSING' ? (
+                    <div className="w-full p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2 animate-fade-in text-left">
+                      <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
+                        <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
+                        <span>Deposit Detected on NEAR! Settling...</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="w-full p-3.5 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-left">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping flex-shrink-0" />
+                      <div className="font-sans text-xs text-stone-600">
+                        <span>Standby: Waiting for incoming {nearAsset.symbol} on NEAR</span>
+                        <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
+                          Single-use ephemeral ingress • 100% onchain shielded
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Single-Use Deposit Address with 1-Click Copy */}
                   <div className="w-full space-y-2 text-left">
                     <div className="flex items-center justify-between text-xs font-mono">
                       <span className="font-bold uppercase tracking-wider text-stone-600 text-[10px]">
-                        Vault Address
+                        Shielded Deposit Address
                       </span>
-                      <span className="text-[10px] text-stone-400">Reusable</span>
+                      <span className="text-[10px] text-stone-400">Single-use</span>
                     </div>
                     <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl font-mono text-xs text-stone-900 break-all select-all font-medium">
-                      {nearAccount}
+                      {nearDepositAddressValue}
                     </div>
                     <button
                       type="button"
@@ -1145,18 +1236,77 @@ export const ReceivePage: React.FC = () => {
                       ) : (
                         <>
                           <Copy className="w-3.5 h-3.5" />
-                          <span>Copy Address</span>
+                          <span>Copy Shielded Address</span>
                         </>
                       )}
                     </button>
                   </div>
 
-                  {/* Standby */}
-                  <div className="w-full p-3.5 rounded-2xl bg-stone-50 border border-stone-200 flex items-center space-x-3 text-left">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping flex-shrink-0" />
-                    <div className="font-sans text-xs text-stone-600">
-                      <span>Standby: Waiting for incoming {nearAsset.symbol} on NEAR</span>
+                  <div className="w-full pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-500">
+                    <span>Expires in ~3 days</span>
+                    <button
+                      type="button"
+                      onClick={handleGenerateFreshNear}
+                      disabled={isNearDeriving}
+                      className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isNearDeriving ? 'animate-spin' : ''}`} />
+                      <span>New Address</span>
+                    </button>
+                  </div>
+
+                  {/* Direct Vault Address Expandable Option */}
+                  {nearAccount && (
+                    <div className="w-full pt-3 border-t border-stone-100 text-left">
+                      <button
+                        type="button"
+                        onClick={() => setShowDirectVault(!showDirectVault)}
+                        className="text-[11px] font-mono text-stone-500 hover:text-stone-900 flex items-center justify-between w-full cursor-pointer py-1"
+                      >
+                        <span>Direct Vault Address (Advanced)</span>
+                        <span>{showDirectVault ? '−' : '+'}</span>
+                      </button>
+                      {showDirectVault && (
+                        <div className="mt-2 p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-2 animate-fade-in">
+                          <span className="text-[10px] text-stone-400 font-mono block">
+                            Direct onchain subaccount (reusable, unshielded sender memo)
+                          </span>
+                          <div className="font-mono text-xs text-stone-900 break-all select-all">
+                            {nearAccount}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(nearAccount);
+                              setNearCopiedAddress(true);
+                              setTimeout(() => setNearCopiedAddress(false), 2000);
+                            }}
+                            className="text-xs font-mono font-bold text-stone-700 hover:text-black underline"
+                          >
+                            Copy Direct Address
+                          </button>
+                        </div>
+                      )}
                     </div>
+                  )}
+                </>
+              ) : nearAccount ? (
+                <>
+                  <div className="py-1">
+                    <QRCodeDisplay value={nearAccount} size={190} />
+                  </div>
+                  <div className="w-full space-y-2 text-left">
+                    <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl font-mono text-xs text-stone-900 break-all select-all font-medium">
+                      {nearAccount}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleNearCopyAddress}
+                      className="w-full py-2.5 px-4 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold font-mono transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-xs"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Address</span>
+                    </button>
                   </div>
                 </>
               ) : (
