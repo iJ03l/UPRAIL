@@ -11,6 +11,7 @@
 
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse } from './types';
+import { PaymentStatus } from './types';
 import { corsMiddleware } from './middleware/cors';
 import { rateLimit } from './middleware/rateLimit';
 import { sessionMiddleware, requireAuth } from './middleware/session';
@@ -25,6 +26,7 @@ import { invitesRouter } from './routes/invites';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import * as nearRpc from './services/nearRpc';
+import { refundEscrowedPayment } from './services/refunds';
 
 // Export Durable Object classes for runtime
 export { EscrowDO } from './durable-objects/escrow';
@@ -338,24 +340,93 @@ app.notFound(async (c) => {
 export default {
   fetch: app.fetch,
   async scheduled(event: any, env: AppContext['Bindings'], ctx: any) {
-    if (env.DB) {
-      const now = Date.now();
-      try {
-        const expired = await env.DB.prepare(
-          "SELECT id FROM payments WHERE expires_at < ? AND status IN ('PENDING', 'DEPOSIT_WAITING')"
+    if (!env.DB) return;
+    const now = Date.now();
+
+    // 1. Expiry sweep for sends whose funds never moved (PENDING /
+    //    DEPOSIT_WAITING): safe to expire, nothing to refund.
+    try {
+      const expired = await env.DB.prepare(
+        `SELECT * FROM payments WHERE expires_at < ? AND status IN ('PENDING', 'DEPOSIT_WAITING') AND intent_hash IS NULL`
+      )
+        .bind(now)
+        .all<{ id: string }>();
+      for (const payment of (expired.results || [])) {
+        await env.DB.prepare(
+          "UPDATE payments SET status = 'EXPIRED', updated_at = ? WHERE id = ? AND status IN ('PENDING', 'DEPOSIT_WAITING')"
         )
-          .bind(now)
-          .all();
-        for (const payment of (expired.results || []) as { id: string }[]) {
-          await env.DB.prepare(
-            "UPDATE payments SET status = 'EXPIRED', updated_at = ? WHERE id = ?"
-          )
-            .bind(now, payment.id)
-            .run();
-        }
-      } catch (e) {
-        console.warn('Scheduled expiry check failed:', e);
+          .bind(now, payment.id)
+          .run();
+        console.log(`[cron] expired unsettled payment ${payment.id}`);
       }
+    } catch (e) {
+      console.warn('[cron] expiry sweep failed:', e);
+    }
+
+    // 2. Crash recovery: stale PENDING rows with no escrow deposit intent —
+    //    the send flow crashed between insert and settlement. Nothing moved
+    //    (intent_hash NULL), so expire them; escalate if any are older than
+    //    15 minutes (they should have finalized or failed immediately).
+    try {
+      const stale = await env.DB.prepare(
+        `SELECT id, created_at FROM payments WHERE status IN ('PENDING', 'DEPOSIT_WAITING')
+           AND intent_hash IS NULL AND created_at < ?`
+      )
+        .bind(now - 15 * 60 * 1000)
+        .all<{ id: string; created_at: number }>();
+      for (const payment of (stale.results || [])) {
+        console.error(
+          `[cron] CRITICAL: stale unsettled payment ${payment.id} (created ${new Date(payment.created_at).toISOString()}) — send flow left it behind, expiring`
+        );
+        await env.DB.prepare(
+          "UPDATE payments SET status = 'EXPIRED', updated_at = ? WHERE id = ? AND status IN ('PENDING', 'DEPOSIT_WAITING') AND intent_hash IS NULL"
+        )
+          .bind(now, payment.id)
+          .run();
+      }
+    } catch (e) {
+      console.warn('[cron] stale-payment sweep failed:', e);
+    }
+
+    // 3. Refund ESCROWED payments past their expiry — the pooled escrow holds
+    //    the gross (amount + fee); refundEscrowedPayment flips the row
+    //    atomically so a concurrent claim can never both win.
+    try {
+      const due = await env.DB.prepare(
+        `SELECT * FROM payments WHERE status = ? AND expires_at < ? ORDER BY created_at ASC LIMIT 50`
+      )
+        .bind(PaymentStatus.ESCROWED, now)
+        .all<any>();
+      for (const row of (due.results || [])) {
+        const res = await refundEscrowedPayment(env, row);
+        if (res.refunded) {
+          console.log(`[cron] refunded expired payment ${row.id} (tx ${res.txHash})`);
+        } else if (!res.alreadyRefunded) {
+          console.warn(`[cron] refund skipped for ${row.id}: ${res.error}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[cron] refund sweep failed:', e);
+    }
+
+    // 4. Crash recovery: REFUNDED rows whose refund_tx_hash never got written
+    //    — the flip succeeded but the transfer/hash write did not complete.
+    try {
+      const stuck = await env.DB.prepare(
+        `SELECT * FROM payments WHERE status = ? AND refund_tx_hash IS NULL ORDER BY created_at ASC LIMIT 25`
+      )
+        .bind(PaymentStatus.REFUNDED)
+        .all<any>();
+      for (const row of (stuck.results || [])) {
+        const res = await refundEscrowedPayment(env, row);
+        if (res.refunded) {
+          console.log(`[cron] completed interrupted refund ${row.id} (tx ${res.txHash})`);
+        } else {
+          console.warn(`[cron] interrupted refund ${row.id} still pending: ${res.error}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[cron] interrupted-refund recovery failed:', e);
     }
   },
 };

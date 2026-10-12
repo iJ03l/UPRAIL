@@ -31,6 +31,3 @@ ESCROW_PRIVATE_KEY=""
 
 # NEAR JSON-RPC endpoint (contains a provider API token)
 NEAR_RPC_URL=""
-
-# Optional: Postgres connection string
-DATABASE_URL=""

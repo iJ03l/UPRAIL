@@ -34,7 +34,7 @@
   },
   // Secrets (set via `wrangler secret put NAME`, never committed):
   //   X_CLIENT_SECRET, SESSION_SECRET, INTERNAL_SERVICE_KEY,
-  //   ESCROW_PRIVATE_KEY, NEAR_RPC_URL, DATABASE_URL, SETTLEMENT_SERVICE_URL
+  //   ESCROW_PRIVATE_KEY, NEAR_RPC_URL, SETTLEMENT_SERVICE_URL
   //
   // SETTLEMENT_SERVICE_URL is how the worker reaches the Go settlement
   // service. No durable_objects/containers block is declared: this worker is

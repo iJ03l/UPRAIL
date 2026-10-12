@@ -112,6 +112,9 @@ export async function createSession(
   const signedToken = await signPayload(JSON.stringify(session), secret);
 
   const reqUrl = new URL(c.req.url);
+  // Host-only cookie: app and API share one origin, so the cookie must not
+  // leak to sibling subdomains. The old `.uprail.world` domain also matched
+  // hostile lookalikes like `evil-uprail.world` (endsWith).
   const cookieOptions: any = {
     path: '/',
     httpOnly: true,
@@ -119,9 +122,6 @@ export async function createSession(
     sameSite: 'Lax',
     maxAge: SESSION_TTL_SECONDS,
   };
-  if (reqUrl.hostname.endsWith('uprail.world')) {
-    cookieOptions.domain = '.uprail.world';
-  }
 
   setCookie(c, SESSION_COOKIE_NAME, signedToken, cookieOptions);
 
@@ -157,9 +157,6 @@ export async function updateSession(
     sameSite: 'Lax',
     maxAge: remainingSeconds,
   };
-  if (reqUrl.hostname.endsWith('uprail.world')) {
-    cookieOptions.domain = '.uprail.world';
-  }
 
   setCookie(c, SESSION_COOKIE_NAME, signedToken, cookieOptions);
 
@@ -178,9 +175,6 @@ export async function destroySession(c: Context<AppContext>): Promise<void> {
     secure: reqUrl.protocol === 'https:',
     sameSite: 'Lax',
   };
-  if (reqUrl.hostname.endsWith('uprail.world')) {
-    deleteOptions.domain = '.uprail.world';
-  }
   deleteCookie(c, SESSION_COOKIE_NAME, deleteOptions);
 }
 

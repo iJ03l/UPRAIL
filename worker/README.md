@@ -8,7 +8,6 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
 - **Router:** Hono v4
 - **State & Storage:**
   - **D1 Database:** All relational state (`x_identities`, `passkeys`, `payments`, `invites`, `withdrawals`, `auth_challenges`, `deposit_addresses`). Schema is owned by `src/db/migrations/*.sql`.
-  - **Postgres (optional):** used when `DATABASE_URL` (or a Hyperdrive binding) is configured; every call site falls back to D1 when it is not.
   - **No Durable Objects:** the worker deploys without `durable_objects`/`containers` (free tier cannot run Worker containers). Escrow state lives in D1 and settlement runs in the external Go service.
   - **Sessions:** Stateless HMAC-SHA256 signed cookies (`src/middleware/session.ts`) — zero KV writes. The `CACHE` KV binding is only read to upgrade legacy session cookies.
   - **Challenges:** Single-use WebAuthn/OAuth challenges stored in D1 + in-memory.
@@ -18,10 +17,10 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
   - WebAuthn (P-256 / ES256, COSE alg `-7`); rpId/origin resolved from `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGIN` via `src/services/webauthnConfig.ts`
 - **Secrets:** Never committed. Set with `wrangler secret put <NAME>` (see `.dev.vars.example`); required secrets fail closed when missing (`src/utils/secrets.ts`).
 - **NEAR Settlement:**
-  - Proxied to the Go settlement service (HMAC-signed internal auth, `src/utils/internalAuth.ts`)
+  - Escrow transfers/refunds are signed by the Worker itself (escrow key in `ESCROW_PRIVATE_KEY`); 1Click quotes are proxied to the Go settlement service when configured (HMAC-signed internal auth, `src/utils/internalAuth.ts`)
   - 1Click confidential quotes with `"advanced"` confidentiality
   - Only real onchain transaction hashes are persisted — settlement responses without a hash fail loudly
-  - The hourly cron marks expired payments `EXPIRED`; refunds are requested explicitly, not automated
+  - The hourly cron expires unsettled sends, refunds `ESCROWED` payments past their expiry back to the sender (gross = amount + fee), and retries interrupted refunds (`src/index.ts`)
 
 ## Routes
 

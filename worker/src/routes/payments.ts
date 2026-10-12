@@ -4,7 +4,6 @@
  */
 
 import { Hono } from 'hono';
-import { ulid } from 'ulid';
 import {
   AppContext,
   ErrorResponse,
@@ -20,19 +19,13 @@ import {
 } from '../types';
 import * as nearProxy from '../services/nearProxy';
 import * as nearRpc from '../services/nearRpc';
+import { refundEscrowedPayment } from '../services/refunds';
 import { signQuote, verifyQuoteToken } from '../services/quoteAuth';
 import { requireQuoteSecret } from '../utils/secrets';
 import { resolveOrigin } from '../services/webauthnConfig';
 import { createPaymentInvite } from '../services/inviteService';
 import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
-import {
-  getDb,
-  insertPayment,
-  getPaymentById,
-  getUserPayments,
-  updatePaymentStatus,
-} from '../db/postgres';
 import { publicErrorMessage } from '../utils/errors';
 
 export const paymentsRouter = new Hono<AppContext>();
@@ -72,48 +65,6 @@ function classifyRecipient(raw: string): { isAddress: boolean; value: string } {
   // NEAR named accounts always contain a dot; X handles never do.
   if (t.includes('.') && NEAR_ACCOUNT_RE.test(t)) return { isAddress: true, value: t.toLowerCase() };
   return { isAddress: false, value: normalizeHandle(t) };
-}
-
-/**
- * Helper to call EscrowDO with RPC or HTTP fallback
- */
-async function callEscrowDO(
-  env: AppContext['Bindings'],
-  paymentId: string,
-  method: 'init' | 'status' | 'cancel',
-  payload?: any
-): Promise<any> {
-  if (!env.ESCROW) {
-    // Pure Free Tier mode - Escrow state is maintained in D1 database
-    return null;
-  }
-  const doId = env.ESCROW.idFromName(paymentId);
-  const stub = env.ESCROW.get(doId) as any;
-
-  if (method === 'init' && typeof stub.initPayment === 'function') {
-    return await stub.initPayment(payload);
-  }
-  if (method === 'status' && typeof stub.getStatus === 'function') {
-    return await stub.getStatus();
-  }
-  if (method === 'cancel' && typeof stub.cancel === 'function') {
-    return await stub.cancel(payload?.senderXId);
-  }
-
-  // Fallback to fetch()
-  const path = `/${method === 'init' ? 'init' : method === 'status' ? 'status' : 'cancel'}`;
-  const request = new Request(`http://escrow${path}`, {
-    method: method === 'status' ? 'GET' : 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: method !== 'status' ? JSON.stringify(payload || {}) : undefined,
-  });
-
-  const response = await stub.fetch(request);
-  if (!response.ok) {
-    const errorJson = (await response.json().catch(() => ({}))) as any;
-    throw new Error(errorJson.error || `EscrowDO operation failed with ${response.status}`);
-  }
-  return await response.json();
 }
 
 /**
@@ -379,7 +330,7 @@ paymentsRouter.post('/quote', async (c) => {
       });
     } catch (proxyErr: any) {
       console.warn('nearProxy.quote fallback to platform escrow holding wallet:', proxyErr);
-      const fallbackQuoteId = ulid();
+      const fallbackQuoteId = crypto.randomUUID();
       const fallbackExpiresAt = Date.now() + 15 * 60 * 1000;
       const secret = requireQuoteSecret(c.env);
       const sigToken = await signQuote(secret, {
@@ -427,7 +378,7 @@ paymentsRouter.post('/quote', async (c) => {
     console.error('Quote generation error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Failed to retrieve confidential quote: ${publicErrorMessage(err, 'Internal error')})`,
+        error: `Failed to retrieve confidential quote: ${publicErrorMessage(err, 'Internal error')}`,
         code: 'QUOTE_ERROR',
       },
       500
@@ -503,7 +454,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     }
 
     const session = c.get('session');
-    const paymentId = ulid();
+    const paymentId = crypto.randomUUID();
     const now = Date.now();
     const expiryDays = parseInt(c.env.PAYMENT_EXPIRY_DAYS || '30', 10);
     const expiresAt = now + expiryDays * 86400 * 1000;
@@ -566,91 +517,13 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       }
     }
 
-    // If recipient is already registered with an active confidential vault, settle directly!
-    // If recipient is not yet registered, lock funds into escrow.uprail.near onchain!
-    let claimTxHash: string | null = null;
-    let escrowDepositTxHash: string | null = null;
+    // ── 1. Record FIRST, move funds SECOND ─────────────────────────────────
+    // The payment row is written before any onchain movement so a crash,
+    // timeout or DB failure can never leave transferred funds without a
+    // claimable record. The row starts PENDING and is finalized to
+    // CLAIMED/ESCROWED (with the settlement hashes) only after the onchain
+    // transfer confirms. A failed settlement marks it CANCELLED.
     const holdingAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
-
-    // Plain-balance path: tokens received directly into the sender's own pk
-    // sub-account move into intents with ft_transfer_call(msg = credit target)
-    // — the recipient's platform account when registered, the escrow holding
-    // account otherwise (exactly the targets the signed-intent path uses).
-    // Direct sends deliver amount − fee to the recipient; escrowed sends lock
-    // the gross amount (the immediate fee dispatch below carves the fee out
-    // of escrow), so in every case the sender's vault loses exactly `amount`.
-    const creditTarget =
-      isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
-    const creditAmount = isRecipientRegistered ? recipientAmount : body.amount;
-    const plainDeposit = await nearRpc.depositPlainBalanceToIntents(
-      c.env,
-      session!.x_id,
-      body.asset,
-      creditAmount,
-      creditTarget
-    );
-
-    if (plainDeposit.deposited && plainDeposit.txHash) {
-      if (isRecipientRegistered) claimTxHash = plainDeposit.txHash;
-      else escrowDepositTxHash = plainDeposit.txHash;
-    } else if (isRecipientRegistered && recipientNearAccount) {
-      try {
-        const transferResult = await nearRpc.executeTransferIntent(
-          c.env,
-          session!.x_id,
-          recipientNearAccount,
-          body.asset,
-          recipientAmount
-        );
-        if (transferResult?.success && transferResult.txHash) {
-          claimTxHash = transferResult.txHash;
-        } else if (transferResult?.error) {
-          throw new Error(transferResult.error);
-        }
-      } catch (directErr: any) {
-        console.error('[send] direct transfer onchain error:', directErr);
-        return c.json<ErrorResponse>(
-          { error: `Onchain settlement failed: ${directErr?.message || 'intent transfer error'}`, code: 'SETTLEMENT_FAILED' },
-          502
-        );
-      }
-      if (!claimTxHash) {
-        return c.json<ErrorResponse>(
-          { error: 'Onchain settlement failed to confirm transaction', code: 'SETTLEMENT_FAILED' },
-          502
-        );
-      }
-    } else {
-      // Recipient is not registered yet. Debit sender's vault onchain into escrow holding account!
-      try {
-        const transferResult = await nearRpc.executeTransferIntent(
-          c.env,
-          session!.x_id,
-          holdingAccount,
-          body.asset,
-          body.amount
-        );
-        if (transferResult?.success && transferResult.txHash) {
-          escrowDepositTxHash = transferResult.txHash;
-        } else if (transferResult?.error) {
-          throw new Error(transferResult.error);
-        }
-      } catch (escrowErr: any) {
-        console.error('[send] escrow lock onchain error:', escrowErr);
-        return c.json<ErrorResponse>(
-          { error: `Escrow transfer failed: ${escrowErr?.message || 'intent transfer error'}`, code: 'ESCROW_LOCK_FAILED' },
-          502
-        );
-      }
-      if (!escrowDepositTxHash) {
-        return c.json<ErrorResponse>(
-          { error: 'Escrow lock failed to confirm onchain transaction', code: 'ESCROW_LOCK_FAILED' },
-          502
-        );
-      }
-    }
-
-    const paymentStatus = isRecipientRegistered ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED;
 
     // Generate preloaded invite code only when the recipient is not yet registered
     const inviteCode = isRecipientRegistered
@@ -671,70 +544,15 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       fee_recipient: feeRecipient,
       invite_code: inviteCode,
       memo,
-      status: paymentStatus,
-      deposit_address: escrowDepositTxHash || body.depositAddress,
-      intent_hash: escrowDepositTxHash,
-      claim_tx_hash: claimTxHash,
+      status: PaymentStatus.PENDING,
+      deposit_address: body.depositAddress,
+      intent_hash: null,
+      claim_tx_hash: null,
       refund_tx_hash: null,
       created_at: now,
       expires_at: expiresAt,
       updated_at: now,
     };
-
-    // Immediately route the protocol fee to fees.uprail.near (send fee only,
-    // 0% on claim). Escrowed sends dispatch it out of the escrowed gross;
-    // direct sends pull it from the sender's own vault — either way the fee
-    // is carved out of the amount being sent, never charged on top of the
-    // sender's balance.
-    if (parseFloat(protocolFee) > 0) {
-      if (isRecipientRegistered) {
-        try {
-          const feeDeposit = await nearRpc.depositPlainBalanceToIntents(
-            c.env,
-            session!.x_id,
-            body.asset,
-            protocolFee,
-            feeRecipient
-          );
-          if (!feeDeposit.deposited) {
-            const feeTx = await nearRpc.executeTransferIntent(
-              c.env,
-              session!.x_id,
-              feeRecipient,
-              body.asset,
-              protocolFee
-            );
-            if (!feeTx?.success) {
-              throw new Error(feeTx?.error || 'fee intent transfer failed');
-            }
-          }
-        } catch (feeErr) {
-          console.warn('[FeeRouting] Direct-send fee dispatch notice:', feeErr);
-        }
-      } else {
-        try {
-          await nearProxy.transfer(c.env, {
-            recipientNearAccount: feeRecipient,
-            asset: body.asset,
-            amount: protocolFee,
-            escrowAccountId: c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near',
-            paymentId: `${paymentId}_fee`,
-          });
-        } catch (feeErr) {
-          console.warn('[FeeRouting] Immediate send fee dispatch notice:', feeErr);
-        }
-      }
-    }
-
-    // 1. Insert into PostgreSQL and D1 database
-    const sql = getDb(c.env);
-    if (sql) {
-      try {
-        await insertPayment(sql, payment);
-      } catch (pgErr) {
-        console.warn('Postgres insertPayment failed, falling back to D1:', pgErr);
-      }
-    }
 
     try {
       await c.env.DB.prepare(
@@ -784,12 +602,171 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
         )
         .run();
     } catch (d1Err) {
-      console.warn('D1 insert payment failed:', d1Err);
+      console.error('[send] D1 insert payment failed before settlement:', d1Err);
+      return c.json<ErrorResponse>(
+        {
+          error: 'Could not record the payment — no funds were moved. Please retry.',
+          code: 'PAYMENT_RECORD_FAILED',
+        },
+        500
+      );
     }
 
-    // 2. Initialize EscrowDO instance (only needed for escrowed payments awaiting claim)
-    if (!isRecipientRegistered) {
-      await callEscrowDO(c.env, paymentId, 'init', payment);
+    /**
+     * Settlement failed before/while funds moved: mark the still-PENDING row
+     * CANCELLED so it never shows up as claimable, then return the error.
+     */
+    const failSend = async (
+      code: string,
+      message: string,
+      status: 400 | 500 | 502
+    ): Promise<Response> => {
+      try {
+        await c.env.DB.prepare(
+          'UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?'
+        )
+          .bind(PaymentStatus.CANCELLED, Date.now(), paymentId, PaymentStatus.PENDING)
+          .run();
+      } catch (cancelErr) {
+        console.error(`[send] failed to mark ${paymentId} cancelled after settlement failure:`, cancelErr);
+      }
+      return c.json<ErrorResponse>({ error: message, code }, status);
+    };
+
+    // ── 2. Move funds ──────────────────────────────────────────────────────
+    let claimTxHash: string | null = null;
+    let escrowDepositTxHash: string | null = null;
+
+    // Plain-balance path: tokens received directly into the sender's own pk
+    // sub-account move into intents with ft_transfer_call(msg = credit target)
+    // — the recipient's platform account when registered, the escrow holding
+    // account otherwise (exactly the targets the signed-intent path uses).
+    // Direct sends deliver amount − fee to the recipient; escrowed sends lock
+    // the gross amount (the fee is carved out of escrow at claim time), so in
+    // every case the sender's vault loses exactly `amount`.
+    const creditTarget =
+      isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
+    const creditAmount = isRecipientRegistered ? recipientAmount : body.amount;
+    const plainDeposit = await nearRpc.depositPlainBalanceToIntents(
+      c.env,
+      session!.x_id,
+      body.asset,
+      creditAmount,
+      creditTarget
+    );
+
+    if (plainDeposit.deposited && plainDeposit.txHash) {
+      if (isRecipientRegistered) claimTxHash = plainDeposit.txHash;
+      else escrowDepositTxHash = plainDeposit.txHash;
+    } else if (isRecipientRegistered && recipientNearAccount) {
+      const transferResult = await nearRpc.executeTransferIntent(
+        c.env,
+        session!.x_id,
+        recipientNearAccount,
+        body.asset,
+        recipientAmount
+      );
+      if (transferResult?.success && transferResult.txHash) {
+        claimTxHash = transferResult.txHash;
+      } else {
+        console.error('[send] direct transfer onchain error:', transferResult?.error);
+        return await failSend(
+          'SETTLEMENT_FAILED',
+          publicErrorMessage(new Error(transferResult?.error || ''), 'Onchain settlement failed'),
+          502
+        );
+      }
+    } else {
+      // Recipient is not registered yet. Debit sender's vault onchain into the escrow holding account.
+      const transferResult = await nearRpc.executeTransferIntent(
+        c.env,
+        session!.x_id,
+        holdingAccount,
+        body.asset,
+        body.amount
+      );
+      if (transferResult?.success && transferResult.txHash) {
+        escrowDepositTxHash = transferResult.txHash;
+      } else {
+        console.error('[send] escrow lock onchain error:', transferResult?.error);
+        return await failSend(
+          'ESCROW_LOCK_FAILED',
+          publicErrorMessage(new Error(transferResult?.error || ''), 'Escrow lock failed'),
+          502
+        );
+      }
+    }
+
+    // ── 3. Finalize the record with the settlement hashes ──────────────────
+    const paymentStatus = isRecipientRegistered ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED;
+    try {
+      const finalize = await c.env.DB.prepare(
+        `UPDATE payments
+            SET status = ?, deposit_address = ?, intent_hash = ?, claim_tx_hash = ?, updated_at = ?
+          WHERE id = ? AND status = ?`
+      )
+        .bind(
+          paymentStatus,
+          escrowDepositTxHash || payment.deposit_address,
+          escrowDepositTxHash,
+          claimTxHash,
+          Date.now(),
+          paymentId,
+          PaymentStatus.PENDING
+        )
+        .run();
+      if ((finalize.meta?.changes ?? 0) === 0) {
+        console.error(
+          `[send] CRITICAL: settlement ${claimTxHash || escrowDepositTxHash} succeeded but ${paymentId} was no longer PENDING`
+        );
+        return c.json<ErrorResponse>(
+          {
+            error: `Payment settled but could not be finalized — quote payment id ${paymentId} to support`,
+            code: 'SEND_NOT_RECORDED',
+          },
+          500
+        );
+      }
+    } catch (finErr) {
+      console.error(`[send] CRITICAL: settlement succeeded but finalize failed for ${paymentId}:`, finErr);
+      return c.json<ErrorResponse>(
+        {
+          error: `Payment settled but could not be recorded — quote payment id ${paymentId} to support`,
+          code: 'SEND_NOT_RECORDED',
+        },
+        500
+      );
+    }
+
+    // ── 4. Protocol fee ────────────────────────────────────────────────────
+    // Direct sends route the fee from the sender's own vault immediately.
+    // Escrowed sends keep the fee inside escrow: it is dispatched to
+    // fees.uprail.near when the recipient claims (or returned to the sender
+    // with the gross amount if the payment expires unclaimed).
+    if (isRecipientRegistered && parseFloat(protocolFee) > 0) {
+      try {
+        const feeDeposit = await nearRpc.depositPlainBalanceToIntents(
+          c.env,
+          session!.x_id,
+          body.asset,
+          protocolFee,
+          feeRecipient
+        );
+        if (!feeDeposit.deposited) {
+          const feeTx = await nearRpc.executeTransferIntent(
+            c.env,
+            session!.x_id,
+            feeRecipient,
+            body.asset,
+            protocolFee
+          );
+          if (!feeTx?.success) {
+            throw new Error(feeTx?.error || 'fee intent transfer failed');
+          }
+        }
+      } catch (feeErr) {
+        console.warn('[FeeRouting] Direct-send fee dispatch notice:', feeErr);
+      }
     }
 
     const appOrigin = resolveOrigin(c.env);
@@ -816,7 +793,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     console.error('Send payment error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Failed to create payment: ${publicErrorMessage(err, 'Internal error')})`,
+        error: `Failed to create payment: ${publicErrorMessage(err, 'Internal error')}`,
         code: 'SEND_PAYMENT_ERROR',
       },
       500
@@ -826,24 +803,12 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
 
 /**
  * GET /api/payments
- * Lists sender's payment history from Postgres/D1 (requires session)
+ * Lists sender's payment history from D1 (requires session)
  */
 paymentsRouter.get('/payments', requireAuth(), async (c) => {
   try {
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
-
-    const sql = getDb(c.env);
-    if (sql) {
-      try {
-        const pgPayments = await getUserPayments(sql, session.x_id, userHandle);
-        if (pgPayments && pgPayments.length > 0) {
-          return c.json({ payments: pgPayments });
-        }
-      } catch (pgErr) {
-        console.warn('Postgres getUserPayments error, fallback to D1:', pgErr);
-      }
-    }
 
     const { results } = await c.env.DB.prepare(
       `
@@ -878,39 +843,15 @@ paymentsRouter.get('/payments/:id', async (c) => {
     const id = c.req.param('id');
     let payment: Payment | null = null;
 
-    const sql = getDb(c.env);
-    if (sql) {
-      try {
-        payment = await getPaymentById(sql, id);
-      } catch (pgErr) {
-        console.warn('Postgres getPaymentById error, fallback to D1:', pgErr);
-      }
-    }
-
-    if (!payment) {
-      payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
-        .bind(id)
-        .first<Payment>();
-    }
+    payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
+      .bind(id)
+      .first<Payment>();
 
     if (!payment) {
       return c.json<ErrorResponse>(
         { error: 'Payment not found', code: 'NOT_FOUND' },
         404
       );
-    }
-
-    // Try to get live status from EscrowDO
-    try {
-      const liveStatus = await callEscrowDO(c.env, id, 'status');
-      if (liveStatus && liveStatus.status) {
-        payment.status = liveStatus.status;
-        payment.claim_tx_hash = liveStatus.claim_tx_hash;
-        payment.refund_tx_hash = liveStatus.refund_tx_hash;
-        payment.updated_at = liveStatus.updated_at;
-      }
-    } catch {
-      // Ignore DO fetch error and fallback to DB state
     }
 
     const session = c.get('session');
@@ -947,7 +888,8 @@ paymentsRouter.get('/payments/:id', async (c) => {
 
 /**
  * POST /api/payments/:id/cancel
- * Cancel payment if status is PENDING or DEPOSIT_WAITING.
+ * Cancels an unclaimed escrowed payment and refunds the escrowed gross
+ * (amount + fee) back to the sender's vault.
  * Strict Object-Level Access Control (IDOR & BAC defense):
  * - MUST be authenticated via requireAuth()
  * - Caller MUST be the verified sender (sender_x_id === session.x_id)
@@ -957,21 +899,9 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
     const id = c.req.param('id');
     const session = c.get('session')!;
 
-    let payment: Payment | null = null;
-    const sql = getDb(c.env);
-    if (sql) {
-      try {
-        payment = await getPaymentById(sql, id);
-      } catch (pgErr) {
-        console.warn('Postgres getPaymentById in cancel error:', pgErr);
-      }
-    }
-
-    if (!payment) {
-      payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
-        .bind(id)
-        .first<Payment>();
-    }
+    const payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
+      .bind(id)
+      .first<Payment>();
 
     if (!payment) {
       return c.json<ErrorResponse>(
@@ -991,47 +921,44 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
       );
     }
 
-    if (
-      payment.status !== PaymentStatus.PENDING &&
-      payment.status !== PaymentStatus.DEPOSIT_WAITING
-    ) {
+    if (payment.status === PaymentStatus.CLAIMED) {
       return c.json<ErrorResponse>(
-        {
-          error: `Payment in status ${payment.status} cannot be cancelled`,
-          code: 'INVALID_STATUS',
-        },
+        { error: 'Payment was already claimed and can no longer be cancelled', code: 'INVALID_STATUS' },
         400
       );
     }
 
-    const updated = await callEscrowDO(c.env, id, 'cancel', {
-      senderXId: session.x_id,
-    });
-
-    // Update Postgres and D1 records status
-    if (sql) {
-      try {
-        await updatePaymentStatus(sql, id, PaymentStatus.CANCELLED);
-      } catch (pgErr) {
-        console.warn('Postgres updatePaymentStatus failed in cancel:', pgErr);
-      }
+    if (payment.status === PaymentStatus.REFUNDED) {
+      return c.json({ success: true, paymentId: id, status: payment.status, txHash: payment.refund_tx_hash });
     }
 
-    const now = Date.now();
-    try {
-      await c.env.DB.prepare(
-        'UPDATE payments SET status = ?, updated_at = ? WHERE id = ?'
-      )
-        .bind(PaymentStatus.CANCELLED, now, id)
-        .run();
-    } catch (d1Err) {
-      console.warn('D1 update payment status failed in cancel:', d1Err);
+    if (payment.status !== PaymentStatus.ESCROWED) {
+      return c.json<ErrorResponse>(
+        { error: `Payment in status ${payment.status} cannot be cancelled`, code: 'INVALID_STATUS' },
+        400
+      );
+    }
+
+    const refund = await refundEscrowedPayment(c.env, payment);
+    if (refund.alreadyRefunded) {
+      return c.json({ success: true, paymentId: id, status: PaymentStatus.REFUNDED });
+    }
+    if (!refund.refunded) {
+      console.warn(`[cancel] refund failed for ${id}:`, refund.error);
+      return c.json<ErrorResponse>(
+        {
+          error: publicErrorMessage(new Error(refund.error || ''), 'Could not settle the refund'),
+          code: 'CANCEL_REFUND_FAILED',
+        },
+        502
+      );
     }
 
     return c.json({
       success: true,
       paymentId: id,
-      status: updated?.status || PaymentStatus.CANCELLED,
+      status: PaymentStatus.REFUNDED,
+      txHash: refund.txHash,
     });
   } catch (err: any) {
     console.error('Cancel payment error:', err);

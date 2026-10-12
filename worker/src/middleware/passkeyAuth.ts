@@ -16,9 +16,8 @@
 import { MiddlewareHandler } from 'hono';
 import type { AppContext, ErrorResponse } from '../types';
 import * as webauthnService from '../services/webauthn';
-import { getDb } from '../db/postgres';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
-import { resolveRpId, allowedWebAuthnOrigins, allowedWebAuthnRpIds, APP_ORIGIN } from '../services/webauthnConfig';
+import { resolveRpId, allowedWebAuthnOrigins, allowedWebAuthnRpIds } from '../services/webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
 
 /**
@@ -146,18 +145,7 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     // Look up the user's registered passkey credential
     let passkeyRow: { public_key: string; counter: number; credential_id?: string } | null = null;
 
-    try {
-      const sql = getDb(c.env);
-      if (sql) {
-        const [row] = await sql<any[]>`
-          SELECT public_key, counter FROM passkeys
-          WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
-        `;
-        if (row) passkeyRow = row;
-      }
-    } catch {}
-
-    if (!passkeyRow && c.env.DB) {
+    if (c.env.DB) {
       try {
         passkeyRow = await c.env.DB.prepare(
           'SELECT public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ?'
@@ -227,15 +215,6 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     // Update counter to prevent clone/replay attacks on the credential
     if (verification.newCounter !== undefined) {
       const newCounter = verification.newCounter;
-      try {
-        const sql = getDb(c.env);
-        if (sql) {
-          await sql`
-            UPDATE passkeys SET counter = ${newCounter}
-            WHERE x_id = ${session.x_id} AND credential_id = ${assertion.id}
-          `;
-        }
-      } catch {}
       if (c.env.DB) {
         await c.env.DB.prepare(
           'UPDATE passkeys SET counter = ? WHERE x_id = ? AND credential_id = ?'

@@ -8,7 +8,6 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext, ErrorResponse } from '../types';
 import { generatePKCE, exchangeCode, getMe } from '../services/xApi';
 import { createSession, destroySession, requireAuth } from '../middleware/session';
-import { getDb, upsertXIdentity, getXIdentity } from '../db/postgres';
 import * as webauthnService from '../services/webauthn';
 import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
@@ -239,28 +238,9 @@ authRouter.get('/callback', async (c) => {
     const xUser = await getMe(tokens.access_token);
     const now = Date.now();
 
-    // 1. Try PostgreSQL first, with fallback to D1
+    // Persist / refresh the identity in D1 (the single source of truth)
     let nearAccount: string | null = null;
-    let identityPersisted = false;
-
-    if ((c.env as any).DATABASE_URL || (c.env as any).HYPERDRIVE) {
-      try {
-        const sql = getDb(c.env);
-        if (sql) {
-          const identity = await upsertXIdentity(sql, {
-            x_id: xUser.id,
-            x_handle: xUser.username.toLowerCase(),
-            x_name: xUser.name,
-          });
-          nearAccount = identity.near_account || null;
-          identityPersisted = true;
-        }
-      } catch (pgErr) {
-        console.warn('Postgres identity upsert failed, using D1:', pgErr);
-      }
-    }
-
-    if (!identityPersisted && c.env.DB) {
+    if (c.env.DB) {
       const existing = await c.env.DB.prepare(
         'SELECT x_id, x_handle, x_name, near_account FROM x_identities WHERE x_id = ?'
       )
@@ -559,23 +539,9 @@ authRouter.post('/passkey/login-verify', async (c) => {
       return c.json<ErrorResponse>({ error: 'Challenge expired or invalid', code: 'CHALLENGE_EXPIRED' }, 400);
     }
 
-    // Look up passkey credential from Postgres (or D1)
+    // Look up passkey credential from D1
     let passkeyRow: { x_id: string; public_key: string; counter: number } | null = null;
-    if ((c.env as any).DATABASE_URL || (c.env as any).HYPERDRIVE) {
-      try {
-        const sql = getDb(c.env);
-        if (sql) {
-          const [row] = await sql<any[]>`
-            SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ${assertion.id}
-          `;
-          if (row) passkeyRow = row;
-        }
-      } catch (err) {
-        console.warn('Postgres passkey query error:', err);
-      }
-    }
-
-    if (!passkeyRow && c.env.DB) {
+    if (c.env.DB) {
       passkeyRow = await c.env.DB.prepare(
         'SELECT x_id, public_key, counter FROM passkeys WHERE credential_id = ?'
       )
@@ -621,21 +587,9 @@ authRouter.post('/passkey/login-verify', async (c) => {
       return c.json<ErrorResponse>({ error: 'Passkey verification failed', code: 'VERIFICATION_FAILED' }, 401);
     }
 
-    // Fetch user profile from Postgres / D1
+    // Fetch user profile from D1
     let userProfile: { x_id: string; x_handle: string; x_name: string; near_account?: string | null; is_activated?: number | null; personal_invite_code?: string | null } | null = null;
-    if ((c.env as any).DATABASE_URL || (c.env as any).HYPERDRIVE) {
-      try {
-        const sql = getDb(c.env);
-        if (sql) {
-          const identity = await getXIdentity(sql, passkeyRow.x_id);
-          if (identity) userProfile = identity as any;
-        }
-      } catch (err) {
-        console.warn('Postgres user lookup error:', err);
-      }
-    }
-
-    if (!userProfile && c.env.DB) {
+    if (c.env.DB) {
       userProfile = await c.env.DB.prepare(
         'SELECT x_id, x_handle, x_name, near_account, is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
       )

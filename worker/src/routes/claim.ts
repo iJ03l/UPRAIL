@@ -21,18 +21,9 @@ import { updateSession } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { resolveOrigin, resolveRpId, allowedWebAuthnOrigins, allowedWebAuthnRpIds } from '../services/webauthnConfig';
 import * as webauthn from '../services/webauthn';
-import * as nearProxy from '../services/nearProxy';
 import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
 import { background } from '../utils/background';
-import {
-  getDb,
-  savePasskey,
-  updateIdentityNearAccount,
-  saveAuthChallenge,
-  consumeAuthChallenge,
-  getPendingPaymentsForRecipient,
-} from '../db/postgres';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import {
   isValidDestinationAddress,
@@ -69,23 +60,11 @@ claimRouter.get('/pending', requireAuth(), async (c) => {
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
 
-    const sql = getDb(c.env);
-    if (sql) {
-      try {
-        const pgPending = await getPendingPaymentsForRecipient(sql, session.x_id, userHandle);
-        if (pgPending && pgPending.length > 0) {
-          return c.json({ payments: pgPending });
-        }
-      } catch (pgErr) {
-        console.warn('Postgres getPendingPaymentsForRecipient error, fallback to D1:', pgErr);
-      }
-    }
-
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
       WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = ?)
-        AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED')
+        AND status = 'ESCROWED'
       ORDER BY created_at DESC
     `
     )
@@ -127,12 +106,6 @@ claimRouter.get('/register-options', requireAuth(), async (c) => {
       purpose: 'registration',
       ttlSeconds: 300,
     });
-    try {
-      const sql = getDb(c.env);
-      if (sql) {
-        await saveAuthChallenge(sql, session.x_id, options.challenge, 'registration', 300);
-      }
-    } catch {}
 
     return c.json(options);
   } catch (err: any) {
@@ -162,19 +135,10 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     }
 
     // Retrieve expected challenge strictly from server cache (fail-closed, single-use, zero KV writes)
-    let expectedChallenge = await consumeChallenge(c.env, {
+    const expectedChallenge = await consumeChallenge(c.env, {
       key: `webauthn_reg:${session.x_id}`,
       purpose: 'registration',
     });
-
-    if (!expectedChallenge) {
-      try {
-        const sql = getDb(c.env);
-        if (sql) {
-          expectedChallenge = await consumeAuthChallenge(sql, session.x_id, 'registration');
-        }
-      } catch {}
-    }
 
     if (!expectedChallenge) {
       return c.json<ErrorResponse>(
@@ -201,24 +165,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     const now = Date.now();
     const passkeyId = crypto.randomUUID();
 
-    // 1. Store passkey in PostgreSQL first
-    try {
-      const sql = getDb(c.env);
-      if (sql) {
-        await savePasskey(sql, {
-          x_id: session.x_id,
-          credential_id: verification.credentialId,
-          public_key: verification.publicKeyHex,
-          counter: verification.counter,
-          transports: body.attestation.response?.transports || [],
-        });
-        await updateIdentityNearAccount(sql, session.x_id, nearAccount);
-      }
-    } catch (pgErr) {
-      console.warn('Postgres passkey save failed, using D1:', pgErr);
-    }
-
-    // 2. Also persist to D1 if D1 binding is present
+    // Persist passkey + link the resolved vault account in D1
     if (c.env.DB) {
       await c.env.DB.prepare(
         `
@@ -259,7 +206,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
         .run();
     }
 
-    // 3. Update active session in KV + Postgres
+    // 3. Update the active session cookie with the resolved vault account
     await updateSession(c, {
       near_account: nearAccount,
     });
@@ -285,7 +232,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     console.error('Passkey registration error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Passkey registration failed: ${publicErrorMessage(err, 'Internal error')})`,
+        error: `Passkey registration failed: ${publicErrorMessage(err, 'Internal error')}`,
         code: 'REGISTRATION_FAILED',
       },
       500
@@ -350,11 +297,10 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
           continue;
         }
 
-        const claimableStatuses = [
-          PaymentStatus.PENDING,
-          PaymentStatus.DEPOSIT_WAITING,
-          PaymentStatus.ESCROWED,
-        ];
+        // Only ESCROWED payments are claimable: PENDING/DEPOSIT_WAITING rows
+        // are in-flight sends whose funds may not have moved yet — claiming
+        // them in that window could pull from the pooled escrow before the
+        // sender was ever debited.
         if (payment.status === PaymentStatus.CLAIMED) {
           results.push({
             paymentId,
@@ -364,7 +310,7 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
           });
           continue;
         }
-        if (!claimableStatuses.includes(payment.status)) {
+        if (payment.status !== PaymentStatus.ESCROWED) {
           results.push({
             paymentId,
             status: payment.status,
@@ -384,15 +330,13 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
                      recipient_x_id = COALESCE(recipient_x_id, ?),
                      updated_at = ?
                WHERE id = ?
-                 AND status IN (?, ?, ?)`
+                 AND status = ?`
             )
               .bind(
                 PaymentStatus.CLAIMED,
                 session.x_id,
                 Date.now(),
                 paymentId,
-                PaymentStatus.PENDING,
-                PaymentStatus.DEPOSIT_WAITING,
                 PaymentStatus.ESCROWED
               )
               .run();
@@ -452,6 +396,20 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
             );
             if (escrowTransfer?.success && escrowTransfer.txHash) {
               txHash = escrowTransfer.txHash;
+            } else if (escrowTransfer?.ambiguous) {
+              // The broadcast may have landed (network error after submit).
+              // Keep the CLAIMED reservation — reverting would let a retry
+              // double-pay the recipient from the pooled escrow.
+              console.error(
+                `[claim/execute] CRITICAL: ambiguous escrow transfer for ${paymentId}:`,
+                escrowTransfer?.error
+              );
+              results.push({
+                paymentId,
+                status: PaymentStatus.CLAIMED,
+                error: `Transfer status unknown — quote payment id ${paymentId} to support`,
+              });
+              continue;
             } else {
               throw new Error(escrowTransfer?.error || 'Escrow transfer execution failed');
             }
@@ -469,6 +427,30 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
             },
             txHash,
           };
+        }
+
+        // Dispatch the carve-out protocol fee from escrow now that the
+        // recipient has been paid. Warn-only on purpose: the fee is held in
+        // escrow until claim (it rides the same pooled balance), and a stuck
+        // fee must never roll back an already-settled claim.
+        const feeAmount = parseFloat(payment.fee || '0') || 0;
+        if (feeAmount > 0) {
+          try {
+            const feeResult = await nearRpc.executeTransferFromEscrowIntent(
+              c.env,
+              c.env.FEE_ACCOUNT_ID || 'fees.uprail.near',
+              payment.asset,
+              payment.fee || '0'
+            );
+            if (!feeResult?.success) {
+              console.error(
+                `[claim/execute] CRITICAL: fee dispatch failed for ${paymentId} (${payment.fee} ${payment.asset}):`,
+                feeResult?.error
+              );
+            }
+          } catch (feeErr) {
+            console.error(`[claim/execute] CRITICAL: fee dispatch error for ${paymentId}:`, feeErr);
+          }
         }
 
         // If payment carries an invite code and recipient is claiming, auto-activate recipient
@@ -543,64 +525,6 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
     const filterAsset = c.req.query('asset')?.toLowerCase();
 
-    // 1. Query claimed payments from D1
-    let claimedRows: { asset: string; amount: string }[] = [];
-    if (c.env.DB) {
-      try {
-        const rows = await c.env.DB.prepare(
-          `SELECT asset, amount FROM payments
-            WHERE status = ?
-              AND (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?))`
-        )
-          .bind(PaymentStatus.CLAIMED, session.x_id, session.x_handle)
-          .all<{ asset: string; amount: string }>();
-        claimedRows = rows.results || [];
-      } catch (e) {
-        console.warn('[claim/balance] Query claimed payments error:', e);
-      }
-    }
-
-    // 2. Query sent active payments and completed withdrawals from D1
-    let sentRows: {
-      asset: string;
-      amount: string;
-      fee?: string;
-      status: string;
-      claim_tx_hash?: string | null;
-      intent_hash?: string | null;
-    }[] = [];
-    let withdrawnRows: { asset: string; amount: string }[] = [];
-    if (c.env.DB) {
-      try {
-        const sRows = await c.env.DB.prepare(
-          "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
-        )
-          .bind(session.x_id, session.x_handle)
-          .all<{
-            asset: string;
-            amount: string;
-            fee?: string;
-            status: string;
-            claim_tx_hash?: string | null;
-            intent_hash?: string | null;
-          }>();
-        sentRows = sRows.results || [];
-      } catch (e) {
-        console.warn('[claim/balance] Query sent payments error:', e);
-      }
-
-      try {
-        const wRows = await c.env.DB.prepare(
-          "SELECT asset, amount FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
-        )
-          .bind(session.x_id)
-          .all<{ asset: string; amount: string }>();
-        withdrawnRows = wRows.results || [];
-      } catch (e) {
-        console.warn('[claim/balance] Query withdrawals error:', e);
-      }
-    }
-
     // Format into ShieldedBalance[] expected by frontend.
     const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => [] as nearRpc.OnchainToken[]);
 
@@ -617,37 +541,28 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
       netBalances[key] = (netBalances[key] || 0) + delta;
     };
 
-    // 3. Query onchain balances if available
+    // 1. Live onchain balances (intents + plain pk-subaccount balances)
     let onchainBalances: nearRpc.IntentAccountBalance[] = [];
     try {
       onchainBalances = await nearRpc.getIntentBalances(c.env, nearAccount);
     } catch {}
-
     for (const ob of onchainBalances) {
       addAmount(ob.defuse_asset_id || ob.symbol, parseFloat(ob.amountFormatted) || 0);
     }
-    // Plain balances sitting directly on the pk account (direct receives)
     try {
       const plainBalances = await nearRpc.getPlainBalances(c.env, nearAccount);
       for (const pb of plainBalances) {
         addAmount(pb.defuse_asset_id || pb.symbol, parseFloat(pb.amountFormatted) || 0);
       }
     } catch {}
-    for (const r of claimedRows) {
-      addAmount(r.asset || 'usdc', parseFloat(r.amount) || 0);
-    }
-    for (const s of sentRows) {
-      // Already-debited onchain rows must not be subtracted again (the
-      // intents balance read above is live and already reflects the debit).
-      const settledOnchain =
-        (s.status === 'CLAIMED' && !nearRpc.isSyntheticTxHash(s.claim_tx_hash)) ||
-        (s.status === 'ESCROWED' && !nearRpc.isSyntheticTxHash(s.intent_hash));
-      if (settledOnchain) continue;
-      const amt = (parseFloat(s.amount) || 0) + (parseFloat(s.fee || '0') || 0);
-      addAmount(s.asset || 'usdc', -amt);
-    }
-    for (const w of withdrawnRows) {
-      addAmount(w.asset || 'usdc', -(parseFloat(w.amount) || 0));
+
+    // 2. D1 virtual deltas — the SAME canonical algorithm as
+    //    getUserAvailableBalance (synthetic-claim guards etc.). The old
+    //    hand-rolled version here skipped those guards and double-counted
+    //    onchain-settled payments into phantom balance.
+    const deltas = await nearRpc.getVirtualBalanceDeltas(c.env, session);
+    for (const [asset, delta] of Object.entries(deltas)) {
+      addAmount(asset, delta);
     }
 
     // Cap net balances at 0
@@ -702,7 +617,7 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     console.error('Balance read error:', err);
     return c.json<ErrorResponse>(
       {
-        error: `Failed to read confidential balance: ${publicErrorMessage(err, 'Internal error')})`,
+        error: `Failed to read confidential balance: ${publicErrorMessage(err, 'Internal error')}`,
         code: 'BALANCE_ERROR',
       },
       500
@@ -763,26 +678,34 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     //    reservation query below, inside the same statement).
     const available = await getWithdrawableBalance(c.env, session, asset);
 
-    let withdrawAmount = available;
+    // Keep ONE decimal string for the reservation row, the 1Click quote and
+    // the onchain settlement — float reformatting (toFixed(6)) used to
+    // truncate BTC(8)/NEAR(24) amounts and make the quote disagree with the
+    // transfer.
+    let amountStr: string;
     if (body.amount && body.amount !== 'all') {
-      const parsed = parseFloat(body.amount);
-      if (isNaN(parsed) || parsed <= 0) {
+      const raw = body.amount.trim();
+      // Plain decimal only — parseFloat alone accepted "1e5", "12abc", "Infinity".
+      if (!/^\d{1,15}(\.\d{1,18})?$/.test(raw)) {
         return c.json<ErrorResponse>(
           { error: 'Invalid withdrawal amount', code: 'INVALID_AMOUNT' },
           400
         );
       }
-      withdrawAmount = parsed;
+      amountStr = raw;
+    } else {
+      amountStr = String(available);
     }
 
-    if (withdrawAmount <= 0) {
+    const parsedAmount = parseFloat(amountStr);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
       return c.json<ErrorResponse>(
-        { error: 'No funds available to withdraw', code: 'ZERO_BALANCE' },
+        { error: 'Invalid withdrawal amount', code: 'INVALID_AMOUNT' },
         400
       );
     }
 
-    if (withdrawAmount > available + 0.0001) {
+    if (parsedAmount > available + 0.0001) {
       return c.json<ErrorResponse>(
         {
           error: `Insufficient shielded balance. Available: ${available.toFixed(6)} ${asset.toUpperCase()}`,
@@ -802,20 +725,24 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         c.env,
         session.x_id,
         asset,
-        String(withdrawAmount),
+        amountStr,
         nearAccountForDeposit
       );
     } catch (plainErr) {
       console.warn('[withdraw] plain-balance deposit skipped:', plainErr);
     }
 
-    // 2. Atomically reserve the withdrawal.
+    // 2. Atomically reserve the withdrawal — and refuse a second concurrent
+    //    PENDING withdrawal for the same asset (they would race past the
+    //    balance check).
     const withdrawalId = 'wth_' + crypto.randomUUID();
     const now = Date.now();
-    const amountUnits = withdrawAmount.toFixed(6).replace(/\.?0+$/, '') || '0';
-    await c.env.DB.prepare(
+    const reserve = await c.env.DB.prepare(
       `INSERT INTO withdrawals (id, x_id, x_handle, destination_address, asset, amount, tx_hash, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, 'PENDING', ?, ?)`
+       SELECT ?, ?, ?, ?, ?, ?, NULL, 'PENDING', ?, ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM withdrawals WHERE x_id = ? AND asset = ? AND status = 'PENDING'
+       )`
     )
       .bind(
         withdrawalId,
@@ -823,11 +750,20 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         session.x_handle,
         destinationAddress,
         asset,
-        amountUnits,
+        amountStr,
         now,
-        now
+        now,
+        session.x_id,
+        asset
       )
       .run();
+
+    if ((reserve.meta?.changes ?? 0) === 0) {
+      return c.json<ErrorResponse>(
+        { error: 'A withdrawal for this asset is already in progress', code: 'WITHDRAWAL_IN_PROGRESS' },
+        409
+      );
+    }
 
     // 3. Execute settlement. For NEAR destinations, transfer directly to the
     //    account. For external destinations (EVM, Solana, Bitcoin), obtain a
@@ -842,7 +778,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         const quote = await get1ClickWithdrawalQuote(c.env, {
           destinationAddress,
           asset,
-          amount: withdrawAmount,
+          amount: parsedAmount,
         });
         settlementNearRecipient = quote.depositAddress;
         oneClickDepositAddress = quote.depositAddress;
@@ -854,10 +790,26 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           session.x_id,
           settlementNearRecipient,
           asset,
-          amountUnits
+          amountStr
         );
         if (withdrawResult?.success && withdrawResult.txHash) {
           txHash = withdrawResult.txHash;
+        } else if (withdrawResult?.ambiguous) {
+          // The broadcast may have landed — marking FAILED would orphan a
+          // real transfer and free the reservation for a double-withdraw.
+          // Keep PENDING for the cron/history to reconcile; surface the id.
+          console.error(
+            `[Withdrawal] CRITICAL: ambiguous settlement for ${withdrawalId}:`,
+            withdrawResult?.error
+          );
+          return c.json<ErrorResponse>(
+            {
+              error: `Withdrawal status unknown — quote withdrawal id ${withdrawalId} to support`,
+              code: 'WITHDRAWAL_UNRECORDED',
+              withdrawalId,
+            } as ErrorResponse,
+            500
+          );
         } else {
           throw new Error(withdrawResult?.error || 'Withdrawal intent execution failed');
         }
@@ -882,7 +834,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       }
       return c.json<ErrorResponse>(
         {
-          error: `Withdrawal settlement failed: ${transferErr.message || 'transfer error'}`,
+          error: `Withdrawal settlement failed: ${publicErrorMessage(transferErr, 'settlement error')}`,
           code: 'WITHDRAWAL_FAILED',
         },
         502
@@ -902,9 +854,10 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       );
       return c.json<ErrorResponse>(
         {
-          error: 'Withdrawal transferred but could not be recorded; contact support with this id',
+          error: `Withdrawal transferred but could not be recorded; contact support with id ${withdrawalId}`,
           code: 'WITHDRAWAL_UNRECORDED',
-        },
+          withdrawalId,
+        } as ErrorResponse,
         500
       );
     }
@@ -915,13 +868,13 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       txHash,
       destinationAddress,
       asset: asset.toUpperCase(),
-      amount: withdrawAmount.toFixed(2),
-      message: `Successfully withdrawn ${withdrawAmount.toFixed(2)} ${asset.toUpperCase()} to ${destinationAddress}`,
+      amount: parsedAmount.toFixed(2),
+      message: `Successfully withdrawn ${parsedAmount.toFixed(2)} ${asset.toUpperCase()} to ${destinationAddress}`,
     });
   } catch (err: any) {
     console.error('Withdrawal error:', err);
     return c.json<ErrorResponse>(
-      { error: `Withdrawal failed: ${publicErrorMessage(err, 'Internal error')})`, code: 'WITHDRAWAL_FAILED' },
+      { error: `Withdrawal failed: ${publicErrorMessage(err, 'Internal error')}`, code: 'WITHDRAWAL_FAILED' },
       500
     );
   }

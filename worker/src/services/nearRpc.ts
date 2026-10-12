@@ -2200,11 +2200,15 @@ export function nep413Serialize(message: string, nonceBytes: Uint8Array, recipie
 
 /**
  * Submits an intent payload to intents.near.execute_intents, relayed and gas-sponsored by escrow.uprail.near.
+ *
+ * `ambiguous: true` on failure means the broadcast MAY have been accepted
+ * (network error / malformed reply AFTER the transaction was submitted) —
+ * callers must not release reservations in that case, or a retry can double-spend.
  */
 export async function executeIntentsRelayed(
   env: Env,
   signedPayload: any
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
   const privKeyStr = env.ESCROW_PRIVATE_KEY;
@@ -2212,6 +2216,7 @@ export async function executeIntentsRelayed(
     return { success: false, error: 'ESCROW_PRIVATE_KEY is missing' };
   }
 
+  let broadcastAttempted = false;
   try {
     const escrowRawKey = base58Decode(privKeyStr);
     const escrowPrivKey = escrowRawKey.slice(0, 32);
@@ -2277,6 +2282,7 @@ export async function executeIntentsRelayed(
     for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
     const base64Tx = btoa(binary);
 
+    broadcastAttempted = true;
     const broadcastRes = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2293,10 +2299,15 @@ export async function executeIntentsRelayed(
       return { success: true, txHash };
     }
 
+    // The node replied with a definite outcome: the transaction did not land.
     const err = bData?.error?.message || JSON.stringify(bData?.result?.status?.Failure || bData);
-    return { success: false, error: err };
+    return { success: false, error: err, ambiguous: false };
   } catch (err: any) {
-    return { success: false, error: err?.message || String(err) };
+    return {
+      success: false,
+      error: err?.message || String(err),
+      ambiguous: broadcastAttempted,
+    };
   }
 }
 
@@ -2619,12 +2630,13 @@ export async function depositPlainBalanceToIntents(
       return { deposited: false, reason: `Invalid amount: ${amount}` };
     }
 
+    // The signer must ALWAYS be the sender's own account — creditAddress is
+    // only the intents-side credit target (memo). Using it as the signer made
+    // direct sends try to spend the RECIPIENT's (or the pooled escrow
+    // account's) plain balance instead of the sender's.
     const sender = await deriveUserNearKeypair(env, senderXId);
     let senderAccountId = sender.accountId;
-    // creditAddress is the caller-resolved nearAccount — use it as hint
-    if (creditAddress && creditAddress.endsWith('.escrow.uprail.near')) {
-      senderAccountId = creditAddress;
-    } else if (env.DB) {
+    if (env.DB) {
       try {
         const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
           .bind(senderXId)
@@ -2713,7 +2725,7 @@ export async function executeTransferFromEscrowIntent(
   recipientNearAccount: string,
   asset: string,
   amount: string
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   try {
     const tokens = await getSupportedTokens(env);
     let token = resolveTokenForAsset(asset, tokens);
@@ -2793,7 +2805,7 @@ export async function executeWithdrawIntent(
   destinationAddress: string,
   asset: string,
   amount: string
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   try {
     const tokens = await getSupportedTokens(env);
     let token = resolveTokenForAsset(asset, tokens);
@@ -3001,6 +3013,98 @@ export function assetsMatch(assetA: string | null | undefined, assetB: string | 
 }
 
 /**
+ * Computes the user's net virtual balance deltas from D1 — the ONE canonical
+ * algorithm behind send/withdraw gates, /onchain/balances and /api/claim/balance:
+ *   + claimed payments received by the user (only synthetic claim txs — real
+ *     onchain claims are already in the intents balance)
+ *   - active sent payments (amount+fee, unless already settled onchain)
+ *   - withdrawals (PENDING or synthetic-tx COMPLETED — real onchain ones are
+ *     already debited)
+ *
+ * When `targetAsset` is given, all rows are filtered with assetsMatch() and the
+ * result is keyed by the caller's asset string; otherwise rows are keyed by their
+ * raw lowercase asset id.
+ */
+export async function getVirtualBalanceDeltas(
+  env: Env,
+  session: Session,
+  targetAsset?: string
+): Promise<Record<string, number>> {
+  const deltas: Record<string, number> = {};
+  if (!env.DB) return deltas;
+
+  const keyFor = (asset: string): string | null => {
+    if (targetAsset) return assetsMatch(asset, targetAsset) ? targetAsset : null;
+    return (asset || 'usdc').toLowerCase();
+  };
+  const add = (asset: string, delta: number) => {
+    const key = keyFor(asset);
+    if (key === null) return;
+    deltas[key] = (deltas[key] || 0) + delta;
+  };
+
+  try {
+    // 1. Claimed payments received by user (synthetic claims only)
+    const claimedRows = await env.DB.prepare(
+      "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?)) AND status = 'CLAIMED'"
+    )
+      .bind(session.x_id, session.x_handle)
+      .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
+
+    for (const row of claimedRows.results || []) {
+      if (isSyntheticTxHash(row.claim_tx_hash)) {
+        add(row.asset, parseFloat(row.amount) || 0);
+      }
+    }
+
+    // 2. Sent active payments by user (debited from balance)
+    const sentRows = await env.DB.prepare(
+      "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+    )
+      .bind(session.x_id, session.x_handle)
+      .all<{
+        asset: string;
+        amount: string;
+        fee?: string;
+        status: string;
+        claim_tx_hash?: string | null;
+        intent_hash?: string | null;
+      }>();
+
+    for (const row of sentRows.results || []) {
+      // ESCROWED with a real escrow intent and CLAIMED with a real claim tx
+      // are already debited from the onchain balance read above — counting
+      // them again double-deducts (app shows 0 while the chain shows funds).
+      const settledOnchain =
+        (row.status === 'CLAIMED' && !isSyntheticTxHash(row.claim_tx_hash)) ||
+        (row.status === 'ESCROWED' && !isSyntheticTxHash(row.intent_hash));
+      if (!settledOnchain) {
+        const amt = parseFloat(row.amount) || 0;
+        const fee = parseFloat(row.fee || '0') || 0;
+        add(row.asset, -(amt + fee));
+      }
+    }
+
+    // 3. Withdrawals by user
+    const withdrawnRows = await env.DB.prepare(
+      "SELECT asset, amount, status, tx_hash FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
+    )
+      .bind(session.x_id)
+      .all<{ asset: string; amount: string; status: string; tx_hash?: string | null }>();
+
+    for (const row of withdrawnRows.results || []) {
+      if (row.status === 'PENDING' || isSyntheticTxHash(row.tx_hash)) {
+        add(row.asset, -(parseFloat(row.amount) || 0));
+      }
+    }
+  } catch (dbErr) {
+    console.warn('[getVirtualBalanceDeltas] DB balance lookup error:', dbErr);
+  }
+
+  return deltas;
+}
+
+/**
  * Calculates a user's authoritative available balance for a specific asset,
  * derived from:
  *   (Live onchain balance in intents.near + D1 claimed virtual payments)
@@ -3051,76 +3155,7 @@ export async function getUserAvailableBalance(
     console.warn('[getUserAvailableBalance] plain balance query error:', err);
   }
 
-  let virtualClaimedAmount = 0;
-  let sentPaymentsAmount = 0;
-  let withdrawnAmount = 0;
-
-  if (env.DB) {
-    try {
-      // 1. Claimed payments received by user
-      const claimedRows = await env.DB.prepare(
-        "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?)) AND status = 'CLAIMED'"
-      )
-        .bind(session.x_id, session.x_handle)
-        .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
-
-      for (const row of claimedRows.results || []) {
-        if (assetsMatch(row.asset, targetAsset)) {
-          if (isSyntheticTxHash(row.claim_tx_hash)) {
-            virtualClaimedAmount += parseFloat(row.amount) || 0;
-          }
-        }
-      }
-
-      // 2. Sent active payments by user (debited from balance)
-      const sentRows = await env.DB.prepare(
-        "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
-      )
-        .bind(session.x_id, session.x_handle)
-        .all<{
-          asset: string;
-          amount: string;
-          fee?: string;
-          status: string;
-          claim_tx_hash?: string | null;
-          intent_hash?: string | null;
-        }>();
-
-      for (const row of sentRows.results || []) {
-        if (assetsMatch(row.asset, targetAsset)) {
-          // ESCROWED with a real escrow intent and CLAIMED with a real claim tx
-          // are already debited from the onchain balance read above — counting
-          // them again double-deducts (app shows 0 while the chain shows funds).
-          const settledOnchain =
-            (row.status === 'CLAIMED' && !isSyntheticTxHash(row.claim_tx_hash)) ||
-            (row.status === 'ESCROWED' && !isSyntheticTxHash(row.intent_hash));
-          if (!settledOnchain) {
-            const amt = parseFloat(row.amount) || 0;
-            const fee = parseFloat(row.fee || '0') || 0;
-            sentPaymentsAmount += amt + fee;
-          }
-        }
-      }
-
-      // 3. Withdrawals by user
-      const withdrawnRows = await env.DB.prepare(
-        "SELECT asset, amount, status, tx_hash FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
-      )
-        .bind(session.x_id)
-        .all<{ asset: string; amount: string; status: string; tx_hash?: string | null }>();
-
-      for (const row of withdrawnRows.results || []) {
-        if (assetsMatch(row.asset, targetAsset)) {
-          if (row.status === 'PENDING' || isSyntheticTxHash(row.tx_hash)) {
-            withdrawnAmount += parseFloat(row.amount) || 0;
-          }
-        }
-      }
-    } catch (dbErr) {
-      console.warn('[getUserAvailableBalance] DB balance lookup error:', dbErr);
-    }
-  }
-
-  const netAvailable = (onchainAmount + virtualClaimedAmount) - (sentPaymentsAmount + withdrawnAmount);
+  const deltas = await getVirtualBalanceDeltas(env, session, targetAsset);
+  const netAvailable = onchainAmount + (deltas[targetAsset] || 0);
   return Math.max(0, netAvailable);
 }

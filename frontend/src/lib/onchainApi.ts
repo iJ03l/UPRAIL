@@ -180,6 +180,8 @@ export async function fetchDepositStatus(address: string): Promise<DepositStatus
       credentials: 'include',
     });
     if (!res.ok) {
+      // Surface the failure instead of pretending the deposit is merely
+      // pending — a masked 502 used to leave the UI spinning silently.
       return {
         status: 'PENDING_DEPOSIT',
         depositedAmount: '0',
@@ -187,6 +189,7 @@ export async function fetchDepositStatus(address: string): Promise<DepositStatus
         depositedAmountUsd: '0',
         txHashes: [],
         isSettled: false,
+        error: `Deposit status unavailable (HTTP ${res.status})`,
       };
     }
     return await res.json();

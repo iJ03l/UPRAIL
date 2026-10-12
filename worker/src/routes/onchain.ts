@@ -37,8 +37,8 @@ onchainRouter.get('/tokens', async (c) => {
   } catch (err: any) {
     console.error('[onchain/tokens] error:', err);
     return c.json<ErrorResponse>(
-      { error: `Failed to fetch onchain token list: ${publicErrorMessage(err)}`, code: 'ONCHAIN_TOKENS_ERROR' },
-      500
+      { error: `Failed to fetch onchain token list: ${publicErrorMessage(err)}`, code: 'TOKEN_LIST_ERROR' },
+      502
     );
   }
 });
@@ -86,64 +86,11 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
       console.warn('[onchain/balances] plain balance merge skipped:', plainErr);
     }
 
-    // Include virtual escrow balances claimed by user, minus active sent payments and withdrawals
+    // Include virtual escrow balances claimed by user, minus active sent payments
+    // and withdrawals — same canonical algorithm as getUserAvailableBalance.
     if (c.env.DB) {
       try {
-        const claimedRows = await c.env.DB.prepare(
-          "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?)) AND status = 'CLAIMED'"
-        )
-          .bind(session.x_id, session.x_handle)
-          .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
-
-        const sentRows = await c.env.DB.prepare(
-          "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
-        )
-          .bind(session.x_id, session.x_handle)
-          .all<{
-            asset: string;
-            amount: string;
-            fee?: string;
-            status: string;
-            claim_tx_hash?: string | null;
-            intent_hash?: string | null;
-          }>();
-
-        let withdrawnRows: { asset: string; amount: string; status: string; tx_hash?: string | null }[] = [];
-        try {
-          const w = await c.env.DB.prepare(
-            "SELECT asset, amount, status, tx_hash FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
-          )
-            .bind(session.x_id)
-            .all<{ asset: string; amount: string; status: string; tx_hash?: string | null }>();
-          withdrawnRows = w.results || [];
-        } catch {}
-
-        const netVirtual: Record<string, number> = {};
-        for (const row of claimedRows.results || []) {
-          if (nearRpc.isSyntheticTxHash(row.claim_tx_hash)) {
-            const a = (row.asset || 'usdc').toLowerCase();
-            netVirtual[a] = (netVirtual[a] || 0) + (parseFloat(row.amount) || 0);
-          }
-        }
-        for (const row of sentRows.results || []) {
-          // ESCROWED/CLAIMED rows with real onchain txs are already debited
-          // from the intents balance read above — subtracting again would
-          // double-deduct (app reads 0 while the chain still shows funds).
-          const settledOnchain =
-            (row.status === 'CLAIMED' && !nearRpc.isSyntheticTxHash(row.claim_tx_hash)) ||
-            (row.status === 'ESCROWED' && !nearRpc.isSyntheticTxHash(row.intent_hash));
-          if (!settledOnchain) {
-            const a = (row.asset || 'usdc').toLowerCase();
-            const amt = (parseFloat(row.amount) || 0) + (parseFloat(row.fee || '0') || 0);
-            netVirtual[a] = (netVirtual[a] || 0) - amt;
-          }
-        }
-        for (const row of withdrawnRows) {
-          if (row.status === 'PENDING' || nearRpc.isSyntheticTxHash(row.tx_hash)) {
-            const a = (row.asset || 'usdc').toLowerCase();
-            netVirtual[a] = (netVirtual[a] || 0) - (parseFloat(row.amount) || 0);
-          }
-        }
+        const netVirtual = await nearRpc.getVirtualBalanceDeltas(c.env, session);
 
         // Virtual balances must carry the SAME id/symbol/decimals as the real
         // onchain entry, otherwise the asset shows up twice.
@@ -163,8 +110,13 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
           if (existing) {
             const currentAmt = parseFloat(existing.amountFormatted || '0');
             const total = Math.max(0, currentAmt + netAmt);
-            existing.amountFormatted = total.toFixed(2);
             const decimals = existing.decimals || token?.decimals || 6;
+            // Keep full precision — toFixed(2) here used to round sub-cent
+            // virtual amounts to 0, making sent funds disappear from the UI.
+            existing.amountFormatted = nearRpc.formatAmount(
+              nearRpc.toBaseUnits(total.toFixed(Math.min(decimals, 18)), decimals),
+              decimals
+            );
             existing.amount = nearRpc.toBaseUnits(total.toFixed(Math.min(decimals, 18)), decimals);
             continue;
           }
@@ -178,7 +130,7 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
               defuse_asset_id: defuseId,
               symbol,
               amount: baseUnits,
-              amountFormatted: netAmt.toFixed(2),
+              amountFormatted: nearRpc.formatAmount(baseUnits, decimals),
               decimals,
               nearContractId: token?.nearContractId || '',
               ...(token?.icon ? { icon: token.icon } : {}),
@@ -200,7 +152,7 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
     console.error('[onchain/balances] error:', err);
     return c.json<ErrorResponse>(
       { error: `Failed to fetch onchain balances: ${publicErrorMessage(err)}`, code: 'ONCHAIN_BALANCE_ERROR' },
-      500
+      502
     );
   }
 });
@@ -245,7 +197,7 @@ onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
     console.error('[onchain/deposit-address] error:', err);
     return c.json<ErrorResponse>(
       { error: `Failed to fetch deposit address: ${publicErrorMessage(err)}`, code: 'DEPOSIT_ADDRESS_ERROR' },
-      500
+      502
     );
   }
 });
@@ -278,15 +230,13 @@ onchainRouter.get('/deposit-status', requireAuth(), async (c) => {
 
     return await probeDepositStatus(address);
   } catch (err: any) {
-    return c.json({
-      status: 'PENDING_DEPOSIT',
-      depositedAmount: '0',
-      depositedAmountFormatted: '0',
-      depositedAmountUsd: '0',
-      txHashes: [],
-      isSettled: false,
-      error: publicErrorMessage(err),
-    });
+    // A lookup failure is not "still pending" — masking it here made the UI
+    // sit on PENDING_DEPOSIT forever while the backend was actually broken.
+    console.error('[onchain/deposit-status] error:', err);
+    return c.json<ErrorResponse>(
+      { error: `Failed to check deposit status: ${publicErrorMessage(err)}`, code: 'DEPOSIT_STATUS_ERROR' },
+      502
+    );
   }
 });
 
@@ -320,8 +270,10 @@ async function callerOwnsDepositAddress(
       .first<{ ok: number }>();
     return Boolean(payment);
   } catch (err) {
+    // Propagate: swallowing this used to turn DB hiccups into a misleading
+    // 403 "address not found".
     console.warn('[onchain/deposit-status] ownership check failed:', err);
-    return false;
+    throw err;
   }
 }
 
@@ -343,6 +295,9 @@ async function probeDepositStatus(address: string): Promise<Response> {
     clearTimeout(timeoutId);
 
     if (!resp.ok) {
+      // 1Click is down/degraded — the deposit is genuinely unknown, so
+      // PENDING_DEPOSIT is the honest state; surface the error so the UI
+      // can warn instead of silently spinning.
       return Response.json({
         status: 'PENDING_DEPOSIT',
         depositedAmount: '0',
@@ -351,6 +306,7 @@ async function probeDepositStatus(address: string): Promise<Response> {
         txHashes: [],
         updatedAt: null,
         isSettled: false,
+        error: `Deposit status service returned ${resp.status}`,
       });
     }
 
@@ -401,7 +357,8 @@ async function probeDepositStatus(address: string): Promise<Response> {
 onchainRouter.get('/history', requireAuth(), async (c) => {
   const session = c.get('session')!;
   const limitParam = c.req.query('limit');
-  const limit = Math.min(parseInt(limitParam || '50', 10), 200);
+  const parsedLimit = parseInt(limitParam || '', 10);
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 200) : 50;
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
   try {
@@ -416,59 +373,71 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
           .bind(nearAccount)
           .all<{ address: string; chain: string }>();
 
-        for (const dep of depositRows.results || []) {
-          if (!dep.address) continue;
+        // Probe all deposit addresses in parallel — sequential fetches here
+        // used to stack up to ~52s of timeouts on one request.
+        const depositStatuses = await Promise.all(
+          (depositRows.results || [])
+            .filter((dep) => dep.address)
+            .map(async (dep) => {
+              try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3500);
+                const statusResp = await fetch(
+                  `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(dep.address)}`,
+                  {
+                    signal: controller.signal,
+                    headers: {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+                      Accept: 'application/json',
+                    },
+                  }
+                );
+                clearTimeout(timeoutId);
+                if (!statusResp.ok) return null;
+                return { dep, statusData: (await statusResp.json()) as any };
+              } catch {
+                return null;
+              }
+            })
+        );
+
+        for (const entry of depositStatuses) {
+          if (!entry) continue;
+          const { dep, statusData } = entry;
           try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3500);
-            const statusResp = await fetch(
-              `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(dep.address)}`,
-              {
-                signal: controller.signal,
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
-                  Accept: 'application/json',
-                },
-              }
-            );
-            clearTimeout(timeoutId);
+            const swapDetails = statusData?.swapDetails;
+            const depAmt = swapDetails?.depositedAmountFormatted || swapDetails?.amountInFormatted || '0';
+            const numAmt = parseFloat(depAmt);
+            const isSuccess = statusData?.status === 'SUCCESS';
 
-            if (statusResp.ok) {
-              const statusData = (await statusResp.json()) as any;
-              const swapDetails = statusData?.swapDetails;
-              const depAmt = swapDetails?.depositedAmountFormatted || swapDetails?.amountInFormatted || '0';
-              const numAmt = parseFloat(depAmt);
-              const isSuccess = statusData?.status === 'SUCCESS';
+            // Ignore unused deposit addresses that have no deposit
+            if (!isSuccess && (!numAmt || numAmt <= 0)) {
+              continue;
+            }
 
-              // Ignore unused deposit addresses that have no deposit
-              if (!isSuccess && (!numAmt || numAmt <= 0)) {
-                continue;
-              }
+            const rawOrigin = swapDetails?.originChainTxHashes?.[0];
+            const originTx = typeof rawOrigin === 'string' ? rawOrigin : rawOrigin?.hash;
+            const rawDest = swapDetails?.destinationChainTxHashes?.[0];
+            const destTx = typeof rawDest === 'string' ? rawDest : rawDest?.hash;
+            const nearTx = swapDetails?.nearTxHashes?.[0];
+            const primaryId = originTx || destTx || nearTx || dep.address;
 
-              const rawOrigin = swapDetails?.originChainTxHashes?.[0];
-              const originTx = typeof rawOrigin === 'string' ? rawOrigin : rawOrigin?.hash;
-              const rawDest = swapDetails?.destinationChainTxHashes?.[0];
-              const destTx = typeof rawDest === 'string' ? rawDest : rawDest?.hash;
-              const nearTx = swapDetails?.nearTxHashes?.[0];
-              const primaryId = originTx || destTx || nearTx || dep.address;
+            if (primaryId && !transactions.some((t: any) => t.id === primaryId || (destTx && t.id === destTx))) {
+              const originAsset =
+                statusData?.quoteResponse?.quoteRequest?.originAsset ||
+                (dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`);
 
-              if (primaryId && !transactions.some((t: any) => t.id === primaryId || (destTx && t.id === destTx))) {
-                const originAsset =
-                  statusData?.quoteResponse?.quoteRequest?.originAsset ||
-                  (dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`);
-
-                transactions.unshift({
-                  id: primaryId,
-                  intent_type: 'deposit',
-                  defuse_asset_id_in: originAsset,
-                  amount_in: depAmt,
-                  sender_id: dep.address,
-                  receiver_id: nearAccount,
-                  block_height: 0,
-                  block_timestamp: statusData.updatedAt ? new Date(statusData.updatedAt).getTime() : Date.now(),
-                  status: isSuccess ? 'success' : statusData.status === 'REFUNDED' ? 'failed' : 'pending',
-                });
-              }
+              transactions.unshift({
+                id: primaryId,
+                intent_type: 'deposit',
+                defuse_asset_id_in: originAsset,
+                amount_in: depAmt,
+                sender_id: dep.address,
+                receiver_id: nearAccount,
+                block_height: 0,
+                block_timestamp: statusData.updatedAt ? new Date(statusData.updatedAt).getTime() : Date.now(),
+                status: isSuccess ? 'success' : statusData.status === 'REFUNDED' ? 'failed' : 'pending',
+              });
             }
           } catch {}
         }
@@ -511,7 +480,7 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
     console.error('[onchain/history] error:', err);
     return c.json<ErrorResponse>(
       { error: `Failed to fetch onchain history: ${publicErrorMessage(err)}`, code: 'ONCHAIN_HISTORY_ERROR' },
-      500
+      502
     );
   }
 });
@@ -523,16 +492,20 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
  */
 onchainRouter.get('/account', requireAuth(), async (c) => {
   const session = c.get('session')!;
-  const report: nearRpc.ProvisionReport = { attempted: false, created: true };
+  const report: nearRpc.ProvisionReport = { attempted: false, created: false };
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session, report);
-  const exists = Boolean(nearAccount) || (await nearRpc.accountExists(c.env, nearAccount));
+  // resolveUserNearAccount attempts provisioning; accountExists is the
+  // authoritative onchain check. The old `Boolean(nearAccount) || …` short-
+  // circuit made hasIntentAccount always true, leaving the UI waiting forever
+  // for an account that was never created.
+  const exists = await nearRpc.accountExists(c.env, nearAccount);
 
   return c.json({
     hasIntentAccount: exists,
     nearAccount,
     xHandle: session.x_handle,
     source: 'virtual_escrow',
-    provisionError: undefined,
+    ...(report.error ? { provisionError: report.error } : {}),
   });
 });
 

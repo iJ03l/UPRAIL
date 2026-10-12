@@ -48,7 +48,6 @@ export interface Env {
   ESCROW_PRIVATE_KEY?: string;
   SESSION_SECRET?: string;
   INTERNAL_SERVICE_KEY?: string;
-  DATABASE_URL?: string;
   /** Base URL of the Go settlement service, e.g. https://go.internal.example */
   SETTLEMENT_SERVICE_URL?: string;
 }

@@ -11,7 +11,6 @@ A sender pays to `@handle`; the recipient claims with Touch ID / Face ID; amount
 | `frontend/` | Next.js 14 app, **static export** served by the Worker |
 | `worker/` | Cloudflare Worker (Hono): auth, payments, claim, invites, onchain proxy, static assets |
 | `go-near-service/` | Go settlement service: 1Click quotes, intents relay, refunds, account creation |
-| `db/postgres_schema.sql` | Postgres schema (optional store) |
 | `worker/src/db/` | D1 schema + migrations (`migrations/*.sql`) |
 
 ## Architecture
@@ -74,7 +73,6 @@ in `.env.example`). Production: `wrangler secret put <NAME>`.
 | `SETTLEMENT_SERVICE_URL` | Worker | Base URL of the Go settlement service |
 | `ESCROW_PRIVATE_KEY` | Worker, Go | Escrow root key; derives per-user vault keys |
 | `NEAR_RPC_URL` | Worker | NEAR JSON-RPC endpoint (may embed a provider token) |
-| `DATABASE_URL` | Worker | Optional Postgres — needs a Hyperdrive binding to reach TCP from a Worker; falls back to D1 when absent or unreachable |
 | `NEAR_PARTNER_API_KEY` | Go | 1Click partner API key |
 
 Secrets **fail closed**: a missing value returns an error instead of falling

@@ -1290,6 +1290,21 @@ export const ReceivePage: React.FC = () => {
                     </div>
                   )}
                 </>
+              ) : !hasIntentAccount ? (
+                <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
+                  <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
+                  <span>Setting up your confidential vault…</span>
+                  <span className="text-stone-400 max-w-[240px] leading-relaxed">
+                    Receive addresses appear once setup finishes — usually a few seconds after your first sign-in.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => refreshBalances()}
+                    className="mt-1 text-xs font-bold text-stone-700 hover:text-black underline"
+                  >
+                    Check again
+                  </button>
+                </div>
               ) : nearAccount ? (
                 <>
                   <div className="py-1">
