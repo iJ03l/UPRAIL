@@ -609,13 +609,22 @@ export const api = {
         const protocolFee = q.protocolFee !== undefined ? q.protocolFee : (numAmount * PROTOCOL_FEE_RATE).toFixed(6).replace(/\.?0+$/, '') || '0';
         const protocolFeeUsd = usd(parseFloat(protocolFee));
         const protocolFeeRecipient = q.feeRecipient || 'fees.uprail.near';
-        const totalAmount = (numAmount + parseFloat(networkFee) + parseFloat(protocolFee)).toFixed(token.decimals > 6 ? 4 : 2);
-        const totalUsd = usd(numAmount + parseFloat(networkFee) + parseFloat(protocolFee));
+        // The protocol fee is carved out of the amount being sent, so the
+        // sender's balance only ever drops by the amount they entered.
+        const recipientAmount =
+          q.recipientAmount !== undefined
+            ? q.recipientAmount
+            : Math.max(0, numAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
+        const recipientAmountUsd = usd(parseFloat(recipientAmount));
+        const totalAmount = numAmount.toFixed(token.decimals > 6 ? 4 : 2);
+        const totalUsd = usd(numAmount);
 
         return {
           token,
           amount: amount || '0',
           amountUsd,
+          recipientAmount,
+          recipientAmountUsd,
           networkFee,
           networkFeeUsd,
           protocolFee,
@@ -639,13 +648,18 @@ export const api = {
     const protocolFee = (numAmount * PROTOCOL_FEE_RATE).toFixed(6).replace(/\.?0+$/, '') || '0';
     const protocolFeeUsd = usd(parseFloat(protocolFee));
     const protocolFeeRecipient = 'fees.uprail.near';
-    const totalAmount = (numAmount + parseFloat(networkFee) + parseFloat(protocolFee)).toFixed(token.decimals > 6 ? 4 : 2);
-    const totalUsd = usd(numAmount + parseFloat(networkFee) + parseFloat(protocolFee));
+    const recipientAmount =
+      Math.max(0, numAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
+    const recipientAmountUsd = usd(parseFloat(recipientAmount));
+    const totalAmount = numAmount.toFixed(token.decimals > 6 ? 4 : 2);
+    const totalUsd = usd(numAmount);
 
     return {
       token,
       amount: amount || '0',
       amountUsd,
+      recipientAmount,
+      recipientAmountUsd,
       networkFee,
       networkFeeUsd,
       protocolFee,
@@ -697,19 +711,22 @@ export const api = {
 
     const tokens = await api.getTokens();
     const token = resolveTokenForAsset(params.tokenId, tokens);
-    const numAmount = parseFloat(params.amount) || 0;
     const price = tokenUsdPrice(token);
 
     if (res.ok) {
       const backendData = await res.json();
+      // The recipient-facing amount is what they can actually claim
+      // (amount − fee); the fee column carries the carved-out protocol fee.
+      const netAmount = backendData.recipientAmount || params.amount;
+      const numNet = parseFloat(netAmount) || 0;
       return {
         id: backendData.paymentId,
         claimCode: backendData.paymentId,
         senderHandle: '',
         recipientHandle: cleanHandle,
         token,
-        amount: params.amount,
-        amountUsd: price === null ? null : numAmount * price,
+        amount: netAmount,
+        amountUsd: price === null ? null : numNet * price,
         fee: backendData.fee || '0',
         feeUsd: price === null ? null : (parseFloat(backendData.fee || '0')) * price,
         feeRecipient: backendData.feeRecipient || 'fees.uprail.near',

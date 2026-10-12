@@ -236,7 +236,13 @@ export const SendPage: React.FC = () => {
           {quote && parseFloat(amount) > 0 && (
             <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 space-y-2 text-xs font-mono">
               <div className="flex items-center justify-between text-stone-500">
-                <span>Platform Fee ({feePercentLabel})</span>
+                <span>Recipient Receives</span>
+                <span className="text-stone-900 font-bold">
+                  {quote.recipientAmount} {quote.token.symbol} (${formatUsd(quote.recipientAmountUsd)})
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-stone-500">
+                <span>Platform Fee ({feePercentLabel}, deducted from amount)</span>
                 <span className="text-stone-900 font-bold">
                   {quote.protocolFee} {quote.token.symbol} (${formatUsd(quote.protocolFeeUsd)})
                 </span>

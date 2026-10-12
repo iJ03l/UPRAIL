@@ -404,12 +404,17 @@ paymentsRouter.post('/quote', async (c) => {
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
     const numAmount = parseFloat(body.amount) || 0;
     const protocolFee = (numAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
+    // The fee is carved out of the amount being sent — the recipient gets
+    // amount − fee, never less than promised minus the published rate.
+    const recipientAmount =
+      (numAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
 
     return c.json<QuoteResponse>({
       quoteId: quoteResult.quoteId,
       recipientHandle: recipient.isAddress ? cleanHandle : `@${cleanHandle}`,
       asset: body.asset,
       amount: body.amount,
+      recipientAmount,
       confidentiality: 'advanced',
       depositAddress: quoteResult.depositAddress || holdingAccount,
       quoteSignature: quoteResult.quoteSignature,
@@ -530,16 +535,27 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
 
     const memo = typeof (body as any).memo === 'string' ? (body as any).memo.trim().slice(0, 280) : null;
 
-    // Protocol fee to fees.uprail.near on every send (FEE_PERCENT, 5%)
+    // Protocol fee to fees.uprail.near on every send (FEE_PERCENT, 5%).
+    // The fee is carved out of the amount being sent: the recipient claims
+    // amount − fee and the sender's balance is only ever debited `amount`.
     const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
-    const protocolFee = (parseFloat(body.amount) * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
+    const grossAmount = parseFloat(body.amount) || 0;
+    const protocolFee = (grossAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
+    const recipientAmount =
+      (grossAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
+    if (parseFloat(recipientAmount) <= 0) {
+      return c.json<ErrorResponse>(
+        { error: 'Amount too small to cover the protocol fee', code: 'INVALID_AMOUNT' },
+        400
+      );
+    }
 
-    // Verify sender has sufficient available balance
+    // Verify sender has sufficient available balance — only the amount being
+    // sent leaves their balance (the fee comes out of it, not on top of it).
     if (session) {
       const available = await nearRpc.getUserAvailableBalance(c.env, session, body.asset);
-      const totalRequired = parseFloat(body.amount) + parseFloat(protocolFee);
-      if (totalRequired > available + 0.0001) {
+      if (grossAmount > available + 0.0001) {
         return c.json<ErrorResponse>(
           {
             error: `Insufficient balance. Available: ${available.toFixed(2)}`,
@@ -560,13 +576,17 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     // sub-account move into intents with ft_transfer_call(msg = credit target)
     // — the recipient's platform account when registered, the escrow holding
     // account otherwise (exactly the targets the signed-intent path uses).
+    // Direct sends deliver amount − fee to the recipient; escrowed sends lock
+    // the gross amount (the immediate fee dispatch below carves the fee out
+    // of escrow), so in every case the sender's vault loses exactly `amount`.
     const creditTarget =
       isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
+    const creditAmount = isRecipientRegistered ? recipientAmount : body.amount;
     const plainDeposit = await nearRpc.depositPlainBalanceToIntents(
       c.env,
       session!.x_id,
       body.asset,
-      body.amount,
+      creditAmount,
       creditTarget
     );
 
@@ -580,7 +600,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           session!.x_id,
           recipientNearAccount,
           body.asset,
-          body.amount
+          recipientAmount
         );
         if (transferResult?.success && transferResult.txHash) {
           claimTxHash = transferResult.txHash;
@@ -644,7 +664,9 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       recipient_handle: cleanHandle,
       recipient_x_id: recipientXId,
       asset: body.asset,
-      amount: body.amount,
+      // The row stores what the recipient can actually claim (amount − fee);
+      // the fee column carries the carved-out protocol fee separately.
+      amount: recipientAmount,
       fee: protocolFee,
       fee_recipient: feeRecipient,
       invite_code: inviteCode,
@@ -659,18 +681,48 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       updated_at: now,
     };
 
-    // Immediately route the protocol fee to fees.uprail.near (send fee only, 0% on claim)
+    // Immediately route the protocol fee to fees.uprail.near (send fee only,
+    // 0% on claim). Escrowed sends dispatch it out of the escrowed gross;
+    // direct sends pull it from the sender's own vault — either way the fee
+    // is carved out of the amount being sent, never charged on top of the
+    // sender's balance.
     if (parseFloat(protocolFee) > 0) {
-      try {
-        await nearProxy.transfer(c.env, {
-          recipientNearAccount: feeRecipient,
-          asset: body.asset,
-          amount: protocolFee,
-          escrowAccountId: c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near',
-          paymentId: `${paymentId}_fee`,
-        });
-      } catch (feeErr) {
-        console.warn('[FeeRouting] Immediate send fee dispatch notice:', feeErr);
+      if (isRecipientRegistered) {
+        try {
+          const feeDeposit = await nearRpc.depositPlainBalanceToIntents(
+            c.env,
+            session!.x_id,
+            body.asset,
+            protocolFee,
+            feeRecipient
+          );
+          if (!feeDeposit.deposited) {
+            const feeTx = await nearRpc.executeTransferIntent(
+              c.env,
+              session!.x_id,
+              feeRecipient,
+              body.asset,
+              protocolFee
+            );
+            if (!feeTx?.success) {
+              throw new Error(feeTx?.error || 'fee intent transfer failed');
+            }
+          }
+        } catch (feeErr) {
+          console.warn('[FeeRouting] Direct-send fee dispatch notice:', feeErr);
+        }
+      } else {
+        try {
+          await nearProxy.transfer(c.env, {
+            recipientNearAccount: feeRecipient,
+            asset: body.asset,
+            amount: protocolFee,
+            escrowAccountId: c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near',
+            paymentId: `${paymentId}_fee`,
+          });
+        } catch (feeErr) {
+          console.warn('[FeeRouting] Immediate send fee dispatch notice:', feeErr);
+        }
       }
     }
 
@@ -753,6 +805,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
         depositAddress: body.depositAddress,
         expiresAt,
         fee: protocolFee,
+        recipientAmount,
         feeRecipient,
         inviteCode: inviteCode || undefined,
         isDirect: isRecipientRegistered,

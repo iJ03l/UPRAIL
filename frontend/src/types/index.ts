@@ -72,6 +72,9 @@ export interface PaymentQuote {
   token: Token;
   amount: string;
   amountUsd: number | null;
+  /** amount − protocolFee: what the recipient actually receives. */
+  recipientAmount: string;
+  recipientAmountUsd: number | null;
   networkFee: string;
   networkFeeUsd: number | null;
   protocolFee: string;

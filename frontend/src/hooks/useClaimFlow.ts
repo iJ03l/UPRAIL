@@ -209,6 +209,19 @@ export function useClaimFlow(initialCode?: string) {
       setIsClaiming(true);
       setError(null);
 
+      // Same as every other fund-moving prompt: a device that never
+      // registered its own passkey can only answer with cross-device QR /
+      // security-key prompts, so register this device first (best-effort) and
+      // let any synced passkey answer the assertion below if that fails.
+      if (user?.handle && !webauthn.hasLocalPasskey(user.handle)) {
+        try {
+          await webauthn.registerPasskey(user.handle);
+          setHasPasskey(true);
+        } catch {
+          /* fall through to the assertion */
+        }
+      }
+
       // Passkey authorization (identical to claim: tx_auth challenge + assertion)
       const handle = user?.handle || 'wallet';
       const assertion = await webauthn.authenticatePasskey(handle);

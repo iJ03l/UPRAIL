@@ -29,6 +29,28 @@ export function rememberInvite(raw: string | null | undefined): string | null {
   return code;
 }
 
+/**
+ * A FULL page load whose URL carries no invite param means the preloaded
+ * code was cleared (the user wiped the query string / opened the base URL)
+ * — drop the remembered copy so every page starts fresh instead of
+ * resurrecting a dead code in the login banner, parking field, and
+ * withInvite() redirects. Client-side hops never re-run this module, and
+ * every legit hop (OAuth callback, withInvite redirects) re-attaches the
+ * param to the URL, so mid-flow bounces keep their code. An auth-error
+ * bounce is not a user clear, so it keeps the code too.
+ */
+function dropInviteOnBarePageLoad(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get('invite') || params.get('ref') || params.get('code');
+    if (!fromUrl && !params.get('error')) localStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* private mode — nothing stored anyway */
+  }
+}
+dropInviteOnBarePageLoad();
+
 /** Reads a stored code without consuming it. */
 export function peekInvite(): string | null {
   try {

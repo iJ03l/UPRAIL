@@ -193,6 +193,8 @@ export interface QuoteResponse {
   recipientHandle: string;
   asset: string;
   amount: string;
+  /** amount − protocolFee: what the recipient actually receives. */
+  recipientAmount?: string;
   confidentiality: 'advanced';
   depositAddress: string;
   quoteSignature: string;
@@ -218,6 +220,8 @@ export interface SendResponse {
   depositAddress: string;
   expiresAt: number;
   fee?: string;
+  /** amount − fee: what the recipient can claim. */
+  recipientAmount?: string;
   feeRecipient?: string;
   inviteCode?: string;
   isDirect?: boolean;

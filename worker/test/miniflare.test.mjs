@@ -235,6 +235,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.asset, 'nep141:wrap.near');
     assert.equal(body.amount, '1.5');
     assert.equal(body.protocolFee, '0.075', 'Must calculate the 5% send fee (1.5 * 0.05 = 0.075)');
+    assert.equal(body.recipientAmount, '1.425', 'Fee is carved out of the amount (1.5 - 0.075)');
     assert.equal(body.feeRecipient, 'fees.uprail.near', 'Must route send fee to fees.uprail.near');
     assert.ok(body.quoteId, 'Must include quoteId');
     assert.ok(body.depositAddress, 'Must include depositAddress');
