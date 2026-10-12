@@ -96,23 +96,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     return localStorage.getItem('uprail_last_avatar') || null;
   });
 
-  // When returning after signup, passkey is primary by default!
+  // When returning after signup on THIS device, passkey is primary by default.
+  // If this device lacks a local passkey in Keychain, default to 𝕏 to link it.
   const [loginMethod, setLoginMethod] = useState<'passkey' | 'x'>(() => {
-    if (typeof window === 'undefined') return 'passkey';
-    const returning =
-      localStorage.getItem('uprail_has_signed_up') === 'true' ||
-      webauthn.hasLocalPasskey() ||
-      !!localStorage.getItem('uprail_last_handle');
-    return returning ? 'passkey' : 'x';
+    if (typeof window === 'undefined') return 'x';
+    return webauthn.hasLocalPasskey() ? 'passkey' : 'x';
   });
 
   // Determine user progression stage:
   // Stage 1: Connect 𝕏 or Passkey Unlock (if !user)
-  // Stage 2: Create Device Passkey (if user exists, but hasPasskey is false)
-  // Stage 3: Fully onboarded (has 𝕏 and passkey) -> route to /parking or /app
+  // Stage 2: Create Device Passkey (if user exists, but this specific device lacks a passkey)
+  // Stage 3: Fully onboarded (has 𝕏 and passkey on this device) -> route to /parking or /app
+  const hasLocalDevicePasskey = user?.handle ? webauthn.hasLocalPasskey(user.handle) : webauthn.hasLocalPasskey();
   const isStep1 = !isLoading && !user;
-  const isStep2 = !isLoading && !!user && user.hasPasskey === false;
-  const isComplete = !isLoading && !!user && user.hasPasskey === true;
+  const isStep2 = !isLoading && !!user && (!user.hasPasskey || !hasLocalDevicePasskey);
+  const isComplete = !isLoading && !!user && user.hasPasskey === true && hasLocalDevicePasskey;
 
   // Where this session was originally headed (share links send people to
   // /claim/<id>?invite=... — dropping that sends the recipient back to square one).
@@ -237,10 +235,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     } catch (err: any) {
       console.error('Passkey login error:', err);
       if (err?.name === 'NotAllowedError') {
-        setError('Passkey prompt was cancelled on your device.');
+        setError('Passkey prompt cancelled or not found on this device. Sign in with 𝕏 to enable Face ID on this iPhone.');
       } else {
-        setError(err?.message || 'Passkey not recognized on this device. Please sign in with 𝕏.');
+        setError('No passkey found on this iPhone yet. Sign in with 𝕏 to enable Face ID on this device.');
       }
+      setLoginMethod('x');
     } finally {
       setIsPasskeyLoading(false);
     }
@@ -498,6 +497,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 </>
               )}
             </button>
+
+            {/* Skip Option if user already has passkey on another device */}
+            {user?.hasPasskey && (
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => navigate(pendingReturnPath() || (user.isActivated ? '/app' : withInvite('/parking')), { replace: true })}
+                  className="text-xs text-stone-500 hover:text-stone-900 font-mono transition-colors underline cursor-pointer"
+                >
+                  Skip for now, continue to app &rarr;
+                </button>
+              </div>
+            )}
 
             {/* Switch Account */}
             <div className="pt-1 text-center">

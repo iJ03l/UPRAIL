@@ -43,19 +43,29 @@ export const webauthn = {
    * Check if a passkey has been saved locally for this handle.
    */
   hasLocalPasskey(handle?: string): boolean {
-    const list: StoredPasskeyInfo[] = JSON.parse(
-      localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
-    );
-    if (!handle) return list.length > 0;
-    const clean = handle.replace(/^@/, '').toLowerCase();
-    return list.some((p) => p.handle.toLowerCase() === clean);
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
+    try {
+      const list: StoredPasskeyInfo[] = JSON.parse(
+        localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
+      );
+      if (!handle) return list.length > 0;
+      const clean = handle.replace(/^@/, '').toLowerCase();
+      return list.some((p) => p.handle.toLowerCase() === clean);
+    } catch {
+      return false;
+    }
   },
 
   /**
    * Get all registered passkeys on this device.
    */
   getRegisteredPasskeys(): StoredPasskeyInfo[] {
-    return JSON.parse(localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]');
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return [];
+    try {
+      return JSON.parse(localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]');
+    } catch {
+      return [];
+    }
   },
 
   /**
@@ -122,11 +132,15 @@ export const webauthn = {
       deviceLabel: navigator.platform || 'Device Biometric Key',
     };
 
-    const existing: StoredPasskeyInfo[] = JSON.parse(
-      localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
-    );
-    existing.push(passkeyInfo);
-    localStorage.setItem(PASSKEY_STORAGE_KEY, JSON.stringify(existing));
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const existing: StoredPasskeyInfo[] = JSON.parse(
+          localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
+        );
+        existing.push(passkeyInfo);
+        localStorage.setItem(PASSKEY_STORAGE_KEY, JSON.stringify(existing));
+      } catch {}
+    }
 
     return { success: true, credentialId: attResp.id };
   },
@@ -140,6 +154,14 @@ export const webauthn = {
     const isSupported = browserSupportsWebAuthn();
     if (!isSupported) {
       throw new Error('WebAuthn is not supported on this browser.');
+    }
+
+    if (cleanHandle && cleanHandle !== 'passkey_holder' && !this.hasLocalPasskey(cleanHandle)) {
+      try {
+        await this.registerPasskey(cleanHandle);
+      } catch {
+        /* fall through to assertion */
+      }
     }
 
     // Single-use tx_auth challenge consumed by requirePasskeyAuth()

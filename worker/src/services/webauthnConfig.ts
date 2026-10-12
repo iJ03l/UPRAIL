@@ -55,9 +55,10 @@ function isLocalOrigin(origin: string): boolean {
  */
 export function allowedWebAuthnOrigins(env: WebAuthnEnv | Env): string[] {
   const origin = resolveOrigin(env);
-  if (!isLocalOrigin(origin)) return [origin];
+  const prodOrigins = [origin, 'https://app.uprail.world', 'https://uprail.world'];
+  if (!isLocalOrigin(origin)) return Array.from(new Set(prodOrigins));
   const host = new URL(origin).hostname;
-  return Array.from(new Set([origin, `http://${host}:3000`, `http://${host}:5173`, `http://${host}:8787`]));
+  return Array.from(new Set([...prodOrigins, `http://${host}:3000`, `http://${host}:5173`, `http://${host}:8787`]));
 }
 
 /** rpIds accepted when verifying an assertion — mirrors allowedWebAuthnOrigins. */

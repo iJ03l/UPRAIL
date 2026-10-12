@@ -20,6 +20,7 @@ import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { api, formatRecipientDisplay, formatUsd, sumUsd } from '../lib/api';
+import { webauthn } from '../lib/webauthn';
 import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { RollingNumber } from '../components/RollingNumber';
@@ -27,6 +28,35 @@ import { Skeleton } from '../components/Skeleton';
 
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
+  const [hasDevicePasskey, setHasDevicePasskey] = useState<boolean>(() => {
+    return user?.handle ? webauthn.hasLocalPasskey(user.handle) : true;
+  });
+  const [isEnablingBiometrics, setIsEnablingBiometrics] = useState<boolean>(false);
+  const [biometricsSuccess, setBiometricsSuccess] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (user?.handle) {
+      setHasDevicePasskey(webauthn.hasLocalPasskey(user.handle));
+    }
+  }, [user?.handle]);
+
+  const handleEnableDeviceBiometrics = async () => {
+    if (!user?.handle || isEnablingBiometrics) return;
+    setIsEnablingBiometrics(true);
+    try {
+      const res = await webauthn.registerPasskey(user.handle);
+      if (res.success) {
+        setHasDevicePasskey(true);
+        setBiometricsSuccess(true);
+        setTimeout(() => setBiometricsSuccess(false), 4000);
+      }
+    } catch (e) {
+      console.warn('Device passkey creation notice:', e);
+    } finally {
+      setIsEnablingBiometrics(false);
+    }
+  };
+
   const {
     history,
     loadHistory,
@@ -190,6 +220,36 @@ export const AppHome: React.FC = () => {
 
   return (
     <div className="w-full">
+      {/* Missing Device Passkey Banner */}
+      {user?.handle && !hasDevicePasskey && (
+        <div className="p-4 sm:p-5 rounded-3xl bg-black text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm animate-fade-in mb-6">
+          <div className="flex items-center space-x-3.5 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
+              <Fingerprint className="w-5 h-5 text-white" />
+            </div>
+            <div className="min-w-0 text-left">
+              <div className="font-display font-bold text-sm tracking-tight">Enable Face ID / Touch ID on this device</div>
+              <div className="text-xs text-stone-300 font-sans mt-0.5">Save a passkey to this device for instant biometric sign-in &amp; payments</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleEnableDeviceBiometrics}
+            disabled={isEnablingBiometrics}
+            className="px-4 py-2.5 rounded-xl bg-white text-black font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-100 active:scale-[0.98] transition-all cursor-pointer flex-shrink-0 self-start sm:self-auto shadow-xs"
+          >
+            {isEnablingBiometrics ? 'Activating...' : 'Enable Face ID'}
+          </button>
+        </div>
+      )}
+
+      {biometricsSuccess && (
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono flex items-center space-x-2 animate-fade-in mb-6">
+          <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <span>Face ID passkey enabled on this device! Native biometrics active.</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
 
         {/* ── LEFT COLUMN: Balance, Quick Actions, Receive via Intents ── */}
