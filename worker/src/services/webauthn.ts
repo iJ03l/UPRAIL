@@ -140,6 +140,11 @@ export async function generateAuthenticationOptions(params: {
   });
 }
 
+export function toBase64Url(str: string): string {
+  if (!str) return '';
+  return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 /**
  * Verify WebAuthn authentication assertion
  */
@@ -155,14 +160,24 @@ export async function verifyAuthentication(params: {
   };
 }) {
   const pubKeyBytes = pubKeyToBuffer(params.credential.publicKey);
+  const credId = toBase64Url(params.credential.id);
+  const rawAssertion = params.assertion || ({} as any);
+  const respId = toBase64Url(rawAssertion.id || params.credential.id);
+  const respRawId = toBase64Url(rawAssertion.rawId || respId);
+
+  const normalizedAssertion: AuthenticationResponseJSON = {
+    ...rawAssertion,
+    id: respId,
+    rawId: respRawId,
+  };
 
   const verification = await verifyAuthenticationResponse({
-    response: params.assertion,
+    response: normalizedAssertion,
     expectedChallenge: params.expectedChallenge,
     expectedOrigin: params.expectedOrigin,
     expectedRPID: params.expectedRPID,
     credential: {
-      id: params.credential.id,
+      id: credId,
       publicKey: pubKeyBytes as any,
       counter: params.credential.counter,
     },
@@ -171,3 +186,4 @@ export async function verifyAuthentication(params: {
 
   return verification;
 }
+

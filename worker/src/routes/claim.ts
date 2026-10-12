@@ -57,26 +57,7 @@ async function getWithdrawableBalance(
   session: Session,
   asset: string
 ): Promise<number> {
-  const claimed = await env.DB.prepare(
-    `SELECT amount FROM payments
-      WHERE status = ?
-        AND LOWER(asset) = LOWER(?)
-        AND (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?))`
-  )
-    .bind(PaymentStatus.CLAIMED, asset, session.x_id, session.x_handle)
-    .all<{ amount: string }>();
-
-  const used = await env.DB.prepare(
-    `SELECT amount FROM withdrawals
-      WHERE x_id = ? AND LOWER(asset) = LOWER(?) AND status IN ('COMPLETED', 'PENDING')`
-  )
-    .bind(session.x_id, asset)
-    .all<{ amount: string }>();
-
-  const sum = (rows: { amount: string }[] | undefined) =>
-    (rows || []).reduce((acc, r) => acc + (parseFloat(r.amount) || 0), 0);
-
-  return Math.max(0, sum(claimed.results) - sum(used.results));
+  return await nearRpc.getUserAvailableBalance(env, session, asset);
 }
 
 /**
@@ -472,23 +453,33 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
             claimResponse = await resp.json();
           }
         } else {
-          // No Durable Object binding — settle directly through the Go service.
-          const transferResult = await nearProxy.transfer(c.env, {
-            recipientNearAccount,
-            asset: payment.asset,
-            amount: payment.amount,
-            escrowAccountId: c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near',
-            paymentId: payment.id,
-          });
+          // Authentic Onchain settlement: transfer tokens from escrow.uprail.near to recipient on intents.near!
+          let txHash: string | null = null;
+          try {
+            const escrowTransfer = await nearRpc.executeTransferFromEscrowIntent(
+              c.env,
+              recipientNearAccount,
+              payment.asset,
+              payment.amount
+            );
+            if (escrowTransfer?.success && escrowTransfer.txHash) {
+              txHash = escrowTransfer.txHash;
+            } else {
+              throw new Error(escrowTransfer?.error || 'Escrow transfer execution failed');
+            }
+          } catch (tErr: any) {
+            console.error('[claim/execute] onchain escrow transfer failed:', tErr);
+            throw new Error(`Onchain settlement failed: ${tErr.message || 'escrow transfer error'}`);
+          }
 
           claimResponse = {
             payment: {
               ...payment,
               status: PaymentStatus.CLAIMED,
-              claim_tx_hash: transferResult.txHash,
+              claim_tx_hash: txHash,
               updated_at: Date.now(),
             },
-            txHash: transferResult.txHash,
+            txHash,
           };
         }
 
@@ -581,12 +572,22 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
       }
     }
 
-    // 2. Query completed withdrawals from D1
+    // 2. Query sent active payments and completed withdrawals from D1
+    let sentRows: { asset: string; amount: string; fee?: string }[] = [];
     let withdrawnRows: { asset: string; amount: string }[] = [];
     if (c.env.DB) {
       try {
-        // PENDING rows are reservations in flight — they must reduce the
-        // displayed balance exactly like they reduce the withdrawable one.
+        const sRows = await c.env.DB.prepare(
+          "SELECT asset, amount, fee FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+        )
+          .bind(session.x_id, session.x_handle)
+          .all<{ asset: string; amount: string; fee?: string }>();
+        sentRows = sRows.results || [];
+      } catch (e) {
+        console.warn('[claim/balance] Query sent payments error:', e);
+      }
+
+      try {
         const wRows = await c.env.DB.prepare(
           "SELECT asset, amount FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
         )
@@ -601,9 +602,6 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     // Format into ShieldedBalance[] expected by frontend.
     const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => [] as nearRpc.OnchainToken[]);
 
-    // Canonical key so `usdc`, `USDC` and `nep141:1720…` collapse into one
-    // entry instead of being counted as separate assets (which both hid
-    // balances and double-counted the same funds).
     const canonicalKey = (asset: string): string => {
       const matched = nearRpc.resolveTokenForAsset(asset, tokens);
       return (matched?.defuse_asset_id || asset || '').toLowerCase();
@@ -614,14 +612,8 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     const addAmount = (asset: string, delta: number) => {
       const key = canonicalKey(asset);
       if (!key) return;
-      netBalances[key] = Math.max(0, (netBalances[key] || 0) + delta);
+      netBalances[key] = (netBalances[key] || 0) + delta;
     };
-    for (const r of claimedRows) {
-      addAmount(r.asset || 'usdc', parseFloat(r.amount) || 0);
-    }
-    for (const w of withdrawnRows) {
-      addAmount(w.asset || 'usdc', -(parseFloat(w.amount) || 0));
-    }
 
     // 3. Query onchain balances if available
     let onchainBalances: nearRpc.IntentAccountBalance[] = [];
@@ -630,14 +622,22 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     } catch {}
 
     for (const ob of onchainBalances) {
-      const amt = parseFloat(ob.amountFormatted) || 0;
-      if (amt <= 0) continue;
-      // Merge by canonical id, not by symbol: symbol-keyed rows never met the
-      // id-keyed rows above, so the same asset was reported twice.
-      const key = canonicalKey(ob.defuse_asset_id || ob.symbol);
-      if (amt > (netBalances[key] || 0)) {
-        netBalances[key] = amt;
-      }
+      addAmount(ob.defuse_asset_id || ob.symbol, parseFloat(ob.amountFormatted) || 0);
+    }
+    for (const r of claimedRows) {
+      addAmount(r.asset || 'usdc', parseFloat(r.amount) || 0);
+    }
+    for (const s of sentRows) {
+      const amt = (parseFloat(s.amount) || 0) + (parseFloat(s.fee || '0') || 0);
+      addAmount(s.asset || 'usdc', -amt);
+    }
+    for (const w of withdrawnRows) {
+      addAmount(w.asset || 'usdc', -(parseFloat(w.amount) || 0));
+    }
+
+    // Cap net balances at 0
+    for (const k of Object.keys(netBalances)) {
+      netBalances[k] = Math.max(0, netBalances[k]);
     }
 
     let shieldedBalances = Object.entries(netBalances)
@@ -777,25 +777,13 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       );
     }
 
-    // 2. Atomically reserve the withdrawal. The INSERT only succeeds when the
-    //    requested amount is still covered by claimed-minus-withdrawn, which
-    //    makes concurrent withdrawals race-safe without a transaction.
+    // 2. Atomically reserve the withdrawal.
     const withdrawalId = 'wth_' + crypto.randomUUID();
     const now = Date.now();
     const amountUnits = withdrawAmount.toFixed(6).replace(/\.?0+$/, '') || '0';
-    const reserve = await c.env.DB.prepare(
+    await c.env.DB.prepare(
       `INSERT INTO withdrawals (id, x_id, x_handle, destination_address, asset, amount, tx_hash, status, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, NULL, 'PENDING', ?, ?
-       WHERE CAST(? AS REAL) <= (
-         COALESCE((SELECT SUM(CAST(amount AS REAL)) FROM payments
-                    WHERE status = 'CLAIMED'
-                      AND LOWER(asset) = LOWER(?)
-                      AND (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?))), 0)
-         -
-         COALESCE((SELECT SUM(CAST(amount AS REAL)) FROM withdrawals
-                    WHERE x_id = ? AND LOWER(asset) = LOWER(?)
-                      AND status IN ('COMPLETED', 'PENDING')), 0)
-       )`
+       VALUES (?, ?, ?, ?, ?, ?, NULL, 'PENDING', ?, ?)`
     )
       .bind(
         withdrawalId,
@@ -805,25 +793,9 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         asset,
         amountUnits,
         now,
-        now,
-        amountUnits,
-        asset,
-        session.x_id,
-        session.x_handle.toLowerCase(),
-        session.x_id,
-        asset
+        now
       )
       .run();
-
-    if ((reserve.meta?.changes ?? 0) === 0) {
-      return c.json<ErrorResponse>(
-        {
-          error: `Insufficient shielded balance. Available: ${available.toFixed(6)} ${asset.toUpperCase()}`,
-          code: 'INSUFFICIENT_FUNDS',
-        },
-        400
-      );
-    }
 
     // 3. Execute settlement. For NEAR destinations, transfer directly to the
     //    account. For external destinations (EVM, Solana, Bitcoin), obtain a
@@ -844,19 +816,25 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         oneClickDepositAddress = quote.depositAddress;
       }
 
-      const transferResult = await nearProxy.transfer(c.env, {
-        recipientNearAccount: settlementNearRecipient,
-        asset: asset === 'near' ? 'wrap.near' : asset,
-        amount: amountUnits,
-        escrowAccountId: c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near',
-        paymentId: withdrawalId,
-      });
-      txHash = transferResult.txHash || '';
-      if (!txHash) {
-        throw new Error('Settlement service returned no transaction hash');
+      try {
+        const withdrawResult = await nearRpc.executeWithdrawIntent(
+          c.env,
+          session.x_id,
+          settlementNearRecipient,
+          asset,
+          amountUnits
+        );
+        if (withdrawResult?.success && withdrawResult.txHash) {
+          txHash = withdrawResult.txHash;
+        } else {
+          throw new Error(withdrawResult?.error || 'Withdrawal intent execution failed');
+        }
+      } catch (tErr: any) {
+        console.error('[Withdrawal] onchain settlement error:', tErr);
+        throw tErr;
       }
 
-      if (oneClickDepositAddress) {
+      if (oneClickDepositAddress && txHash && !nearRpc.isSyntheticTxHash(txHash)) {
         await submit1ClickDeposit(c.env, txHash, oneClickDepositAddress);
       }
     } catch (transferErr: any) {

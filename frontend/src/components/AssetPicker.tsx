@@ -116,7 +116,9 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
 
       // Tab-based filtering when no active search text
       if (activeTab === 'popular') {
+        const hasBalance = (parseFloat(t.balance || '0') || 0) > 0;
         return (
+          hasBalance ||
           t.category === 'popular' ||
           ((t.chain === 'near' || !t.chain) && ['near', 'usdc', 'usdt', 'eth', 'btc', 'sol'].includes(symLower))
         );
@@ -236,11 +238,11 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
             </div>
 
             {/* Filter Tabs */}
-            <div className="flex p-0.5 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono font-bold">
+            <div className="flex p-0.5 rounded-xl bg-stone-100 border border-stone-200 text-[10px] sm:text-[11px] font-mono font-bold overflow-x-auto no-scrollbar">
               <button
                 type="button"
                 onClick={() => { setActiveTab('popular'); setSearch(''); }}
-                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                className={`flex-1 min-w-[52px] py-1.5 px-2 rounded-lg transition-all text-center whitespace-nowrap cursor-pointer ${
                   activeTab === 'popular' && !search
                     ? 'bg-white text-stone-950 shadow-2xs font-bold'
                     : 'text-stone-500 hover:text-black'
@@ -251,7 +253,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
               <button
                 type="button"
                 onClick={() => { setActiveTab('stables'); setSearch(''); }}
-                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                className={`flex-1 min-w-[52px] py-1.5 px-2 rounded-lg transition-all text-center whitespace-nowrap cursor-pointer ${
                   activeTab === 'stables' && !search
                     ? 'bg-white text-stone-950 shadow-2xs font-bold'
                     : 'text-stone-500 hover:text-black'
@@ -262,7 +264,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
               <button
                 type="button"
                 onClick={() => { setActiveTab('l1'); setSearch(''); }}
-                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                className={`flex-1 min-w-[42px] py-1.5 px-2 rounded-lg transition-all text-center whitespace-nowrap cursor-pointer ${
                   activeTab === 'l1' && !search
                     ? 'bg-white text-stone-950 shadow-2xs font-bold'
                     : 'text-stone-500 hover:text-black'
@@ -273,7 +275,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
               <button
                 type="button"
                 onClick={() => { setActiveTab('memes'); setSearch(''); }}
-                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                className={`flex-1 min-w-[50px] py-1.5 px-2 rounded-lg transition-all text-center whitespace-nowrap cursor-pointer ${
                   activeTab === 'memes' && !search
                     ? 'bg-white text-stone-950 shadow-2xs font-bold'
                     : 'text-stone-500 hover:text-black'
@@ -284,7 +286,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
               <button
                 type="button"
                 onClick={() => { setActiveTab('all'); setSearch(''); }}
-                className={`flex-1 py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                className={`flex-1 min-w-[38px] py-1.5 px-2 rounded-lg transition-all text-center whitespace-nowrap cursor-pointer ${
                   activeTab === 'all' && !search
                     ? 'bg-white text-stone-950 shadow-2xs font-bold'
                     : 'text-stone-500 hover:text-black'
@@ -303,7 +305,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search symbol, network, name..."
                 autoFocus
-                className="w-full bg-stone-50 rounded-xl pl-9 pr-3 py-2 text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono transition-colors"
+                className="w-full bg-stone-50 rounded-xl pl-9 pr-3 py-2 text-base sm:text-xs text-stone-900 placeholder-stone-400 border border-stone-200 focus:outline-none focus:border-black font-mono transition-colors"
               />
             </div>
 

@@ -30,14 +30,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   if (!isOpen || !payment) return null;
 
+  const isDirect = payment.isDirect || payment.status === 'claimed';
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(payment.claimLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (payment.claimLink) {
+      navigator.clipboard.writeText(payment.claimLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const tweetText = encodeURIComponent(
-    `Hey @${payment.recipientHandle}, I sent you ${payment.amount} ${payment.token.symbol} on UP! Claim it instantly with your device passkey: ${payment.claimLink}`
+    isDirect
+      ? `Hey @${payment.recipientHandle}, I just sent you ${payment.amount} ${payment.token.symbol} directly on UP!`
+      : `Hey @${payment.recipientHandle}, I sent you ${payment.amount} ${payment.token.symbol} on UP! Claim it instantly with your device passkey: ${payment.claimLink}`
   );
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
 
@@ -61,13 +67,27 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
         {/* Title */}
         <div className="text-center space-y-1 mb-5">
-          <h3 className="text-xl font-extrabold text-stone-950 font-display">Payment Ready!</h3>
+          <h3 className="text-xl font-extrabold text-stone-950 font-display">
+            {isDirect ? 'Payment Delivered!' : 'Payment Ready!'}
+          </h3>
           <p className="text-xs text-stone-600">
-            Share the claim link with{' '}
-            <span className="text-stone-900 font-bold font-mono">
-              @{payment.recipientHandle}
-            </span>{' '}
-            to collect their funds.
+            {isDirect ? (
+              <>
+                Funds deposited directly into{' '}
+                <span className="text-stone-900 font-bold font-mono">
+                  @{payment.recipientHandle}
+                </span>
+                's vault.
+              </>
+            ) : (
+              <>
+                Share the claim link with{' '}
+                <span className="text-stone-900 font-bold font-mono">
+                  @{payment.recipientHandle}
+                </span>{' '}
+                to collect their funds.
+              </>
+            )}
           </p>
         </div>
 
@@ -89,49 +109,58 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </div>
           </div>
           <span className="text-xs px-2.5 py-1 rounded-full bg-stone-100 text-stone-900 border border-stone-200 font-bold">
-            Private Escrow
+            {isDirect ? 'Direct Vault Transfer' : 'Private Escrow'}
           </span>
         </div>
 
-        {/* Claim Link Input */}
-        <div className="space-y-1.5 mb-4">
-          <label className="text-[11px] font-bold uppercase tracking-wider text-stone-600">
-            Secure Claim Link
-          </label>
-          <div className="flex items-center space-x-2">
-            <input
-              type="text"
-              readOnly
-              value={payment.claimLink}
-              className="flex-1 bg-stone-50 rounded-xl px-3 py-2.5 text-xs text-stone-800 font-mono border border-stone-200 focus:outline-none select-all"
-            />
-            <button
-              onClick={handleCopy}
-              className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copy</span>
-                </>
-              )}
-            </button>
+        {/* Claim Link Input or Direct Notice */}
+        {!isDirect ? (
+          <>
+            <div className="space-y-1.5 mb-4">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-stone-600">
+                Secure Claim Link
+              </label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={payment.claimLink}
+                  className="flex-1 bg-stone-50 rounded-xl px-3 py-2.5 text-base sm:text-xs text-stone-800 font-mono border border-stone-200 focus:outline-none select-all"
+                />
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Preloaded Invite Code Notice */}
+            <div className="mb-4 p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs font-mono">
+              <span className="text-stone-500 text-[11px]">VIP Invite Attached:</span>
+              <span className="font-bold text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200">
+                {payment.inviteCode || (payment.claimLink.includes('invite=') ? payment.claimLink.split('invite=')[1] : 'INCLUDED')}
+              </span>
+              <span className="text-[10px] text-stone-400">Preloaded for Recipient</span>
+            </div>
+          </>
+        ) : (
+          <div className="mb-4 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
+            <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span>Recipient is already registered. Funds delivered directly — no claim link required.</span>
           </div>
-        </div>
-
-        {/* Preloaded Invite Code Notice */}
-        <div className="mb-4 p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs font-mono">
-          <span className="text-stone-500 text-[11px]">VIP Invite Attached:</span>
-          <span className="font-bold text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200">
-            {payment.inviteCode || (payment.claimLink.includes('invite=') ? payment.claimLink.split('invite=')[1] : 'INCLUDED')}
-          </span>
-          <span className="text-[10px] text-stone-400">Preloaded for Recipient</span>
-        </div>
+        )}
 
         {/* Actions */}
         <div className="space-y-2 mb-5">

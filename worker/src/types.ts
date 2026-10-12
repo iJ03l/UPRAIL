@@ -220,6 +220,7 @@ export interface SendResponse {
   fee?: string;
   feeRecipient?: string;
   inviteCode?: string;
+  isDirect?: boolean;
 }
 
 export interface ClaimPendingResponse {

@@ -56,11 +56,11 @@ export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({
           alt={`QR Code for ${value}`}
           width={size}
           height={size}
-          className="rounded-xl block select-none"
+          className="rounded-xl block select-none max-w-full h-auto"
         />
       ) : (
         <div
-          style={{ width: size, height: size }}
+          style={{ width: size, height: size, maxWidth: '100%' }}
           className="animate-pulse bg-stone-100 rounded-xl flex items-center justify-center text-xs font-mono text-stone-400"
         >
           Generating QR...

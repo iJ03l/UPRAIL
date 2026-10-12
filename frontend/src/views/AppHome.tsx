@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from '../lib/router';
 import {
   ArrowDownLeft,
@@ -14,6 +14,7 @@ import {
   RefreshCw,
   ArrowRight,
   AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
@@ -34,6 +35,7 @@ export const AppHome: React.FC = () => {
 
   const {
     balances,
+    tokens,
     totalBalanceUsd,
     nearAccount,
     hasIntentAccount,
@@ -48,6 +50,26 @@ export const AppHome: React.FC = () => {
   } = useOnchainData();
 
   const [hideBalance, setHideBalance] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const handleManualRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await Promise.allSettled([
+        refresh(),
+        refreshBalances(),
+        refreshHistory(),
+        loadHistory(),
+        api.getPendingPayments().then((p) => setPendingPayments(p || [])),
+      ]);
+    } catch (err) {
+      console.warn('Manual refresh notice:', err);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
   // First visit has nothing cached: show skeletons. A cached refresh keeps the
   // last numbers on screen and only swaps them when the fresh data lands.
   const isFirstLoad = isLoadingBalances && totalBalanceUsd === null && balances.length === 0;
@@ -81,6 +103,91 @@ export const AppHome: React.FC = () => {
     setTimeout(() => setCopiedTxId(null), 2000);
   };
 
+  const recentActivity = useMemo(() => {
+    type UnifiedActivity = {
+      id: string;
+      type: 'payment' | 'deposit' | 'withdrawal';
+      isSent: boolean;
+      title: string;
+      subtitle: string;
+      amount: string;
+      symbol: string;
+      status: string;
+      timestamp: number;
+      copyValue?: string;
+      copyTitle?: string;
+      explorerUrl?: string;
+    };
+
+    const list: UnifiedActivity[] = [];
+
+    for (const p of history) {
+      const isSent = Boolean(
+        user?.handle && p.senderHandle && p.senderHandle.toLowerCase() === user.handle.toLowerCase()
+      );
+      list.push({
+        id: p.id,
+        type: 'payment',
+        isSent,
+        title: isSent ? formatRecipientDisplay(p.recipientHandle) : `@${p.senderHandle}`,
+        subtitle: p.memo || new Date(p.createdAt).toLocaleDateString(),
+        amount: `${isSent ? '-' : '+'}${p.amount}`,
+        symbol: p.token.symbol,
+        status: p.status,
+        timestamp: new Date(p.createdAt).getTime(),
+        copyValue: p.status === 'claimed' ? undefined : (p.claimLink || undefined),
+        copyTitle: 'Copy claim link',
+      });
+    }
+
+    for (const tx of transactions) {
+      const isDeposit = tx.intent_type === 'deposit';
+      const isWithdrawal = tx.intent_type === 'withdrawal';
+      const assetToken = tokens.find(
+        (t) =>
+          t.id.toLowerCase() === (tx.defuse_asset_id_in || '').toLowerCase() ||
+          (t.nearContractId && (tx.defuse_asset_id_in || '').includes(t.nearContractId))
+      );
+      const symbol =
+        assetToken?.symbol ||
+        (tx.defuse_asset_id_in?.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')
+          ? 'USDC'
+          : tx.defuse_asset_id_in?.includes('wrap.near')
+          ? 'NEAR'
+          : tx.defuse_asset_id_in?.toLowerCase().includes('usdc')
+          ? 'USDC'
+          : tx.defuse_asset_id_in?.toUpperCase() || 'NEAR');
+      const amt = tx.amount_in || tx.amount_out || '0';
+
+      const shortId = tx.id ? `${tx.id.slice(0, 6)}...${tx.id.slice(-4)}` : '';
+      const explorerUrl = tx.id && !tx.id.startsWith('0x') && tx.id.length > 20
+        ? `https://nearblocks.io/txns/${tx.id}`
+        : undefined;
+
+      list.push({
+        id: tx.id,
+        type: isDeposit ? 'deposit' : isWithdrawal ? 'withdrawal' : 'payment',
+        isSent: !isDeposit,
+        title: isDeposit
+          ? 'Deposit to Vault'
+          : isWithdrawal
+          ? `Withdraw to ${tx.receiver_id ? `${tx.receiver_id.slice(0, 6)}...` : 'wallet'}`
+          : 'Intent Transfer',
+        subtitle: `${new Date(tx.block_timestamp).toLocaleDateString()} • Tx: ${shortId}`,
+        amount: `${isDeposit ? '+' : '-'}${amt}`,
+        symbol,
+        status: tx.status,
+        timestamp: Number(tx.block_timestamp) || 0,
+        copyValue: tx.id,
+        copyTitle: 'Copy tx hash',
+        explorerUrl,
+      });
+    }
+
+    list.sort((a, b) => b.timestamp - a.timestamp);
+    return list;
+  }, [history, transactions, user?.handle, tokens]);
+
   return (
     <div className="w-full">
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
@@ -103,12 +210,12 @@ export const AppHome: React.FC = () => {
               <div className="flex items-center space-x-1">
                 <button
                   type="button"
-                  onClick={() => refresh()}
-                  disabled={isLoadingBalances}
+                  onClick={handleManualRefresh}
+                  disabled={isRefreshing || isLoadingBalances}
                   className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-50 transition-colors cursor-pointer"
-                  title="Refresh live balance"
+                  title="Refresh live balance & activity"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingBalances ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${(isRefreshing || isLoadingBalances) ? 'animate-spin text-stone-900' : ''}`} />
                 </button>
                 <button
                   type="button"
@@ -220,53 +327,53 @@ export const AppHome: React.FC = () => {
           )}
 
           {/* Quick Action Buttons */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <Link
               to="/app/send"
-              className="py-4 px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <ArrowUpRight className="w-5 h-5" />
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
                 Send
               </span>
-              <span className="text-[10px] font-mono text-stone-400">
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
                 𝕏 & Wallets
               </span>
             </Link>
 
             <Link
               to="/app/receive"
-              className="py-4 px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-10 h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <ArrowDownLeft className="w-5 h-5" />
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <ArrowDownLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
                 Receive
               </span>
-              <span className="text-[10px] font-mono text-stone-400">
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
                 Any Chain
               </span>
             </Link>
 
             <Link
               to="/app/claim"
-              className="py-4 px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer relative"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer relative"
             >
               {pendingPayments.length > 0 && (
                 <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-stone-900 text-white text-[9px] font-mono font-bold animate-pulse">
                   {pendingPayments.length}
                 </span>
               )}
-              <div className="w-10 h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <Fingerprint className="w-5 h-5" />
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <Fingerprint className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
                 Claim
               </span>
-              <span className="text-[10px] font-mono text-stone-400">
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
                 {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Passkey'}
               </span>
             </Link>
@@ -282,23 +389,23 @@ export const AppHome: React.FC = () => {
                   Transactions
                 </h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 font-bold">
-                  {history.length + transactions.length}
+                  {Math.min(recentActivity.length, 4)}
                 </span>
               </div>
               <button
                 type="button"
-                onClick={() => { loadHistory(); refreshHistory(); }}
-                disabled={isLoadingHistory || isLoadingOnchainHistory}
+                onClick={handleManualRefresh}
+                disabled={isRefreshing || isLoadingHistory || isLoadingOnchainHistory}
                 className="text-stone-400 hover:text-stone-700 p-1 rounded-lg hover:bg-stone-50 transition-colors cursor-pointer"
                 title="Refresh transactions"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${(isLoadingHistory || isLoadingOnchainHistory) ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 ${(isRefreshing || isLoadingHistory || isLoadingOnchainHistory) ? 'animate-spin text-stone-900' : ''}`} />
               </button>
             </div>
 
-            {/* Simple hairline list — intent history takes priority */}
-            <div className="divide-y divide-stone-100">
-              {(isLoadingHistory || isLoadingOnchainHistory) && history.length === 0 ? (
+            {/* Simple hairline list — unified onchain and P2P ledger */}
+            <div className="divide-y divide-stone-100 max-h-[390px] sm:max-h-[450px] overflow-y-auto pr-1 overscroll-contain">
+              {(isLoadingHistory || isLoadingOnchainHistory) && recentActivity.length === 0 ? (
                 <div className="py-2 space-y-3" aria-hidden="true">
                   {Array.from({ length: 4 }).map((_, i) => (
                     <div key={i} className="flex items-center justify-between gap-3 px-1 py-1">
@@ -316,28 +423,27 @@ export const AppHome: React.FC = () => {
                     </div>
                   ))}
                 </div>
-              ) : history.length === 0 && transactions.length === 0 ? (
+              ) : recentActivity.length === 0 ? (
                 <div className="py-12 text-center text-xs text-stone-400 font-mono">
                   No activity yet.
                 </div>
               ) : (
-                history.map((tx) => {
-                  const isSent = Boolean(user?.handle && tx.senderHandle && tx.senderHandle.toLowerCase() === user.handle.toLowerCase());
+                recentActivity.slice(0, 4).map((tx) => {
                   return (
                     <div
                       key={tx.id}
                       className="py-3 flex items-center justify-between hover:bg-stone-50/70 rounded-xl px-2 transition-colors group"
                     >
                       <div className="flex items-center space-x-2.5">
-                        <div className="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 bg-stone-100 text-stone-800">
-                          {isSent ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5" />}
+                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${tx.isSent ? 'bg-stone-100 text-stone-800' : 'bg-emerald-50 text-emerald-800'}`}>
+                          {tx.isSent ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-700" />}
                         </div>
                         <div>
-                          <div className="text-xs font-bold text-stone-900 font-mono">
-                            {isSent ? formatRecipientDisplay(tx.recipientHandle) : `@${tx.senderHandle}`}
+                          <div className="text-xs font-bold text-stone-900 font-mono truncate max-w-[120px] sm:max-w-[160px]">
+                            {tx.title}
                           </div>
                           <div className="text-[10px] text-stone-400 font-mono truncate max-w-[120px] sm:max-w-[160px]">
-                            {tx.memo || new Date(tx.createdAt).toLocaleDateString()}
+                            {tx.subtitle}
                           </div>
                         </div>
                       </div>
@@ -345,24 +451,41 @@ export const AppHome: React.FC = () => {
                       <div className="flex items-center space-x-2">
                         <div className="text-right">
                           <div className="text-xs font-mono font-bold text-stone-900">
-                            {isSent ? '-' : '+'}{tx.amount} {tx.token.symbol}
+                            {tx.amount} {tx.symbol}
                           </div>
-                          <span className="text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded text-stone-600 bg-stone-100 border border-stone-200">
+                          <span className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
+                            tx.status === 'success' || tx.status === 'claimed'
+                              ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                              : 'text-stone-600 bg-stone-100 border-stone-200'
+                          }`}>
                             {tx.status}
                           </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopyTxLink(tx.claimLink, tx.id)}
-                          className="p-1 rounded-lg text-stone-300 hover:text-black hover:bg-stone-100 transition-colors cursor-pointer"
-                          title="Copy claim link"
-                        >
-                          {copiedTxId === tx.id ? (
-                            <Check className="w-3.5 h-3.5 text-stone-900" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </button>
+                        {tx.copyValue && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyTxLink(tx.copyValue!, tx.id)}
+                            className="p-1 rounded-lg text-stone-300 hover:text-black hover:bg-stone-100 transition-colors cursor-pointer"
+                            title={tx.copyTitle || "Copy link"}
+                          >
+                            {copiedTxId === tx.id ? (
+                              <Check className="w-3.5 h-3.5 text-stone-900" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+                        {tx.explorerUrl && (
+                          <a
+                            href={tx.explorerUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 rounded-lg text-stone-300 hover:text-black hover:bg-stone-100 transition-colors"
+                            title="View on Explorer"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
                       </div>
                     </div>
                   );
@@ -375,7 +498,7 @@ export const AppHome: React.FC = () => {
                 to="/app/history"
                 className="inline-flex items-center space-x-1 text-xs font-mono font-bold text-stone-900 hover:text-black transition-colors"
               >
-                <span>Full Ledger</span>
+                <span>Full Ledger ({recentActivity.length})</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>

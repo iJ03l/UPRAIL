@@ -61,127 +61,94 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
       console.warn('[onchain/balances] RPC getIntentBalances error:', rpcErr);
     }
 
-    // Include virtual escrow balances claimed by user
+    // Include virtual escrow balances claimed by user, minus active sent payments and withdrawals
     if (c.env.DB) {
       try {
         const claimedRows = await c.env.DB.prepare(
-          "SELECT asset, amount FROM payments WHERE LOWER(recipient_handle) = LOWER(?) AND status = 'CLAIMED'"
+          "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?)) AND status = 'CLAIMED'"
         )
-          .bind(session.x_handle)
-          .all<{ asset: string; amount: string }>();
+          .bind(session.x_id, session.x_handle)
+          .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
 
-        let withdrawnRows: { asset: string; amount: string }[] = [];
+        const sentRows = await c.env.DB.prepare(
+          "SELECT asset, amount, fee, status, claim_tx_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+        )
+          .bind(session.x_id, session.x_handle)
+          .all<{ asset: string; amount: string; fee?: string; status: string; claim_tx_hash?: string | null }>();
+
+        let withdrawnRows: { asset: string; amount: string; status: string; tx_hash?: string | null }[] = [];
         try {
           const w = await c.env.DB.prepare(
-            "SELECT asset, amount FROM withdrawals WHERE x_id = ? AND status = 'COMPLETED'"
+            "SELECT asset, amount, status, tx_hash FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
           )
             .bind(session.x_id)
-            .all<{ asset: string; amount: string }>();
+            .all<{ asset: string; amount: string; status: string; tx_hash?: string | null }>();
           withdrawnRows = w.results || [];
         } catch {}
 
         const netVirtual: Record<string, number> = {};
         for (const row of claimedRows.results || []) {
-          const a = (row.asset || 'usdc').toLowerCase();
-          netVirtual[a] = (netVirtual[a] || 0) + (parseFloat(row.amount) || 0);
+          if (nearRpc.isSyntheticTxHash(row.claim_tx_hash)) {
+            const a = (row.asset || 'usdc').toLowerCase();
+            netVirtual[a] = (netVirtual[a] || 0) + (parseFloat(row.amount) || 0);
+          }
+        }
+        for (const row of sentRows.results || []) {
+          if (row.status !== 'CLAIMED' || nearRpc.isSyntheticTxHash(row.claim_tx_hash)) {
+            const a = (row.asset || 'usdc').toLowerCase();
+            const amt = (parseFloat(row.amount) || 0) + (parseFloat(row.fee || '0') || 0);
+            netVirtual[a] = (netVirtual[a] || 0) - amt;
+          }
         }
         for (const row of withdrawnRows) {
-          const a = (row.asset || 'usdc').toLowerCase();
-          netVirtual[a] = Math.max(0, (netVirtual[a] || 0) - (parseFloat(row.amount) || 0));
+          if (row.status === 'PENDING' || nearRpc.isSyntheticTxHash(row.tx_hash)) {
+            const a = (row.asset || 'usdc').toLowerCase();
+            netVirtual[a] = (netVirtual[a] || 0) - (parseFloat(row.amount) || 0);
+          }
         }
 
         // Virtual balances must carry the SAME id/symbol/decimals as the real
-        // onchain entry, otherwise the asset shows up twice (once real, once
-        // synthetic) and NEAR was rendered with 6 decimals instead of 24.
+        // onchain entry, otherwise the asset shows up twice.
         const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => [] as nearRpc.OnchainToken[]);
         for (const [asset, netAmt] of Object.entries(netVirtual)) {
-          if (netAmt <= 0) continue;
+          if (netAmt === 0) continue;
           const token = nearRpc.resolveTokenForAsset(asset, tokens);
           const defuseId = (token?.defuse_asset_id || asset).toLowerCase();
           const symbol = (token?.symbol || asset).toUpperCase();
 
           const existing = balances.find(
             (b) =>
-              (b.defuse_asset_id || '').toLowerCase() === defuseId ||
-              (b.symbol || '').toLowerCase() === symbol.toLowerCase()
+              nearRpc.assetsMatch(b.defuse_asset_id, asset) ||
+              nearRpc.assetsMatch(b.symbol, symbol) ||
+              nearRpc.assetsMatch(b.nearContractId, token?.nearContractId)
           );
-          if (existing) continue;
+          if (existing) {
+            const currentAmt = parseFloat(existing.amountFormatted || '0');
+            const total = Math.max(0, currentAmt + netAmt);
+            existing.amountFormatted = total.toFixed(2);
+            const decimals = existing.decimals || token?.decimals || 6;
+            existing.amount = nearRpc.toBaseUnits(total.toFixed(Math.min(decimals, 18)), decimals);
+            continue;
+          }
 
-          const decimals = token?.decimals ?? (defuseId.includes('wrap.near') ? 24 : 18);
-          const baseUnits = nearRpc.toBaseUnits(netAmt.toFixed(Math.min(decimals, 18)), decimals);
+          // If not in onchain balances and netAmt is positive, add virtual entry
+          if (netAmt > 0) {
+            const decimals = token?.decimals ?? (defuseId.includes('wrap.near') ? 24 : 18);
+            const baseUnits = nearRpc.toBaseUnits(netAmt.toFixed(Math.min(decimals, 18)), decimals);
 
-          balances.push({
-            defuse_asset_id: defuseId,
-            symbol,
-            amount: baseUnits,
-            amountFormatted: netAmt.toFixed(2),
-            decimals,
-            nearContractId: token?.nearContractId || '',
-            ...(token?.icon ? { icon: token.icon } : {}),
-          });
+            balances.push({
+              defuse_asset_id: defuseId,
+              symbol,
+              amount: baseUnits,
+              amountFormatted: netAmt.toFixed(2),
+              decimals,
+              nearContractId: token?.nearContractId || '',
+              ...(token?.icon ? { icon: token.icon } : {}),
+            });
+          }
         }
       } catch (dbErr) {
         console.warn('[onchain/balances] D1 virtual balance lookup error:', dbErr);
-      }
-    }
-
-    // Check active 1Click cross-chain deposit addresses for incoming deposits
-    if (c.env.DB) {
-      try {
-        const depositRows = await c.env.DB.prepare(
-          'SELECT address, chain, chain_name FROM deposit_addresses WHERE account_id = ?'
-        )
-          .bind(nearAccount)
-          .all<{ address: string; chain: string; chain_name: string }>();
-
-        for (const dep of depositRows.results || []) {
-          if (!dep.address) continue;
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3500);
-            const statusResp = await fetch(
-              `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(dep.address)}`,
-              {
-                signal: controller.signal,
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
-                  Accept: 'application/json',
-                },
-              }
-            );
-            clearTimeout(timeoutId);
-
-            if (statusResp.ok) {
-              const statusData = (await statusResp.json()) as any;
-              const swapDetails = statusData?.swapDetails;
-              const depAmt = parseFloat(swapDetails?.depositedAmountFormatted || '0');
-              if (depAmt > 0 && statusData?.status !== 'REFUNDED') {
-                const assetSymbol = dep.chain === 'near' ? 'NEAR' : (dep.chain || 'USDC').toUpperCase();
-                const existing = balances.find((b) => b.symbol?.toUpperCase() === assetSymbol);
-                if (existing) {
-                  const currentVal = parseFloat(existing.amountFormatted || '0');
-                  if (currentVal < depAmt) {
-                    existing.amountFormatted = depAmt.toString();
-                    existing.amount = (depAmt * Math.pow(10, existing.decimals || (dep.chain === 'near' ? 24 : 6))).toString();
-                  }
-                } else {
-                  balances.push({
-                    defuse_asset_id: dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`,
-                    symbol: assetSymbol,
-                    amount: (depAmt * (dep.chain === 'near' ? 1e24 : 1e6)).toString(),
-                    amountFormatted: depAmt.toString(),
-                    decimals: dep.chain === 'near' ? 24 : 6,
-                    nearContractId: dep.chain === 'near' ? 'wrap.near' : `${dep.chain}.omft.near`,
-                  });
-                }
-              }
-            }
-          } catch (statusErr) {
-            console.warn('[onchain/balances] 1click deposit status check error:', statusErr);
-          }
-        }
-      } catch (depErr) {
-        console.warn('[onchain/balances] deposit_addresses check error:', depErr);
       }
     }
 
@@ -209,19 +176,21 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
  * Query params:
  *   chain  — optional, e.g. "base", "arbitrum", "sol", "near", "eth", "btc"
  *   token  — optional, e.g. "USDC", "USDT", "NEAR", "ETH", "SOL", "BTC"
+ *   amount — optional exact deposit amount (e.g. "2.13", "10")
  *   refresh — optional boolean to bypass cache and derive a new 1-time address
  */
 onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
   const session = c.get('session')!;
   const chain = c.req.query('chain');
   const token = c.req.query('token');
-  const bypassCache = c.req.query('refresh') === 'true';
+  const amount = c.req.query('amount');
+  const bypassCache = c.req.query('refresh') === 'true' || !!amount;
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
   try {
     if (chain) {
-      // Single chain (with optional token)
-      const address = await nearRpc.getDepositAddress(c.env, nearAccount, chain, bypassCache, token);
+      // Single chain (with optional token and exact amount)
+      const address = await nearRpc.getDepositAddress(c.env, nearAccount, chain, bypassCache, token, amount);
       if (!address) {
         return c.json<ErrorResponse>(
           { error: `No deposit address available for chain: ${chain}${token ? ` (${token})` : ''}`, code: 'NO_DEPOSIT_ADDRESS' },
@@ -404,7 +373,7 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
     if (c.env.DB) {
       try {
         const depositRows = await c.env.DB.prepare(
-          'SELECT address, chain FROM deposit_addresses WHERE account_id = ?'
+          'SELECT address, chain FROM deposit_addresses WHERE account_id = ? ORDER BY updated_at DESC LIMIT 15'
         )
           .bind(nearAccount)
           .all<{ address: string; chain: string }>();
@@ -429,28 +398,68 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
             if (statusResp.ok) {
               const statusData = (await statusResp.json()) as any;
               const swapDetails = statusData?.swapDetails;
-              const txHashes = [
-                ...(swapDetails?.nearTxHashes || []),
-                ...(swapDetails?.originChainTxHashes || []),
-              ];
-              for (const hash of txHashes) {
-                if (!transactions.some((t: any) => t.id === hash)) {
-                  transactions.unshift({
-                    id: hash,
-                    intent_type: 'deposit',
-                    defuse_asset_id_in: dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`,
-                    amount_in: swapDetails?.depositedAmountFormatted || '0',
-                    sender_id: dep.address,
-                    receiver_id: nearAccount,
-                    block_height: 0,
-                    block_timestamp: statusData.updatedAt ? new Date(statusData.updatedAt).getTime() : Date.now(),
-                    status: statusData.status === 'SUCCESS' ? 'success' : 'pending',
-                  });
-                }
+              const depAmt = swapDetails?.depositedAmountFormatted || swapDetails?.amountInFormatted || '0';
+              const numAmt = parseFloat(depAmt);
+              const isSuccess = statusData?.status === 'SUCCESS';
+
+              // Ignore unused deposit addresses that have no deposit
+              if (!isSuccess && (!numAmt || numAmt <= 0)) {
+                continue;
+              }
+
+              const rawOrigin = swapDetails?.originChainTxHashes?.[0];
+              const originTx = typeof rawOrigin === 'string' ? rawOrigin : rawOrigin?.hash;
+              const rawDest = swapDetails?.destinationChainTxHashes?.[0];
+              const destTx = typeof rawDest === 'string' ? rawDest : rawDest?.hash;
+              const nearTx = swapDetails?.nearTxHashes?.[0];
+              const primaryId = originTx || destTx || nearTx || dep.address;
+
+              if (primaryId && !transactions.some((t: any) => t.id === primaryId || (destTx && t.id === destTx))) {
+                const originAsset =
+                  statusData?.quoteResponse?.quoteRequest?.originAsset ||
+                  (dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`);
+
+                transactions.unshift({
+                  id: primaryId,
+                  intent_type: 'deposit',
+                  defuse_asset_id_in: originAsset,
+                  amount_in: depAmt,
+                  sender_id: dep.address,
+                  receiver_id: nearAccount,
+                  block_height: 0,
+                  block_timestamp: statusData.updatedAt ? new Date(statusData.updatedAt).getTime() : Date.now(),
+                  status: isSuccess ? 'success' : statusData.status === 'REFUNDED' ? 'failed' : 'pending',
+                });
               }
             }
           } catch {}
         }
+
+        // Include withdrawals recorded for this user
+        const withdrawRows = await c.env.DB.prepare(
+          "SELECT id, asset, amount, destination_address, tx_hash, status, created_at FROM withdrawals WHERE x_id = ? ORDER BY created_at DESC LIMIT 50"
+        )
+          .bind(session.x_id)
+          .all<{ id: string; asset: string; amount: string; destination_address: string; tx_hash: string | null; status: string; created_at: string }>();
+
+        for (const w of withdrawRows.results || []) {
+          const wId = w.tx_hash || w.id;
+          if (!transactions.some((t: any) => t.id === wId)) {
+            transactions.push({
+              id: wId,
+              intent_type: 'withdrawal',
+              defuse_asset_id_in: w.asset,
+              amount_in: w.amount,
+              sender_id: nearAccount,
+              receiver_id: w.destination_address,
+              block_height: 0,
+              block_timestamp: new Date(w.created_at).getTime(),
+              status: w.status === 'COMPLETED' ? 'success' : w.status === 'FAILED' ? 'failed' : 'pending',
+            });
+          }
+        }
+
+        transactions.sort((a: any, b: any) => (Number(b.block_timestamp) || 0) - (Number(a.block_timestamp) || 0));
       } catch {}
     }
 

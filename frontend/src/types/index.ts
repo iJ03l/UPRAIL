@@ -61,6 +61,7 @@ export interface PaymentIntent {
   shieldedTxHash?: string;
   claimTxHash?: string;
   claimLink: string;
+  isDirect?: boolean;
   createdAt: string;
   expiresAt: string;
   claimedAt?: string;

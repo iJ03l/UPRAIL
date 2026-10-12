@@ -1,26 +1,38 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Token, PaymentQuote, PaymentIntent } from '../types';
 import { api, SUPPORTED_TOKENS, normalizeRecipientInput, tokenUsdPrice } from '../lib/api';
 import { usePasskeyTxAuth } from './usePasskeyTxAuth';
-import { useOnchainData } from './useOnchainData';
+import { useOnchainData, persistCache, globalCache } from './useOnchainData';
+
+const HISTORY_CACHE_KEY = 'uprail_payment_history_cache';
+
+let globalHistoryCache: PaymentIntent[] = (() => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(HISTORY_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+})();
 
 export function usePayments() {
   const { authorizeWithPasskey } = usePasskeyTxAuth();
-  const { tokens: onchainTokens, balances } = useOnchainData();
+  const { tokens: onchainTokens, balances, refreshBalances } = useOnchainData();
 
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
-  const [history, setHistory] = useState<PaymentIntent[]>([]);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [history, setHistory] = useState<PaymentIntent[]>(globalHistoryCache);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(globalHistoryCache.length === 0);
 
   // Combine onchain tokens with live user balances & filter out raw un-defused native token
   const tokens = useMemo<Token[]>(() => {
-    if (!onchainTokens || onchainTokens.length === 0) {
-      return SUPPORTED_TOKENS;
-    }
+    const rawTokens = (onchainTokens && onchainTokens.length > 0)
+      ? onchainTokens.filter((ot) => ot.id !== 'near' && ot.id !== 'native')
+      : SUPPORTED_TOKENS;
 
     const priorityOrder: Record<string, number> = {
       NEAR: 1,
@@ -35,31 +47,61 @@ export function usePayments() {
       AURORA: 10,
     };
 
-    const mapped = onchainTokens
-      .filter((ot) => ot.id !== 'near' && ot.id !== 'native') // remove raw un-defused native token
-      .map((ot) => {
-        const balRecord = balances.find(
-          (b) =>
-            b.defuse_asset_id?.toLowerCase() === ot.id.toLowerCase() ||
-            (ot.nearContractId && b.nearContractId?.toLowerCase() === ot.nearContractId.toLowerCase()) ||
-            b.symbol.toLowerCase() === ot.symbol.toLowerCase()
-        );
-        return {
-          id: ot.id,
-          symbol: ot.symbol,
-          name: ot.name,
-          iconUrl: ot.iconUrl,
-          decimals: ot.decimals,
-          priceUsd: tokenUsdPrice(ot as any) ?? undefined,
-          nearContractId: ot.nearContractId,
-          chain: ot.chain || 'near',
-          badge: (ot.chain || 'near').toUpperCase(),
-          category: ((ot as any).category || (['NEAR', 'USDC', 'USDT', 'ETH', 'BTC', 'SOL'].includes(ot.symbol) ? 'popular' : 'all')) as any,
-          balance: balRecord?.amountFormatted || balRecord?.amount || '0.00',
-        };
-      });
+    const mapped = rawTokens.map((ot) => {
+      const balRecord = balances.find(
+        (b) =>
+          b.defuse_asset_id?.toLowerCase() === ot.id.toLowerCase() ||
+          (ot.nearContractId && b.nearContractId?.toLowerCase() === ot.nearContractId.toLowerCase()) ||
+          b.symbol.toLowerCase() === ot.symbol.toLowerCase()
+      );
+      return {
+        id: ot.id,
+        symbol: ot.symbol,
+        name: ot.name,
+        iconUrl: ot.iconUrl,
+        decimals: ot.decimals,
+        priceUsd: tokenUsdPrice(ot as any) ?? undefined,
+        nearContractId: ot.nearContractId,
+        chain: ot.chain || 'near',
+        badge: (ot.chain || 'near').toUpperCase(),
+        category: ((ot as any).category || (['NEAR', 'USDC', 'USDT', 'ETH', 'BTC', 'SOL'].includes(ot.symbol) ? 'popular' : 'all')) as any,
+        balance: balRecord?.amountFormatted || balRecord?.amount || '0.00',
+      };
+    });
+
+    const getHoldingUsdValue = (t: Token): number => {
+      const bal = parseFloat(t.balance || '0');
+      if (isNaN(bal) || bal <= 0) return 0;
+      if (typeof t.priceUsd === 'number' && isFinite(t.priceUsd) && t.priceUsd > 0) {
+        return bal * t.priceUsd;
+      }
+      const sym = t.symbol.toUpperCase();
+      if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDD', 'USDE', 'USDG', 'FDUSD'].includes(sym)) {
+        return bal * 1.0;
+      }
+      // Positive balance of unpriced asset ranks higher than 0 balance
+      return 0.000001;
+    };
 
     mapped.sort((a, b) => {
+      const valA = getHoldingUsdValue(a);
+      const valB = getHoldingUsdValue(b);
+
+      // 1. Asset with highest USD value held by user must be at the very top
+      if (Math.abs(valA - valB) > 0.000001) {
+        return valB - valA;
+      }
+
+      // 2. If holding values are both unknown or equal, any positive balance comes before 0 balance
+      const numBalA = parseFloat(a.balance || '0') || 0;
+      const numBalB = parseFloat(b.balance || '0') || 0;
+      if (numBalA > 0 && numBalB <= 0) return -1;
+      if (numBalB > 0 && numBalA <= 0) return 1;
+      if (numBalA > 0 && numBalB > 0 && Math.abs(numBalA - numBalB) > 0.000001) {
+        return numBalB - numBalA;
+      }
+
+      // 3. Fall back to canonical priority order
       const pA = priorityOrder[a.symbol.toUpperCase()] ?? 999;
       const pB = priorityOrder[b.symbol.toUpperCase()] ?? 999;
       if (pA !== pB) return pA - pB;
@@ -69,13 +111,26 @@ export function usePayments() {
     return mapped.length > 0 ? mapped : SUPPORTED_TOKENS;
   }, [onchainTokens, balances]);
 
-  const [selectedTokenId, setSelectedTokenId] = useState<string>(SUPPORTED_TOKENS[0].id);
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  const userManuallySelectedRef = useRef(false);
+
+  // Keep selectedToken synced with the highest-value token unless user explicitly chose another
+  useEffect(() => {
+    if (!userManuallySelectedRef.current && tokens.length > 0) {
+      setSelectedTokenId(tokens[0].id);
+    }
+  }, [tokens]);
 
   const selectedToken = useMemo<Token>(() => {
-    return tokens.find((t) => t.id === selectedTokenId) || tokens[0] || SUPPORTED_TOKENS[0];
+    if (selectedTokenId) {
+      const found = tokens.find((t) => t.id === selectedTokenId);
+      if (found) return found;
+    }
+    return tokens[0] || SUPPORTED_TOKENS[0];
   }, [tokens, selectedTokenId]);
 
   const setSelectedToken = useCallback((t: Token) => {
+    userManuallySelectedRef.current = true;
     setSelectedTokenId(t.id);
   }, []);
 
@@ -140,8 +195,30 @@ export function usePayments() {
       });
 
       setCreatedPayment(payment);
-      // Refresh history
+
+      // Optimistically deduct the sent amount from local cache so balance reflects immediately
+      const sendAmt = parseFloat(amount) || 0;
+      if (sendAmt > 0 && Array.isArray(globalCache.balances)) {
+        const updatedBalances = globalCache.balances.map((b) => {
+          if (
+            b.symbol.toLowerCase() === selectedToken.symbol.toLowerCase() ||
+            b.defuse_asset_id?.toLowerCase() === selectedToken.id.toLowerCase()
+          ) {
+            const currentFormatted = parseFloat(b.amountFormatted) || 0;
+            const newFormatted = Math.max(0, currentFormatted - sendAmt);
+            return {
+              ...b,
+              amountFormatted: newFormatted.toFixed(Math.min(6, b.decimals || 6)),
+            };
+          }
+          return b;
+        });
+        persistCache({ balances: updatedBalances });
+      }
+
+      // Refresh history & balances
       loadHistory();
+      void refreshBalances();
       return payment;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to send payment';
@@ -197,6 +274,29 @@ export function usePayments() {
         passkeyAssertion: assertion,
       });
 
+      // Optimistically deduct withdrawn amount from local cache so balance reflects immediately
+      const withdrawAmt = parseFloat(amount) || 0;
+      if (withdrawAmt > 0 && Array.isArray(globalCache.balances)) {
+        const updatedBalances = globalCache.balances.map((b) => {
+          if (
+            b.symbol.toLowerCase() === selectedToken.symbol.toLowerCase() ||
+            b.defuse_asset_id?.toLowerCase() === tokenId.toLowerCase()
+          ) {
+            const currentFormatted = parseFloat(b.amountFormatted) || 0;
+            const newFormatted = Math.max(0, currentFormatted - withdrawAmt);
+            return {
+              ...b,
+              amountFormatted: newFormatted.toFixed(Math.min(6, b.decimals || 6)),
+            };
+          }
+          return b;
+        });
+        persistCache({ balances: updatedBalances });
+      }
+
+      loadHistory();
+      void refreshBalances();
+
       return {
         txHash: result.txHash,
         withdrawalId: result.withdrawalId,
@@ -214,9 +314,19 @@ export function usePayments() {
   // Load history
   const loadHistory = useCallback(async () => {
     try {
-      setIsLoadingHistory(true);
+      if (globalHistoryCache.length === 0) {
+        setIsLoadingHistory(true);
+      }
       const items = await api.getPaymentHistory();
-      setHistory(items);
+      if (Array.isArray(items)) {
+        globalHistoryCache = items;
+        setHistory(items);
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(items));
+          }
+        } catch {}
+      }
     } catch (err) {
       console.error('Failed to load payment history:', err);
     } finally {

@@ -153,12 +153,14 @@ export async function fetchOnchainBalances(): Promise<OnchainBalancesResponse | 
 export async function fetchDepositAddress(
   chain: string,
   refresh = false,
-  token?: string
+  token?: string,
+  amount?: string
 ): Promise<DepositAddress | null> {
   const params = new URLSearchParams();
   params.set('chain', chain);
   if (refresh) params.set('refresh', 'true');
   if (token) params.set('token', token);
+  if (amount) params.set('amount', amount);
 
   const res = await fetch(url(`/api/onchain/deposit-address?${params.toString()}`), {
     credentials: 'include',

@@ -148,12 +148,12 @@ export const InteractiveRailSimulator: React.FC = () => {
                   value={cleanHandle}
                   onChange={(e) => setHandle(e.target.value)}
                   placeholder="handle"
-                  className="w-full pl-9 pr-4 py-3 bg-white border border-stone-200 focus:border-[#E05326] rounded-2xl text-stone-900 font-medium text-sm focus:outline-none transition-all shadow-2xs"
+                  className="w-full pl-9 pr-4 py-3 bg-white border border-stone-200 focus:border-[#E05326] rounded-2xl text-stone-900 font-medium text-base sm:text-sm focus:outline-none transition-all shadow-2xs"
                 />
               </div>
 
               {/* Quick preset handle chips */}
-              <div className="flex gap-2 mt-2">
+              <div className="flex flex-wrap gap-2 mt-2">
                 {PRESET_HANDLES.map((p) => (
                   <button
                     key={p.handle}
@@ -236,7 +236,7 @@ export const InteractiveRailSimulator: React.FC = () => {
           <div className="lg:col-span-7 flex flex-col justify-between bg-white rounded-3xl border border-stone-200 p-6 sm:p-8 relative overflow-hidden shadow-xs">
             {/* Laser Track Visualization */}
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-stone-500">
+              <div className="flex justify-between text-[9px] sm:text-xs font-mono text-stone-500">
                 <span>ORIGIN VAULT</span>
                 <span className="text-[#E05326] font-bold">ENCLAVE TRANSMISSION</span>
                 <span>RECIPIENT PASSKEY</span>
@@ -250,44 +250,44 @@ export const InteractiveRailSimulator: React.FC = () => {
             </div>
 
             {/* Three Visual Pipeline Stage Capsules */}
-            <div className="grid grid-cols-3 gap-3 my-6">
+            <div className="grid grid-cols-3 gap-2 sm:gap-3 my-6">
               {/* Stage 1 */}
-              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center shadow-xs">
-                <div className="w-9 h-9 rounded-xl bg-white border border-stone-200 flex items-center justify-center mx-auto mb-2 text-stone-700 font-mono font-bold text-xs">
+              <div className="p-2.5 sm:p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center shadow-xs">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white border border-stone-200 flex items-center justify-center mx-auto mb-2 text-stone-700 font-mono font-bold text-xs">
                   01
                 </div>
-                <div className="text-xs font-bold text-stone-900">Input Deposit</div>
-                <div className="text-[10px] text-stone-500 mt-0.5 font-mono">{amount} {selectedToken.symbol}</div>
+                <div className="text-[11px] sm:text-xs font-bold text-stone-900 leading-tight">Input Deposit</div>
+                <div className="text-[9px] sm:text-[10px] text-stone-500 mt-0.5 font-mono">{amount} {selectedToken.symbol}</div>
               </div>
 
               {/* Stage 2 */}
               <div
-                className={`p-4 rounded-2xl border text-center transition-all shadow-xs ${
+                className={`p-2.5 sm:p-4 rounded-2xl border text-center transition-all shadow-xs ${
                   beamPct >= 50
                     ? 'bg-[#E05326]/10 border-[#E05326] text-[#E05326]'
                     : 'bg-stone-50 border-stone-200 text-stone-400'
                 }`}
               >
-                <div className="w-9 h-9 rounded-xl bg-white border border-inherit flex items-center justify-center mx-auto mb-2">
-                  <Lock className="w-4 h-4" />
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white border border-inherit flex items-center justify-center mx-auto mb-2">
+                  <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </div>
-                <div className="text-xs font-bold text-stone-900">TEE Shard</div>
-                <div className="text-[10px] mt-0.5 font-mono">Encrypted</div>
+                <div className="text-[11px] sm:text-xs font-bold text-stone-900 leading-tight">TEE Shard</div>
+                <div className="text-[9px] sm:text-[10px] mt-0.5 font-mono">Encrypted</div>
               </div>
 
               {/* Stage 3 */}
               <div
-                className={`p-4 rounded-2xl border text-center transition-all shadow-xs ${
+                className={`p-2.5 sm:p-4 rounded-2xl border text-center transition-all shadow-xs ${
                   isLocked
                     ? 'bg-[#39FF14]/15 border-[#062E0C] text-[#062E0C]'
                     : 'bg-stone-50 border-stone-200 text-stone-400'
                 }`}
               >
-                <div className="w-9 h-9 rounded-xl bg-white border border-inherit flex items-center justify-center mx-auto mb-2">
-                  <Fingerprint className="w-4 h-4 text-emerald-700" />
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white border border-inherit flex items-center justify-center mx-auto mb-2">
+                  <Fingerprint className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-700" />
                 </div>
-                <div className="text-xs font-bold text-stone-900">Passkey Vault</div>
-                <div className="text-[10px] mt-0.5 font-mono">@{cleanHandle}</div>
+                <div className="text-[11px] sm:text-xs font-bold text-stone-900 leading-tight">Passkey Vault</div>
+                <div className="text-[9px] sm:text-[10px] mt-0.5 font-mono truncate">@{cleanHandle}</div>
               </div>
             </div>
 

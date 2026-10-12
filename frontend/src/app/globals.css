@@ -11,6 +11,18 @@
     scroll-behavior: smooth;
   }
 
+  /* Instant tactile press feedback for every button on the platform —
+     responds on pointerdown, never gated on network. Tailwind transition
+     utilities on individual buttons still win over this base rule. */
+  button {
+    transition: transform 120ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:not(:disabled):active {
+    transform: scale(0.97);
+  }
+
   body {
     background-color: #0A0807;
     color: #F5F2EF;

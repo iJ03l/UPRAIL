@@ -142,6 +142,24 @@ export async function redeemInvite(
     throw new Error('You cannot redeem your own invite code');
   }
 
+  // If this invite is tied to an escrow payment, bind it strictly to the recipient!
+  if (check.invite.payment_id) {
+    const payment = await env.DB.prepare(
+      'SELECT recipient_handle, recipient_x_id FROM payments WHERE id = ?'
+    )
+      .bind(check.invite.payment_id)
+      .first<{ recipient_handle: string; recipient_x_id: string | null }>();
+
+    if (payment) {
+      const isExpected = payment.recipient_x_id
+        ? payment.recipient_x_id === user.x_id
+        : payment.recipient_handle.toLowerCase() === cleanHandle;
+      if (!isExpected) {
+        throw new Error(`This invite code is bound exclusively to @${payment.recipient_handle}`);
+      }
+    }
+  }
+
   // 1. Mark invite as USED (user-generated personal invites are single-use; system bootstrap codes remain active)
   const isSystemGenesis = check.invite.creator_x_handle === 'system' || ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET'].includes(code);
   if (!isSystemGenesis) {

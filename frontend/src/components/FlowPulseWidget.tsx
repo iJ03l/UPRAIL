@@ -159,13 +159,13 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
         </div>
 
         {/* Action Button */}
-        <div className="pt-6 border-t border-stone-100 flex items-center justify-between">
-          <span className="text-[11px] font-mono text-stone-400">
+        <div className="pt-6 border-t border-stone-100 flex items-center justify-between gap-2">
+          <span className="text-[11px] font-mono text-stone-400 truncate">
             Ephemeral 1-time ingress addresses
           </span>
           <Link
             to="/app/receive"
-            className="px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95"
+            className="px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95 flex-shrink-0"
           >
             <span>Receive</span>
             <ArrowDownLeft className="w-3.5 h-3.5" />
@@ -215,13 +215,13 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
         </div>
 
         {/* Action Button */}
-        <div className="pt-6 border-t border-stone-100 flex items-center justify-between">
-          <span className="text-[11px] font-mono text-stone-400">
+        <div className="pt-6 border-t border-stone-100 flex items-center justify-between gap-2">
+          <span className="text-[11px] font-mono text-stone-400 truncate">
             Send to any 𝕏 handle or wallet
           </span>
           <Link
             to="/app/send"
-            className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95"
+            className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95 flex-shrink-0"
           >
             <span>Send</span>
             <ArrowUpRight className="w-3.5 h-3.5" />

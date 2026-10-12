@@ -8,9 +8,9 @@
  *   // Then include assertion in the API call body as `passkeyAssertion`
  *
  * Flow:
- *   1. Request a fresh challenge from /api/auth-challenge
- *   2. Prompt the user's device for a WebAuthn assertion using that challenge
- *   3. Return the assertion to be included in the fund-moving API call
+ *   1. Request a fresh challenge options object from /api/auth-challenge
+ *   2. Prompt the user's device for a WebAuthn assertion via @simplewebauthn/browser
+ *   3. Return the standard base64url-encoded assertion to be included in the fund-moving API call
  *
  * Security:
  *   - Challenges are single-use and expire in 5 minutes
@@ -19,32 +19,11 @@
  */
 
 import { useState, useCallback } from 'react';
+import { startAuthentication } from '@simplewebauthn/browser';
+import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 import { api } from '../lib/api';
 
-/**
- * Decodes a base64url string (as issued by the server) into raw bytes.
- * Equivalent to @simplewebauthn/browser's base64URLStringToBuffer().
- */
-function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
-  const b64 = value.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-  const raw = atob(padded);
-  const bytes = new Uint8Array(new ArrayBuffer(raw.length));
-  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-  return bytes;
-}
-
-export interface PasskeyAssertion {
-  id: string;
-  rawId: string;
-  type: 'public-key';
-  response: {
-    authenticatorData: string;
-    clientDataJSON: string;
-    signature: string;
-    userHandle?: string;
-  };
-}
+export type PasskeyAssertion = AuthenticationResponseJSON;
 
 export function usePasskeyTxAuth() {
   const [isAuthorizing, setIsAuthorizing] = useState(false);
@@ -54,7 +33,7 @@ export function usePasskeyTxAuth() {
    * Prompts the user for a passkey assertion to authorize a fund-moving transaction.
    * Returns the assertion object to be included in the API request body.
    *
-   * @param actionDescription - Human-readable description shown in browser passkey prompt
+   * @param _actionDescription - Human-readable description shown in browser passkey prompt
    * @returns PasskeyAssertion to include as `passkeyAssertion` in the API body
    */
   const authorizeWithPasskey = useCallback(async (
@@ -64,57 +43,14 @@ export function usePasskeyTxAuth() {
     setError(null);
 
     try {
-      // Step 1: Get a fresh server-issued single-use tx_auth challenge.
-      // The server also tells us the rpId it registered the passkey under —
-      // guessing it from window.location.hostname breaks on any host that
-      // isn't exactly the registration origin.
-      const { challenge, rpId } = await api.getTxAuthOptions();
+      // Step 1: Get a fresh server-issued single-use tx_auth challenge options object.
+      // The server provides challenge, rpId, timeout, and allowed parameters.
+      const options = await api.getTxAuthOptions();
 
-      // Step 2: The server's challenge is a base64url string; the authenticator
-      // must sign its raw bytes so clientDataJSON.challenge round-trips back
-      // to the exact string the server stored.
-      const challengeBytes = base64UrlToBytes(challenge);
-
-      // Step 3: Prompt device for passkey assertion
-      if (!window.PublicKeyCredential) {
-        throw new Error('WebAuthn is not supported in this browser');
-      }
-
-      const credential = await navigator.credentials.get({
-        publicKey: {
-          challenge: challengeBytes,
-          ...(rpId ? { rpId } : {}),
-          userVerification: 'required', // Required for fund movements
-          timeout: 60000,
-        },
-      }) as PublicKeyCredential | null;
-
-      if (!credential) {
-        throw new Error('No passkey credential returned');
-      }
-
-      const assertionResponse = credential.response as AuthenticatorAssertionResponse;
-
-      // Step 4: Encode assertion for transport to server
-      const assertion: PasskeyAssertion = {
-        id: credential.id,
-        rawId: btoa(String.fromCharCode(...new Uint8Array(credential.rawId))),
-        type: 'public-key',
-        response: {
-          authenticatorData: btoa(
-            String.fromCharCode(...new Uint8Array(assertionResponse.authenticatorData))
-          ),
-          clientDataJSON: btoa(
-            String.fromCharCode(...new Uint8Array(assertionResponse.clientDataJSON))
-          ),
-          signature: btoa(
-            String.fromCharCode(...new Uint8Array(assertionResponse.signature))
-          ),
-          userHandle: assertionResponse.userHandle
-            ? btoa(String.fromCharCode(...new Uint8Array(assertionResponse.userHandle)))
-            : undefined,
-        },
-      };
+      // Step 2: Use startAuthentication from @simplewebauthn/browser
+      // This ceremony ensures 100% compliant base64url encoding across all fields
+      // and guarantees id === rawId matching required by SimpleWebAuthn.
+      const assertion = await startAuthentication(options as any);
 
       return assertion;
     } catch (err: any) {

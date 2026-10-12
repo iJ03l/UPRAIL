@@ -70,6 +70,39 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
       );
     }
 
+    // Defensive normalization: ensure assertion and all WebAuthn fields are base64url compliant
+    if (assertion) {
+      if (typeof assertion.id === 'string') {
+        assertion.id = assertion.id.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+      if (typeof assertion.rawId === 'string') {
+        assertion.rawId = assertion.rawId.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+      // SimpleWebAuthn strictly requires id === rawId
+      if (assertion.id && (!assertion.rawId || assertion.rawId !== assertion.id)) {
+        assertion.rawId = assertion.id;
+      }
+
+      if (assertion.response && typeof assertion.response === 'object') {
+        if (typeof assertion.response.authenticatorData === 'string') {
+          assertion.response.authenticatorData = assertion.response.authenticatorData
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        if (typeof assertion.response.clientDataJSON === 'string') {
+          assertion.response.clientDataJSON = assertion.response.clientDataJSON
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        if (typeof assertion.response.signature === 'string') {
+          assertion.response.signature = assertion.response.signature
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        if (typeof assertion.response.userHandle === 'string') {
+          assertion.response.userHandle = assertion.response.userHandle
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+      }
+    }
+
     // Extract challenge from clientDataJSON
     let challenge: string | null = null;
     try {
@@ -111,7 +144,7 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     }
 
     // Look up the user's registered passkey credential
-    let passkeyRow: { public_key: string; counter: number } | null = null;
+    let passkeyRow: { public_key: string; counter: number; credential_id?: string } | null = null;
 
     try {
       const sql = getDb(c.env);
@@ -131,6 +164,24 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
         )
           .bind(session.x_id, assertion.id)
           .first<any>();
+      } catch {}
+    }
+
+    // Fallback: if only one passkey exists for this user, look it up even if credential_id had an alternate encoding
+    if (!passkeyRow && c.env.DB) {
+      try {
+        const rows = await c.env.DB.prepare(
+          'SELECT public_key, counter, credential_id FROM passkeys WHERE x_id = ?'
+        )
+          .bind(session.x_id)
+          .all<any>();
+        if (rows.results && rows.results.length === 1) {
+          passkeyRow = rows.results[0];
+          if (passkeyRow && passkeyRow.credential_id) {
+            assertion.id = webauthnService.toBase64Url(passkeyRow.credential_id);
+            assertion.rawId = assertion.id;
+          }
+        }
       } catch {}
     }
 

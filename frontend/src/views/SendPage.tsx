@@ -1,19 +1,18 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from '../lib/router';
 import {
   Zap,
   CheckCircle2,
   AlertCircle,
   ArrowRight,
-  ArrowLeft,
   Wallet,
   AtSign,
   Fingerprint,
 } from 'lucide-react';
 import { HandleInput } from '../components/HandleInput';
 import { AmountInput } from '../components/AmountInput';
+import { BackBar } from '../components/BackBar';
 import { ShareModal } from '../components/ShareModal';
 import { usePayments } from '../hooks/usePayments';
 import { PROTOCOL_FEE_RATE, formatUsd } from '../lib/api';
@@ -84,10 +83,17 @@ export const SendPage: React.FC = () => {
 
       const payment = await sendPayment(target, amount, memo);
       setCreatedPayment(payment);
-      setShowShareModal(true);
-      setSuccessToast(
-        `Successfully sent ${payment.amount} ${payment.token.symbol} to @${payment.recipientHandle}!`
-      );
+      if (payment.isDirect || payment.status === 'claimed') {
+        setShowShareModal(false);
+        setSuccessToast(
+          `Successfully sent ${payment.amount} ${payment.token.symbol} directly to @${payment.recipientHandle}'s vault!`
+        );
+      } else {
+        setShowShareModal(true);
+        setSuccessToast(
+          `Successfully escrowed ${payment.amount} ${payment.token.symbol} for @${payment.recipientHandle}!`
+        );
+      }
       setRecipient('');
       setWalletAddress('');
       setAmount('');
@@ -104,24 +110,8 @@ export const SendPage: React.FC = () => {
 
   return (
     <div className="w-full space-y-6">
-      {/* Back Link */}
-      <Link
-        to="/app"
-        className="inline-flex items-center space-x-1.5 text-xs font-mono text-stone-500 hover:text-black transition-colors"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        <span>Back to Home</span>
-      </Link>
-
-      {/* Page Title & Intro */}
-      <div className="text-center space-y-2 mb-6">
-        <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
-          Send Value Privately
-        </h1>
-        <p className="text-sm text-stone-600 max-w-md mx-auto">
-          Send to an 𝕏 handle claimed with Touch ID, or route via cross-chain intents to any external wallet.
-        </p>
-      </div>
+      {/* Back navigation — wide bar on desktop, floating round on mobile */}
+      <BackBar label="Back to Home" />
 
       {/* Success Notification */}
       {successToast && (
@@ -130,7 +120,7 @@ export const SendPage: React.FC = () => {
             <CheckCircle2 className="w-4 h-4 text-stone-900 flex-shrink-0" />
             <span className="font-medium">{successToast}</span>
           </div>
-          {createdPayment && sendMode === 'handle' && (
+          {createdPayment && sendMode === 'handle' && !createdPayment.isDirect && createdPayment.status !== 'claimed' && (
             <button
               onClick={() => setShowShareModal(true)}
               className="ml-3 font-bold text-stone-900 underline hover:text-black cursor-pointer"
@@ -157,26 +147,28 @@ export const SendPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setSendMode('handle')}
-            className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+            className={`flex-1 py-2.5 px-2 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
               sendMode === 'handle'
                 ? 'bg-white text-stone-950 shadow-xs'
                 : 'text-stone-500 hover:text-black'
             }`}
           >
-            <AtSign className="w-3.5 h-3.5 text-stone-900" />
-            <span>Send to 𝕏 Handle</span>
+            <AtSign className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+            <span className="hidden sm:inline">Send to 𝕏 Handle</span>
+            <span className="sm:hidden">𝕏 Handle</span>
           </button>
           <button
             type="button"
             onClick={() => setSendMode('wallet')}
-            className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+            className={`flex-1 py-2.5 px-2 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
               sendMode === 'wallet'
                 ? 'bg-white text-stone-950 shadow-xs'
                 : 'text-stone-500 hover:text-black'
             }`}
           >
-            <Wallet className="w-3.5 h-3.5 text-stone-900" />
-            <span>Send to Wallet via Intents</span>
+            <Wallet className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+            <span className="hidden sm:inline">Send to Wallet via Intents</span>
+            <span className="sm:hidden">Wallet Intents</span>
           </button>
         </div>
 
@@ -206,7 +198,7 @@ export const SendPage: React.FC = () => {
                 onChange={(e) => setWalletAddress(e.target.value.trim())}
                 disabled={isSubmitting}
                 placeholder="0x... (EVM), Solana base58, or .near"
-                className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3.5 text-xs text-stone-900 font-mono placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
+                className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3.5 text-base sm:text-xs text-stone-900 font-mono placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
               />
             </div>
           )}
@@ -236,7 +228,7 @@ export const SendPage: React.FC = () => {
               disabled={isSubmitting}
               placeholder="e.g. bounty, consulting, dinner ☕"
               maxLength={120}
-              className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3 text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
+              className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3 text-base sm:text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
             />
           </div>
 

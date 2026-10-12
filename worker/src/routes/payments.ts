@@ -509,14 +509,20 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     // backfills this column atomically. Wallet-address recipients never map
     // to an x_identities row and stay NULL.
     let recipientXId: string | null = null;
+    let recipientNearAccount: string | null = null;
+    let isRecipientRegistered = false;
     if (!recipient.isAddress) {
       try {
         const row = await c.env.DB.prepare(
-          'SELECT x_id FROM x_identities WHERE LOWER(x_handle) = ?'
+          'SELECT x_id, near_account, is_activated FROM x_identities WHERE LOWER(x_handle) = ?'
         )
           .bind(cleanHandle)
-          .first<{ x_id: string }>();
-        recipientXId = row?.x_id ?? null;
+          .first<{ x_id: string; near_account: string | null; is_activated: number | boolean }>();
+        if (row) {
+          recipientXId = row.x_id;
+          recipientNearAccount = row.near_account;
+          isRecipientRegistered = Boolean(row.near_account || row.is_activated);
+        }
       } catch (lookupErr) {
         console.warn('[send] recipient x_id lookup failed:', lookupErr);
       }
@@ -529,8 +535,90 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
     const protocolFee = (parseFloat(body.amount) * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
 
-    // Generate preloaded 6-capital-letter invite code attached to this payment
-    const inviteCode = await createPaymentInvite(c.env, paymentId, session?.x_id, session?.x_handle);
+    // Verify sender has sufficient available balance
+    if (session) {
+      const available = await nearRpc.getUserAvailableBalance(c.env, session, body.asset);
+      const totalRequired = parseFloat(body.amount) + parseFloat(protocolFee);
+      if (totalRequired > available + 0.0001) {
+        return c.json<ErrorResponse>(
+          {
+            error: `Insufficient balance. Available: ${available.toFixed(2)}`,
+            code: 'INSUFFICIENT_FUNDS',
+          },
+          400
+        );
+      }
+    }
+
+    // If recipient is already registered with an active confidential vault, settle directly!
+    // If recipient is not yet registered, lock funds into escrow.uprail.near onchain!
+    let claimTxHash: string | null = null;
+    let escrowDepositTxHash: string | null = null;
+    const holdingAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+
+    if (isRecipientRegistered && recipientNearAccount) {
+      try {
+        const transferResult = await nearRpc.executeTransferIntent(
+          c.env,
+          session!.x_id,
+          recipientNearAccount,
+          body.asset,
+          body.amount
+        );
+        if (transferResult?.success && transferResult.txHash) {
+          claimTxHash = transferResult.txHash;
+        } else if (transferResult?.error) {
+          throw new Error(transferResult.error);
+        }
+      } catch (directErr: any) {
+        console.error('[send] direct transfer onchain error:', directErr);
+        return c.json<ErrorResponse>(
+          { error: `Onchain settlement failed: ${directErr?.message || 'intent transfer error'}`, code: 'SETTLEMENT_FAILED' },
+          502
+        );
+      }
+      if (!claimTxHash) {
+        return c.json<ErrorResponse>(
+          { error: 'Onchain settlement failed to confirm transaction', code: 'SETTLEMENT_FAILED' },
+          502
+        );
+      }
+    } else {
+      // Recipient is not registered yet. Debit sender's vault onchain into escrow holding account!
+      try {
+        const transferResult = await nearRpc.executeTransferIntent(
+          c.env,
+          session!.x_id,
+          holdingAccount,
+          body.asset,
+          body.amount
+        );
+        if (transferResult?.success && transferResult.txHash) {
+          escrowDepositTxHash = transferResult.txHash;
+        } else if (transferResult?.error) {
+          throw new Error(transferResult.error);
+        }
+      } catch (escrowErr: any) {
+        console.error('[send] escrow lock onchain error:', escrowErr);
+        return c.json<ErrorResponse>(
+          { error: `Escrow transfer failed: ${escrowErr?.message || 'intent transfer error'}`, code: 'ESCROW_LOCK_FAILED' },
+          502
+        );
+      }
+      if (!escrowDepositTxHash) {
+        return c.json<ErrorResponse>(
+          { error: 'Escrow lock failed to confirm onchain transaction', code: 'ESCROW_LOCK_FAILED' },
+          502
+        );
+      }
+    }
+
+    const paymentStatus = isRecipientRegistered ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED;
+
+    // Generate preloaded invite code only when the recipient is not yet registered
+    const inviteCode = isRecipientRegistered
+      ? null
+      : await createPaymentInvite(c.env, paymentId, session?.x_id, session?.x_handle);
 
     const payment: Payment = {
       id: paymentId,
@@ -544,10 +632,10 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       fee_recipient: feeRecipient,
       invite_code: inviteCode,
       memo,
-      status: PaymentStatus.DEPOSIT_WAITING,
-      deposit_address: body.depositAddress,
-      intent_hash: null,
-      claim_tx_hash: null,
+      status: paymentStatus,
+      deposit_address: escrowDepositTxHash || body.depositAddress,
+      intent_hash: escrowDepositTxHash,
+      claim_tx_hash: claimTxHash,
       refund_tx_hash: null,
       created_at: now,
       expires_at: expiresAt,
@@ -602,7 +690,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           created_at,
           expires_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
       `
       )
         .bind(
@@ -619,6 +707,8 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           payment.memo,
           payment.status,
           payment.deposit_address,
+          payment.intent_hash,
+          payment.claim_tx_hash,
           payment.created_at,
           payment.expires_at,
           payment.updated_at
@@ -628,22 +718,27 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       console.warn('D1 insert payment failed:', d1Err);
     }
 
-    // 2. Initialize EscrowDO instance
-    await callEscrowDO(c.env, paymentId, 'init', payment);
+    // 2. Initialize EscrowDO instance (only needed for escrowed payments awaiting claim)
+    if (!isRecipientRegistered) {
+      await callEscrowDO(c.env, paymentId, 'init', payment);
+    }
 
     const appOrigin = resolveOrigin(c.env);
-    const shareLink = `${appOrigin}/claim/${paymentId}?invite=${inviteCode}`;
+    const shareLink = isRecipientRegistered
+      ? ''
+      : `${appOrigin}/claim/${paymentId}?invite=${inviteCode}`;
 
     return c.json<SendResponse>(
       {
         paymentId,
         shareLink,
-        status: PaymentStatus.DEPOSIT_WAITING,
+        status: paymentStatus,
         depositAddress: body.depositAddress,
         expiresAt,
         fee: protocolFee,
         feeRecipient,
-        inviteCode,
+        inviteCode: inviteCode || undefined,
+        isDirect: isRecipientRegistered,
       },
       201
     );

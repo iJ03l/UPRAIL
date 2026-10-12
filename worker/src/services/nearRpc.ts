@@ -6,7 +6,7 @@
  * No hardcoded state. No stale caches for critical financial data.
  */
 
-import type { Env } from '../types';
+import type { Env, Session } from '../types';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58Decode, base58Encode } from '../utils/base58';
 import { getOnchainIcon } from './onchainIcons';
@@ -199,6 +199,7 @@ export interface IntentAccountBalance {
   amountFormatted: string;   // human-readable
   decimals: number;
   nearContractId: string;
+  icon?: string;
 }
 
 export interface DepositAddress {
@@ -234,10 +235,7 @@ async function nearRpc(
   method: string,
   params: Record<string, unknown>
 ): Promise<any> {
-  if (!rpcUrl) {
-    throw new Error('NEAR_RPC_URL is not configured');
-  }
-  const targetUrl = rpcUrl;
+  const targetUrl = rpcUrl || 'https://free.rpc.fastnear.com';
   const resp = await fetch(targetUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -269,21 +267,43 @@ async function viewFunction(
   args: Record<string, unknown> = {}
 ): Promise<any> {
   const argsBase64 = btoa(JSON.stringify(args));
-  const result = await nearRpc(rpcUrl, 'query', {
-    request_type: 'call_function',
-    finality: 'final',
-    account_id: contractId,
-    method_name: methodName,
-    args_base64: argsBase64,
-  });
+  const primaryRpc = rpcUrl || 'https://free.rpc.fastnear.com';
 
-  if (!result || !result.result) {
+  try {
+    const result = await nearRpc(primaryRpc, 'query', {
+      request_type: 'call_function',
+      finality: 'final',
+      account_id: contractId,
+      method_name: methodName,
+      args_base64: argsBase64,
+    });
+
+    if (result && result.result) {
+      const bytes = new Uint8Array(result.result);
+      const text = new TextDecoder().decode(bytes);
+      return JSON.parse(text);
+    }
     return null;
+  } catch (primaryErr) {
+    // If primary RPC fails, fall back to FastNEAR public RPC
+    if (primaryRpc !== 'https://free.rpc.fastnear.com') {
+      try {
+        const fallbackResult = await nearRpc('https://free.rpc.fastnear.com', 'query', {
+          request_type: 'call_function',
+          finality: 'final',
+          account_id: contractId,
+          method_name: methodName,
+          args_base64: argsBase64,
+        });
+        if (fallbackResult && fallbackResult.result) {
+          const bytes = new Uint8Array(fallbackResult.result);
+          const text = new TextDecoder().decode(bytes);
+          return JSON.parse(text);
+        }
+      } catch {}
+    }
+    throw primaryErr;
   }
-
-  const bytes = new Uint8Array(result.result);
-  const text = new TextDecoder().decode(bytes);
-  return JSON.parse(text);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -676,75 +696,129 @@ export async function getIntentBalances(
   nearAccount: string
 ): Promise<IntentAccountBalance[]> {
   const contractId = env.INTENTS_CONTRACT_ID || 'intents.near';
-  const rpcUrl = env.NEAR_RPC_URL;
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
 
-  try {
-    // Standard intents contract method: get_balance / ft_balance_of
-    // Query all token balances for the account
-    const balances = await viewFunction(rpcUrl, contractId, 'mt_batch_balance_of', {
-      account_id: nearAccount,
-    });
-
-    if (balances && typeof balances === 'object') {
-      // Response is typically: { "nep141:usdc.token.near": "1000000", ... }
-      const tokens = await getSupportedTokens(env);
-      const tokenMap = new Map(tokens.map((t) => [t.defuse_asset_id, t]));
-
-      return Object.entries(balances)
-        .map(([assetId, rawAmount]: [string, any]) => {
-          const token = tokenMap.get(assetId);
-          // Unknown asset: don't assume 6 (that would render a 24-decimal
-          // NEAR-like balance 10^18× too large). NEAR-native wrapped assets
-          // are 24, everything else defaults to the EVM-familiar 18.
-          const decimals = token?.decimals ?? (assetId.includes('wrap.near') ? 24 : 18);
-          const amtStr = String(rawAmount ?? '0');
-          return {
-            defuse_asset_id: assetId,
-            symbol: token?.symbol || assetId.split(':').pop() || assetId,
-            amount: amtStr,
-            amountFormatted: formatAmount(amtStr, decimals),
-            decimals,
-            nearContractId: token?.nearContractId || '',
-          } satisfies IntentAccountBalance;
-        })
-        .filter((b) => b.amount !== '0');
-    }
-  } catch (err) {
-    console.warn('[nearRpc] mt_batch_balance_of failed, trying per-token:', err);
-  }
-
-  // Fallback: try ft_balance_of on the intents contract per known token
   try {
     const tokens = await getSupportedTokens(env);
+    const tokenMap = new Map<string, OnchainToken>();
+    for (const t of tokens) {
+      if (t.defuse_asset_id) tokenMap.set(t.defuse_asset_id, t);
+    }
+    // Guarantee core defuse assets exist in the map
+    if (!tokenMap.has('nep141:wrap.near')) {
+      tokenMap.set('nep141:wrap.near', {
+        defuse_asset_id: 'nep141:wrap.near',
+        symbol: 'NEAR',
+        name: 'NEAR Protocol',
+        decimals: 24,
+        icon: getOnchainIcon('near'),
+        chain: 'near',
+        nearContractId: 'wrap.near',
+      });
+    }
+    if (!tokenMap.has('wrap.near')) {
+      tokenMap.set('wrap.near', {
+        defuse_asset_id: 'wrap.near',
+        symbol: 'NEAR',
+        name: 'NEAR Protocol',
+        decimals: 24,
+        icon: getOnchainIcon('near'),
+        chain: 'near',
+        nearContractId: 'wrap.near',
+      });
+    }
+
+    const tokenIds = Array.from(tokenMap.keys());
+    if (tokenIds.length === 0) return [];
+
     const balances: IntentAccountBalance[] = [];
+    const chunkSize = 50;
+    for (let i = 0; i < tokenIds.length; i += chunkSize) {
+      const chunk = tokenIds.slice(i, i + chunkSize);
+      try {
+        const rawAmounts = await viewFunction(rpcUrl, contractId, 'mt_batch_balance_of', {
+          account_id: nearAccount,
+          token_ids: chunk,
+        });
+
+        if (Array.isArray(rawAmounts)) {
+          for (let j = 0; j < chunk.length; j++) {
+            const assetId = chunk[j];
+            const rawAmount = String(rawAmounts[j] ?? '0');
+            if (rawAmount === '0' || rawAmount === 'null' || !rawAmount) continue;
+
+            const token = tokenMap.get(assetId);
+            const decimals = token?.decimals ?? (assetId.includes('wrap.near') ? 24 : 18);
+            const symbol = token?.symbol || assetId.split(':').pop() || assetId;
+
+            const existing = balances.find((b) => b.symbol.toUpperCase() === symbol.toUpperCase());
+            if (existing) {
+              const existingAmt = BigInt(existing.amount || '0');
+              const newAmt = BigInt(rawAmount || '0');
+              existing.amount = (existingAmt + newAmt).toString();
+              existing.amountFormatted = formatAmount(existing.amount, decimals);
+            } else {
+              balances.push({
+                defuse_asset_id: assetId,
+                symbol,
+                amount: rawAmount,
+                amountFormatted: formatAmount(rawAmount, decimals),
+                decimals,
+                nearContractId: token?.nearContractId || '',
+                ...(token?.icon ? { icon: token.icon } : {}),
+              });
+            }
+          }
+        }
+      } catch (chunkErr) {
+        console.warn(`[nearRpc] mt_batch_balance_of chunk failed:`, chunkErr);
+      }
+    }
+
+    if (balances.length > 0) {
+      return balances;
+    }
+  } catch (err) {
+    console.warn('[nearRpc] mt_batch_balance_of failed, trying fallback:', err);
+  }
+
+  // Fallback: try individual mt_balance_of on core tokens
+  try {
+    const fallbackTokens = [
+      { id: 'nep141:wrap.near', symbol: 'NEAR', decimals: 24, nearContractId: 'wrap.near' },
+      { id: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1', symbol: 'USDC', decimals: 6, nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1' },
+      { id: 'nep141:usdt.tether-token.near', symbol: 'USDT', decimals: 6, nearContractId: 'usdt.tether-token.near' },
+      { id: 'nep141:sol.omft.near', symbol: 'SOL', decimals: 9, nearContractId: 'sol.omft.near' },
+      { id: 'nep141:eth.bridge.near', symbol: 'ETH', decimals: 18, nearContractId: 'eth.bridge.near' },
+    ];
+    const fallbackBalances: IntentAccountBalance[] = [];
 
     await Promise.allSettled(
-      tokens.map(async (token) => {
+      fallbackTokens.map(async (tok) => {
         try {
-          const raw = await viewFunction(rpcUrl, contractId, 'ft_balance_of', {
+          const raw = await viewFunction(rpcUrl, contractId, 'mt_balance_of', {
             account_id: nearAccount,
-            token_id: token.defuse_asset_id,
+            token_id: tok.id,
           });
           const amtStr = String(raw ?? '0');
-          if (amtStr !== '0') {
-            balances.push({
-              defuse_asset_id: token.defuse_asset_id,
-              symbol: token.symbol,
+          if (amtStr !== '0' && amtStr !== 'null') {
+            fallbackBalances.push({
+              defuse_asset_id: tok.id,
+              symbol: tok.symbol,
               amount: amtStr,
-              amountFormatted: formatAmount(amtStr, token.decimals),
-              decimals: token.decimals,
-              nearContractId: token.nearContractId,
+              amountFormatted: formatAmount(amtStr, tok.decimals),
+              decimals: tok.decimals,
+              nearContractId: tok.nearContractId,
+              icon: getOnchainIcon(tok.symbol.toLowerCase()),
             });
           }
-        } catch {
-          // Token not supported or zero balance — skip silently
-        }
+        } catch {}
       })
     );
 
-    return balances;
+    return fallbackBalances;
   } catch (err) {
-    console.warn('[nearRpc] Per-token balance fallback failed:', err);
+    console.warn('[nearRpc] mt_balance_of fallback failed:', err);
   }
 
   return [];
@@ -764,6 +838,7 @@ interface ChainDepositConfig {
   minAmountUsd: string;
   refundTo: string;
   symbol: string;
+  decimals: number;
 }
 
 export const SUPPORTED_CHAINS = [
@@ -787,8 +862,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '150000',
     minAmountFormatted: '0.15 USDC',
     minAmountUsd: '$0.15',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
   'arbitrum_usdc': {
     key: 'arbitrum_usdc',
@@ -800,8 +876,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDC',
     minAmountUsd: '$0.10',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
   'sol_usdc': {
     key: 'sol_usdc',
@@ -813,8 +890,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDC',
     minAmountUsd: '$0.10',
-    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
   'eth_usdc': {
     key: 'eth_usdc',
@@ -826,8 +904,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '2000000',
     minAmountFormatted: '2.00 USDC',
     minAmountUsd: '$2.00',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
   'near_usdc': {
     key: 'near_usdc',
@@ -839,8 +918,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDC',
     minAmountUsd: '$0.10',
-    refundTo: 'escrow.uprail.near',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
 
   // USDT configs
@@ -854,8 +934,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDT',
     minAmountUsd: '$0.10',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDT',
+    decimals: 6,
   },
   'sol_usdt': {
     key: 'sol_usdt',
@@ -867,8 +948,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDT',
     minAmountUsd: '$0.10',
-    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+    refundTo: '',
     symbol: 'USDT',
+    decimals: 6,
   },
   'eth_usdt': {
     key: 'eth_usdt',
@@ -880,8 +962,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '2000000',
     minAmountFormatted: '2.00 USDT',
     minAmountUsd: '$2.00',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDT',
+    decimals: 6,
   },
   'near_usdt': {
     key: 'near_usdt',
@@ -893,8 +976,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDT',
     minAmountUsd: '$0.10',
-    refundTo: 'escrow.uprail.near',
+    refundTo: '',
     symbol: 'USDT',
+    decimals: 6,
   },
 
   // Native NEAR
@@ -908,8 +992,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '10000000000000000000000',
     minAmountFormatted: '0.01 NEAR',
     minAmountUsd: '$0.05',
-    refundTo: 'escrow.uprail.near',
+    refundTo: '',
     symbol: 'NEAR',
+    decimals: 24,
   },
 
   // ETH configs
@@ -923,8 +1008,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '50000000000000',
     minAmountFormatted: '0.00005 ETH',
     minAmountUsd: '$0.12',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'ETH',
+    decimals: 18,
   },
   'arbitrum_eth': {
     key: 'arbitrum_eth',
@@ -936,8 +1022,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '50000000000000',
     minAmountFormatted: '0.00005 ETH',
     minAmountUsd: '$0.12',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'ETH',
+    decimals: 18,
   },
   'eth_eth': {
     key: 'eth_eth',
@@ -949,8 +1036,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '800000000000000',
     minAmountFormatted: '0.0008 ETH',
     minAmountUsd: '$2.00',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'ETH',
+    decimals: 18,
   },
 
   // SOL config
@@ -964,8 +1052,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '1000000',
     minAmountFormatted: '0.001 SOL',
     minAmountUsd: '$0.11',
-    refundTo: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM',
+    refundTo: '',
     symbol: 'SOL',
+    decimals: 9,
   },
 
   // BTC config
@@ -979,8 +1068,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '8300',
     minAmountFormatted: '0.000083 BTC',
     minAmountUsd: '$6.80',
-    refundTo: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq',
+    refundTo: '',
     symbol: 'BTC',
+    decimals: 8,
   },
 
   // Polygon USDC
@@ -994,8 +1084,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDC',
     minAmountUsd: '$0.10',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
   'polygon_usdc': {
     key: 'polygon_usdc',
@@ -1007,8 +1098,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDC',
     minAmountUsd: '$0.10',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
 
   // Optimism USDC
@@ -1022,8 +1114,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDC',
     minAmountUsd: '$0.10',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
 
   // Avalanche USDC
@@ -1037,8 +1130,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '100000',
     minAmountFormatted: '0.10 USDC',
     minAmountUsd: '$0.10',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDC',
+    decimals: 6,
   },
 
   // BSC USDT
@@ -1052,8 +1146,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '1000000000000000000',
     minAmountFormatted: '1.00 USDT',
     minAmountUsd: '$1.00',
-    refundTo: '0x742d35Cc6634C0532925a3b844Bc454e4438f44e',
+    refundTo: '',
     symbol: 'USDT',
+    decimals: 18,
   },
 
   // Dogecoin
@@ -1067,8 +1162,9 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     amount: '20000000',
     minAmountFormatted: '0.2 DOGE',
     minAmountUsd: '$0.10',
-    refundTo: 'D8vFzvgQ3bXUa7j4U7qB8fQ3bXUa7j4U7q',
+    refundTo: '',
     symbol: 'DOGE',
+    decimals: 8,
   },
 };
 
@@ -1119,8 +1215,8 @@ async function fetch1ClickDepositAddress(
         destinationAsset: cfg.destinationAsset,
         amount: cfg.amount,
         depositType: 'ORIGIN_CHAIN',
-        refundType: 'ORIGIN_CHAIN',
-        refundTo: cfg.refundTo,
+        refundType: 'INTENTS',
+        refundTo: nearAccount,
         deadline,
       }),
     });
@@ -1151,8 +1247,8 @@ async function fetch1ClickDepositAddress(
               destinationAsset: cfg.destinationAsset,
               amount: retryAmount,
               depositType: 'ORIGIN_CHAIN',
-              refundType: 'ORIGIN_CHAIN',
-              refundTo: cfg.refundTo,
+              refundType: 'INTENTS',
+              refundTo: nearAccount,
               deadline,
             }),
           });
@@ -1196,8 +1292,8 @@ async function fetch1ClickDepositAddress(
       expiresAt: quote.deadline ? new Date(quote.deadline).getTime() : undefined,
       token: cfg.token,
       minAmount: cfg.amount,
-      minAmountFormatted: cfg.minAmountFormatted,
-      minAmountUsd: cfg.minAmountUsd,
+      minAmountFormatted: quote.amountInFormatted ? `${quote.amountInFormatted} ${cfg.token}` : cfg.minAmountFormatted,
+      minAmountUsd: quote.amountInUsd ? `$${parseFloat(quote.amountInUsd).toFixed(2)}` : cfg.minAmountUsd,
       isOneTime: true,
     };
   } catch (err) {
@@ -1288,6 +1384,169 @@ async function saveDepositAddress(
   }
 }
 
+// ─── NEP-145 registration for NEAR-origin deposit addresses ───────────────────
+
+/**
+ * Ensures a freshly derived NEAR-chain deposit address can receive its
+ * NEP-141 token from an ordinary wallet.
+ *
+ * 1Click returns a one-time implicit account as the deposit address, but does
+ * NOT storage-register it on the FT contract (verified onchain) — a normal
+ * `ft_transfer` from Meteor/Sender/HERE would fail with "receiver not
+ * registered". NEP-145 `storage_deposit` is permissionless, so the escrow
+ * account registers the address right after the quote is derived, before the
+ * QR is shown. Native NEAR arrives as a plain transfer (no registration
+ * needed) and wrap.near is skipped for the same reason.
+ *
+ * Best-effort: returns false when it cannot sign (no ESCROW_PRIVATE_KEY, e.g.
+ * local dev) or the RPC rejects the call — the deposit address is still
+ * returned to the caller.
+ */
+async function ensureNearFtDepositRegistered(
+  env: Env,
+  cfg: ChainDepositConfig,
+  depositAddress: string
+): Promise<boolean> {
+  try {
+    if (cfg.chain !== 'near' || !cfg.originAsset.startsWith('nep141:')) return false;
+    const contractId = cfg.originAsset.slice('nep141:'.length);
+    if (!contractId || contractId === 'wrap.near') return false;
+    return await registerFtReceiver(env, contractId, depositAddress);
+  } catch (err) {
+    console.warn('[nearRpc] storage registration skipped:', err);
+    return false;
+  }
+}
+
+/**
+ * Signs and broadcasts `storage_deposit({ account_id, registration_only })`
+ * from the escrow account to the token contract, attaching exactly the
+ * contract's `storage_balance_bounds.min` (excess is refunded when
+ * registration_only is set). Skips the tx entirely if the receiver is already
+ * registered. Mirrors the Borsh + ed25519 flow in createOnchainSubAccount.
+ */
+async function registerFtReceiver(
+  env: Env,
+  contractId: string,
+  receiverId: string
+): Promise<boolean> {
+  const privKeyStr = env.ESCROW_PRIVATE_KEY;
+  if (!privKeyStr) return false; // local dev / test — nothing to sign with
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+
+  // Already registered? Cheap view call — keeps retries and cache replays free.
+  try {
+    const existing = await viewFunction(rpcUrl, contractId, 'storage_balance_of', {
+      account_id: receiverId,
+    });
+    if (existing) return true;
+  } catch {
+    // Contract may not expose the view — proceed; the deposit call itself
+    // will surface any real error.
+  }
+
+  // Attach the contract's exact minimum; fall back to the NEP-145 reference
+  // minimum of 0.00125 NEAR when bounds are unavailable.
+  let deposit = 1250000000000000000000n;
+  try {
+    const bounds = await viewFunction(rpcUrl, contractId, 'storage_balance_bounds', {});
+    if (bounds?.min !== undefined) deposit = BigInt(bounds.min);
+  } catch {
+    /* keep reference min */
+  }
+
+  try {
+    const escrowRawKey = base58Decode(privKeyStr);
+    const escrowPrivKey = escrowRawKey.slice(0, 32);
+    const escrowPubKey = ed25519.getPublicKey(escrowPrivKey);
+    const escrowPubKeyFormatted = `ed25519:${base58Encode(escrowPubKey)}`;
+
+    const statusRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'reg_status', method: 'status', params: [] }),
+    });
+    const statusData = (await statusRes.json()) as any;
+    const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
+
+    const keyRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'reg_nonce',
+        method: 'query',
+        params: {
+          request_type: 'view_access_key',
+          finality: 'final',
+          account_id: escrowId,
+          public_key: escrowPubKeyFormatted,
+        },
+      }),
+    });
+    const keyData = (await keyRes.json()) as any;
+    if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) return false;
+    const nonce = BigInt(keyData.result.nonce) + 1n;
+
+    const w = new BorshWriter();
+    w.writeString(escrowId);
+    w.writePublicKey(escrowPubKey);
+    w.writeU64(nonce);
+    w.writeString(contractId);
+    w.writeBytes(latestBlockHash);
+
+    w.writeU32(1); // 1 action
+    w.writeU8(2);  // FunctionCall
+    w.writeString('storage_deposit');
+    const args = new TextEncoder().encode(
+      JSON.stringify({ account_id: receiverId, registration_only: true })
+    );
+    w.writeU32(args.length);
+    w.writeBytes(args);
+    w.writeU64(10000000000000n); // 10 TGas — plenty for storage_deposit
+    w.writeU128(deposit);
+
+    const txBytes = w.toBytes();
+    const digest = await crypto.subtle.digest('SHA-256', txBytes);
+    const sig = ed25519.sign(new Uint8Array(digest), escrowPrivKey);
+
+    const signedW = new BorshWriter();
+    signedW.writeBytes(txBytes);
+    signedW.writeU8(0);
+    signedW.writeBytes(sig);
+    const signedBytes = signedW.toBytes();
+
+    let binary = '';
+    for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
+
+    const txRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'storage_deposit',
+        method: 'broadcast_tx_commit',
+        params: [btoa(binary)],
+      }),
+    });
+    const txResult = (await txRes.json()) as any;
+    const ok =
+      txResult?.result?.status?.SuccessValue !== undefined ||
+      txResult?.result?.status?.SuccessReceiptId !== undefined;
+    if (!ok) {
+      console.warn(
+        '[nearRpc] storage_deposit for deposit address failed:',
+        txResult?.error?.message || JSON.stringify(txResult?.result?.status || txResult)
+      );
+    }
+    return ok;
+  } catch (err) {
+    console.warn('[nearRpc] registerFtReceiver error:', err);
+    return false;
+  }
+}
+
 /**
  * Fetches the user's deposit address for a given chain (and token) from the 1Click/intents API.
  * Uses D1 cache for ultra-fast response, with fresh onchain generation on demand.
@@ -1297,12 +1556,22 @@ export async function getDepositAddress(
   nearAccount: string,
   chainId: string,
   bypassCache = false,
-  tokenSymbol?: string
+  tokenSymbol?: string,
+  amount?: string
 ): Promise<DepositAddress | null> {
   const cleanChain = chainId.toLowerCase();
   const cleanToken = (tokenSymbol || '').toLowerCase();
   const directKey = cleanToken ? `${cleanChain}_${cleanToken}` : cleanChain;
-  let cfg = CHAIN_DEPOSIT_CONFIGS[directKey] || CHAIN_DEPOSIT_CONFIGS[cleanChain];
+  // An explicitly requested token must resolve to THAT token — never silently
+  // fall back to the chain default (e.g. asking for LONK would previously
+  // quote wNEAR under LONK's name).
+  let cfg = CHAIN_DEPOSIT_CONFIGS[directKey];
+  if (!cfg && tokenSymbol) {
+    const chainCfg = CHAIN_DEPOSIT_CONFIGS[cleanChain];
+    if (chainCfg && (chainCfg.symbol || chainCfg.token).toUpperCase() === tokenSymbol.toUpperCase()) {
+      cfg = chainCfg;
+    }
+  }
 
   // Dynamic fallback for any token + chain supported by intents
   if (!cfg && tokenSymbol) {
@@ -1314,14 +1583,6 @@ export async function getDepositAddress(
           t.symbol.toUpperCase() === tokenSymbol.toUpperCase()
       );
       if (matched) {
-        const isEvm = ['eth', 'base', 'arbitrum', 'arb', 'pol', 'polygon', 'bsc', 'op', 'optimism', 'avax', 'scroll', 'bera', 'gnosis'].includes(cleanChain);
-        const isSol = cleanChain === 'sol' || cleanChain === 'solana';
-        const refundTo = isSol
-          ? '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'
-          : isEvm
-          ? '0x742d35Cc6634C0532925a3b844Bc454e4438f44e'
-          : 'escrow.uprail.near';
-
         let destinationAsset = matched.defuse_asset_id;
         const symUpper = matched.symbol.toUpperCase();
         if (symUpper === 'USDC') destinationAsset = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
@@ -1341,8 +1602,9 @@ export async function getDepositAddress(
           amount: '100000',
           minAmountFormatted: `0.10 ${matched.symbol}`,
           minAmountUsd: '$0.10',
-          refundTo,
+          refundTo: nearAccount,
           symbol: matched.symbol,
+          decimals: matched.decimals || 6,
         };
       }
     } catch (err) {
@@ -1350,20 +1612,51 @@ export async function getDepositAddress(
     }
   }
 
+  if (!cfg && !tokenSymbol) {
+    cfg = CHAIN_DEPOSIT_CONFIGS[cleanChain];
+  }
   if (!cfg) {
-    cfg = CHAIN_DEPOSIT_CONFIGS['near_near'];
+    // Fail closed: an unresolvable chain/token must404 rather than produce a
+    // quote for a different asset than the one the UI displays.
+    console.warn(`[nearRpc] getDepositAddress: unresolved ${cleanChain}/${tokenSymbol || '(any)'}`);
+    return null;
+  }
+
+  // If a custom exact deposit amount is specified, re-calibrate cfg.amount
+  if (amount && parseFloat(amount) > 0) {
+    const dec = cfg.decimals ?? 6;
+    const baseUnits = toBaseUnits(amount, dec);
+    cfg = {
+      ...cfg,
+      amount: baseUnits,
+      minAmountFormatted: `${amount} ${cfg.token}`,
+      minAmountUsd: ['USDC', 'USDT', 'DAI'].includes(cfg.token.toUpperCase())
+        ? `$${parseFloat(amount).toFixed(2)}`
+        : cfg.minAmountUsd,
+    };
+    // Always bypass cache when an exact amount quote is requested
+    bypassCache = true;
   }
   const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
 
   // 1. Check D1 cache if not bypassing
   if (!bypassCache) {
     const cached = await getCachedDepositAddress(env.DB, nearAccount, cfg.key);
-    if (cached) return cached;
+    if (cached) {
+      // Re-verify NEP-145 registration on reuse — the original registration tx
+      // may have failed, and an unregistered receiver breaks wallet sends.
+      await ensureNearFtDepositRegistered(env, cfg, cached.address);
+      return cached;
+    }
   }
 
   // 2. Fetch fresh address via 1Click quote
   const fresh = await fetch1ClickDepositAddress(apiBase, nearAccount, cfg);
   if (fresh) {
+    // NEAR-origin NEP-141 receivers must be storage-registered, otherwise a
+    // plain wallet ft_transfer to this one-time implicit address is rejected
+    // onchain. Best-effort — never blocks returning the address.
+    await ensureNearFtDepositRegistered(env, cfg, fresh.address);
     await saveDepositAddress(env.DB, nearAccount, fresh, cfg.key);
     return fresh;
   }
@@ -1627,17 +1920,135 @@ export async function deriveUserNearKeypair(
 }
 
 /**
+ * Checks whether a public key is registered on intents.near, and registers it if missing.
+ */
+export async function registerKeyOnIntents(
+  rpcUrl: string,
+  subAccount: string,
+  userPubKey: Uint8Array,
+  userPrivKey: Uint8Array
+): Promise<boolean> {
+  const userPubKeyB58 = `ed25519:${base58Encode(userPubKey)}`;
+  try {
+    const checkRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'query',
+        params: {
+          request_type: 'call_function',
+          finality: 'final',
+          account_id: 'intents.near',
+          method_name: 'has_public_key',
+          args_base64: btoa(JSON.stringify({
+            account_id: subAccount,
+            public_key: userPubKeyB58,
+          })),
+        },
+      }),
+    });
+    const checkData = (await checkRes.json()) as any;
+    if (checkData.result?.result) {
+      const hasKey = JSON.parse(new TextDecoder().decode(new Uint8Array(checkData.result.result)));
+      if (hasKey) return true;
+    }
+  } catch {}
+
+  try {
+    const statusRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'status', params: [] }),
+    });
+    const statusData = (await statusRes.json()) as any;
+    const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
+
+    const keyRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'query',
+        params: {
+          request_type: 'view_access_key',
+          finality: 'final',
+          account_id: subAccount,
+          public_key: userPubKeyB58,
+        },
+      }),
+    });
+    const keyData = (await keyRes.json()) as any;
+    if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) return false;
+    const nonce = BigInt(keyData.result.nonce) + 1n;
+
+    const w = new BorshWriter();
+    w.writeString(subAccount);
+    w.writePublicKey(userPubKey);
+    w.writeU64(nonce);
+    w.writeString('intents.near');
+    w.writeBytes(latestBlockHash);
+
+    w.writeU32(1);
+    w.writeU8(2); // FunctionCall
+    w.writeString('add_public_key');
+    const args = new TextEncoder().encode(JSON.stringify({ public_key: userPubKeyB58 }));
+    w.writeU32(args.length);
+    w.writeBytes(args);
+    w.writeU64(50000000000000n); // 50 TGas
+    w.writeU128(1n); // 1 yoctoNEAR
+
+    const txBytes = w.toBytes();
+    const digest = await crypto.subtle.digest('SHA-256', txBytes);
+    const sig = ed25519.sign(new Uint8Array(digest), userPrivKey);
+
+    const signedW = new BorshWriter();
+    signedW.writeBytes(txBytes);
+    signedW.writeU8(0);
+    signedW.writeBytes(sig);
+    const signedBytes = signedW.toBytes();
+
+    let binary = '';
+    for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
+    const base64Tx = btoa(binary);
+
+    const regRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'broadcast_tx_commit',
+        params: [base64Tx],
+      }),
+    });
+    const regData = (await regRes.json()) as any;
+    return !!(regData?.result?.status?.SuccessValue !== undefined || regData?.result?.status?.SuccessReceiptId);
+  } catch (err) {
+    console.warn('[registerKeyOnIntents] failed:', err);
+    return false;
+  }
+}
+
+/**
  * Creates an authentic onchain NEAR sub-account under escrow.uprail.near.
  * Transactions are signed with ESCROW_PRIVATE_KEY and broadcast directly to NEAR RPC.
  */
 export async function createOnchainSubAccount(
   env: Env,
   subAccount: string,
-  userPubKey?: Uint8Array
+  userPubKey?: Uint8Array,
+  userPrivKey?: Uint8Array
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
-  // Check if account already exists onchain or in virtual escrow
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  // Check if account already exists onchain
   const alreadyExists = await accountExists(env, subAccount);
   if (alreadyExists) {
+    if (userPubKey && userPrivKey) {
+      await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch(() => {});
+    }
     return { success: true };
   }
 
@@ -1647,18 +2058,12 @@ export async function createOnchainSubAccount(
     return { success: true, txHash: 'virtual_escrow' };
   }
 
-  // Post-quantum ML-DSA-65 master escrow root:
-  // Sub-accounts are deterministic virtual intent vaults anchored by post-quantum signatures.
-  if (privKeyStr.startsWith('ml-dsa-65:') || privKeyStr.includes('ml-dsa')) {
-    return { success: true, txHash: 'virtual_escrow_pq' };
-  }
-
-  const rpcUrl = env.NEAR_RPC_URL;
-  if (!rpcUrl) {
-    return { success: true, txHash: 'virtual_escrow' };
-  }
-
   try {
+    const escrowRawKey = base58Decode(privKeyStr);
+    const escrowPrivKey = escrowRawKey.slice(0, 32);
+    const escrowPubKey = ed25519.getPublicKey(escrowPrivKey);
+    const escrowPubKeyFormatted = `ed25519:${base58Encode(escrowPubKey)}`;
+
     // 1. Fetch latest block hash
     const statusRes = await fetch(rpcUrl, {
       method: 'POST',
@@ -1669,11 +2074,6 @@ export async function createOnchainSubAccount(
     const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
 
     // 2. Fetch escrow access key nonce
-    const escrowRawKey = base58Decode(privKeyStr);
-    const escrowPrivKey = escrowRawKey.slice(0, 32);
-    const escrowPubKey = ed25519.getPublicKey(escrowPrivKey);
-    const escrowPubKeyFormatted = `ed25519:${base58Encode(escrowPubKey)}`;
-
     const keyRes = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1690,17 +2090,15 @@ export async function createOnchainSubAccount(
       }),
     });
     const keyData = (await keyRes.json()) as any;
-    if (!keyData?.result?.nonce) {
-      // In Virtual Escrow, sub-account operations run through intents signed by user passkeys/derived keys.
-      // Do not block vault operation if the master key uses a non-ed25519 key or RPC access key query fails.
-      return { success: true, txHash: 'virtual_escrow' };
+    if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) {
+      return { success: false, error: 'Escrow access key query failed' };
     }
     const nonce = BigInt(keyData.result.nonce) + 1n;
 
-    // 3. Public key for new sub-account (deterministic or random)
+    // 3. Public key for new sub-account
     const newPubKey = userPubKey || ed25519.getPublicKey(crypto.getRandomValues(new Uint8Array(32)));
 
-    // 4. Encode NEAR transaction (actions: CreateAccount, Transfer 0.01 NEAR for storage, AddKey FullAccess)
+    // 4. Encode NEAR transaction (actions: CreateAccount, Transfer 0.05 NEAR for storage/gas, AddKey FullAccess)
     const w = new BorshWriter();
     w.writeString(escrowId);
     w.writePublicKey(escrowPubKey);
@@ -1711,7 +2109,7 @@ export async function createOnchainSubAccount(
     w.writeU32(3); // 3 actions
     w.writeU8(0);  // action 0: CreateAccount
     w.writeU8(3);  // action 1: Transfer
-    w.writeU128(10000000000000000000000n); // 0.01 NEAR for storage
+    w.writeU128(50000000000000000000000n); // 0.05 NEAR for storage and gas
     w.writeU8(5);  // action 2: AddKey
     w.writePublicKey(newPubKey);
     w.writeU64(0n); // nonce = 0
@@ -1727,7 +2125,6 @@ export async function createOnchainSubAccount(
     signedW.writeBytes(sig);
     const signedBytes = signedW.toBytes();
 
-    // Base64 encode
     let binary = '';
     for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
     const base64Tx = btoa(binary);
@@ -1746,40 +2143,392 @@ export async function createOnchainSubAccount(
     const txResult = (await txRes.json()) as any;
     if (txResult?.result?.status?.SuccessValue !== undefined || txResult?.result?.status?.SuccessReceiptId) {
       const txHash = txResult.result.transaction?.hash || `created_${Date.now()}`;
+      if (userPubKey && userPrivKey) {
+        await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch(() => {});
+      }
       return { success: true, txHash };
     }
 
     const errMsg = txResult?.error?.message || JSON.stringify(txResult?.result?.status?.Failure || txResult);
-    console.warn(`[nearRpc] createOnchainSubAccount non-blocking notice:`, errMsg);
-    return { success: true, txHash: 'virtual_escrow' };
+    console.warn(`[nearRpc] createOnchainSubAccount notice:`, errMsg);
+    return { success: false, error: errMsg };
   } catch (err: any) {
-    console.warn(`[nearRpc] createOnchainSubAccount fallback to virtual escrow:`, err?.message || err);
-    return { success: true, txHash: 'virtual_escrow' };
+    console.warn(`[nearRpc] createOnchainSubAccount error:`, err?.message || err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 
 // ─── Account State ─────────────────────────────────────────────────────────────
 
 /**
- * Checks whether a NEAR account exists onchain via live QuikNode RPC.
- * Virtual escrow accounts under UPRAIL are deterministically active.
+ * Checks whether a NEAR account exists onchain via live QuikNode / FastNEAR RPC.
  */
 export async function accountExists(env: Env, accountId: string): Promise<boolean> {
   if (!accountId) return false;
-  if (accountId.endsWith('.escrow.uprail.near') || accountId.endsWith('.uprail.near')) {
-    return true;
-  }
   try {
-    const res = await nearRpc(env.NEAR_RPC_URL, 'query', {
+    const res = await nearRpc(env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com', 'query', {
       request_type: 'view_account',
       finality: 'final',
       account_id: accountId,
     });
-    return !!res && !res.error;
+    return !!(res && (res.amount !== undefined || res.result?.amount !== undefined));
   } catch {
     return false;
   }
 }
+
+export function isSyntheticTxHash(h?: string | null): boolean {
+  if (!h) return true;
+  return (
+    h.startsWith('virtual_') ||
+    h.startsWith('direct_') ||
+    h.startsWith('wth_tx_') ||
+    h.startsWith('created_') ||
+    h.length < 32
+  );
+}
+
+export function nep413Serialize(message: string, nonceBytes: Uint8Array, recipient: string): Uint8Array {
+  const w = new BorshWriter();
+  w.writeU32(2147484061); // tag: (1 << 31) + 413
+  w.writeString(message);
+  w.writeBytes(nonceBytes); // 32 bytes
+  w.writeString(recipient);
+  w.writeU8(0); // callback_url: None (Option<String> where 0 = None)
+  return w.toBytes();
+}
+
+/**
+ * Submits an intent payload to intents.near.execute_intents, relayed and gas-sponsored by escrow.uprail.near.
+ */
+export async function executeIntentsRelayed(
+  env: Env,
+  signedPayload: any
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+  const privKeyStr = env.ESCROW_PRIVATE_KEY;
+  if (!privKeyStr) {
+    return { success: false, error: 'ESCROW_PRIVATE_KEY is missing' };
+  }
+
+  try {
+    const escrowRawKey = base58Decode(privKeyStr);
+    const escrowPrivKey = escrowRawKey.slice(0, 32);
+    const escrowPubKey = ed25519.getPublicKey(escrowPrivKey);
+    const escrowPubKeyB58 = `ed25519:${base58Encode(escrowPubKey)}`;
+
+    const statusRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'status', params: [] }),
+    });
+    const statusData = (await statusRes.json()) as any;
+    const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
+
+    const keyRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'query',
+        params: {
+          request_type: 'view_access_key',
+          finality: 'final',
+          account_id: escrowId,
+          public_key: escrowPubKeyB58,
+        },
+      }),
+    });
+    const keyData = (await keyRes.json()) as any;
+    if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) {
+      return { success: false, error: 'Escrow key query failed' };
+    }
+    const nonce = BigInt(keyData.result.nonce) + 1n;
+
+    const w = new BorshWriter();
+    w.writeString(escrowId);
+    w.writePublicKey(escrowPubKey);
+    w.writeU64(nonce);
+    w.writeString('intents.near');
+    w.writeBytes(latestBlockHash);
+
+    w.writeU32(1);
+    w.writeU8(2); // FunctionCall
+    w.writeString('execute_intents');
+    const callArgs = new TextEncoder().encode(JSON.stringify({ signed: [signedPayload] }));
+    w.writeU32(callArgs.length);
+    w.writeBytes(callArgs);
+    w.writeU64(100000000000000n); // 100 TGas
+    w.writeU128(0n); // 0 deposit
+
+    const txBytes = w.toBytes();
+    const txDigest = await crypto.subtle.digest('SHA-256', txBytes);
+    const txSig = ed25519.sign(new Uint8Array(txDigest), escrowPrivKey);
+
+    const signedW = new BorshWriter();
+    signedW.writeBytes(txBytes);
+    signedW.writeU8(0);
+    signedW.writeBytes(txSig);
+    const signedBytes = signedW.toBytes();
+
+    let binary = '';
+    for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
+    const base64Tx = btoa(binary);
+
+    const broadcastRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'broadcast_tx_commit',
+        params: [base64Tx],
+      }),
+    });
+    const bData = (await broadcastRes.json()) as any;
+    if (bData?.result?.status?.SuccessValue !== undefined || bData?.result?.status?.SuccessReceiptId) {
+      const txHash = bData.result.transaction?.hash;
+      return { success: true, txHash };
+    }
+
+    const err = bData?.error?.message || JSON.stringify(bData?.result?.status?.Failure || bData);
+    return { success: false, error: err };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Signs and settles a transfer intent from user to recipient on intents.near.
+ */
+export async function executeTransferIntent(
+  env: Env,
+  senderXId: string,
+  recipientNearAccount: string,
+  asset: string,
+  amount: string
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) {
+      token = await resolveRheaToken(env, asset);
+    }
+    if (!token) {
+      return { success: false, error: `Unsupported asset: ${asset}` };
+    }
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { success: false, error: `Invalid amount: ${amount}` };
+    }
+
+    const senderDerived = await deriveUserNearKeypair(env, senderXId);
+    const senderId = senderDerived.accountId;
+
+    // Ensure sender subaccount is live & key registered onchain
+    await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
+
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
+    let nonceB64 = '';
+    for (let i = 0; i < nonceBytes.length; i++) nonceB64 += String.fromCharCode(nonceBytes[i]);
+    nonceB64 = btoa(nonceB64);
+
+    const deadline = new Date(Date.now() + 3600000).toISOString();
+    const defuseAssetId = token.defuse_asset_id || `nep141:${token.nearContractId}`;
+
+    const intentMessageObj = {
+      signer_id: senderId,
+      deadline,
+      intents: [
+        {
+          intent: 'transfer',
+          receiver_id: recipientNearAccount,
+          tokens: {
+            [defuseAssetId]: baseUnits,
+          },
+        },
+      ],
+    };
+    const messageStr = JSON.stringify(intentMessageObj);
+
+    const nep413Bytes = nep413Serialize(messageStr, nonceBytes, 'intents.near');
+    const digest = await crypto.subtle.digest('SHA-256', nep413Bytes);
+    const sigBytes = ed25519.sign(new Uint8Array(digest), senderDerived.privateKey);
+
+    const signedPayload = {
+      standard: 'nep413',
+      payload: {
+        message: messageStr,
+        nonce: nonceB64,
+        recipient: 'intents.near',
+      },
+      public_key: senderDerived.publicKeyB58,
+      signature: `ed25519:${base58Encode(sigBytes)}`,
+    };
+
+    return await executeIntentsRelayed(env, signedPayload);
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Signs and settles an authentic onchain transfer intent from escrow.uprail.near to recipient on intents.near.
+ * Used when releasing escrowed funds to an unregistered X user upon claiming.
+ */
+export async function executeTransferFromEscrowIntent(
+  env: Env,
+  recipientNearAccount: string,
+  asset: string,
+  amount: string
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) {
+      token = await resolveRheaToken(env, asset);
+    }
+    if (!token) {
+      return { success: false, error: `Unsupported asset: ${asset}` };
+    }
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { success: false, error: `Invalid amount: ${amount}` };
+    }
+
+    const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+    const privKeyStr = env.ESCROW_PRIVATE_KEY;
+    if (!privKeyStr) {
+      return { success: false, error: 'ESCROW_PRIVATE_KEY is missing' };
+    }
+
+    const escrowRawKey = base58Decode(privKeyStr);
+    const escrowPrivKey = escrowRawKey.slice(0, 32);
+    const escrowPubKey = ed25519.getPublicKey(escrowPrivKey);
+    const escrowPubKeyB58 = `ed25519:${base58Encode(escrowPubKey)}`;
+
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
+    let nonceB64 = '';
+    for (let i = 0; i < nonceBytes.length; i++) nonceB64 += String.fromCharCode(nonceBytes[i]);
+    nonceB64 = btoa(nonceB64);
+
+    const deadline = new Date(Date.now() + 3600000).toISOString();
+    const defuseAssetId = token.defuse_asset_id || `nep141:${token.nearContractId}`;
+
+    const intentMessageObj = {
+      signer_id: escrowId,
+      deadline,
+      intents: [
+        {
+          intent: 'transfer',
+          receiver_id: recipientNearAccount,
+          tokens: {
+            [defuseAssetId]: baseUnits,
+          },
+        },
+      ],
+    };
+    const messageStr = JSON.stringify(intentMessageObj);
+
+    const nep413Bytes = nep413Serialize(messageStr, nonceBytes, 'intents.near');
+    const digest = await crypto.subtle.digest('SHA-256', nep413Bytes);
+    const sigBytes = ed25519.sign(new Uint8Array(digest), escrowPrivKey);
+
+    const signedPayload = {
+      standard: 'nep413',
+      payload: {
+        message: messageStr,
+        nonce: nonceB64,
+        recipient: 'intents.near',
+      },
+      public_key: escrowPubKeyB58,
+      signature: `ed25519:${base58Encode(sigBytes)}`,
+    };
+
+    return await executeIntentsRelayed(env, signedPayload);
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Signs and settles a fungible token withdrawal intent from intents.near to an external account.
+ */
+export async function executeWithdrawIntent(
+  env: Env,
+  senderXId: string,
+  destinationAddress: string,
+  asset: string,
+  amount: string
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) {
+      token = await resolveRheaToken(env, asset);
+    }
+    if (!token) {
+      return { success: false, error: `Unsupported asset: ${asset}` };
+    }
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { success: false, error: `Invalid amount: ${amount}` };
+    }
+
+    const senderDerived = await deriveUserNearKeypair(env, senderXId);
+    const senderId = senderDerived.accountId;
+
+    // Ensure sender subaccount is live & key registered onchain
+    await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
+
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
+    let nonceB64 = '';
+    for (let i = 0; i < nonceBytes.length; i++) nonceB64 += String.fromCharCode(nonceBytes[i]);
+    nonceB64 = btoa(nonceB64);
+
+    const deadline = new Date(Date.now() + 3600000).toISOString();
+    const contractId = token.nearContractId || token.defuse_asset_id.replace(/^nep141:/, '');
+
+    const intentMessageObj = {
+      signer_id: senderId,
+      deadline,
+      intents: [
+        {
+          intent: 'ft_withdraw',
+          token: contractId,
+          receiver_id: destinationAddress,
+          amount: baseUnits,
+        },
+      ],
+    };
+    const messageStr = JSON.stringify(intentMessageObj);
+
+    const nep413Bytes = nep413Serialize(messageStr, nonceBytes, 'intents.near');
+    const digest = await crypto.subtle.digest('SHA-256', nep413Bytes);
+    const sigBytes = ed25519.sign(new Uint8Array(digest), senderDerived.privateKey);
+
+    const signedPayload = {
+      standard: 'nep413',
+      payload: {
+        message: messageStr,
+        nonce: nonceB64,
+        recipient: 'intents.near',
+      },
+      public_key: senderDerived.publicKeyB58,
+      signature: `ed25519:${base58Encode(sigBytes)}`,
+    };
+
+    return await executeIntentsRelayed(env, signedPayload);
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
 
 /**
  * Provisions the caller's confidential intent sub-account if it is missing.
@@ -1838,7 +2587,7 @@ export async function resolveUserNearAccount(
 
   // 3. Try onchain creation if account does not exist
   try {
-    const provision = await createOnchainSubAccount(env, accountId, derived.publicKey);
+    const provision = await createOnchainSubAccount(env, accountId, derived.publicKey, derived.privateKey);
     if (report) {
       report.attempted = true;
       report.created = provision.success;
@@ -1864,4 +2613,131 @@ export async function resolveUserNearAccount(
 
   session.near_account = accountId;
   return accountId;
+}
+
+/**
+ * Compares two asset identifiers across defuse format, NEAR contracts, and symbols.
+ * Handles cases like 'usdc' vs 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'
+ */
+export function assetsMatch(assetA: string | null | undefined, assetB: string | null | undefined): boolean {
+  if (!assetA || !assetB) return false;
+  const a = assetA.toLowerCase().trim();
+  const b = assetB.toLowerCase().trim();
+  if (a === b) return true;
+
+  const cleanA = a.includes(':') ? a.split(':').pop()! : a;
+  const cleanB = b.includes(':') ? b.split(':').pop()! : b;
+  if (cleanA === cleanB) return true;
+
+  // Known USDC aliases
+  const usdcIds = ['usdc', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'];
+  if (usdcIds.some((id) => a.includes(id)) && usdcIds.some((id) => b.includes(id))) return true;
+
+  // Known USDT aliases
+  const usdtIds = ['usdt', 'usdt.tether-token.near'];
+  if (usdtIds.some((id) => a.includes(id)) && usdtIds.some((id) => b.includes(id))) return true;
+
+  // Known NEAR aliases
+  const nearIds = ['near', 'wrap.near', 'wnear'];
+  if (nearIds.some((id) => a.includes(id)) && nearIds.some((id) => b.includes(id))) return true;
+
+  // Known ETH aliases
+  const ethIds = ['eth', 'eth.bridge.near', 'weth'];
+  if (ethIds.some((id) => a.includes(id)) && ethIds.some((id) => b.includes(id))) return true;
+
+  // Known BTC aliases
+  const btcIds = ['btc', 'wbtc', '2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near', 'btc.omft.near'];
+  if (btcIds.some((id) => a.includes(id)) && btcIds.some((id) => b.includes(id))) return true;
+
+  return false;
+}
+
+/**
+ * Calculates a user's authoritative available balance for a specific asset,
+ * derived from:
+ *   (Live onchain balance in intents.near + D1 claimed virtual payments)
+ *   - (D1 active sent payments + D1 completed/pending withdrawals)
+ */
+export async function getUserAvailableBalance(
+  env: Env,
+  session: Session,
+  targetAsset: string
+): Promise<number> {
+  const nearAccount = await resolveUserNearAccount(env, session);
+
+  let onchainAmount = 0;
+  try {
+    const onchainBalances = await getIntentBalances(env, nearAccount);
+    for (const b of onchainBalances) {
+      if (
+        assetsMatch(b.defuse_asset_id, targetAsset) ||
+        assetsMatch(b.symbol, targetAsset) ||
+        assetsMatch(b.nearContractId, targetAsset)
+      ) {
+        onchainAmount += parseFloat(b.amountFormatted || '0') || 0;
+      }
+    }
+  } catch (err) {
+    console.warn('[getUserAvailableBalance] onchain query error:', err);
+  }
+
+  let virtualClaimedAmount = 0;
+  let sentPaymentsAmount = 0;
+  let withdrawnAmount = 0;
+
+  if (env.DB) {
+    try {
+      // 1. Claimed payments received by user
+      const claimedRows = await env.DB.prepare(
+        "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?)) AND status = 'CLAIMED'"
+      )
+        .bind(session.x_id, session.x_handle)
+        .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
+
+      for (const row of claimedRows.results || []) {
+        if (assetsMatch(row.asset, targetAsset)) {
+          if (isSyntheticTxHash(row.claim_tx_hash)) {
+            virtualClaimedAmount += parseFloat(row.amount) || 0;
+          }
+        }
+      }
+
+      // 2. Sent active payments by user (debited from balance)
+      const sentRows = await env.DB.prepare(
+        "SELECT asset, amount, fee, status, claim_tx_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+      )
+        .bind(session.x_id, session.x_handle)
+        .all<{ asset: string; amount: string; fee?: string; status: string; claim_tx_hash?: string | null }>();
+
+      for (const row of sentRows.results || []) {
+        if (assetsMatch(row.asset, targetAsset)) {
+          if (row.status !== 'CLAIMED' || isSyntheticTxHash(row.claim_tx_hash)) {
+            const amt = parseFloat(row.amount) || 0;
+            const fee = parseFloat(row.fee || '0') || 0;
+            sentPaymentsAmount += amt + fee;
+          }
+        }
+      }
+
+      // 3. Withdrawals by user
+      const withdrawnRows = await env.DB.prepare(
+        "SELECT asset, amount, status, tx_hash FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
+      )
+        .bind(session.x_id)
+        .all<{ asset: string; amount: string; status: string; tx_hash?: string | null }>();
+
+      for (const row of withdrawnRows.results || []) {
+        if (assetsMatch(row.asset, targetAsset)) {
+          if (row.status === 'PENDING' || isSyntheticTxHash(row.tx_hash)) {
+            withdrawnAmount += parseFloat(row.amount) || 0;
+          }
+        }
+      }
+    } catch (dbErr) {
+      console.warn('[getUserAvailableBalance] DB balance lookup error:', dbErr);
+    }
+  }
+
+  const netAvailable = (onchainAmount + virtualClaimedAmount) - (sentPaymentsAmount + withdrawnAmount);
+  return Math.max(0, netAvailable);
 }

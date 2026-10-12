@@ -151,7 +151,7 @@ export const LandingPage: React.FC = () => {
                     value={quickSendHandle}
                     onChange={(e) => setQuickSendHandle(e.target.value)}
                     placeholder="username"
-                    className="w-full pl-8 pr-3 py-3 bg-stone-900 border border-stone-700 focus:border-white rounded-xl text-white font-medium text-xs font-mono focus:outline-none transition-colors"
+                    className="w-full pl-8 pr-3 py-3 bg-stone-900 border border-stone-700 focus:border-white rounded-xl text-white font-medium text-base sm:text-xs font-mono focus:outline-none transition-colors"
                   />
                 </div>
 

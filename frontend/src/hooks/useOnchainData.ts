@@ -123,17 +123,20 @@ try {
     if (raw) {
       const parsed = JSON.parse(raw);
       const owner = cacheOwnerId();
-      if (parsed && parsed.owner === owner) {
-        globalCache = { ...globalCache, ...parsed };
-      } else {
-        // Not ours (or no account signed in) — never surface it.
-        localStorage.removeItem(CACHE_KEY);
+      if (parsed) {
+        if (owner && parsed.owner && parsed.owner !== owner) {
+          localStorage.removeItem(CACHE_KEY);
+        } else {
+          globalCache = { ...globalCache, ...parsed };
+        }
       }
     }
   }
 } catch {}
 
-function persistCache(patch: Partial<OnchainCache>) {
+const listeners = new Set<() => void>();
+
+export function persistCache(patch: Partial<OnchainCache>) {
   const owner = cacheOwnerId();
   // Never persist across accounts: a snapshot written by user A must not be
   // readable after user B signs in on the same browser.
@@ -148,7 +151,14 @@ function persistCache(patch: Partial<OnchainCache>) {
       localStorage.setItem(CACHE_KEY, JSON.stringify(globalCache));
     }
   } catch {}
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {}
+  }
 }
+
+export { globalCache };
 
 export function useOnchainData(): UseOnchainDataResult {
   const [tokens, setTokens] = useState<OnchainToken[]>(globalCache.tokens);
@@ -169,6 +179,22 @@ export function useOnchainData(): UseOnchainDataResult {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+
+  // Synchronize state across all components when global cache updates
+  useEffect(() => {
+    const sync = () => {
+      setTokens(globalCache.tokens);
+      setBalances(globalCache.balances);
+      setNearAccount(globalCache.nearAccount);
+      setHasIntentAccount(globalCache.hasIntentAccount);
+      setDepositAddresses(globalCache.depositAddresses);
+      setTransactions(globalCache.transactions);
+    };
+    listeners.add(sync);
+    return () => {
+      listeners.delete(sync);
+    };
+  }, []);
 
   // ── Load supported tokens (no auth required) ──────────────────────────────
   const loadTokens = useCallback(async () => {

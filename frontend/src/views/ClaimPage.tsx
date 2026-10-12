@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
-  ArrowLeft,
   ArrowUpRight,
   RefreshCw,
   Sparkles,
@@ -17,6 +16,7 @@ import { useXAuth } from '../hooks/useXAuth';
 import { PasskeyPrompt } from '../components/PasskeyPrompt';
 import { XAuthBanner } from '../components/XAuthBanner';
 import { TokenIcon } from '../components/TokenIcon';
+import { BackBar } from '../components/BackBar';
 import { formatUsd, sumUsd } from '../lib/api';
 import { currentInvite, inviteFromSearch } from '../lib/invite';
 
@@ -76,7 +76,7 @@ const WithdrawCard: React.FC<{
           value={destination}
           onChange={(e) => setDestination(e.target.value.trim())}
           placeholder="Destination address (NEAR, 0x…, Solana)…"
-          className="flex-1 rounded-xl bg-stone-50 border border-stone-200 px-3 py-2.5 text-xs font-mono text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white"
+          className="flex-1 rounded-xl bg-stone-50 border border-stone-200 px-3 py-2.5 text-base sm:text-xs font-mono text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white"
         />
       </div>
 
@@ -162,35 +162,15 @@ export const ClaimPage: React.FC = () => {
 
   return (
     <div className="w-full space-y-6">
-      {/* Back Link */}
-      <Link
-        to="/app"
-        className="inline-flex items-center space-x-1.5 text-xs font-mono text-stone-500 hover:text-black transition-colors"
-      >
-        <ArrowLeft className="w-3.5 h-3.5" />
-        <span>Back to Home</span>
-      </Link>
+      {/* Back navigation — wide bar on desktop, floating round on mobile */}
+      <BackBar label="Back to Home" />
 
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight flex items-center gap-2">
-            <span>Incoming Claims</span>
-            {pendingPayments.length > 0 && (
-              <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-stone-900 text-white font-bold align-middle">
-                {pendingPayments.length} waiting
-              </span>
-            )}
-          </h1>
-          <p className="text-sm text-stone-600 mt-1">
-            Funds sent to {user?.handle ? <span className="font-mono font-bold text-stone-900">@{user.handle}</span> : 'you'} appear here automatically. Claim instantly with your device passkey.
-          </p>
-        </div>
-
+      {/* Refresh (page title removed — the back bar owns the top now) */}
+      <div className="flex items-center justify-end">
         <button
           onClick={() => loadPendingPayments()}
           disabled={isLoading}
-          className="self-start sm:self-auto p-2.5 rounded-xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer text-xs flex items-center space-x-1.5 font-mono font-bold"
+          className="p-2.5 rounded-xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer text-xs flex items-center space-x-1.5 font-mono font-bold"
           title="Refresh incoming payments"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />

@@ -401,13 +401,27 @@ export const api = {
         const data = await res.json();
         if (data?.authenticated && data?.user) {
           localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
+          localStorage.setItem('uprail_user_cache_v1', JSON.stringify(data.user));
           return { user: data.user };
+        } else {
+          localStorage.removeItem(STORAGE_KEYS.USER);
+          localStorage.removeItem('uprail_user_cache_v1');
+          return { user: null };
         }
+      } else if (res.status === 401) {
+        localStorage.removeItem(STORAGE_KEYS.USER);
+        localStorage.removeItem('uprail_user_cache_v1');
+        return { user: null };
       }
     } catch (e) {
-      console.warn('Backend /auth/status unavailable', e);
+      console.warn('Backend /auth/status unavailable, checking cached session', e);
+      const cached = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem('uprail_user_cache_v1');
+      if (cached) {
+        try {
+          return { user: JSON.parse(cached) };
+        } catch {}
+      }
     }
-    localStorage.removeItem(STORAGE_KEYS.USER);
     return { user: null };
   },
 
@@ -703,7 +717,8 @@ export const api = {
         memo: params.memo || '',
         status: mapBackendStatus(backendData.status),
         depositAddress: backendData.depositAddress || depositAddress || 'escrow.uprail.near',
-        claimLink: backendData.shareLink || claimUrlFor(backendData.paymentId, backendData.inviteCode),
+        claimLink: backendData.shareLink || (backendData.isDirect ? '' : claimUrlFor(backendData.paymentId, backendData.inviteCode)),
+        isDirect: backendData.isDirect,
         createdAt: new Date().toISOString(),
         expiresAt: new Date(backendData.expiresAt || Date.now() + 86400000 * 30).toISOString(),
       };
