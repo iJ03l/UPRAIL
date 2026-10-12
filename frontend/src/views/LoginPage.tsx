@@ -53,8 +53,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const inv = params.get('invite') || currentInvite();
-      if (inv) setUrlInvite(inv.trim().toUpperCase());
+      const inv = params.get('invite') || params.get('ref') || params.get('code') || currentInvite();
+      if (inv) {
+        setUrlInvite(inv.trim().toUpperCase());
+      } else {
+        setUrlInvite('');
+      }
       const err = params.get('error');
       if (err) setError(decodeURIComponent(err));
       if (params.get('privacy') || params.get('legal') === 'privacy') {

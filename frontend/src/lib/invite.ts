@@ -51,6 +51,16 @@ function dropInviteOnBarePageLoad(): void {
 }
 dropInviteOnBarePageLoad();
 
+/** Clears any stored invite code immediately. */
+export function clearInvite(): void {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(PENDING_KEY);
+      sessionStorage.removeItem(PENDING_KEY);
+    }
+  } catch {}
+}
+
 /** Reads a stored code without consuming it. */
 export function peekInvite(): string | null {
   try {
@@ -64,28 +74,44 @@ export function peekInvite(): string | null {
 /** Reads + clears - used once the code has actually been redeemed. */
 export function takeInvite(): string | null {
   const code = peekInvite();
-  try {
-    if (typeof window !== 'undefined') localStorage.removeItem(PENDING_KEY);
-  } catch {
-    /* ignore */
-  }
+  clearInvite();
   return code;
 }
 
 /** Pulls an invite out of a location search string, storing it on the way. */
 export function inviteFromSearch(search: string): string | null {
+  if (typeof window === 'undefined') return null;
   const params = new URLSearchParams(search);
   const fromUrl = params.get('invite') || params.get('ref') || params.get('code');
-  return rememberInvite(fromUrl);
+  if (fromUrl) {
+    return rememberInvite(fromUrl);
+  }
+  // If the search string has no invite parameter and is not an error bounce,
+  // the user has cleared the URL — drop any previously stored code.
+  if (!params.get('error')) {
+    clearInvite();
+  }
+  return null;
 }
 
 /**
- * Best-known invite code right now: current URL first (the freshest signal),
- * then whatever was remembered on an earlier hop.
+ * Best-known invite code right now:
+ * If the current URL has an invite param, remember and return it.
+ * If the current URL has NO invite param, wipe local storage and return null.
+ * Stored invite never survives clearing the URL.
  */
 export function currentInvite(): string | null {
   if (typeof window === 'undefined') return null;
-  return inviteFromSearch(window.location.search) || peekInvite();
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get('invite') || params.get('ref') || params.get('code');
+  if (fromUrl) {
+    return rememberInvite(fromUrl);
+  }
+  if (!params.get('error')) {
+    clearInvite();
+    return null;
+  }
+  return peekInvite();
 }
 
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;

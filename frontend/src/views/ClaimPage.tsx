@@ -192,7 +192,7 @@ export const ClaimPage: React.FC = () => {
             </div>
           </div>
           <span className="text-[11px] text-stone-900 font-bold bg-white px-2.5 py-1 rounded-full border border-stone-200">
-            0% Claim Fee • Full Access Preloaded
+            Full Access Preloaded
           </span>
         </div>
       )}
@@ -329,9 +329,6 @@ export const ClaimPage: React.FC = () => {
                       </span>
                       <span className="text-[9px] font-mono uppercase font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-200">
                         {p.status}
-                      </span>
-                      <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-900 text-white">
-                        0% Fee
                       </span>
                     </div>
 

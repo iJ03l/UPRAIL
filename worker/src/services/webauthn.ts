@@ -57,6 +57,7 @@ export async function generateRegistrationOptions(params: {
     // Alg -7: ES256 (ECDSA w/ SHA-256 on secp256r1 / P-256 curve for NEAR)
     supportedAlgorithmIDs: [-7],
     authenticatorSelection: {
+      authenticatorAttachment: 'platform',
       residentKey: 'preferred',
       userVerification: 'preferred',
     },
@@ -134,6 +135,7 @@ export async function generateAuthenticationOptions(params: {
         ? params.credentialIds.map((id) => ({
             id,
             type: 'public-key' as const,
+            transports: ['internal'] as any,
           }))
         : undefined,
     userVerification: 'preferred',

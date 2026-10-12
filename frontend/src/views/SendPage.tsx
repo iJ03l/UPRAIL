@@ -252,10 +252,6 @@ export const SendPage: React.FC = () => {
                 <span className="text-stone-600 font-mono">Immediate → fees.uprail.near</span>
               </div>
               <div className="flex items-center justify-between text-stone-500 text-[11px]">
-                <span className="text-stone-400">Recipient Claim Fee</span>
-                <span className="text-stone-900 font-bold">0% (Claims 100%)</span>
-              </div>
-              <div className="flex items-center justify-between text-stone-500 text-[11px]">
                 <span className="text-stone-400">Access Invite</span>
                 <span className="text-stone-900 font-bold">Preloaded in Claim Link</span>
               </div>

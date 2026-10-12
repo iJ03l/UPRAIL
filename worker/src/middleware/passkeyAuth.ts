@@ -264,7 +264,23 @@ export async function issueTxChallenge(c: any): Promise<Response> {
   }
 
   const rpId = resolveRpId(c.env);
-  const options = await webauthnService.generateAuthenticationOptions({ rpId });
+  let credentialIds: string[] | undefined;
+  if (c.env.DB && session.x_id) {
+    try {
+      const pks: any = await c.env.DB.prepare(
+        'SELECT credential_id FROM passkeys WHERE x_id = ? ORDER BY created_at DESC'
+      )
+        .bind(session.x_id)
+        .all();
+      if (pks.results && pks.results.length > 0) {
+        credentialIds = pks.results.map((r: any) => r.credential_id);
+      }
+    } catch (dbErr) {
+      console.warn('[issueTxChallenge] D1 passkeys lookup notice:', dbErr);
+    }
+  }
+
+  const options = await webauthnService.generateAuthenticationOptions({ credentialIds, rpId });
 
   const challengeKey = `passkey_tx_auth:${session.x_id}:${options.challenge}`;
 

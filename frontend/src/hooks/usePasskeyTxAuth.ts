@@ -61,7 +61,17 @@ export function usePasskeyTxAuth() {
 
       // Step 1: Get a fresh server-issued single-use tx_auth challenge options object.
       // The server provides challenge, rpId, timeout, and allowed parameters.
-      const options = await api.getTxAuthOptions();
+      const rawOptions = await api.getTxAuthOptions();
+      const options: any = {
+        ...rawOptions,
+        userVerification: 'preferred',
+      };
+      if (options.allowCredentials && Array.isArray(options.allowCredentials)) {
+        options.allowCredentials = options.allowCredentials.map((c: any) => ({
+          ...c,
+          transports: c.transports || ['internal'],
+        }));
+      }
 
       // Step 2: Use startAuthentication from @simplewebauthn/browser
       // This ceremony ensures 100% compliant base64url encoding across all fields

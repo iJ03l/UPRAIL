@@ -89,7 +89,15 @@ export const webauthn = {
       throw new Error('WebAuthn is not supported on this browser.');
     }
 
-    const options = await api.getPasskeyRegisterOptions(cleanHandle);
+    const rawOptions = await api.getPasskeyRegisterOptions(cleanHandle);
+    const options: any = {
+      ...rawOptions,
+      authenticatorSelection: {
+        ...(rawOptions.authenticatorSelection || {}),
+        authenticatorAttachment: 'platform',
+        userVerification: 'preferred',
+      },
+    };
     const attResp = await startRegistration(
       // DOM lib and @simplewebauthn/types ship structurally duplicate definitions
       options as unknown as Parameters<typeof startRegistration>[0]
@@ -128,7 +136,17 @@ export const webauthn = {
     }
 
     // Single-use tx_auth challenge consumed by requirePasskeyAuth()
-    const options = await api.getTxAuthOptions();
+    const rawOptions = await api.getTxAuthOptions();
+    const options: any = {
+      ...rawOptions,
+      userVerification: 'preferred',
+    };
+    if (options.allowCredentials && Array.isArray(options.allowCredentials)) {
+      options.allowCredentials = options.allowCredentials.map((c: any) => ({
+        ...c,
+        transports: c.transports || ['internal'],
+      }));
+    }
     const asseResp = await startAuthentication(options);
 
     return {
