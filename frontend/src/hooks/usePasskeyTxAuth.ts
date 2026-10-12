@@ -22,12 +22,15 @@ import { useState, useCallback } from 'react';
 import { startAuthentication } from '@simplewebauthn/browser';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 import { api } from '../lib/api';
+import { webauthn } from '../lib/webauthn';
+import { useXAuth } from './useXAuth';
 
 export type PasskeyAssertion = AuthenticationResponseJSON;
 
 export function usePasskeyTxAuth() {
   const [isAuthorizing, setIsAuthorizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { user } = useXAuth();
 
   /**
    * Prompts the user for a passkey assertion to authorize a fund-moving transaction.
@@ -43,6 +46,19 @@ export function usePasskeyTxAuth() {
     setError(null);
 
     try {
+      // A device that never registered its own passkey can only answer with
+      // cross-device "scan QR code" / security-key prompts. Register this
+      // device first so the ceremony uses the phone's native biometrics.
+      // Best-effort: a synced passkey may still answer the assertion below,
+      // so any failure (including the user declining) falls through.
+      if (user?.handle && !webauthn.hasLocalPasskey(user.handle)) {
+        try {
+          await webauthn.registerPasskey(user.handle);
+        } catch {
+          /* fall through to the assertion */
+        }
+      }
+
       // Step 1: Get a fresh server-issued single-use tx_auth challenge options object.
       // The server provides challenge, rpId, timeout, and allowed parameters.
       const options = await api.getTxAuthOptions();
@@ -62,7 +78,7 @@ export function usePasskeyTxAuth() {
     } finally {
       setIsAuthorizing(false);
     }
-  }, []);
+  }, [user]);
 
   return {
     authorizeWithPasskey,

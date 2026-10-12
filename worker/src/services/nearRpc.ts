@@ -3030,14 +3030,27 @@ export async function getUserAvailableBalance(
 
       // 2. Sent active payments by user (debited from balance)
       const sentRows = await env.DB.prepare(
-        "SELECT asset, amount, fee, status, claim_tx_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+        "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
       )
         .bind(session.x_id, session.x_handle)
-        .all<{ asset: string; amount: string; fee?: string; status: string; claim_tx_hash?: string | null }>();
+        .all<{
+          asset: string;
+          amount: string;
+          fee?: string;
+          status: string;
+          claim_tx_hash?: string | null;
+          intent_hash?: string | null;
+        }>();
 
       for (const row of sentRows.results || []) {
         if (assetsMatch(row.asset, targetAsset)) {
-          if (row.status !== 'CLAIMED' || isSyntheticTxHash(row.claim_tx_hash)) {
+          // ESCROWED with a real escrow intent and CLAIMED with a real claim tx
+          // are already debited from the onchain balance read above — counting
+          // them again double-deducts (app shows 0 while the chain shows funds).
+          const settledOnchain =
+            (row.status === 'CLAIMED' && !isSyntheticTxHash(row.claim_tx_hash)) ||
+            (row.status === 'ESCROWED' && !isSyntheticTxHash(row.intent_hash));
+          if (!settledOnchain) {
             const amt = parseFloat(row.amount) || 0;
             const fee = parseFloat(row.fee || '0') || 0;
             sentPaymentsAmount += amt + fee;

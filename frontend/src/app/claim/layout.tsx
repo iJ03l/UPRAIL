@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     description: 'A confidential payment is waiting for you. Claim it instantly with your device passkey.',
     images: [
       {
-        url: 'https://app.uprail.world/og/og-refer.png',
+        url: 'https://app.uprail.world/og/og-claim.png',
         width: 1200,
         height: 630,
         alt: 'Payment waiting',
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'UPRAIL — Payment Waiting',
     description: 'A confidential payment is waiting for you. Claim it instantly with your device passkey.',
-    images: ['https://app.uprail.world/og/og-refer.png'],
+    images: ['https://app.uprail.world/og/og-claim.png'],
   },
 };
 

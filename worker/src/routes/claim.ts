@@ -573,15 +573,29 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     }
 
     // 2. Query sent active payments and completed withdrawals from D1
-    let sentRows: { asset: string; amount: string; fee?: string }[] = [];
+    let sentRows: {
+      asset: string;
+      amount: string;
+      fee?: string;
+      status: string;
+      claim_tx_hash?: string | null;
+      intent_hash?: string | null;
+    }[] = [];
     let withdrawnRows: { asset: string; amount: string }[] = [];
     if (c.env.DB) {
       try {
         const sRows = await c.env.DB.prepare(
-          "SELECT asset, amount, fee FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+          "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
         )
           .bind(session.x_id, session.x_handle)
-          .all<{ asset: string; amount: string; fee?: string }>();
+          .all<{
+            asset: string;
+            amount: string;
+            fee?: string;
+            status: string;
+            claim_tx_hash?: string | null;
+            intent_hash?: string | null;
+          }>();
         sentRows = sRows.results || [];
       } catch (e) {
         console.warn('[claim/balance] Query sent payments error:', e);
@@ -624,10 +638,23 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
     for (const ob of onchainBalances) {
       addAmount(ob.defuse_asset_id || ob.symbol, parseFloat(ob.amountFormatted) || 0);
     }
+    // Plain balances sitting directly on the pk account (direct receives)
+    try {
+      const plainBalances = await nearRpc.getPlainBalances(c.env, nearAccount);
+      for (const pb of plainBalances) {
+        addAmount(pb.defuse_asset_id || pb.symbol, parseFloat(pb.amountFormatted) || 0);
+      }
+    } catch {}
     for (const r of claimedRows) {
       addAmount(r.asset || 'usdc', parseFloat(r.amount) || 0);
     }
     for (const s of sentRows) {
+      // Already-debited onchain rows must not be subtracted again (the
+      // intents balance read above is live and already reflects the debit).
+      const settledOnchain =
+        (s.status === 'CLAIMED' && !nearRpc.isSyntheticTxHash(s.claim_tx_hash)) ||
+        (s.status === 'ESCROWED' && !nearRpc.isSyntheticTxHash(s.intent_hash));
+      if (settledOnchain) continue;
       const amt = (parseFloat(s.amount) || 0) + (parseFloat(s.fee || '0') || 0);
       addAmount(s.asset || 'usdc', -amt);
     }

@@ -96,10 +96,17 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
           .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
 
         const sentRows = await c.env.DB.prepare(
-          "SELECT asset, amount, fee, status, claim_tx_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+          "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
         )
           .bind(session.x_id, session.x_handle)
-          .all<{ asset: string; amount: string; fee?: string; status: string; claim_tx_hash?: string | null }>();
+          .all<{
+            asset: string;
+            amount: string;
+            fee?: string;
+            status: string;
+            claim_tx_hash?: string | null;
+            intent_hash?: string | null;
+          }>();
 
         let withdrawnRows: { asset: string; amount: string; status: string; tx_hash?: string | null }[] = [];
         try {
@@ -119,7 +126,13 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
           }
         }
         for (const row of sentRows.results || []) {
-          if (row.status !== 'CLAIMED' || nearRpc.isSyntheticTxHash(row.claim_tx_hash)) {
+          // ESCROWED/CLAIMED rows with real onchain txs are already debited
+          // from the intents balance read above — subtracting again would
+          // double-deduct (app reads 0 while the chain still shows funds).
+          const settledOnchain =
+            (row.status === 'CLAIMED' && !nearRpc.isSyntheticTxHash(row.claim_tx_hash)) ||
+            (row.status === 'ESCROWED' && !nearRpc.isSyntheticTxHash(row.intent_hash));
+          if (!settledOnchain) {
             const a = (row.asset || 'usdc').toLowerCase();
             const amt = (parseFloat(row.amount) || 0) + (parseFloat(row.fee || '0') || 0);
             netVirtual[a] = (netVirtual[a] || 0) - amt;

@@ -24,6 +24,7 @@ import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
+import * as nearRpc from './services/nearRpc';
 
 // Export Durable Object classes for runtime
 export { EscrowDO } from './durable-objects/escrow';
@@ -259,21 +260,34 @@ app.notFound(async (c) => {
             if (p) {
               recipient = p.recipient_handle;
               amount = p.amount;
-              asset = (p.asset || 'USDC').toUpperCase();
+              asset = p.asset || '';
             }
           } catch {}
+        }
+        // Resolve the stored asset id to a plain-English ticker — a share card
+        // must never print a token contract (nep141:...).
+        let ticker = '';
+        if (asset) {
+          try {
+            const tokens = await nearRpc.getSupportedTokens(c.env);
+            ticker = nearRpc.resolveTokenForAsset(asset, tokens)?.symbol || '';
+          } catch {}
+          if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset.toUpperCase();
         }
         const title = recipient
           ? `Payment waiting for @${recipient} on UPRAIL`
           : 'Payment Ready to Claim on UPRAIL';
-        const description = amount && recipient
-          ? `@${recipient}, you have ${amount} ${asset} ready to claim with your device passkey on UPRAIL.`
-          : 'Claim confidential payment on UPRAIL. Instant passkey settlement on NEAR Intents.';
+        const description =
+          amount && recipient && ticker
+            ? `${amount} ${ticker} is waiting for @${recipient} to claim — private and instant with a passkey on UPRAIL.`
+            : recipient
+            ? `A confidential payment is waiting for @${recipient} to claim — private and instant with a passkey on UPRAIL.`
+            : 'Claim a confidential payment on UPRAIL. Instant passkey settlement on NEAR Intents.';
 
         return renderShareCardHtml({
           title,
           description,
-          imageUrl: 'https://app.uprail.world/og/og-send.png',
+          imageUrl: 'https://app.uprail.world/og/og-claim.png',
           url: url.href,
         });
       }
