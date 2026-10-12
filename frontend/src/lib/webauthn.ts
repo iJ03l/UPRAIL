@@ -68,7 +68,14 @@ export const webauthn = {
     }
 
     // 1. Fetch challenge and options from backend (optionally scoped to known handle)
-    const options = await api.getPasskeyLoginOptions(handle);
+    const rawOptions = await api.getPasskeyLoginOptions(handle);
+    const options: any = {
+      ...rawOptions,
+      userVerification: 'preferred',
+    };
+    // Ensure allowCredentials is deleted so modern browsers and iOS Safari present
+    // "Sign in to uprail.world with your passkey" with native Face ID/Touch ID & "Other options"
+    delete options.allowCredentials;
 
     // 2. Perform native browser WebAuthn ceremony
     const assertion = await startAuthentication(options);
@@ -141,12 +148,7 @@ export const webauthn = {
       ...rawOptions,
       userVerification: 'preferred',
     };
-    if (options.allowCredentials && Array.isArray(options.allowCredentials)) {
-      options.allowCredentials = options.allowCredentials.map((c: any) => ({
-        ...c,
-        transports: c.transports || ['internal'],
-      }));
-    }
+    delete options.allowCredentials;
     const asseResp = await startAuthentication(options);
 
     return {

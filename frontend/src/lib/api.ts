@@ -1021,6 +1021,7 @@ export const api = {
     const { options, challengeToken } = await challengeRes.json();
 
     const { startAuthentication } = await import('@simplewebauthn/browser');
+    delete options.allowCredentials;
     const assertion = await startAuthentication(options);
 
     const exportUrl = API_BASE ? `${API_BASE}/auth/export-key` : '/auth/export-key';

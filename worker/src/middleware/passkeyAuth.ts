@@ -264,23 +264,10 @@ export async function issueTxChallenge(c: any): Promise<Response> {
   }
 
   const rpId = resolveRpId(c.env);
-  let credentialIds: string[] | undefined;
-  if (c.env.DB && session.x_id) {
-    try {
-      const pks: any = await c.env.DB.prepare(
-        'SELECT credential_id FROM passkeys WHERE x_id = ? ORDER BY created_at DESC'
-      )
-        .bind(session.x_id)
-        .all();
-      if (pks.results && pks.results.length > 0) {
-        credentialIds = pks.results.map((r: any) => r.credential_id);
-      }
-    } catch (dbErr) {
-      console.warn('[issueTxChallenge] D1 passkeys lookup notice:', dbErr);
-    }
-  }
-
-  const options = await webauthnService.generateAuthenticationOptions({ credentialIds, rpId });
+  // Passkey Discoverable Authentication:
+  // Do not restrict allowCredentials so the platform biometric prompt (Face ID / Touch ID)
+  // triggers natively without locking the user to a foreign or cross-device security key.
+  const options = await webauthnService.generateAuthenticationOptions({ rpId });
 
   const challengeKey = `passkey_tx_auth:${session.x_id}:${options.challenge}`;
 

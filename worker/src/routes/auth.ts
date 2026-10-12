@@ -494,30 +494,11 @@ authRouter.post('/logout', async (c) => {
 authRouter.get('/passkey/login-options', async (c) => {
   try {
     const rpId = resolveRpId(c.env);
-    const handleParam = c.req.query('handle')?.trim().replace(/^@/, '').toLowerCase();
-    let credentialIds: string[] | undefined;
-
-    if (handleParam && c.env.DB) {
-      try {
-        const userRow = await c.env.DB.prepare(
-          'SELECT x_id FROM x_identities WHERE LOWER(x_handle) = LOWER(?)'
-        ).bind(handleParam).first<{ x_id: string }>();
-
-        if (userRow?.x_id) {
-          const passkeys = await c.env.DB.prepare(
-            'SELECT credential_id FROM passkeys WHERE x_id = ? ORDER BY created_at DESC'
-          ).bind(userRow.x_id).all<{ credential_id: string }>();
-
-          if (passkeys.results && passkeys.results.length > 0) {
-            credentialIds = passkeys.results.map((r: any) => r.credential_id);
-          }
-        }
-      } catch (dbErr) {
-        console.warn('login-options D1 handle lookup error:', dbErr);
-      }
-    }
-
-    const options = await webauthnService.generateAuthenticationOptions({ credentialIds, rpId });
+    // Passkey Discoverable Credentials (Resident Keys):
+    // Do not restrict allowCredentials so iOS and modern browsers display
+    // the native "Sign in to uprail.world with your passkey" prompt with Face ID/Touch ID
+    // and the "Other Options" button rather than locking the user to a foreign device ID.
+    const options = await webauthnService.generateAuthenticationOptions({ rpId });
 
     // Store challenge via challengeService (zero KV writes)
     await storeChallenge(c.env, {

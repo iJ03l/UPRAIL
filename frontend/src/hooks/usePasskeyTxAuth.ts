@@ -66,12 +66,7 @@ export function usePasskeyTxAuth() {
         ...rawOptions,
         userVerification: 'preferred',
       };
-      if (options.allowCredentials && Array.isArray(options.allowCredentials)) {
-        options.allowCredentials = options.allowCredentials.map((c: any) => ({
-          ...c,
-          transports: c.transports || ['internal'],
-        }));
-      }
+      delete options.allowCredentials;
 
       // Step 2: Use startAuthentication from @simplewebauthn/browser
       // This ceremony ensures 100% compliant base64url encoding across all fields
