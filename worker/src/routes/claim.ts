@@ -429,36 +429,53 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
           };
         }
 
-        // Dispatch the carve-out protocol fee from escrow now that the
-        // recipient has been paid. Warn-only on purpose: the fee is held in
-        // escrow until claim (it rides the same pooled balance), and a stuck
-        // fee must never roll back an already-settled claim. The outcome is
-        // still recorded on the row — a fee that silently never arrives is
-        // indistinguishable from one that was never attempted.
+        // Settle the protocol fee now that the recipient has been paid.
+        // Warn-only on purpose: the fee is held in escrow until claim (it
+        // rides the same pooled balance), and a stuck fee must never roll back
+        // an already-settled claim. The outcome is still recorded on the row —
+        // a fee that silently never arrives is indistinguishable from one that
+        // was never attempted, which is how fees.uprail.near stayed at zero
+        // even through two claimed payments.
+        //
+        // When the fee destination IS the escrow holding account there is
+        // nothing to move: the gross was deposited at send time and the
+        // recipient has just taken their net out, so the fee simply stays put.
+        // Emitting a transfer intent here would be a self-transfer, which
+        // intents rejects — and which previously showed up as a dispatch
+        // failure that nobody could see.
         const feeAmount = parseFloat(payment.fee || '0') || 0;
         if (feeAmount > 0) {
-          let feeDispatchStatus = 'failed';
+          const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
+          const escrowAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+          let feeDispatchStatus: string;
           let feeDispatchError: string | null = null;
-          try {
-            const feeResult = await nearRpc.executeTransferFromEscrowIntent(
-              c.env,
-              c.env.FEE_ACCOUNT_ID || 'fees.uprail.near',
-              payment.asset,
-              payment.fee || '0'
-            );
-            if (feeResult?.success) {
-              feeDispatchStatus = 'sent';
-            } else {
-              feeDispatchError = feeResult?.error || 'escrow fee transfer failed';
-              console.error(
-                `[claim/execute] CRITICAL: fee dispatch failed for ${paymentId} (${payment.fee} ${payment.asset}):`,
-                feeResult?.error
+
+          if (feeRecipient === escrowAccount) {
+            feeDispatchStatus = 'retained';
+          } else {
+            feeDispatchStatus = 'failed';
+            try {
+              const feeResult = await nearRpc.executeTransferFromEscrowIntent(
+                c.env,
+                feeRecipient,
+                payment.asset,
+                payment.fee || '0'
               );
+              if (feeResult?.success) {
+                feeDispatchStatus = 'sent';
+              } else {
+                feeDispatchError = feeResult?.error || 'escrow fee transfer failed';
+                console.error(
+                  `[claim/execute] CRITICAL: fee dispatch failed for ${paymentId} (${payment.fee} ${payment.asset}):`,
+                  feeResult?.error
+                );
+              }
+            } catch (feeErr: any) {
+              feeDispatchError = feeErr?.message || String(feeErr);
+              console.error(`[claim/execute] CRITICAL: fee dispatch error for ${paymentId}:`, feeErr);
             }
-          } catch (feeErr: any) {
-            feeDispatchError = feeErr?.message || String(feeErr);
-            console.error(`[claim/execute] CRITICAL: fee dispatch error for ${paymentId}:`, feeErr);
           }
+
           if (c.env.DB) {
             try {
               await c.env.DB.prepare(

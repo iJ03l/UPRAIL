@@ -352,7 +352,7 @@ paymentsRouter.post('/quote', async (c) => {
     }
 
     const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
-    const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
+    const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
     const numAmount = parseFloat(body.amount) || 0;
     const protocolFee = (numAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
     // The fee is carved out of the amount being sent — the recipient gets
@@ -486,11 +486,12 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
 
     const memo = typeof (body as any).memo === 'string' ? (body as any).memo.trim().slice(0, 280) : null;
 
-    // Protocol fee to fees.uprail.near on every send (FEE_PERCENT, 5%).
-    // The fee is carved out of the amount being sent: the recipient claims
-    // amount − fee and the sender's balance is only ever debited `amount`.
+    // Protocol fee on every send (FEE_PERCENT, 5%), routed to the escrow
+    // holding account. The fee is carved out of the amount being sent: the
+    // recipient claims amount − fee and the sender is only ever debited
+    // `amount`.
     const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
-    const feeRecipient = c.env.FEE_ACCOUNT_ID || 'fees.uprail.near';
+    const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
     const grossAmount = parseFloat(body.amount) || 0;
     const protocolFee = (grossAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
     const recipientAmount =
@@ -741,14 +742,15 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     // ── 4. Protocol fee ────────────────────────────────────────────────────
     // Direct sends route the fee from the sender's own vault immediately.
     // Escrowed sends keep the fee inside escrow: it is dispatched to
-    // fees.uprail.near when the recipient claims (or returned to the sender
-    // with the gross amount if the payment expires unclaimed).
+    // the escrow holding account when the recipient claims (or returned to
+    // the sender with the gross amount if the payment expires unclaimed).
     //
     // The outcome is recorded on the payment row rather than only logged:
     // the recipient has already been paid by this point, so a fee that cannot
     // be routed must never roll the send back — but it must also never be
     // invisible. An unrecorded failure is indistinguishable from a fee that
-    // was never attempted, which is how fees.uprail.near stayed at zero.
+    // was never attempted, which is how fees.uprail.near stayed at zero even
+    // through two claimed payments.
     let feeDispatchStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
     let feeDispatchError: string | null = null;
     if (isRecipientRegistered && parseFloat(protocolFee) > 0) {

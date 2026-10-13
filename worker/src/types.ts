@@ -39,7 +39,8 @@ export interface Env {
   MASTER_ACCOUNT_ID?: string;
   MASTER_PRIVATE_KEY?: string;
 
-  // Protocol fees (FEE_PERCENT, currently 5%, to fees.uprail.near)
+  // Protocol fees (FEE_PERCENT, currently 5%, to the escrow holding account
+  // by default — see wrangler.jsonc for why fees.uprail.near cannot receive)
   FEE_ACCOUNT_ID?: string;
   FEE_PERCENT?: string;
 

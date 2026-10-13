@@ -25,7 +25,15 @@
     "INTENTS_CONTRACT_ID": "intents.near",
     "ESCROW_ACCOUNT_ID": "escrow.uprail.near",
     "MASTER_ACCOUNT_ID": "uprail.near",
-    "FEE_ACCOUNT_ID": "fees.uprail.near",
+    // Fees are routed to escrow.uprail.near, not fees.uprail.near. Intents
+    // only accepts a signed transfer intent to an account with a public key
+    // registered on the contract, and neither fees.uprail.near nor uprail.near
+    // has one — every fee transfer to them failed, silently, and
+    // fees.uprail.near has held 0.000000 NEAR since it was created. Escrow is
+    // the one platform account registered on intents, so it is the only
+    // destination that actually receives. FEE_ACCOUNT_ID can still override
+    // this once a treasury account is registered on intents.
+    "FEE_ACCOUNT_ID": "escrow.uprail.near",
     "FEE_PERCENT": "0.05",
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
