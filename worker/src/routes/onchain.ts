@@ -144,6 +144,11 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
       }
     }
 
+    // On-chain balances come pre-priced; virtual ones only know what the
+    // registry lists, so a launchpad holding recorded as a virtual row would
+    // otherwise drop out of the dashboard subtotal.
+    await nearRpc.attachMissingPrices(c.env, balances);
+
     return c.json({
       nearAccount,
       balances,

@@ -890,6 +890,228 @@ export function tokenUsdPrice(symbol: string | undefined, priceUsd?: number): nu
   return STABLE_SYMBOLS.has(sym) ? 1 : null;
 }
 
+// ─── Launchpad/meme prices: Ref DCL concentrated-liquidity pools ─────────────
+//
+// Rhea metadata and the intents registry carry no prices, and every launchpad
+// token we ship (UPTOBER and friends) is listed on exactly one concentrated-
+// liquidity pool that nobody indexes — DexScreener reports 0 pairs for them.
+// The pools do exist on-chain, under `dclv2.ref-labs.near`, keyed by
+// `token_x|token_y|fee` with `token_x < token_y` lexicographically. One
+// `get_pool` call returns `current_point`, and a CL pool's mid is closed form:
+//
+//   price(base in quote) = 1.0001^current_point * 10^(decimals_base - decimals_quote)
+//
+// Verified against GeckoTerminal: UPTOBER 0.883x, UPTOBER-2 1.022x. The residual
+// is tick granularity, not error — the 1% tier moves in steps of 200 points
+// (2.02% per step), so ±1% is the expected tick-vs-spot spread.
+//
+// A wrong fee tier returns `null` rather than an error, so probing the common
+// tiers is safe and costs at most 4 subrequests; the 1% tier covers ~66% of
+// all DCL pools and, empirically, every launchpad token.
+
+const DCL_SWAP_CONTRACT_ID = 'dclv2.ref-labs.near';
+const DCL_FEE_TIERS = [10000, 100, 2000, 400] as const;
+const WRAP_NEAR_CONTRACT_ID = 'wrap.near';
+const USDC_CONTRACT_ID = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+const DCL_MEM_TTL_MS = 5 * 60 * 1000;
+const DCL_KV_TTL_S = 15 * 60;
+const DCL_NEGATIVE_TTL_S = 60 * 60;
+
+/**
+ * Per-isolate memo keyed by `base|quote`. A "no pool" result is cached as
+ * `null` (distinct from a miss) so a dead token stops costing 4 view calls
+ * on every single request until the TTL lapses.
+ */
+const dclMemCache = new Map<string, { at: number; priceInQuote: number | null }>();
+
+/** `1.0001^point`, or null when the point would under/overflow a float. */
+function dclMidFromPoint(point: unknown): number | null {
+  const p = Number(point);
+  if (!Number.isFinite(p)) return null;
+  const raw = Math.pow(1.0001, p);
+  return Number.isFinite(raw) && raw > 0 ? raw : null;
+}
+
+async function readDclPool(
+  rpcUrl: string,
+  poolId: string
+): Promise<{ current_point: unknown } | null> {
+  try {
+    const pool = await viewFunction(rpcUrl, DCL_SWAP_CONTRACT_ID, 'get_pool', { pool_id: poolId });
+    if (!pool || typeof pool !== 'object') return null;
+    if (pool.current_point === undefined || pool.current_point === null) return null;
+    return pool as { current_point: unknown };
+  } catch {
+    return null;
+  }
+}
+
+async function probeDclPools(
+  rpcUrl: string,
+  baseContract: string,
+  quoteContract: string,
+  baseDecimals: number,
+  quoteDecimals: number
+): Promise<number | null> {
+  // DCL enforces token_x < token_y at pool creation, so there is exactly one
+  // canonical id; the mid is price(token_x in token_y) and gets inverted if
+  // the caller asked for the other direction.
+  const baseFirst = baseContract < quoteContract;
+  const [tokenX, tokenY, xDecimals, yDecimals] = baseFirst
+    ? [baseContract, quoteContract, baseDecimals, quoteDecimals]
+    : [quoteContract, baseContract, quoteDecimals, baseDecimals];
+
+  for (const fee of DCL_FEE_TIERS) {
+    const pool = await readDclPool(rpcUrl, `${tokenX}|${tokenY}|${fee}`);
+    if (!pool) continue;
+    const mid = dclMidFromPoint(pool.current_point);
+    if (mid === null) return null;
+    const xInY = mid * Math.pow(10, xDecimals - yDecimals);
+    if (!Number.isFinite(xInY) || xInY <= 0) return null;
+    return baseFirst ? xInY : 1 / xInY;
+  }
+  return null;
+}
+
+async function getDclPoolPriceInQuote(
+  env: Env,
+  baseContract: string,
+  quoteContract: string,
+  baseDecimals: number,
+  quoteDecimals: number
+): Promise<number | null> {
+  const cacheKey = `${baseContract}|${quoteContract}`;
+
+  const memo = dclMemCache.get(cacheKey);
+  if (memo && Date.now() - memo.at < DCL_MEM_TTL_MS) return memo.priceInQuote;
+
+  const kvKey = `dcl-price:v1:${cacheKey}`;
+  if (env.CACHE) {
+    try {
+      const raw = await env.CACHE.get(kvKey);
+      if (raw !== null) {
+        const n = Number(raw);
+        if (isFinite(n)) {
+          const cachedPrice = n > 0 ? n : null; // '0' is the negative sentinel
+          dclMemCache.set(cacheKey, { at: Date.now(), priceInQuote: cachedPrice });
+          return cachedPrice;
+        }
+      }
+    } catch (err) {
+      console.warn('[dcl] KV read failed:', err);
+    }
+  }
+
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const price = await probeDclPools(rpcUrl, baseContract, quoteContract, baseDecimals, quoteDecimals);
+
+  if (env.CACHE) {
+    try {
+      await env.CACHE.put(kvKey, price !== null ? String(price) : '0', {
+        expirationTtl: price !== null ? DCL_KV_TTL_S : DCL_NEGATIVE_TTL_S,
+      });
+    } catch (err) {
+      console.warn('[dcl] KV write failed:', err);
+    }
+  }
+  dclMemCache.set(cacheKey, { at: Date.now(), priceInQuote: price });
+  return price;
+}
+
+/**
+ * Registry tier of the price stack, for rows that arrived without one. Matched
+ * on contract id first, then symbol, and falls through to the stablecoin peg
+ * so a row that skipped the caller's own merge still resolves.
+ */
+async function registryTokenPrice(
+  env: Env,
+  contractId: string | null,
+  symbol: string | null
+): Promise<number | null> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    const needle = (contractId || '').trim();
+    const symNeedle = (symbol || '').trim().toUpperCase();
+    const t = (needle && tokens.find((x) => (x.nearContractId || '') === needle))
+      || (symNeedle && tokens.find((x) => (x.symbol || '').toUpperCase() === symNeedle));
+    if (!t) return null;
+    return tokenUsdPrice(t.symbol, t.priceUsd);
+  } catch {
+    return null;
+  }
+}
+
+export interface HeldTokenPriceSource {
+  contractId?: string | null;
+  nearContractId?: string | null;
+  symbol?: string | null;
+  decimals?: number | null;
+  priceUsd?: number | null;
+}
+
+/**
+ * Price a held token in three tiers: registry price, stablecoin peg, then an
+ * on-chain DCL pool against wNEAR (or USDC). Returns null when nothing knows,
+ * never 0 — callers must keep distinguishing "worthless" from "no price".
+ */
+export async function resolveTokenUsdPrice(
+  env: Env,
+  token: HeldTokenPriceSource
+): Promise<number | null> {
+  // Tier 1: the caller already attached a price (or the row is a stablecoin).
+  const known = tokenUsdPrice(token.symbol ?? undefined, token.priceUsd ?? undefined);
+  if (known !== null) return known;
+
+  const base = (token.contractId || token.nearContractId || '').trim();
+
+  // Tier 1b: the registry knows this contract even though the row did not get
+  // it — rows built before a registry refresh, or by a path that skipped the merge.
+  if (base) {
+    const fromRegistry = await registryTokenPrice(env, base, token.symbol ?? null);
+    if (fromRegistry !== null) return fromRegistry;
+  }
+
+  // Tiers 2-3 need a DCL pool, which wNEAR itself never has (it is the quote).
+  if (!base || base === WRAP_NEAR_CONTRACT_ID) return null;
+  const baseDecimals = typeof token.decimals === 'number' ? token.decimals : 18;
+  if (!Number.isFinite(baseDecimals) || baseDecimals < 0 || baseDecimals > 36) return null;
+
+  const inNear = await getDclPoolPriceInQuote(env, base, WRAP_NEAR_CONTRACT_ID, baseDecimals, 24);
+  if (inNear !== null) {
+    const nearUsd = await registryTokenPrice(env, WRAP_NEAR_CONTRACT_ID, 'NEAR');
+    if (nearUsd !== null) return inNear * nearUsd;
+  }
+
+  // No wNEAR pool: a USDC pool is already a dollar price.
+  const inUsdc = await getDclPoolPriceInQuote(env, base, USDC_CONTRACT_ID, baseDecimals, 6);
+  if (inUsdc !== null) return inUsdc;
+
+  return null;
+}
+
+/**
+ * Fill in `priceUsd` on balance rows that the registry and peg could not
+ * price, using at most `budget` DCL lookups. Every lookup is 1–4 subrequests,
+ * so the budget is what keeps a token-heavy account inside the Workers Free
+ * 50-subrequest cap rather than silently truncating like the old registry
+ * fan-out did.
+ */
+export async function attachMissingPrices<T extends HeldTokenPriceSource>(
+  env: Env,
+  rows: T[],
+  budget = 6
+): Promise<void> {
+  let remaining = budget;
+  for (const row of rows) {
+    if (remaining <= 0) break;
+    if (row.priceUsd !== undefined && row.priceUsd !== null) continue;
+    const resolved = await resolveTokenUsdPrice(env, row);
+    if (resolved === null) continue;
+    row.priceUsd = resolved;
+    remaining -= 1;
+  }
+}
+
 export async function getIntentBalances(
   env: Env,
   nearAccount: string
@@ -1001,6 +1223,9 @@ export async function getIntentBalances(
     );
 
     if (balances.length > 0) {
+      // Registry-backed prices only cover what the registry lists; launchpad
+      // rows arrive here unpriced and get their price from their DCL pool.
+      await attachMissingPrices(env, balances);
       return balances;
     }
   } catch (err) {
@@ -1043,6 +1268,7 @@ export async function getIntentBalances(
       })
     );
 
+    await attachMissingPrices(env, fallbackBalances);
     return fallbackBalances;
   } catch (err) {
     console.warn('[nearRpc] mt_balance_of fallback failed:', err);
@@ -3199,6 +3425,10 @@ export async function getPlainBalances(
         ...(nearPrice !== null ? { priceUsd: nearPrice } : {}),
       });
     }
+
+    // Priced rows only: the 20 s snapshot below is shared with every caller,
+    // so an unpriced meme would otherwise stick around for the whole TTL.
+    await attachMissingPrices(env, out);
 
     try {
       await cache?.put(cacheKey, JSON.stringify(out), { expirationTtl: 20 });
