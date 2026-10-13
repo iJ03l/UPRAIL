@@ -357,6 +357,8 @@ export interface IntentAccountBalance {
   decimals: number;
   nearContractId: string;
   icon?: string;
+  /** Live USD price from the registry; absent when the asset has none. */
+  priceUsd?: number;
 }
 
 export interface DepositAddress {
@@ -871,6 +873,23 @@ export function getIntentAccountId(nearAccount: string, contractId: string): str
  * Fetches all token balances for a user's intent account directly from the onchain
  * intents contract. This is live, not cached.
  */
+/** Assets that are a dollar by construction — the peg is a price. */
+const STABLE_SYMBOLS = new Set([
+  'USDC', 'USDT', 'DAI', 'FRAX', 'USDD', 'USDE', 'USDG', 'FDUSD',
+]);
+
+/**
+ * Live USD price for a registry token, or null when neither the registry nor
+ * the stablecoin peg knows it. Never falls back to 0: callers must be able to
+ * tell "worthless" from "we have no price", because $0.00 and an unknown
+ * holding look identical on a dashboard total.
+ */
+export function tokenUsdPrice(symbol: string | undefined, priceUsd?: number): number | null {
+  if (typeof priceUsd === 'number' && isFinite(priceUsd) && priceUsd > 0) return priceUsd;
+  const sym = (symbol || '').trim().toUpperCase();
+  return STABLE_SYMBOLS.has(sym) ? 1 : null;
+}
+
 export async function getIntentBalances(
   env: Env,
   nearAccount: string
@@ -961,6 +980,7 @@ export async function getIntentBalances(
               existing.amount = (existingAmt + newAmt).toString();
               existing.amountFormatted = formatAmount(existing.amount, decimals);
             } else {
+              const price = tokenUsdPrice(symbol, token?.priceUsd);
               balances.push({
                 defuse_asset_id: assetId,
                 symbol,
@@ -969,6 +989,7 @@ export async function getIntentBalances(
                 decimals,
                 nearContractId: token?.nearContractId || '',
                 ...(token?.icon ? { icon: token.icon } : {}),
+                ...(price !== null ? { priceUsd: price } : {}),
               });
             }
           }
@@ -1006,6 +1027,7 @@ export async function getIntentBalances(
           });
           const amtStr = String(raw ?? '0');
           if (amtStr !== '0' && amtStr !== 'null') {
+            const price = tokenUsdPrice(tok.symbol);
             fallbackBalances.push({
               defuse_asset_id: tok.id,
               symbol: tok.symbol,
@@ -1014,6 +1036,7 @@ export async function getIntentBalances(
               decimals: tok.decimals,
               nearContractId: tok.nearContractId,
               icon: getOnchainIcon(tok.symbol.toLowerCase()),
+              ...(price !== null ? { priceUsd: price } : {}),
             });
           }
         } catch {}
@@ -3083,6 +3106,7 @@ export async function getPlainBalances(
       if (!symbol) return; // no metadata -> never render a raw address as a ticker
       const decimals = rheaMeta?.decimals ?? regMeta?.decimals ?? 18;
       const icon = (regMeta?.icon || rheaMeta?.icon || undefined) as string | undefined;
+      const price = tokenUsdPrice(symbol, regMeta?.priceUsd);
 
       coveredContracts.add(cl);
       out.push({
@@ -3093,6 +3117,7 @@ export async function getPlainBalances(
         decimals,
         nearContractId: contractId,
         ...(icon ? { icon } : {}),
+        ...(price !== null ? { priceUsd: price } : {}),
       });
     };
 
@@ -3163,6 +3188,7 @@ export async function getPlainBalances(
     const native = await getPlainNearBalance(rpcUrl, nearAccount);
     const totalNear = native + wNearHeld;
     if (totalNear > 0n) {
+      const nearPrice = tokenUsdPrice('NEAR', regByContract.get('wrap.near')?.priceUsd);
       out.push({
         defuse_asset_id: 'nep141:wrap.near',
         symbol: 'NEAR',
@@ -3170,6 +3196,7 @@ export async function getPlainBalances(
         amountFormatted: formatAmount(totalNear.toString(), 24),
         decimals: 24,
         nearContractId: 'wrap.near',
+        ...(nearPrice !== null ? { priceUsd: nearPrice } : {}),
       });
     }
 

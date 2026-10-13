@@ -42,6 +42,11 @@ export interface OnchainBalance {
   decimals: number;
   nearContractId: string;
   icon?: string;
+  /**
+   * Live USD price the API already resolved for this exact asset id. Present
+   * only when the registry knows it — a launchpad meme will not have one.
+   */
+  priceUsd?: number;
 }
 
 export interface OnchainBalancesResponse {

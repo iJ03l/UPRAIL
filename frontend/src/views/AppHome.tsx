@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
-import { useOnchainData } from '../hooks/useOnchainData';
+import { useOnchainData, balanceUsd } from '../hooks/useOnchainData';
 import { api, formatRecipientDisplay, formatUsd, sumUsd } from '../lib/api';
 import { webauthn } from '../lib/webauthn';
 import type { PaymentIntent } from '../types';
@@ -67,6 +67,7 @@ export const AppHome: React.FC = () => {
     balances,
     tokens,
     totalBalanceUsd,
+    unpricedBalanceCount,
     nearAccount,
     hasIntentAccount,
     isLoadingBalances,
@@ -304,6 +305,15 @@ export const AppHome: React.FC = () => {
                   />
                 </div>
               )}
+              {/* The headline is a priced subtotal whenever any holding is
+                  priced — a dash is useless. Say how much is missing so the
+                  figure is read as a floor, never as the full portfolio. */}
+              {!isFirstLoad && !hideBalance && unpricedBalanceCount > 0 && totalBalanceUsd !== null && (
+                <div className="text-[11px] font-mono text-amber-600">
+                  +{unpricedBalanceCount} holding{unpricedBalanceCount === 1 ? '' : 's'} without a
+                  live price
+                </div>
+              )}
               <div className="flex items-center space-x-2 text-xs font-mono text-stone-500">
                 <span className={`w-1.5 h-1.5 rounded-full ${hasIntentAccount ? 'bg-stone-900' : 'bg-amber-500 animate-pulse'}`} />
                 {hasIntentAccount ? (
@@ -339,15 +349,21 @@ export const AppHome: React.FC = () => {
                   <span>{onchainError}</span>
                 </span>
               ) : balances.length > 0 ? (
-                balances.map((b) => (
-                  <span
-                    key={b.defuse_asset_id}
-                    className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700"
-                    title={b.defuse_asset_id}
-                  >
-                    {b.amountFormatted} {b.symbol}
-                  </span>
-                ))
+                balances.map((b) => {
+                  const usd = hideBalance ? null : balanceUsd(b, tokens);
+                  return (
+                    <span
+                      key={b.defuse_asset_id}
+                      className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700"
+                      title={b.defuse_asset_id}
+                    >
+                      {b.amountFormatted} {b.symbol}
+                      {usd !== null && usd > 0 ? (
+                        <span className="text-stone-400"> · {formatUsd(usd)}</span>
+                      ) : null}
+                    </span>
+                  );
+                })
               ) : isFirstLoad ? (
                 <div className="flex flex-wrap gap-2 pt-0.5" aria-hidden="true">
                   <Skeleton variant="chip" className="w-24" />

@@ -125,6 +125,7 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
           if (netAmt > 0) {
             const decimals = token?.decimals ?? (defuseId.includes('wrap.near') ? 24 : 18);
             const baseUnits = nearRpc.toBaseUnits(netAmt.toFixed(Math.min(decimals, 18)), decimals);
+            const price = nearRpc.tokenUsdPrice(token?.symbol || symbol, token?.priceUsd);
 
             balances.push({
               defuse_asset_id: defuseId,
@@ -134,6 +135,7 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
               decimals,
               nearContractId: token?.nearContractId || '',
               ...(token?.icon ? { icon: token.icon } : {}),
+              ...(price !== null ? { priceUsd: price } : {}),
             });
           }
         }

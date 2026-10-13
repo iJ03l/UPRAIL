@@ -33,7 +33,14 @@ export interface UseOnchainDataResult {
 
   // User's intent account balances (live from onchain)
   balances: OnchainBalance[];
+  /**
+   * USD of the holdings we could price. Not the complete portfolio whenever
+   * `unpricedBalanceCount > 0` — the UI must say so rather than pass it off
+   * as the total.
+   */
   totalBalanceUsd: number | null;
+  /** Holdings with no live price — how much of the portfolio is missing. */
+  unpricedBalanceCount: number;
   nearAccount: string | null;
   hasIntentAccount: boolean;
   isLoadingBalances: boolean;
@@ -58,18 +65,53 @@ export interface UseOnchainDataResult {
   error: string | null;
 }
 
-/**
- * Live registry price for a balance, or null when we have none. There is no
- * oracle table and no peg pin: an unpriced holding must not silently turn
- * into $0 (which made the dashboard total quietly wrong).
- */
-function estimateUsd(symbol: string, amountFormatted: string, tokens: OnchainToken[] = []): number | null {
-  const amount = parseFloat(amountFormatted) || 0;
-  if (amount <= 0) return 0;
-  const sym = (symbol || '').trim();
+/** Assets that are a dollar by construction — the peg is a price. */
+const STABLE_SYMBOLS = new Set([
+  'USDC', 'USDT', 'DAI', 'FRAX', 'USDD', 'USDE', 'USDG', 'FDUSD',
+]);
 
-  const live = tokens.find((t) => (t.symbol || '').toLowerCase() === sym.toLowerCase())?.priceUsd;
-  return typeof live === 'number' && isFinite(live) && live > 0 ? amount * live : null;
+/**
+ * USD value of a single holding, or `null` when nothing can price it.
+ *
+ * Resolution order matters:
+ *  1. the price the API attached to the balance row — it travelled with the
+ *     exact asset id, so it cannot be confused with a same-symbol asset on
+ *     another chain;
+ *  2. the registry joined on asset id / contract id;
+ *  3. the registry joined on symbol (fallback only);
+ *  4. the stablecoin peg.
+ *
+ * There is deliberately no `0` fallback: an unpriced launchpad meme must not
+ * silently look worthless, and $0.00 must not look like a priced holding.
+ */
+export function balanceUsd(b: OnchainBalance, tokens: OnchainToken[] = []): number | null {
+  const amount = parseFloat(b.amountFormatted || '0') || 0;
+  if (!(amount > 0)) return 0;
+
+  const direct = b.priceUsd;
+  if (typeof direct === 'number' && isFinite(direct) && direct > 0) return amount * direct;
+
+  const id = (b.defuse_asset_id || '').toLowerCase();
+  const contract = (b.nearContractId || '').toLowerCase();
+  for (const t of tokens) {
+    const tid = (t.id || '').toLowerCase();
+    const tc = (t.nearContractId || '').toLowerCase();
+    const matched =
+      (id && (tid === id || tc === id)) ||
+      (contract && (tid === contract || tc === contract));
+    if (matched && typeof t.priceUsd === 'number' && t.priceUsd > 0) return amount * t.priceUsd;
+  }
+
+  const sym = (b.symbol || '').trim().toUpperCase();
+  if (STABLE_SYMBOLS.has(sym)) return amount;
+
+  if (sym) {
+    const bySymbol = tokens.find((t) => (t.symbol || '').trim().toUpperCase() === sym);
+    if (bySymbol && typeof bySymbol.priceUsd === 'number' && bySymbol.priceUsd > 0) {
+      return amount * bySymbol.priceUsd;
+    }
+  }
+  return null;
 }
 
 /** Prices are polled so the total on screen tracks the market, not mount time. */
@@ -346,16 +388,23 @@ export function useOnchainData(): UseOnchainDataResult {
   );
 
   // ── Compute total balance USD ─────────────────────────────────────────────
-  const perBalanceUsd = balances.map((b) => estimateUsd(b.symbol, b.amountFormatted, tokens));
-  const totalBalanceUsd = perBalanceUsd.some((v) => v === null)
-    ? null
-    : perBalanceUsd.reduce<number>((acc, v) => acc + (v as number), 0);
+  // A subtotal of the holdings we can price is worth more than a dash, but it
+  // must never masquerade as the whole portfolio: when nothing is priced the
+  // total stays unknown (null -> "—"), and when only some holdings are priced
+  // the count of missing ones is reported alongside so the figure is read as
+  // a floor.
+  const perBalanceUsd = balances.map((b) => balanceUsd(b, tokens));
+  const unpricedBalanceCount = perBalanceUsd.filter((v) => v === null).length;
+  const pricedTotal = perBalanceUsd.reduce<number>((acc, v) => (v === null ? acc : acc + v), 0);
+  const hasPricedValue = perBalanceUsd.some((v) => v !== null && v > 0);
+  const totalBalanceUsd = hasPricedValue || unpricedBalanceCount === 0 ? pricedTotal : null;
 
   return {
     tokens,
     isLoadingTokens,
     balances,
     totalBalanceUsd,
+    unpricedBalanceCount,
     nearAccount,
     hasIntentAccount,
     isLoadingBalances,

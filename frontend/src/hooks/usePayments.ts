@@ -98,7 +98,10 @@ export function usePayments() {
         name: b.symbol,
         iconUrl: b.icon || '',
         decimals: b.decimals,
-        priceUsd: undefined,
+        // The balances API already resolved a price for this exact asset id;
+        // dropping it here left held tokens unpriced in the Send list even
+        // when the registry knew the value.
+        priceUsd: b.priceUsd,
         nearContractId: b.nearContractId,
         chain: 'near',
         badge: 'NEAR',
