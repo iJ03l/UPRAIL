@@ -174,13 +174,24 @@ onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
   const chain = c.req.query('chain');
   const token = c.req.query('token');
   const amount = c.req.query('amount');
+  // Pin the exact NEP-141 contract when the picker knows it — tickers are not
+  // unique on NEAR and a symbol-only lookup can resolve the wrong asset.
+  const contract = c.req.query('contract');
   const bypassCache = c.req.query('refresh') === 'true' || !!amount;
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
   try {
     if (chain) {
-      // Single chain (with optional token and exact amount)
-      const address = await nearRpc.getDepositAddress(c.env, nearAccount, chain, bypassCache, token, amount);
+      // Single chain (with optional token, pinned contract and exact amount)
+      const address = await nearRpc.getDepositAddress(
+        c.env,
+        nearAccount,
+        chain,
+        bypassCache,
+        token,
+        amount,
+        contract
+      );
       if (!address) {
         return c.json<ErrorResponse>(
           { error: `No deposit address available for chain: ${chain}${token ? ` (${token})` : ''}`, code: 'NO_DEPOSIT_ADDRESS' },
@@ -219,7 +230,25 @@ onchainRouter.get('/deposit-status', requireAuth(), async (c) => {
     return c.json<ErrorResponse>({ error: 'Missing address query param', code: 'INVALID_REQUEST' }, 400);
   }
 
+  // NEAR-native vault ingress: assets the 1Click status API has never heard of
+  // (launchpad NEP-141s) settle by arriving as a plain FT balance on the
+  // caller's own vault, so their status is read from the token contract
+  // instead of the bridge tracker.
+  const contract = (c.req.query('contract') || '').trim();
+  const tokenSymbol = c.req.query('token');
+
   try {
+    const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
+    if (contract && nearAccount && address.toLowerCase() === nearAccount.toLowerCase()) {
+      const native = await nearRpc.probeNativeFtDeposit(
+        c.env,
+        nearAccount,
+        contract,
+        tokenSymbol
+      );
+      if (native) return c.json(native as any);
+    }
+
     const owned = await callerOwnsDepositAddress(c.env, session, address);
     if (!owned) {
       return c.json<ErrorResponse>(

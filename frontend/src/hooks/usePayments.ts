@@ -47,13 +47,20 @@ export function usePayments() {
       AURORA: 10,
     };
 
-    const mapped = rawTokens.map((ot) => {
+    const matchedBalanceKeys = new Set<string>();
+
+    const mapped: Token[] = rawTokens.map((ot) => {
       const balRecord = balances.find(
         (b) =>
           b.defuse_asset_id?.toLowerCase() === ot.id.toLowerCase() ||
           (ot.nearContractId && b.nearContractId?.toLowerCase() === ot.nearContractId.toLowerCase()) ||
           b.symbol.toLowerCase() === ot.symbol.toLowerCase()
       );
+      if (balRecord) {
+        matchedBalanceKeys.add(
+          (balRecord.defuse_asset_id || `${balRecord.nearContractId}:${balRecord.symbol}`).toLowerCase()
+        );
+      }
       return {
         id: ot.id,
         symbol: ot.symbol,
@@ -68,6 +75,37 @@ export function usePayments() {
         balance: balRecord?.amountFormatted || balRecord?.amount || '0.00',
       };
     });
+
+    // Held-but-unlisted assets. The registry is a curated head, so a launchpad
+    // meme the user actually owns may be absent from it — without this the
+    // token is spendable onchain but impossible to pick here.
+    for (const b of balances) {
+      const key = (b.defuse_asset_id || `${b.nearContractId}:${b.symbol}`).toLowerCase();
+      if (matchedBalanceKeys.has(key)) continue;
+      const alreadyListed =
+        mapped.some(
+          (t) =>
+            t.id.toLowerCase() === (b.defuse_asset_id || '').toLowerCase() ||
+            (!!b.nearContractId &&
+              (t.nearContractId || '').toLowerCase() === b.nearContractId.toLowerCase())
+        ) || mapped.some((t) => t.symbol.toUpperCase() === b.symbol.toUpperCase());
+      if (alreadyListed) continue;
+      const amt = parseFloat(b.amountFormatted || b.amount || '0') || 0;
+      if (amt <= 0) continue;
+      mapped.push({
+        id: b.defuse_asset_id || `nep141:${b.nearContractId}`,
+        symbol: b.symbol,
+        name: b.symbol,
+        iconUrl: b.icon || '',
+        decimals: b.decimals,
+        priceUsd: undefined,
+        nearContractId: b.nearContractId,
+        chain: 'near',
+        badge: 'NEAR',
+        category: 'all',
+        balance: b.amountFormatted || b.amount || '0',
+      } as Token);
+    }
 
     const getHoldingUsdValue = (t: Token): number => {
       const bal = parseFloat(t.balance || '0');

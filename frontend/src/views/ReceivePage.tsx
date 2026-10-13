@@ -95,6 +95,8 @@ const NEAR_RECEIVE_TOKEN: Token = {
 function useDepositPoll(opts: {
   address: string | undefined;
   settled: boolean;
+  contract?: string;
+  token?: string;
   onStatus: (status: DepositStatusResponse) => void;
   onSettled: () => void;
   refreshBalances: () => void;
@@ -102,14 +104,15 @@ function useDepositPoll(opts: {
 }): void {
   const optsRef = useRef(opts);
   optsRef.current = opts;
-  const { address, settled } = opts;
+  const { address, settled, contract, token } = opts;
 
   useEffect(() => {
     if (!address || settled) return;
 
     const checkStatus = async () => {
       try {
-        const status = await fetchDepositStatus(address);
+        const o0 = optsRef.current;
+        const status = await fetchDepositStatus(address, { contract: o0.contract, token: o0.token });
         const o = optsRef.current;
         o.onStatus(status);
 
@@ -132,11 +135,11 @@ function useDepositPoll(opts: {
     checkStatus();
     const id = setInterval(checkStatus, 2500);
     return () => clearInterval(id);
-  }, [address, settled]);
+  }, [address, settled, contract, token]);
 }
 
 export const ReceivePage: React.FC = () => {
-  const { hasIntentAccount, nearAccount, refreshBalances, refreshHistory } = useOnchainData();
+  const { hasIntentAccount, nearAccount, balances, refreshBalances, refreshHistory } = useOnchainData();
 
   const [tokens, setTokens] = useState<TokenOption[]>(TOKEN_OPTIONS);
   // Start BLANK — do not derive until token, chain, AND exact amount are selected
@@ -368,7 +371,15 @@ export const ReceivePage: React.FC = () => {
       if (!hasIntentAccount || !nearAsset?.symbol) return;
       setIsNearDeriving(true);
       try {
-        const data = await fetchDepositAddress('near', refresh, nearAsset.symbol);
+        // Pin the contract: tickers are not unique on NEAR, so resolving by
+        // symbol alone can derive an address for the wrong UPTOBER.
+        const data = await fetchDepositAddress(
+          'near',
+          refresh,
+          nearAsset.symbol,
+          undefined,
+          nearAsset.nearContractId
+        );
         setNearDepositAddress(data);
       } catch (err) {
         console.warn('Failed to load NEAR deposit address:', err);
@@ -390,6 +401,10 @@ export const ReceivePage: React.FC = () => {
   useDepositPoll({
     address: activeTab === 'crosschain' ? currentAddress?.address : nearDepositAddress?.address,
     settled: activeTab === 'crosschain' ? settledSuccess : nearSettledSuccess,
+    // Only the NEAR tab uses vault-ingress detection; cross-chain deposits are
+    // tracked by the bridge indexer and must not be probed on a token contract.
+    contract: activeTab === 'defuse' ? nearAsset.nearContractId : undefined,
+    token: activeTab === 'defuse' ? nearAsset.symbol : undefined,
     onStatus: (status) => {
       if (activeTab === 'crosschain') setDepositStatus(status);
       else setNearDepositStatus(status);
@@ -444,6 +459,43 @@ export const ReceivePage: React.FC = () => {
 
   const depositAddressValue = currentAddress?.address || '';
   const nearDepositAddressValue = nearDepositAddress?.address || '';
+
+  // Registry head plus whatever the user actually holds. The backend registry
+  // is a curated slice, so a launchpad meme (e.g. UPTOBER) can be absent from
+  // it while still sitting in the vault — without this it would be impossible
+  // to pick it here or see it in the Receive picker.
+  const nearPickerTokens = useMemo<Token[]>(() => {
+    const seen = new Set(registryTokens.map((t) => (t.nearContractId || t.id || '').toLowerCase()));
+    const seenSymbols = new Set(registryTokens.map((t) => t.symbol.toUpperCase()));
+    const extra: Token[] = [];
+    for (const b of balances || []) {
+      const contract = (b.nearContractId || '').toLowerCase();
+      const sym = (b.symbol || '').toUpperCase();
+      if (!contract || seen.has(contract)) continue;
+      if (seenSymbols.has(sym)) continue;
+      const amt = parseFloat(b.amountFormatted || b.amount || '0') || 0;
+      if (amt <= 0) continue;
+      seen.add(contract);
+      seenSymbols.add(sym);
+      extra.push({
+        id: b.defuse_asset_id || `nep141:${contract}`,
+        symbol: sym,
+        name: sym,
+        iconUrl: b.icon || '',
+        decimals: b.decimals ?? 18,
+        nearContractId: b.nearContractId,
+        chain: 'near',
+        badge: 'NEAR',
+        category: 'memes',
+        balance: b.amountFormatted || b.amount || '0',
+      });
+    }
+    return extra.length > 0 ? [...registryTokens, ...extra] : registryTokens;
+  }, [registryTokens, balances]);
+
+  // Vault ingress addresses are reusable (no 1Click one-time quote), so the
+  // single-use / expiry copy would be a lie for them.
+  const nearIsOneTime = nearDepositAddress?.isOneTime !== false;
   const minAmountDisplay =
     currentAddress?.minAmountFormatted ||
     (depositAmount && selectedToken ? `${depositAmount} ${selectedToken}` : selectedToken === 'USDC' ? '0.10 USDC' : selectedToken === 'NEAR' ? '0.01 NEAR' : `0.10 ${selectedToken}`);
@@ -1125,7 +1177,7 @@ export const ReceivePage: React.FC = () => {
                 </div>
 
                 <AssetPicker
-                  tokens={registryTokens}
+                  tokens={nearPickerTokens}
                   selectedToken={nearAsset}
                   onSelectToken={handleSelectNearToken}
                 />
@@ -1206,7 +1258,9 @@ export const ReceivePage: React.FC = () => {
                       <div className="font-sans text-xs text-stone-600">
                         <span>Standby: Waiting for incoming {nearAsset.symbol} on NEAR</span>
                         <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
-                          Single-use ephemeral ingress • 100% onchain shielded
+                          {nearIsOneTime
+                            ? 'Single-use ephemeral ingress • 100% onchain shielded'
+                            : 'Reusable vault ingress • detected on FT balance arrival'}
                         </span>
                       </div>
                     </div>
@@ -1218,7 +1272,9 @@ export const ReceivePage: React.FC = () => {
                       <span className="font-bold uppercase tracking-wider text-stone-600 text-[10px]">
                         Shielded Deposit Address
                       </span>
-                      <span className="text-[10px] text-stone-400">Single-use</span>
+                      <span className="text-[10px] text-stone-400">
+                        {nearIsOneTime ? 'Single-use' : 'Reusable'}
+                      </span>
                     </div>
                     <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl font-mono text-xs text-stone-900 break-all select-all font-medium">
                       {nearDepositAddressValue}
@@ -1243,7 +1299,7 @@ export const ReceivePage: React.FC = () => {
                   </div>
 
                   <div className="w-full pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-500">
-                    <span>Expires in ~3 days</span>
+                    <span>{nearIsOneTime ? 'Expires in ~3 days' : 'Reusable — no expiry'}</span>
                     <button
                       type="button"
                       onClick={handleGenerateFreshNear}
@@ -1251,12 +1307,13 @@ export const ReceivePage: React.FC = () => {
                       className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
                     >
                       <RefreshCw className={`w-3 h-3 ${isNearDeriving ? 'animate-spin' : ''}`} />
-                      <span>New Address</span>
+                      <span>{nearIsOneTime ? 'New Address' : 'Refresh'}</span>
                     </button>
                   </div>
 
-                  {/* Direct Vault Address Expandable Option */}
-                  {nearAccount && (
+                  {/* Direct Vault Address Expandable Option — suppressed when the
+                      primary address already IS the vault (ingress fallback). */}
+                  {nearAccount && nearIsOneTime && (
                     <div className="w-full pt-3 border-t border-stone-100 text-left">
                       <button
                         type="button"

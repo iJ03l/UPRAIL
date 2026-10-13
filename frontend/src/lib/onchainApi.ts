@@ -41,6 +41,7 @@ export interface OnchainBalance {
   amountFormatted: string;
   decimals: number;
   nearContractId: string;
+  icon?: string;
 }
 
 export interface OnchainBalancesResponse {
@@ -154,13 +155,15 @@ export async function fetchDepositAddress(
   chain: string,
   refresh = false,
   token?: string,
-  amount?: string
+  amount?: string,
+  contract?: string
 ): Promise<DepositAddress | null> {
   const params = new URLSearchParams();
   params.set('chain', chain);
   if (refresh) params.set('refresh', 'true');
   if (token) params.set('token', token);
   if (amount) params.set('amount', amount);
+  if (contract) params.set('contract', contract);
 
   const res = await fetch(url(`/api/onchain/deposit-address?${params.toString()}`), {
     credentials: 'include',
@@ -173,10 +176,20 @@ export async function fetchDepositAddress(
 
 /**
  * Polls the real-time deposit status from the solver bridge for a deposit address.
+ *
+ * `contract` / `token` pin which NEP-141 to watch for NEAR-native vault
+ * ingress — assets the bridge tracker does not index are detected by their
+ * balance arriving on the vault instead.
  */
-export async function fetchDepositStatus(address: string): Promise<DepositStatusResponse> {
+export async function fetchDepositStatus(
+  address: string,
+  opts?: { contract?: string; token?: string }
+): Promise<DepositStatusResponse> {
   try {
-    const res = await fetch(url(`/api/onchain/deposit-status?address=${encodeURIComponent(address)}`), {
+    const params = new URLSearchParams({ address });
+    if (opts?.contract) params.set('contract', opts.contract);
+    if (opts?.token) params.set('token', opts.token);
+    const res = await fetch(url(`/api/onchain/deposit-status?${params.toString()}`), {
       credentials: 'include',
     });
     if (!res.ok) {

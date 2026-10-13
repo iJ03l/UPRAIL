@@ -10,16 +10,19 @@ import {
   Lock,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
-import type { PaymentIntent } from '../types';
+import type { PaymentIntent, Token } from '../types';
 
 interface FlowPulseWidgetProps {
   history?: PaymentIntent[];
   transactions?: any[];
+  /** Registry used to price raw onchain amounts — an unpriced asset contributes $0, never its face amount. */
+  tokens?: Token[];
 }
 
 export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
   history = [],
   transactions = [],
+  tokens = [],
 }) => {
   const { user } = useXAuth();
 
@@ -27,6 +30,37 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
   const stats = useMemo(() => {
     const userHandle = user?.handle?.trim().toLowerCase();
     const nearAccount = user?.nearAccount?.trim().toLowerCase();
+
+    const priceById = new Map<string, number>();
+    const priceBySymbol = new Map<string, number>();
+    for (const t of tokens || []) {
+      if (typeof t.priceUsd === 'number' && t.priceUsd > 0) {
+        if (t.id) priceById.set(t.id.toLowerCase(), t.priceUsd);
+        if (t.nearContractId) priceById.set(t.nearContractId.toLowerCase(), t.priceUsd);
+        if (t.symbol) priceBySymbol.set(t.symbol.toUpperCase(), t.priceUsd);
+      }
+    }
+
+    // Raw token amounts are not dollars. Previously an unpriced meme deposit
+    // was added as-is, so receiving 700000 UPTOBER inflated inflow by $700k.
+    const toUsd = (tx: any, amt: number): number => {
+      if (!amt || !isFinite(amt)) return 0;
+      const candidates = [
+        tx.defuse_asset_id,
+        tx.asset_in,
+        tx.nearContractId,
+        tx.contract_id,
+      ]
+        .filter(Boolean)
+        .map((v: string) => String(v).toLowerCase());
+      for (const c of candidates) {
+        const p = priceById.get(c);
+        if (typeof p === 'number') return amt * p;
+      }
+      const sym = String(tx.symbol || tx.token_symbol || '').toUpperCase();
+      const p = sym ? priceBySymbol.get(sym) : undefined;
+      return typeof p === 'number' ? amt * p : 0;
+    };
 
     let inflowCount = 0;
     let inflowUsd = 0;
@@ -94,7 +128,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
 
         if (isDeposit || isReceiver) {
           inflowCount++;
-          inflowUsd += amt;
+          inflowUsd += toUsd(tx, amt);
         } else if (
           isSender ||
           tx.type === 'send' ||
@@ -102,7 +136,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
           tx.intent_type === 'transfer'
         ) {
           egressCount++;
-          egressUsd += amt;
+          egressUsd += toUsd(tx, amt);
         }
       }
     }
@@ -113,7 +147,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
       egressCount,
       egressUsd,
     };
-  }, [history, transactions, user]);
+  }, [history, transactions, tokens, user]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">

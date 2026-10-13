@@ -119,7 +119,20 @@ function parseRheaList(raw: unknown): RheaTokenEntry[] {
   return out;
 }
 
+/**
+ * Per-isolate memo. The Rhea payload is ~6000 entries; held-token discovery
+ * resolves metadata once per held contract, so without an in-memory copy that
+ * path would re-read (and re-parse) the whole list thousands of times per
+ * balance refresh — KV alone is not enough.
+ */
+let rheaMemCache: { at: number; tokens: RheaTokenEntry[] } | null = null;
+const RHEA_MEM_TTL_MS = 5 * 60 * 1000;
+
 export async function getRheaTokens(env: Env): Promise<RheaTokenEntry[]> {
+  if (rheaMemCache && Date.now() - rheaMemCache.at < RHEA_MEM_TTL_MS) {
+    return rheaMemCache.tokens;
+  }
+
   let cached: RheaTokenEntry[] | null = null;
   let cachedAt = 0;
   try {
@@ -135,7 +148,10 @@ export async function getRheaTokens(env: Env): Promise<RheaTokenEntry[]> {
     console.warn('[rhea] KV read failed:', err);
   }
 
-  if (cached && Date.now() - cachedAt < RHEA_TTL_MS) return cached;
+  if (cached && Date.now() - cachedAt < RHEA_TTL_MS) {
+    rheaMemCache = { at: Date.now(), tokens: cached };
+    return cached;
+  }
 
   try {
     const resp = await fetch(RHEA_LIST_URL, { headers: { Accept: 'application/json' } });
@@ -147,12 +163,18 @@ export async function getRheaTokens(env: Env): Promise<RheaTokenEntry[]> {
           expirationTtl: 24 * 3600,
         }).catch((kvErr) => console.warn('[rhea] KV write failed:', kvErr));
       }
+      rheaMemCache = { at: Date.now(), tokens: fresh };
       return fresh;
     }
   } catch (err) {
     console.warn('[rhea] token list fetch failed:', err);
   }
-  return cached ?? [];
+  if (cached) {
+    // Stale KV beats empty list on feed outage.
+    rheaMemCache = { at: cachedAt, tokens: cached };
+    return cached;
+  }
+  return [];
 }
 
 export function rheaToOnchainToken(e: RheaTokenEntry): OnchainToken {
@@ -187,6 +209,128 @@ export async function resolveRheaToken(
       list.find((e) => e.contractId.toLowerCase() === contract) ||
       list.find((e) => e.symbol.toLowerCase() === raw);
     return hit ? rheaToOnchainToken(hit) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same lookup as `resolveRheaToken`, but never guesses when a ticker maps to
+ * more than one contract. Launchpad symbols are reused (`UPTOBER` exists as
+ * both `uptober.nearlytrade.near` and the abandoned `uptober-2.nearlytrade.near`),
+ * and the Rhea list orders the dead one first — so a blind symbol match would
+ * derive an address, storage-register a receiver and label the UI with the
+ * wrong asset.
+ *
+ * Tie-break order: pinned contract > unique symbol > the candidate the account
+ * actually holds. If that is still ambiguous, fail closed (`null`) instead of
+ * picking arbitrarily.
+ */
+export async function resolveRheaTokenForAccount(
+  env: Env,
+  asset: string | null | undefined,
+  nearAccount?: string
+): Promise<OnchainToken | null> {
+  const raw = (asset || '').trim().toLowerCase();
+  if (!raw) return null;
+  const contract = raw.startsWith('nep141:') ? raw.slice(7) : raw;
+
+  let list: RheaTokenEntry[];
+  try {
+    list = await getRheaTokens(env);
+  } catch {
+    return null;
+  }
+
+  const byContract = list.find((e) => e.contractId.toLowerCase() === contract);
+  if (byContract) return rheaToOnchainToken(byContract);
+
+  const candidates = list.filter((e) => e.symbol.toLowerCase() === raw);
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return rheaToOnchainToken(candidates[0]);
+
+  if (nearAccount) {
+    try {
+      const held = await fetchAccountFtBalances(nearAccount);
+      const heldSet = new Set(held.map((h) => h.contractId.toLowerCase()));
+      const withBalance = candidates.filter((e) => heldSet.has(e.contractId.toLowerCase()));
+      if (withBalance.length === 1) return rheaToOnchainToken(withBalance[0]);
+    } catch {
+      /* fall through to fail-closed */
+    }
+  }
+
+  console.warn(
+    `[nearRpc] ambiguous ticker "${raw}" matches ${candidates.length} contracts (${candidates
+      .map((e) => e.contractId)
+      .join(', ')}) — refusing to guess`
+  );
+  return null;
+}
+
+/**
+ * Held-token discovery. The curated registry can never know which launchpad
+ * meme a given user happens to hold (`uptober.nearlytrade.near` has no 1Click
+ * entry, no Ref pool, no price), so balance discovery must not be scoped to
+ * it. FastNEAR indexes every NEP-141 balance of an account and answers in a
+ * single ~1s call, no API key.
+ */
+const FASTNEAR_ACCOUNT_FT_URL = 'https://api.fastnear.com/v1/account';
+
+export interface HeldFtBalance {
+  contractId: string;
+  balance: string;
+  lastUpdateBlockHeight?: number;
+}
+
+export async function fetchAccountFtBalances(
+  nearAccount: string
+): Promise<HeldFtBalance[]> {
+  if (!nearAccount) return [];
+  try {
+    const resp = await fetch(
+      `${FASTNEAR_ACCOUNT_FT_URL}/${encodeURIComponent(nearAccount)}/ft`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!resp.ok) throw new Error(`fastnear ft ${resp.status}`);
+    const data = (await resp.json()) as any;
+    const list = Array.isArray(data?.tokens) ? data.tokens : [];
+    const out: HeldFtBalance[] = [];
+    for (const t of list) {
+      const contractId = typeof t?.contract_id === 'string' ? t.contract_id : '';
+      if (!contractId) continue;
+      const balance =
+        typeof t?.balance === 'string' ? t.balance : String(t?.balance ?? '0');
+      if (!balance || balance === '0' || balance === 'null') continue;
+      const height = Number(t?.last_update_block_height);
+      out.push({
+        contractId,
+        balance,
+        ...(Number.isFinite(height) ? { lastUpdateBlockHeight: height } : {}),
+      });
+    }
+    return out;
+  } catch (err) {
+    console.warn('[nearRpc] fastnear FT balance fetch failed:', err);
+    return [];
+  }
+}
+
+/**
+ * Metadata lookup for an arbitrary NEAR FT contract, sourced from the Rhea
+ * (Ref) list. Returns null when the contract is not listed anywhere we can
+ * describe it — callers skip those rather than rendering a bare address as a
+ * ticker symbol.
+ */
+async function getHeldTokenMeta(
+  env: Env,
+  contractId: string
+): Promise<RheaTokenEntry | null> {
+  const cl = (contractId || '').toLowerCase();
+  if (!cl) return null;
+  try {
+    const list = await getRheaTokens(env);
+    return list.find((e) => e.contractId.toLowerCase() === cl) || null;
   } catch {
     return null;
   }
@@ -728,13 +872,36 @@ export async function getIntentBalances(
       });
     }
 
+    // The registry only ever contains a curated display head, so a token the
+    // user actually moved into intents (any launchpad NEP-141) would otherwise
+    // be invisible. `mt_batch_balance_of` accepts arbitrary asset ids and
+    // simply answers 0 for unknown ones, so the scan is widened to the full
+    // Rhea list. Measured: ~6300 ids in a couple of parallel calls, which is
+    // both complete AND faster than the old sequential 50-id chunks.
+    try {
+      const rhea = await getRheaTokens(env);
+      for (const entry of rhea) {
+        const assetId = `nep141:${entry.contractId}`;
+        if (tokenMap.has(assetId)) continue;
+        const onchain = rheaToOnchainToken(entry);
+        tokenMap.set(assetId, onchain);
+      }
+    } catch (rheaErr) {
+      console.warn('[nearRpc] rhea expansion for intent balances skipped:', rheaErr);
+    }
+
     const tokenIds = Array.from(tokenMap.keys());
     if (tokenIds.length === 0) return [];
 
     const balances: IntentAccountBalance[] = [];
-    const chunkSize = 50;
+    const chunkSize = 2000;
+    const chunks: string[][] = [];
     for (let i = 0; i < tokenIds.length; i += chunkSize) {
-      const chunk = tokenIds.slice(i, i + chunkSize);
+      chunks.push(tokenIds.slice(i, i + chunkSize));
+    }
+
+    await Promise.allSettled(
+      chunks.map(async (chunk) => {
       try {
         const rawAmounts = await viewFunction(rpcUrl, contractId, 'mt_batch_balance_of', {
           account_id: nearAccount,
@@ -773,7 +940,8 @@ export async function getIntentBalances(
       } catch (chunkErr) {
         console.warn(`[nearRpc] mt_batch_balance_of chunk failed:`, chunkErr);
       }
-    }
+      })
+    );
 
     if (balances.length > 0) {
       return balances;
@@ -1550,6 +1718,10 @@ async function registerFtReceiver(
 /**
  * Fetches the user's deposit address for a given chain (and token) from the 1Click/intents API.
  * Uses D1 cache for ultra-fast response, with fresh onchain generation on demand.
+ *
+ * `contractId` pins the exact NEP-141 contract when the picker already knows it.
+ * Tickers are not unique on NEAR (two distinct `UPTOBER` contracts exist), so
+ * symbol-only resolution must never be allowed to pick the wrong one silently.
  */
 export async function getDepositAddress(
   env: Env,
@@ -1557,10 +1729,12 @@ export async function getDepositAddress(
   chainId: string,
   bypassCache = false,
   tokenSymbol?: string,
-  amount?: string
+  amount?: string,
+  contractId?: string
 ): Promise<DepositAddress | null> {
   const cleanChain = chainId.toLowerCase();
   const cleanToken = (tokenSymbol || '').toLowerCase();
+  const cleanContract = (contractId || '').trim().toLowerCase();
   const directKey = cleanToken ? `${cleanChain}_${cleanToken}` : cleanChain;
   // An explicitly requested token must resolve to THAT token — never silently
   // fall back to the chain default (e.g. asking for LONK would previously
@@ -1574,41 +1748,69 @@ export async function getDepositAddress(
   }
 
   // Dynamic fallback for any token + chain supported by intents
-  if (!cfg && tokenSymbol) {
+  if (!cfg && (tokenSymbol || cleanContract)) {
+    let matched: OnchainToken | null = null;
     try {
       const allTokens = await getSupportedTokens(env);
-      const matched = allTokens.find(
-        (t: any) =>
-          ((t.chain || '').toLowerCase() === cleanChain || (t.blockchain || '').toLowerCase() === cleanChain) &&
-          t.symbol.toUpperCase() === tokenSymbol.toUpperCase()
-      );
-      if (matched) {
-        let destinationAsset = matched.defuse_asset_id;
-        const symUpper = matched.symbol.toUpperCase();
-        if (symUpper === 'USDC') destinationAsset = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
-        else if (symUpper === 'USDT') destinationAsset = 'nep141:usdt.tether-token.near';
-        else if (symUpper === 'NEAR') destinationAsset = 'nep141:wrap.near';
-        else if (symUpper === 'ETH') destinationAsset = 'nep141:eth.bridge.near';
-        else if (symUpper === 'BTC') destinationAsset = 'nep141:btc.omft.near';
-        else if (symUpper === 'SOL') destinationAsset = 'nep141:sol.omft.near';
-
-        cfg = {
-          key: directKey,
-          chain: cleanChain,
-          chainName: cleanChain.toUpperCase(),
-          token: matched.symbol,
-          originAsset: matched.defuse_asset_id,
-          destinationAsset,
-          amount: '100000',
-          minAmountFormatted: `0.10 ${matched.symbol}`,
-          minAmountUsd: '$0.10',
-          refundTo: nearAccount,
-          symbol: matched.symbol,
-          decimals: matched.decimals || 6,
-        };
+      // Prefer the pinned contract when the caller supplied one — the symbol
+      // alone is ambiguous for launchpad tokens.
+      if (cleanContract) {
+        matched =
+          allTokens.find(
+            (t: any) =>
+              ((t.chain || '').toLowerCase() === cleanChain ||
+                (t.blockchain || '').toLowerCase() === cleanChain) &&
+              (t.nearContractId || '').toLowerCase() === cleanContract
+          ) || null;
+      }
+      if (!matched && tokenSymbol) {
+        matched =
+          allTokens.find(
+            (t: any) =>
+              ((t.chain || '').toLowerCase() === cleanChain ||
+                (t.blockchain || '').toLowerCase() === cleanChain) &&
+              t.symbol.toUpperCase() === tokenSymbol.toUpperCase()
+          ) || null;
       }
     } catch (err) {
       console.warn('[nearRpc] dynamic token resolution failed:', err);
+    }
+
+    // The registry is a curated display head, so a Rhea-only NEAR meme can be
+    // missing from it. Resolve straight from the full Rhea list before giving
+    // up — this is what makes depositing `*.nearlytrade.near` assets possible.
+    if (!matched && cleanChain === 'near') {
+      try {
+        matched = await resolveRheaTokenForAccount(env, cleanContract || tokenSymbol, nearAccount);
+      } catch (err) {
+        console.warn('[nearRpc] rhea token resolution failed:', err);
+      }
+    }
+
+    if (matched) {
+      let destinationAsset = matched.defuse_asset_id;
+      const symUpper = matched.symbol.toUpperCase();
+      if (symUpper === 'USDC') destinationAsset = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+      else if (symUpper === 'USDT') destinationAsset = 'nep141:usdt.tether-token.near';
+      else if (symUpper === 'NEAR') destinationAsset = 'nep141:wrap.near';
+      else if (symUpper === 'ETH') destinationAsset = 'nep141:eth.bridge.near';
+      else if (symUpper === 'BTC') destinationAsset = 'nep141:btc.omft.near';
+      else if (symUpper === 'SOL') destinationAsset = 'nep141:sol.omft.near';
+
+      cfg = {
+        key: directKey,
+        chain: cleanChain,
+        chainName: cleanChain.toUpperCase(),
+        token: matched.symbol,
+        originAsset: matched.defuse_asset_id,
+        destinationAsset,
+        amount: '100000',
+        minAmountFormatted: `0.10 ${matched.symbol}`,
+        minAmountUsd: '$0.10',
+        refundTo: nearAccount,
+        symbol: matched.symbol,
+        decimals: matched.decimals || 6,
+      };
     }
   }
 
@@ -1697,7 +1899,89 @@ export async function getDepositAddress(
     };
   }
 
+  // 5. NEAR-native ingress for assets 1Click cannot quote.
+  //    The 1Click solver registry only knows a few hundred assets, so a
+  //    launchpad NEP-141 (e.g. `uptober.nearlytrade.near`) can never mint a
+  //    one-time address there. Rather than fail closed and leave the Receive
+  //    tab with no address and no deposit progress, fall back to the user's
+  //    own vault account, storage-register it on the FT contract so a plain
+  //    wallet transfer succeeds, and let the balance watcher detect arrival.
+  if (cfg.chain === 'near') {
+    await ensureNearFtDepositRegistered(env, cfg, nearAccount);
+    const vaultIngress: DepositAddress = {
+      chain: 'near',
+      chainName: 'NEAR',
+      address: nearAccount,
+      token: cfg.token,
+      minAmountFormatted: cfg.minAmountFormatted,
+      minAmountUsd: cfg.minAmountUsd,
+      isOneTime: false,
+    };
+    await saveDepositAddress(env.DB, nearAccount, vaultIngress, cfg.key);
+    return vaultIngress;
+  }
+
   return null;
+}
+
+/**
+ * Current plain FT balance of a single NEP-141 contract on an account, plus
+ * its metadata. Used by the Receive tab to turn "tokens arrived at the vault"
+ * into a real deposit status, which is the only detection available for
+ * assets the 1Click status API has never heard of.
+ */
+export async function probeNativeFtDeposit(
+  env: Env,
+  nearAccount: string,
+  contractId: string,
+  tokenSymbol?: string
+): Promise<Record<string, unknown> | null> {
+  const cleanContract = (contractId || '').trim().toLowerCase();
+  if (!nearAccount || !cleanContract) return null;
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+
+  let decimals = 18;
+  let symbol = (tokenSymbol || '').toUpperCase();
+  let icon: string | undefined;
+  let defuseAssetId = `nep141:${cleanContract}`;
+  try {
+    const meta = await getHeldTokenMeta(env, cleanContract);
+    if (meta) {
+      decimals = meta.decimals;
+      symbol = symbol || meta.symbol.toUpperCase();
+      icon = meta.icon || undefined;
+      defuseAssetId = `nep141:${meta.contractId}`;
+    }
+  } catch {}
+
+  let raw = 0n;
+  try {
+    raw = await getPlainFtBalance(rpcUrl, cleanContract, nearAccount);
+  } catch (err) {
+    console.warn('[nearRpc] probeNativeFtDeposit balance check failed:', err);
+  }
+
+  const amountFormatted = formatAmount(raw.toString(), decimals);
+  const settled = raw > 0n;
+
+  return {
+    status: settled ? 'SUCCESS' : 'PENDING_DEPOSIT',
+    depositedAmount: raw.toString(),
+    depositedAmountFormatted: amountFormatted,
+    // No oracle price for launchpad memes — never invent a USD figure.
+    depositedAmountUsd: '0',
+    amountInFormatted: amountFormatted,
+    amountOutFormatted: null,
+    timeEstimate: null,
+    txHashes: [],
+    updatedAt: new Date().toISOString(),
+    isSettled: settled,
+    source: 'native_ft_balance',
+    defuseAssetId,
+    ...(symbol ? { symbol } : {}),
+    ...(icon ? { icon } : {}),
+    nearContractId: cleanContract,
+  };
 }
 
 /**
@@ -1792,35 +2076,55 @@ export async function getIntentHistory(
   nearAccount: string,
   limit = 50
 ): Promise<IntentTx[]> {
+  let txs: IntentTx[] = [];
+
   // Try the 1Click API transaction history endpoint
   try {
     const url = `${env.NEAR_API_BASE}/v1/accounts/${encodeURIComponent(nearAccount)}/transactions?limit=${limit}`;
-    const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    const resp = await fetch(url, { headers: { Accept: 'application/json' } });
     if (resp.ok) {
-      const data = await resp.json() as any;
+      const data = (await resp.json()) as any;
       const list = Array.isArray(data) ? data : (data.transactions || data.items || []);
-      const txs = list.map((tx: any) => ({
-        // Real upstream transaction hash only — entries without one are
-        // dropped below rather than given a synthetic (fabricated) id.
-        id: tx.id || tx.hash || tx.transaction_hash || '',
-        intent_type: tx.type || tx.intent_type || 'transfer',
-        defuse_asset_id_in: tx.asset_in || tx.defuse_asset_id_in,
-        defuse_asset_id_out: tx.asset_out || tx.defuse_asset_id_out,
-        amount_in: tx.amount_in || tx.amount || '0',
-        amount_out: tx.amount_out || '0',
-        receiver_id: tx.receiver_id || tx.recipient || tx.to,
-        sender_id: tx.sender_id || tx.sender || tx.from,
-        block_height: Number(tx.block_height || 0),
-        block_timestamp: Number(tx.block_timestamp || tx.timestamp || 0),
-        status: tx.status === 'SUCCESS' || tx.status === 'success' ? 'success'
-          : tx.status === 'FAILED' || tx.status === 'failed' ? 'failed'
-          : 'pending',
-      })) as IntentTx[];
-      return txs.filter((tx) => !!tx.id);
+      txs = list
+        .map((tx: any) => ({
+          // Real upstream transaction hash only — entries without one are
+          // dropped below rather than given a synthetic (fabricated) id.
+          id: tx.id || tx.hash || tx.transaction_hash || '',
+          intent_type: tx.type || tx.intent_type || 'transfer',
+          defuse_asset_id_in: tx.asset_in || tx.defuse_asset_id_in,
+          defuse_asset_id_out: tx.asset_out || tx.defuse_asset_id_out,
+          amount_in: tx.amount_in || tx.amount || '0',
+          amount_out: tx.amount_out || '0',
+          receiver_id: tx.receiver_id || tx.recipient || tx.to,
+          sender_id: tx.sender_id || tx.sender || tx.from,
+          block_height: Number(tx.block_height || 0),
+          block_timestamp: Number(tx.block_timestamp || tx.timestamp || 0),
+          status:
+            tx.status === 'SUCCESS' || tx.status === 'success'
+              ? 'success'
+              : tx.status === 'FAILED' || tx.status === 'failed'
+                ? 'failed'
+                : 'pending',
+        }))
+        .filter((tx: any) => !!tx.id) as IntentTx[];
     }
   } catch (err) {
     console.warn('[nearRpc] getIntentHistory via 1click failed:', err);
   }
+
+  // NEP-141s sent straight to the vault never appear in intents history — they
+  // are recovered from the plain-balance snapshot diff taken by
+  // getPlainBalances. Best-effort only.
+  try {
+    const plainEvents = await getPlainFtDepositEvents(env, nearAccount);
+    for (const ev of plainEvents) {
+      if (!txs.some((t) => t.id === ev.id)) txs.push(ev);
+    }
+  } catch (plainErr) {
+    console.warn('[nearRpc] plain FT deposit events lookup failed:', plainErr);
+  }
+
+  if (txs.length > 0) return txs;
 
   // Fallback: query NEAR RPC directly for recent transactions on the intents contract
   try {
@@ -2530,10 +2834,144 @@ async function signAndBroadcastFunctionCall(opts: {
 }
 
 /**
+ * Plain (direct-to-vault) FT deposit events, derived by diffing the account's
+ * FT balances between polls. A NEP-141 sent straight to the user's vault is
+ * not an intents transaction and is not visible to the 1Click history API, so
+ * without this the "Shielded Inflow" widget could never count it.
+ *
+ * The snapshot is KV-backed per account; losing it degrades to "no events
+ * until the next increase", never to fabricated history.
+ */
+const PLAIN_FT_STATE_KEY = (account: string) => `plain_ft_state:v1:${account}`;
+const PLAIN_FT_STATE_TTL_S = 30 * 24 * 3600;
+const PLAIN_FT_EVENT_LIMIT = 25;
+
+interface PlainFtSnapshotEntry {
+  b: string;
+  h?: number;
+}
+
+interface PlainFtState {
+  at: number;
+  snap: Record<string, PlainFtSnapshotEntry>;
+  events: IntentTx[];
+}
+
+async function readPlainFtState(
+  env: Env,
+  nearAccount: string
+): Promise<PlainFtState | null> {
+  const cache = (env as any).CACHE;
+  if (!cache) return null;
+  try {
+    const raw = await cache.get(PLAIN_FT_STATE_KEY(nearAccount));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PlainFtState;
+    if (!parsed || typeof parsed !== 'object' || !parsed.snap) return null;
+    return {
+      at: Number(parsed.at) || 0,
+      snap: parsed.snap || {},
+      events: Array.isArray(parsed.events) ? parsed.events : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writePlainFtState(
+  env: Env,
+  nearAccount: string,
+  state: PlainFtState
+): Promise<void> {
+  const cache = (env as any).CACHE;
+  if (!cache) return;
+  try {
+    await cache.put(PLAIN_FT_STATE_KEY(nearAccount), JSON.stringify(state), {
+      expirationTtl: PLAIN_FT_STATE_TTL_S,
+    });
+  } catch (err) {
+    console.warn('[nearRpc] plain FT snapshot write failed:', err);
+  }
+}
+
+/**
+ * Compares the current held-FT set against the previous snapshot and appends a
+ * synthetic `deposit` event for every contract whose balance grew. A missing
+ * snapshot only seeds the baseline — it never back-fills events, because we
+ * cannot tell an incoming transfer from a balance that predates the account.
+ */
+export async function recordPlainFtDepositEvents(
+  env: Env,
+  nearAccount: string,
+  held: HeldFtBalance[],
+  resolveMeta: (contractId: string) => Promise<RheaTokenEntry | null>
+): Promise<IntentTx[]> {
+  if (!nearAccount || held.length === 0) return [];
+  const prev = await readPlainFtState(env, nearAccount);
+  const now = Date.now();
+  const nextSnap: Record<string, PlainFtSnapshotEntry> = {};
+  const newEvents: IntentTx[] = [];
+
+  for (const h of held) {
+    const key = h.contractId.toLowerCase();
+    nextSnap[key] = { b: h.balance, ...(h.lastUpdateBlockHeight ? { h: h.lastUpdateBlockHeight } : {}) };
+    if (!prev) continue;
+
+    const before = BigInt(prev.snap[key]?.b || '0');
+    let after: bigint;
+    try {
+      after = BigInt(h.balance);
+    } catch {
+      continue;
+    }
+    if (after <= before) continue;
+
+    const meta = await resolveMeta(h.contractId);
+    if (!meta) continue; // no metadata -> nothing sensible to render
+
+    const delta = (after - before).toString();
+    const height = h.lastUpdateBlockHeight || 0;
+    newEvents.push({
+      id: `ft:${key}:${height}`,
+      intent_type: 'deposit',
+      defuse_asset_id_in: `nep141:${h.contractId}`,
+      amount_in: formatAmount(delta, meta.decimals),
+      receiver_id: nearAccount,
+      block_height: height,
+      block_timestamp: now,
+      status: 'success',
+    });
+  }
+
+  const events = [...newEvents, ...(prev?.events || [])]
+    .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i)
+    .slice(0, PLAIN_FT_EVENT_LIMIT);
+
+  await writePlainFtState(env, nearAccount, { at: now, snap: nextSnap, events });
+  return events;
+}
+
+/** Events recorded for an account by `recordPlainFtDepositEvents`. */
+export async function getPlainFtDepositEvents(
+  env: Env,
+  nearAccount: string
+): Promise<IntentTx[]> {
+  if (!nearAccount) return [];
+  const state = await readPlainFtState(env, nearAccount);
+  return state?.events || [];
+}
+
+/**
  * All plain balances held directly on the user's pk sub-account — i.e. tokens
  * someone sent straight to the account (the Receive flow) before any deposit
- * into intents. Scans the registry's NEP-141 contracts in parallel chunks plus
- * native NEAR; KV-cached for 20s to keep /balances snappy.
+ * into intents.
+ *
+ * Two sources are unioned, both additive:
+ *  1. the registry's NEP-141 contracts (unchanged legacy scan), and
+ *  2. FastNEAR's full FT index for the account, which is the only way a
+ *     user-held launchpad meme (absent from every registry) becomes visible.
+ *
+ * KV-cached for 20s to keep /balances snappy.
  */
 export async function getPlainBalances(
   env: Env,
@@ -2553,6 +2991,7 @@ export async function getPlainBalances(
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
     const tokens = (await getSupportedTokens(env)).filter((t) => t.nearContractId);
     const out: IntentAccountBalance[] = [];
+    const coveredContracts = new Set<string>();
     const chunkSize = 25;
     for (let i = 0; i < tokens.length; i += chunkSize) {
       const chunk = tokens.slice(i, i + chunkSize);
@@ -2561,8 +3000,9 @@ export async function getPlainBalances(
       );
       for (let j = 0; j < chunk.length; j++) {
         const bal = results[j];
-        if (bal <= 0n) continue;
         const t = chunk[j];
+        coveredContracts.add((t.nearContractId as string).toLowerCase());
+        if (bal <= 0n) continue;
         out.push({
           defuse_asset_id: t.defuse_asset_id || `nep141:${t.nearContractId}`,
           symbol: t.symbol,
@@ -2572,6 +3012,55 @@ export async function getPlainBalances(
           nearContractId: t.nearContractId as string,
           ...(t.icon ? { icon: t.icon } : {}),
         });
+      }
+    }
+
+    // Held-token pass: anything the account holds that the registry scan never
+    // looked at. FastNEAR is the discovery source; the Rhea list supplies the
+    // metadata. Contracts with no describable metadata are skipped rather than
+    // rendered as a raw address. The list is resolved once — accounts can hold
+    // thousands of FTs and a per-token lookup would be O(n·m).
+    const held = await fetchAccountFtBalances(nearAccount);
+    if (held.length > 0) {
+      const rheaByContract = new Map<string, RheaTokenEntry>();
+      try {
+        for (const e of await getRheaTokens(env)) {
+          rheaByContract.set(e.contractId.toLowerCase(), e);
+        }
+      } catch (metaErr) {
+        console.warn('[nearRpc] rhea metadata unavailable for held tokens:', metaErr);
+      }
+
+      for (const h of held) {
+        const cl = h.contractId.toLowerCase();
+        if (coveredContracts.has(cl)) continue;
+        let amount: bigint;
+        try {
+          amount = BigInt(h.balance);
+        } catch {
+          continue;
+        }
+        if (amount <= 0n) continue;
+        const meta = rheaByContract.get(cl);
+        if (!meta) continue;
+        coveredContracts.add(cl);
+        out.push({
+          defuse_asset_id: `nep141:${meta.contractId}`,
+          symbol: meta.symbol.toUpperCase(),
+          amount: amount.toString(),
+          amountFormatted: formatAmount(amount.toString(), meta.decimals),
+          decimals: meta.decimals,
+          nearContractId: meta.contractId,
+          ...(meta.icon ? { icon: meta.icon } : {}),
+        });
+      }
+
+      try {
+        await recordPlainFtDepositEvents(env, nearAccount, held, async (contractId) =>
+          rheaByContract.get(contractId.toLowerCase()) ?? null
+        );
+      } catch (eventErr) {
+        console.warn('[nearRpc] plain FT deposit events skipped:', eventErr);
       }
     }
 
