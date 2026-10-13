@@ -286,7 +286,20 @@ export interface HeldFtBalance {
 export async function fetchAccountFtBalances(
   nearAccount: string
 ): Promise<HeldFtBalance[]> {
-  if (!nearAccount) return [];
+  const strict = await fetchAccountFtBalancesStrict(nearAccount);
+  return strict ?? [];
+}
+
+/**
+ * Same as `fetchAccountFtBalances`, but distinguishes "indexer says the account
+ * holds nothing" (`[]`) from "the fetch failed" (`null`). Callers that would
+ * otherwise replace a real scan with an empty result must not confuse the two —
+ * an empty snapshot would be written back and later read as a mass deposit.
+ */
+export async function fetchAccountFtBalancesStrict(
+  nearAccount: string
+): Promise<HeldFtBalance[] | null> {
+  if (!nearAccount) return null;
   try {
     const resp = await fetch(
       `${FASTNEAR_ACCOUNT_FT_URL}/${encodeURIComponent(nearAccount)}/ft`,
@@ -312,7 +325,7 @@ export async function fetchAccountFtBalances(
     return out;
   } catch (err) {
     console.warn('[nearRpc] fastnear FT balance fetch failed:', err);
-    return [];
+    return null;
   }
 }
 
@@ -545,6 +558,29 @@ function parseDefuseAssetId(id: string): { chain: string; contractId: string } {
  * This is the authoritative source — no hardcoded lists.
  */
 export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
+  if (supportedTokensMem && Date.now() - supportedTokensMem.at < SUPPORTED_TOKENS_MEM_TTL_MS) {
+    return [...supportedTokensMem.tokens];
+  }
+  const tokens = await loadSupportedTokens(env);
+  if (Array.isArray(tokens) && tokens.length > 0) {
+    supportedTokensMem = { at: Date.now(), tokens };
+  }
+  return [...tokens];
+}
+
+/**
+ * Per-isolate memo of the merged registry.
+ *
+ * One request typically resolves the registry several times (intent balances,
+ * plain balances, virtual deltas). Each resolution used to cost 3 external
+ * fetches — 1Click, CoinGecko and Rhea — which both burned most of Workers
+ * Free's 50-subrequest budget and hammered CoinGecko hard enough to get 429s,
+ * leaving every token without a price.
+ */
+let supportedTokensMem: { at: number; tokens: OnchainToken[] } | null = null;
+const SUPPORTED_TOKENS_MEM_TTL_MS = 30_000;
+
+async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
   const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
 
   // 1. Primary: query 1Click Defuse live token registry with live USD prices
@@ -2962,14 +2998,24 @@ export async function getPlainFtDepositEvents(
 }
 
 /**
+ * Upper bound on the secondary registry scan that patches FastNEAR's index lag
+ * for high-value assets (wNEAR, USDC, ETH, …). Chosen so that a full
+ * `/api/onchain/balances` request stays comfortably inside Workers Free's
+ * 50-subrequest budget.
+ */
+const PLAIN_MAJOR_SCAN_MAX = 8;
+/** Bound on the degraded-path scan when FastNEAR itself is unreachable. */
+const PLAIN_SCAN_FALLBACK_MAX = 24;
+
+/**
  * All plain balances held directly on the user's pk sub-account — i.e. tokens
  * someone sent straight to the account (the Receive flow) before any deposit
  * into intents.
  *
- * Two sources are unioned, both additive:
- *  1. the registry's NEP-141 contracts (unchanged legacy scan), and
- *  2. FastNEAR's full FT index for the account, which is the only way a
- *     user-held launchpad meme (absent from every registry) becomes visible.
+ * FastNEAR's account FT index is the primary source: one subrequest describes
+ * every NEP-141 the account holds, including launchpad memes that appear in no
+ * registry. A small capped registry scan covers index lag; a bounded fallback
+ * scan runs only when the indexer is down.
  *
  * KV-cached for 20s to keep /balances snappy.
  */
@@ -2989,88 +3035,139 @@ export async function getPlainBalances(
 
   try {
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
-    const tokens = (await getSupportedTokens(env)).filter((t) => t.nearContractId);
     const out: IntentAccountBalance[] = [];
     const coveredContracts = new Set<string>();
-    const chunkSize = 25;
-    for (let i = 0; i < tokens.length; i += chunkSize) {
-      const chunk = tokens.slice(i, i + chunkSize);
-      const results = await Promise.all(
-        chunk.map((t) => getPlainFtBalance(rpcUrl, t.nearContractId as string, nearAccount))
+
+    // Metadata is resolved ONCE — accounts can hold thousands of FTs and a
+    // per-token lookup would be O(n·m).
+    const rheaByContract = new Map<string, RheaTokenEntry>();
+    try {
+      for (const e of await getRheaTokens(env)) {
+        rheaByContract.set(e.contractId.toLowerCase(), e);
+      }
+    } catch (metaErr) {
+      console.warn('[nearRpc] rhea metadata unavailable for held tokens:', metaErr);
+    }
+
+    // The registry is memoized, so this is free on the hot path and is also
+    // the metadata source for held assets the Rhea list does not describe.
+    const registry = await getSupportedTokens(env);
+    const regByContract = new Map<string, OnchainToken>();
+    for (const t of registry) {
+      if (t.nearContractId) regByContract.set(t.nearContractId.toLowerCase(), t);
+    }
+
+    /** wNEAR is merged into the single NEAR row at the end, never listed twice. */
+    let wNearHeld = 0n;
+
+    const pushHeld = (contractId: string, raw: string): void => {
+      const cl = contractId.toLowerCase();
+      if (coveredContracts.has(cl)) return;
+      if (cl === 'wrap.near') {
+        const v = BigInt(raw);
+        if (v > 0n) wNearHeld += v;
+        coveredContracts.add(cl);
+        return;
+      }
+      let amount: bigint;
+      try {
+        amount = BigInt(raw);
+      } catch {
+        return;
+      }
+      if (amount <= 0n) return;
+
+      const rheaMeta = rheaByContract.get(cl);
+      const regMeta = regByContract.get(cl);
+      const symbol = (rheaMeta?.symbol || regMeta?.symbol || '').trim();
+      if (!symbol) return; // no metadata -> never render a raw address as a ticker
+      const decimals = rheaMeta?.decimals ?? regMeta?.decimals ?? 18;
+      const icon = (regMeta?.icon || rheaMeta?.icon || undefined) as string | undefined;
+
+      coveredContracts.add(cl);
+      out.push({
+        defuse_asset_id: regMeta?.defuse_asset_id || `nep141:${contractId}`,
+        symbol: symbol.toUpperCase(),
+        amount: amount.toString(),
+        amountFormatted: formatAmount(amount.toString(), decimals),
+        decimals,
+        nearContractId: contractId,
+        ...(icon ? { icon } : {}),
+      });
+    };
+
+    // ── 1. FastNEAR: ONE subrequest returns every NEP-141 the account holds.
+    //
+    // This replaces a registry-wide `ft_balance_of` fan-out of ~490 fetches.
+    // Workers Free allows 50 subrequests per invocation, so every call after
+    // the budget ran out silently resolved to 0 — held launchpad tokens (which
+    // are absent from the registry anyway) could never appear, and the request
+    // reported success with partial data.
+    const held = await fetchAccountFtBalancesStrict(nearAccount);
+
+    if (held) {
+      for (const h of held) pushHeld(h.contractId, h.balance);
+
+      // Index lag guard: verify a handful of high-value registry assets that
+      // FastNEAR has not reported yet, so a just-arrived wNEAR/USDC transfer
+      // is not missing for an index cycle. Capped to stay inside the budget.
+      const missing = registry
+        .filter((t) => t.nearContractId && !coveredContracts.has(t.nearContractId.toLowerCase()))
+        .slice(0, PLAIN_MAJOR_SCAN_MAX);
+      if (missing.length > 0) {
+        const scanned = await Promise.all(
+          missing.map((t) => getPlainFtBalance(rpcUrl, t.nearContractId as string, nearAccount))
+        );
+        for (let i = 0; i < missing.length; i++) {
+          if (scanned[i] <= 0n) continue;
+          pushHeld(missing[i].nearContractId as string, scanned[i].toString());
+        }
+      }
+    } else {
+      // FastNEAR unreachable — fall back to a BOUNDED registry scan so the
+      // request still returns something instead of exhausting the subrequest
+      // budget and reporting an empty balance set.
+      const tokens = registry.filter((t) => t.nearContractId).slice(0, PLAIN_SCAN_FALLBACK_MAX);
+      const scanned = await Promise.all(
+        tokens.map((t) => getPlainFtBalance(rpcUrl, t.nearContractId as string, nearAccount))
       );
-      for (let j = 0; j < chunk.length; j++) {
-        const bal = results[j];
-        const t = chunk[j];
-        coveredContracts.add((t.nearContractId as string).toLowerCase());
-        if (bal <= 0n) continue;
-        out.push({
-          defuse_asset_id: t.defuse_asset_id || `nep141:${t.nearContractId}`,
-          symbol: t.symbol,
-          amount: bal.toString(),
-          amountFormatted: formatAmount(bal.toString(), t.decimals || 18),
-          decimals: t.decimals || 18,
-          nearContractId: t.nearContractId as string,
-          ...(t.icon ? { icon: t.icon } : {}),
-        });
+      for (let i = 0; i < tokens.length; i++) {
+        if (scanned[i] <= 0n) continue;
+        pushHeld(tokens[i].nearContractId as string, scanned[i].toString());
       }
     }
 
-    // Held-token pass: anything the account holds that the registry scan never
-    // looked at. FastNEAR is the discovery source; the Rhea list supplies the
-    // metadata. Contracts with no describable metadata are skipped rather than
-    // rendered as a raw address. The list is resolved once — accounts can hold
-    // thousands of FTs and a per-token lookup would be O(n·m).
-    const held = await fetchAccountFtBalances(nearAccount);
-    if (held.length > 0) {
-      const rheaByContract = new Map<string, RheaTokenEntry>();
-      try {
-        for (const e of await getRheaTokens(env)) {
-          rheaByContract.set(e.contractId.toLowerCase(), e);
-        }
-      } catch (metaErr) {
-        console.warn('[nearRpc] rhea metadata unavailable for held tokens:', metaErr);
-      }
-
-      for (const h of held) {
-        const cl = h.contractId.toLowerCase();
-        if (coveredContracts.has(cl)) continue;
-        let amount: bigint;
-        try {
-          amount = BigInt(h.balance);
-        } catch {
-          continue;
-        }
-        if (amount <= 0n) continue;
-        const meta = rheaByContract.get(cl);
-        if (!meta) continue;
-        coveredContracts.add(cl);
-        out.push({
-          defuse_asset_id: `nep141:${meta.contractId}`,
-          symbol: meta.symbol.toUpperCase(),
-          amount: amount.toString(),
-          amountFormatted: formatAmount(amount.toString(), meta.decimals),
-          decimals: meta.decimals,
-          nearContractId: meta.contractId,
-          ...(meta.icon ? { icon: meta.icon } : {}),
-        });
-      }
-
+    // Snapshot diffing only makes sense against a complete held set. If the
+    // indexer failed we would otherwise write an empty snapshot and later read
+    // the whole wallet back as one giant fabricated deposit.
+    if (held) {
       try {
         await recordPlainFtDepositEvents(env, nearAccount, held, async (contractId) =>
-          rheaByContract.get(contractId.toLowerCase()) ?? null
+          rheaByContract.get(contractId.toLowerCase()) ??
+          (regByContract.get(contractId.toLowerCase())
+            ? {
+                contractId,
+                symbol: regByContract.get(contractId.toLowerCase())!.symbol,
+                name: regByContract.get(contractId.toLowerCase())!.name,
+                decimals: regByContract.get(contractId.toLowerCase())!.decimals,
+                icon: '',
+              }
+            : null)
         );
       } catch (eventErr) {
         console.warn('[nearRpc] plain FT deposit events skipped:', eventErr);
       }
     }
 
+    // Native NEAR is held outside any FT contract, so it has no FastNEAR row.
     const native = await getPlainNearBalance(rpcUrl, nearAccount);
-    if (native > 0n) {
+    const totalNear = native + wNearHeld;
+    if (totalNear > 0n) {
       out.push({
         defuse_asset_id: 'nep141:wrap.near',
         symbol: 'NEAR',
-        amount: native.toString(),
-        amountFormatted: formatAmount(native.toString(), 24),
+        amount: totalNear.toString(),
+        amountFormatted: formatAmount(totalNear.toString(), 24),
         decimals: 24,
         nearContractId: 'wrap.near',
       });

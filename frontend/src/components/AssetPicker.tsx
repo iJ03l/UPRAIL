@@ -11,6 +11,11 @@ interface AssetPickerProps {
   selectedToken: Token;
   onSelectToken: (token: Token) => void;
   disabled?: boolean;
+  /**
+   * Locks the picker to a single rail (the tab strip is hidden and search
+   * results are filtered by it too). Omit for the default multi-tab picker.
+   */
+  tab?: 'popular' | 'stables' | 'l1' | 'memes' | 'all';
 }
 
 const MEME_SYMBOLS_SET = new Set([
@@ -42,11 +47,12 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
   selectedToken,
   onSelectToken,
   disabled = false,
+  tab,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'popular' | 'stables' | 'l1' | 'memes' | 'all'>(
-    'popular'
+    tab ?? 'popular'
   );
   // Rhea long tail: the curated list cannot hold 6k launchpad tokens, so a
   // typed query also searches the server list and merges matches in.
@@ -104,14 +110,17 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
 
       // If searching, check symbol, name, chain, or contract id (so a pasted
       // `*.nearlytrade.near` contract resolves even with a generic symbol).
+      // A locked rail still applies its own filter to search hits — otherwise
+      // typing "usdc" on the Memes rail would surface a stablecoin.
       if (sLower) {
-        return (
+        const matchesQuery =
           symLower.includes(sLower) ||
           nameLower.includes(sLower) ||
           chainLower.includes(sLower) ||
           (t.nearContractId && t.nearContractId.toLowerCase().includes(sLower)) ||
-          (t.badge && t.badge.toLowerCase().includes(sLower))
-        );
+          (t.badge && t.badge.toLowerCase().includes(sLower));
+        if (!matchesQuery) return false;
+        if (!tab) return true;
       }
 
       // Tab-based filtering when no active search text
@@ -237,7 +246,8 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
               </button>
             </div>
 
-            {/* Filter Tabs */}
+            {/* Filter Tabs — hidden when the picker is locked to one rail */}
+            {!tab && (
             <div className="flex p-0.5 rounded-xl bg-stone-100 border border-stone-200 text-[10px] sm:text-[11px] font-mono font-bold overflow-x-auto no-scrollbar">
               <button
                 type="button"
@@ -295,6 +305,7 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
                 All
               </button>
             </div>
+            )}
 
             {/* Search Input */}
             <div className="relative">

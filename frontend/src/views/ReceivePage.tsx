@@ -109,22 +109,56 @@ function useDepositPoll(opts: {
   useEffect(() => {
     if (!address || settled) return;
 
+    // NEAR vault-ingress probes answer with the account's CUMULATIVE FT
+    // balance, so the first reading is whatever was already held — not a
+    // deposit. Treating that as "arrived" made the tab celebrate a deposit
+    // that never happened and re-fetch balances every 2.5s forever. Only a
+    // later increase proves new funds actually landed.
+    const isCumulative = Boolean(contract);
+    let baseline: bigint | null = null;
+    // The NEAR tab polls a vault that may sit idle for hours. Re-rendering on
+    // an identical payload every 2.5s is pure churn, so the status callback
+    // only fires when something the UI can show has actually changed.
+    let lastSignature = '';
+
+    const toRaw = (v?: string): bigint => {
+      try {
+        return BigInt((v || '').trim() || '0');
+      } catch {
+        return 0n;
+      }
+    };
+
     const checkStatus = async () => {
       try {
-        const o0 = optsRef.current;
-        const status = await fetchDepositStatus(address, { contract: o0.contract, token: o0.token });
         const o = optsRef.current;
-        o.onStatus(status);
+        const status = await fetchDepositStatus(address, { contract: o.contract, token: o.token });
+        const signature = `${status.status}|${status.depositedAmountFormatted}|${status.isSettled}|${status.error || ''}`;
+        if (signature !== lastSignature) {
+          lastSignature = signature;
+          o.onStatus(status);
+        }
 
-        const depAmt = parseFloat(status.depositedAmountFormatted || '0');
-        if (status.status === 'SUCCESS' || depAmt > 0) {
-          // Trigger balance and history updates in the app immediately
+        let isNewDeposit: boolean;
+        if (isCumulative) {
+          const raw = toRaw(status.depositedAmount);
+          if (baseline === null) {
+            baseline = raw;
+            isNewDeposit = false;
+          } else {
+            isNewDeposit = raw > baseline;
+            if (isNewDeposit) baseline = raw;
+          }
+        } else {
+          const depAmt = parseFloat(status.depositedAmountFormatted || '0');
+          isNewDeposit = status.status === 'SUCCESS' || status.isSettled === true || depAmt > 0;
+        }
+
+        if (isNewDeposit) {
+          // Only refetch on a real arrival — a settled tab must not poll.
           o.refreshBalances();
           o.refreshHistory();
-
-          if (status.status === 'SUCCESS' || status.isSettled) {
-            o.onSettled();
-          }
+          o.onSettled();
         }
       } catch (err) {
         // Silent poll error
@@ -454,6 +488,11 @@ export const ReceivePage: React.FC = () => {
   };
 
   const handleGenerateFreshNear = () => {
+    // Clear the settled banner so polling restarts with a fresh baseline —
+    // otherwise the previous deposit stays celebrated and no new arrival is
+    // ever noticed while the tab is open.
+    setNearSettledSuccess(false);
+    setNearDepositStatus(null);
     loadNearAddress(true);
   };
 
@@ -1180,6 +1219,7 @@ export const ReceivePage: React.FC = () => {
                   tokens={nearPickerTokens}
                   selectedToken={nearAsset}
                   onSelectToken={handleSelectNearToken}
+                  tab="memes"
                 />
               </div>
             </div>

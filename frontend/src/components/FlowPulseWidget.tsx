@@ -10,14 +10,24 @@ import {
   Lock,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
+import { formatUsd } from '../lib/api';
 import type { PaymentIntent, Token } from '../types';
 
 interface FlowPulseWidgetProps {
   history?: PaymentIntent[];
   transactions?: any[];
-  /** Registry used to price raw onchain amounts — an unpriced asset contributes $0, never its face amount. */
+  /**
+   * Registry used to price raw onchain amounts. An asset with no live price
+   * contributes nothing to the total and is reported separately — a token
+   * amount is never added as if it were dollars, and a total we cannot compute
+   * renders as an em dash rather than a confident $0.00.
+   */
   tokens?: Token[];
 }
+
+const STABLE_SYMBOLS = new Set([
+  'USDC', 'USDT', 'DAI', 'FRAX', 'USDD', 'USDE', 'USDG', 'FDUSD',
+]);
 
 export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
   history = [],
@@ -33,51 +43,94 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
 
     const priceById = new Map<string, number>();
     const priceBySymbol = new Map<string, number>();
+    const tokenByKey = new Map<string, Token>();
     for (const t of tokens || []) {
-      if (typeof t.priceUsd === 'number' && t.priceUsd > 0) {
-        if (t.id) priceById.set(t.id.toLowerCase(), t.priceUsd);
-        if (t.nearContractId) priceById.set(t.nearContractId.toLowerCase(), t.priceUsd);
-        if (t.symbol) priceBySymbol.set(t.symbol.toUpperCase(), t.priceUsd);
+      for (const k of [t.id, t.nearContractId]) {
+        if (k) tokenByKey.set(k.toLowerCase(), t);
       }
+      if (typeof t.priceUsd !== 'number' || !(t.priceUsd > 0)) continue;
+      if (t.id) priceById.set(t.id.toLowerCase(), t.priceUsd);
+      if (t.nearContractId) priceById.set(t.nearContractId.toLowerCase(), t.priceUsd);
+      if (t.symbol) priceBySymbol.set(t.symbol.toUpperCase(), t.priceUsd);
     }
 
-    // Raw token amounts are not dollars. Previously an unpriced meme deposit
-    // was added as-is, so receiving 700000 UPTOBER inflated inflow by $700k.
-    const toUsd = (tx: any, amt: number): number => {
-      if (!amt || !isFinite(amt)) return 0;
-      const candidates = [
-        tx.defuse_asset_id,
-        tx.asset_in,
-        tx.nearContractId,
-        tx.contract_id,
-      ]
-        .filter(Boolean)
-        .map((v: string) => String(v).toLowerCase());
-      for (const c of candidates) {
-        const p = priceById.get(c);
-        if (typeof p === 'number') return amt * p;
+    const assetKeys = (tx: any): string[] => {
+      const raw = [
+        tx?.defuse_asset_id_in,
+        tx?.defuse_asset_id_out,
+        tx?.defuse_asset_id,
+        tx?.asset_in,
+        tx?.asset_out,
+        tx?.nearContractId,
+        tx?.contract_id,
+      ].filter(Boolean) as string[];
+      const keys = new Set<string>();
+      for (const v of raw) {
+        const s = String(v).toLowerCase();
+        keys.add(s);
+        // `nep141:<contract>` also indexes by the bare contract id.
+        if (s.startsWith('nep141:')) keys.add(s.slice(7));
       }
-      const sym = String(tx.symbol || tx.token_symbol || '').toUpperCase();
-      const p = sym ? priceBySymbol.get(sym) : undefined;
-      return typeof p === 'number' ? amt * p : 0;
+      return [...keys];
+    };
+
+    /** `null` = "no live price for this asset", never a silent zero. */
+    const usdFor = (keys: string[], symbol?: string): number | null => {
+      for (const k of keys) {
+        const p = priceById.get(k);
+        if (typeof p === 'number' && p > 0) return p;
+      }
+      const sym = (symbol || '').toUpperCase();
+      if (sym) {
+        const p = priceBySymbol.get(sym);
+        if (typeof p === 'number' && p > 0) return p;
+        // A dollar is a dollar even when the feed is rate-limiting.
+        if (STABLE_SYMBOLS.has(sym)) return 1;
+      }
+      return null;
+    };
+
+    const symbolFor = (tx: any): string => {
+      const keys = assetKeys(tx);
+      for (const k of keys) {
+        const t = tokenByKey.get(k);
+        if (t?.symbol) return t.symbol;
+      }
+      return String(tx?.symbol || tx?.token_symbol || '').toUpperCase();
     };
 
     let inflowCount = 0;
-    let inflowUsd = 0;
+    let inflowPriced = 0;
+    let inflowUnpriced = 0;
     let egressCount = 0;
-    let egressUsd = 0;
+    let egressPriced = 0;
+    let egressUnpriced = 0;
+
+    const add = (dir: 'in' | 'out', usd: number | null): void => {
+      if (dir === 'in') {
+        inflowCount++;
+        if (usd === null) inflowUnpriced++;
+        else inflowPriced += usd;
+      } else {
+        egressCount++;
+        if (usd === null) egressUnpriced++;
+        else egressPriced += usd;
+      }
+    };
 
     // 1. Calculate from user payment intents
     if (Array.isArray(history)) {
       for (const item of history) {
         const amt = parseFloat(item.amount) || 0;
-        const price = item.token?.priceUsd;
-        const usd =
-          typeof item.amountUsd === 'number' && item.amountUsd > 0
-            ? item.amountUsd
-            : typeof price === 'number' && price > 0
-              ? amt * price
-              : 0;
+        let usd: number | null = null;
+        if (typeof item.amountUsd === 'number' && item.amountUsd > 0) {
+          usd = item.amountUsd;
+        } else if (typeof item.token?.priceUsd === 'number' && item.token.priceUsd > 0 && amt > 0) {
+          usd = amt * item.token.priceUsd;
+        } else {
+          const p = usdFor([], item.token?.symbol);
+          if (p !== null && amt > 0) usd = amt * p;
+        }
 
         const isRecipient =
           Boolean(userHandle) &&
@@ -89,15 +142,12 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
           item.senderHandle.toLowerCase() === userHandle;
 
         if (isRecipient) {
-          inflowCount++;
-          inflowUsd += usd;
+          add('in', usd);
         } else if (isSender) {
-          egressCount++;
-          egressUsd += usd;
+          add('out', usd);
         } else if (!userHandle) {
           // If session is still hydrating, default to outflow if item exists
-          egressCount++;
-          egressUsd += usd;
+          add('out', usd);
         }
       }
     }
@@ -113,6 +163,8 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             tx.amount_out ||
             '0'
           ) || 0;
+        const price = usdFor(assetKeys(tx), symbolFor(tx));
+        const usd = price !== null && amt > 0 ? amt * price : null;
         const isDeposit =
           tx.type === 'deposit' ||
           tx.type === 'receive' ||
@@ -127,25 +179,26 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
           tx.sender_id.toLowerCase() === nearAccount;
 
         if (isDeposit || isReceiver) {
-          inflowCount++;
-          inflowUsd += toUsd(tx, amt);
+          add('in', usd);
         } else if (
           isSender ||
           tx.type === 'send' ||
           tx.type === 'withdraw' ||
           tx.intent_type === 'transfer'
         ) {
-          egressCount++;
-          egressUsd += toUsd(tx, amt);
+          add('out', usd);
         }
       }
     }
 
     return {
       inflowCount,
-      inflowUsd,
+      // Nothing priceable at all -> unknown, not "$0.00".
+      inflowUsd: inflowUnpriced > 0 && inflowPriced === 0 ? null : inflowPriced,
+      inflowUnpriced,
       egressCount,
-      egressUsd,
+      egressUsd: egressUnpriced > 0 && egressPriced === 0 ? null : egressPriced,
+      egressUnpriced,
     };
   }, [history, transactions, tokens, user]);
 
@@ -180,15 +233,17 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
           {/* Big Dollar Amount */}
           <div className="space-y-1 pt-1">
             <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
-              ${stats.inflowUsd.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
+              {formatUsd(stats.inflowUsd)}
             </div>
             <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span>Zero mempool exposure · Settled via NEAR Intents</span>
             </div>
+            {stats.inflowUnpriced > 0 && (
+              <div className="text-[11px] font-mono text-amber-600">
+                +{stats.inflowUnpriced} without a live price
+              </div>
+            )}
           </div>
         </div>
 
@@ -236,15 +291,17 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
           {/* Big Dollar Amount */}
           <div className="space-y-1 pt-1">
             <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
-              ${stats.egressUsd.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
+              {formatUsd(stats.egressUsd)}
             </div>
             <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
               <span>Biometric passkey signature required · 5% protocol fee</span>
             </div>
+            {stats.egressUnpriced > 0 && (
+              <div className="text-[11px] font-mono text-amber-600">
+                +{stats.egressUnpriced} without a live price
+              </div>
+            )}
           </div>
         </div>
 
