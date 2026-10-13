@@ -184,7 +184,11 @@ export function usePayments() {
       }
       try {
         setIsQuoting(true);
-        const q = await api.getQuote(tokenId, amount);
+        // Held launchpad assets are not in the curated token list, so pass the
+        // already-resolved object through. Without it getQuote cannot match the
+        // id and would have to refuse rather than guess a different asset.
+        const known = tokens.find((t) => t.id === tokenId);
+        const q = await api.getQuote(tokenId, amount, 'escrow', known);
         setQuote(q);
       } catch (err) {
         console.error('Quote calculation error:', err);
@@ -192,7 +196,7 @@ export function usePayments() {
         setIsQuoting(false);
       }
     },
-    []
+    [tokens]
   );
 
   // Send confidential payment (authorized by device Passkey)
@@ -233,6 +237,7 @@ export function usePayments() {
         amount,
         memo,
         passkeyAssertion: assertion,
+        token: selectedToken,
       });
 
       setCreatedPayment(payment);

@@ -120,6 +120,12 @@ export interface CreatePaymentRequest {
   passkeyAssertion?: unknown;
   quoteSignature?: string;
   depositAddress?: string;
+  /**
+   * The already-resolved token object. Held launchpad assets are absent from
+   * the curated token list, so without it the quote for such an asset cannot
+   * be resolved and the send would move the wrong token.
+   */
+  token?: Token;
 }
 
 export interface PasskeyCredential {

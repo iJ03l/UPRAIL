@@ -144,7 +144,7 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
     amountUsd: price === null ? null : numAmount * price,
     fee,
     feeUsd: price === null ? null : (parseFloat(fee) || 0) * price,
-    feeRecipient: p.fee_recipient || 'fees.uprail.near',
+    feeRecipient: p.fee_recipient || 'escrow.uprail.near',
     inviteCode: p.invite_code || undefined,
     memo: p.memo || '',
     status: mapBackendStatus(p.status),
@@ -178,6 +178,43 @@ export function tokenUsdPrice(token: { symbol?: string; priceUsd?: number } | nu
 /** True when a live price exists — use it to decide between $ and —. */
 export function hasUsdPrice(token: { priceUsd?: number } | null | undefined): boolean {
   return tokenUsdPrice(token) !== null;
+}
+
+/**
+ * Resolve the asset a quote is for.
+ *
+ * A quote priced and labelled for the wrong token is worse than no quote at
+ * all: `createPayment` sends exactly `q.token.id`, so a silent fallback to
+ * `tokens[0]` (which the priority sort puts NEAR) would quote, label and then
+ * move a different asset than the one the user picked. Held launchpad tokens
+ * such as UPTOBER are absent from the curated head — the Rhea merge caps the
+ * list and scores shortest tickers first — so they only ever resolve through
+ * the caller's already-resolved token.
+ *
+ * The caller's token is therefore authoritative when supplied; an id that
+ * resolves to nothing is a hard error rather than a plausible-looking guess.
+ */
+async function resolveQuoteToken(tokenId: string, knownToken?: Token): Promise<Token> {
+  const needle = (tokenId || '').trim().toLowerCase();
+  const matches = (t: Token): boolean =>
+    t.id.toLowerCase() === needle || (t.symbol || '').toLowerCase() === needle;
+
+  if (knownToken && matches(knownToken)) return knownToken;
+
+  try {
+    const tokens = await api.getTokens();
+    const found = tokens.find(matches);
+    if (found) return found;
+  } catch (err) {
+    console.warn('[api] token list unavailable while resolving quote asset:', err);
+  }
+
+  // Nothing resolved — including the caller's token, which would mean the
+  // id and the object disagree. Falling back to tokens[0] here is what used
+  // to quote and send held launchpad assets as wNEAR, so refuse instead.
+  throw new Error(
+    `Unknown asset "${tokenId}" — refusing to quote a different token than the one selected`
+  );
 }
 
 /**
@@ -579,11 +616,14 @@ export const api = {
   },
 
   // Payment quote calculation with cryptographic backend binding
-  // Payment quote calculation with cryptographic backend binding
-  async getQuote(tokenId: string, amount: string, recipientHandle = 'escrow'): Promise<PaymentQuote> {
+  async getQuote(
+    tokenId: string,
+    amount: string,
+    recipientHandle = 'escrow',
+    knownToken?: Token
+  ): Promise<PaymentQuote> {
     const numAmount = parseFloat(amount) || 0;
-    const tokens = await api.getTokens();
-    const token = tokens.find((t) => t.id === tokenId || t.symbol.toLowerCase() === tokenId.toLowerCase()) || tokens[0] || SUPPORTED_TOKENS[0];
+    const token = await resolveQuoteToken(tokenId, knownToken);
     // One live price drives every USD figure in the quote; without it every
     // figure is null and the UI shows "—" rather than three different guesses.
     const price = tokenUsdPrice(token);
@@ -608,7 +648,7 @@ export const api = {
         const networkFeeUsd = usd(parseFloat(networkFee));
         const protocolFee = q.protocolFee !== undefined ? q.protocolFee : (numAmount * PROTOCOL_FEE_RATE).toFixed(6).replace(/\.?0+$/, '') || '0';
         const protocolFeeUsd = usd(parseFloat(protocolFee));
-        const protocolFeeRecipient = q.feeRecipient || 'fees.uprail.near';
+        const protocolFeeRecipient = q.feeRecipient || 'escrow.uprail.near';
         // The protocol fee is carved out of the amount being sent, so the
         // sender's balance only ever drops by the amount they entered.
         const recipientAmount =
@@ -647,7 +687,7 @@ export const api = {
     const networkFeeUsd = usd(parseFloat(networkFee));
     const protocolFee = (numAmount * PROTOCOL_FEE_RATE).toFixed(6).replace(/\.?0+$/, '') || '0';
     const protocolFeeUsd = usd(parseFloat(protocolFee));
-    const protocolFeeRecipient = 'fees.uprail.near';
+    const protocolFeeRecipient = 'escrow.uprail.near';
     const recipientAmount =
       Math.max(0, numAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
     const recipientAmountUsd = usd(parseFloat(recipientAmount));
@@ -682,12 +722,21 @@ export const api = {
     let depositAddress = params.depositAddress;
 
     if (!quoteSignature || !depositAddress) {
-      const q = await api.getQuote(params.tokenId, params.amount, cleanHandle);
+      const q = await api.getQuote(params.tokenId, params.amount, cleanHandle, params.token);
       quoteSignature = q.quoteSignature;
       depositAddress = q.depositAddress;
       // Send exactly the asset id the quote was signed for — /api/send
       // verifies the signature with an exact (non-fuzzy) asset comparison.
-      params = { ...params, tokenId: q.token.id };
+      // Only adopt the quote's id when it really is the selected asset;
+      // blindly overwriting here is how a held launchpad token used to be
+      // sent as wNEAR after the quote silently fell back to tokens[0].
+      if (q.token.id === params.tokenId || q.token.symbol.toLowerCase() === params.tokenId.toLowerCase()) {
+        params = { ...params, tokenId: q.token.id };
+      } else {
+        throw new Error(
+          `Quote was signed for ${q.token.id} but ${params.tokenId} was selected — refusing to send a different asset`
+        );
+      }
     }
 
     if (!quoteSignature) {
@@ -729,7 +778,7 @@ export const api = {
         amountUsd: price === null ? null : numNet * price,
         fee: backendData.fee || '0',
         feeUsd: price === null ? null : (parseFloat(backendData.fee || '0')) * price,
-        feeRecipient: backendData.feeRecipient || 'fees.uprail.near',
+        feeRecipient: backendData.feeRecipient || 'escrow.uprail.near',
         inviteCode: backendData.inviteCode,
         memo: params.memo || '',
         status: mapBackendStatus(backendData.status),
