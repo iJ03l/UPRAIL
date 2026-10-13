@@ -924,6 +924,24 @@ const DCL_NEGATIVE_TTL_S = 60 * 60;
  */
 const dclMemCache = new Map<string, { at: number; priceInQuote: number | null }>();
 
+/**
+ * Workers Free allows 50 subrequests per invocation and KV reads/writes count
+ * against that cap exactly like view calls do. Everything this price stack
+ * spends is charged here, so a token-heavy account degrades to "some rows stay
+ * unpriced" rather than exhausting the cap and failing the whole request the
+ * way the old registry-wide ft_balance_of fan-out silently zeroed balances.
+ */
+export interface PriceBudget {
+  spent: number;
+  max: number;
+}
+
+function spend(budget: PriceBudget, n = 1): boolean {
+  if (budget.spent + n > budget.max) return false;
+  budget.spent += n;
+  return true;
+}
+
 /** `1.0001^point`, or null when the point would under/overflow a float. */
 function dclMidFromPoint(point: unknown): number | null {
   const p = Number(point);
@@ -934,8 +952,10 @@ function dclMidFromPoint(point: unknown): number | null {
 
 async function readDclPool(
   rpcUrl: string,
-  poolId: string
+  poolId: string,
+  budget: PriceBudget
 ): Promise<{ current_point: unknown } | null> {
+  if (!spend(budget)) return null;
   try {
     const pool = await viewFunction(rpcUrl, DCL_SWAP_CONTRACT_ID, 'get_pool', { pool_id: poolId });
     if (!pool || typeof pool !== 'object') return null;
@@ -951,7 +971,8 @@ async function probeDclPools(
   baseContract: string,
   quoteContract: string,
   baseDecimals: number,
-  quoteDecimals: number
+  quoteDecimals: number,
+  budget: PriceBudget
 ): Promise<number | null> {
   // DCL enforces token_x < token_y at pool creation, so there is exactly one
   // canonical id; the mid is price(token_x in token_y) and gets inverted if
@@ -962,7 +983,7 @@ async function probeDclPools(
     : [quoteContract, baseContract, quoteDecimals, baseDecimals];
 
   for (const fee of DCL_FEE_TIERS) {
-    const pool = await readDclPool(rpcUrl, `${tokenX}|${tokenY}|${fee}`);
+    const pool = await readDclPool(rpcUrl, `${tokenX}|${tokenY}|${fee}`, budget);
     if (!pool) continue;
     const mid = dclMidFromPoint(pool.current_point);
     if (mid === null) return null;
@@ -978,7 +999,8 @@ async function getDclPoolPriceInQuote(
   baseContract: string,
   quoteContract: string,
   baseDecimals: number,
-  quoteDecimals: number
+  quoteDecimals: number,
+  budget: PriceBudget
 ): Promise<number | null> {
   const cacheKey = `${baseContract}|${quoteContract}`;
 
@@ -986,7 +1008,7 @@ async function getDclPoolPriceInQuote(
   if (memo && Date.now() - memo.at < DCL_MEM_TTL_MS) return memo.priceInQuote;
 
   const kvKey = `dcl-price:v1:${cacheKey}`;
-  if (env.CACHE) {
+  if (env.CACHE && spend(budget)) {
     try {
       const raw = await env.CACHE.get(kvKey);
       if (raw !== null) {
@@ -1003,9 +1025,9 @@ async function getDclPoolPriceInQuote(
   }
 
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
-  const price = await probeDclPools(rpcUrl, baseContract, quoteContract, baseDecimals, quoteDecimals);
+  const price = await probeDclPools(rpcUrl, baseContract, quoteContract, baseDecimals, quoteDecimals, budget);
 
-  if (env.CACHE) {
+  if (env.CACHE && spend(budget)) {
     try {
       await env.CACHE.put(kvKey, price !== null ? String(price) : '0', {
         expirationTtl: price !== null ? DCL_KV_TTL_S : DCL_NEGATIVE_TTL_S,
@@ -1056,7 +1078,10 @@ export interface HeldTokenPriceSource {
  */
 export async function resolveTokenUsdPrice(
   env: Env,
-  token: HeldTokenPriceSource
+  token: HeldTokenPriceSource,
+  // Enough for both quote legs (wNEAR then USDC): 4 view calls + a KV read and
+  // write each. Callers that price many rows pass a shared budget instead.
+  budget: PriceBudget = { spent: 0, max: 12 }
 ): Promise<number | null> {
   // Tier 1: the caller already attached a price (or the row is a stablecoin).
   const known = tokenUsdPrice(token.symbol ?? undefined, token.priceUsd ?? undefined);
@@ -1076,39 +1101,39 @@ export async function resolveTokenUsdPrice(
   const baseDecimals = typeof token.decimals === 'number' ? token.decimals : 18;
   if (!Number.isFinite(baseDecimals) || baseDecimals < 0 || baseDecimals > 36) return null;
 
-  const inNear = await getDclPoolPriceInQuote(env, base, WRAP_NEAR_CONTRACT_ID, baseDecimals, 24);
+  const inNear = await getDclPoolPriceInQuote(env, base, WRAP_NEAR_CONTRACT_ID, baseDecimals, 24, budget);
   if (inNear !== null) {
     const nearUsd = await registryTokenPrice(env, WRAP_NEAR_CONTRACT_ID, 'NEAR');
     if (nearUsd !== null) return inNear * nearUsd;
   }
 
   // No wNEAR pool: a USDC pool is already a dollar price.
-  const inUsdc = await getDclPoolPriceInQuote(env, base, USDC_CONTRACT_ID, baseDecimals, 6);
+  const inUsdc = await getDclPoolPriceInQuote(env, base, USDC_CONTRACT_ID, baseDecimals, 6, budget);
   if (inUsdc !== null) return inUsdc;
 
   return null;
 }
 
 /**
- * Fill in `priceUsd` on balance rows that the registry and peg could not
- * price, using at most `budget` DCL lookups. Every lookup is 1–4 subrequests,
- * so the budget is what keeps a token-heavy account inside the Workers Free
- * 50-subrequest cap rather than silently truncating like the old registry
- * fan-out did.
+ * Fill in `priceUsd` on balance rows the registry and the peg could not price.
+ * The budget is counted in subrequests, not tokens: a token with no pool costs
+ * 8 view calls plus 4 KV ops, so pricing is abandoned for the remaining rows
+ * once the budget is spent and they simply stay unpriced.
  */
+export const DEFAULT_PRICE_SUBREQUEST_BUDGET = 30;
+
 export async function attachMissingPrices<T extends HeldTokenPriceSource>(
   env: Env,
   rows: T[],
-  budget = 6
+  maxSubrequests: number = DEFAULT_PRICE_SUBREQUEST_BUDGET
 ): Promise<void> {
-  let remaining = budget;
+  const budget: PriceBudget = { spent: 0, max: Math.max(0, maxSubrequests) };
   for (const row of rows) {
-    if (remaining <= 0) break;
+    if (budget.spent >= budget.max) break;
     if (row.priceUsd !== undefined && row.priceUsd !== null) continue;
-    const resolved = await resolveTokenUsdPrice(env, row);
+    const resolved = await resolveTokenUsdPrice(env, row, budget);
     if (resolved === null) continue;
     row.priceUsd = resolved;
-    remaining -= 1;
   }
 }
 
