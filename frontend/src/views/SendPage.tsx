@@ -238,22 +238,14 @@ export const SendPage: React.FC = () => {
               <div className="flex items-center justify-between text-stone-500">
                 <span>Recipient Receives</span>
                 <span className="text-stone-900 font-bold">
-                  {quote.recipientAmount} {quote.token.symbol} (${formatUsd(quote.recipientAmountUsd)})
+                  {quote.recipientAmount} {quote.token.symbol} ({formatUsd(quote.recipientAmountUsd)})
                 </span>
               </div>
               <div className="flex items-center justify-between text-stone-500">
                 <span>Platform Fee ({feePercentLabel}, deducted from amount)</span>
                 <span className="text-stone-900 font-bold">
-                  {quote.protocolFee} {quote.token.symbol} (${formatUsd(quote.protocolFeeUsd)})
+                  {quote.protocolFee} {quote.token.symbol} ({formatUsd(quote.protocolFeeUsd)})
                 </span>
-              </div>
-              <div className="flex items-center justify-between text-stone-500 text-[11px]">
-                <span className="text-stone-400">Fee Routing</span>
-                <span className="text-stone-600 font-mono">Immediate → fees.uprail.near</span>
-              </div>
-              <div className="flex items-center justify-between text-stone-500 text-[11px]">
-                <span className="text-stone-400">Access Invite</span>
-                <span className="text-stone-900 font-bold">Preloaded in Claim Link</span>
               </div>
               <div className="flex items-center justify-between text-stone-500">
                 <span>Solver Routing</span>
@@ -265,7 +257,7 @@ export const SendPage: React.FC = () => {
               <div className="pt-2 border-t border-stone-200 flex items-center justify-between font-bold text-stone-900 text-sm">
                 <span>Total to Send</span>
                 <span className="text-stone-950 font-bold">
-                  {quote.totalAmount} {quote.token.symbol} (${formatUsd(quote.totalUsd)})
+                  {quote.totalAmount} {quote.token.symbol} ({formatUsd(quote.totalUsd)})
                 </span>
               </div>
             </div>

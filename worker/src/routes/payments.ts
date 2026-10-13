@@ -743,6 +743,14 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     // Escrowed sends keep the fee inside escrow: it is dispatched to
     // fees.uprail.near when the recipient claims (or returned to the sender
     // with the gross amount if the payment expires unclaimed).
+    //
+    // The outcome is recorded on the payment row rather than only logged:
+    // the recipient has already been paid by this point, so a fee that cannot
+    // be routed must never roll the send back — but it must also never be
+    // invisible. An unrecorded failure is indistinguishable from a fee that
+    // was never attempted, which is how fees.uprail.near stayed at zero.
+    let feeDispatchStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
+    let feeDispatchError: string | null = null;
     if (isRecipientRegistered && parseFloat(protocolFee) > 0) {
       try {
         const feeDeposit = await nearRpc.depositPlainBalanceToIntents(
@@ -752,7 +760,9 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           protocolFee,
           feeRecipient
         );
-        if (!feeDeposit.deposited) {
+        if (feeDeposit.deposited) {
+          feeDispatchStatus = 'sent';
+        } else {
           const feeTx = await nearRpc.executeTransferIntent(
             c.env,
             session!.x_id,
@@ -760,12 +770,31 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
             body.asset,
             protocolFee
           );
-          if (!feeTx?.success) {
-            throw new Error(feeTx?.error || 'fee intent transfer failed');
+          if (feeTx?.success) {
+            feeDispatchStatus = 'sent';
+          } else {
+            feeDispatchStatus = 'failed';
+            feeDispatchError = feeTx?.error || 'fee intent transfer failed';
           }
         }
-      } catch (feeErr) {
-        console.warn('[FeeRouting] Direct-send fee dispatch notice:', feeErr);
+      } catch (feeErr: any) {
+        feeDispatchStatus = 'failed';
+        feeDispatchError = feeErr?.message || String(feeErr);
+        console.warn('[FeeRouting] Direct-send fee dispatch failed:', feeErr);
+      }
+    } else if (parseFloat(protocolFee) > 0) {
+      feeDispatchStatus = 'skipped';
+      feeDispatchError = 'held in escrow until claim';
+    }
+    if (feeDispatchStatus !== 'skipped' || feeDispatchError) {
+      try {
+        await c.env.DB.prepare(
+          'UPDATE payments SET fee_dispatch_status = ?, fee_dispatch_error = ?, updated_at = ? WHERE id = ?'
+        )
+          .bind(feeDispatchStatus, feeDispatchError, Date.now(), paymentId)
+          .run();
+      } catch (feeDbErr) {
+        console.error(`[FeeRouting] could not record fee dispatch for ${paymentId}:`, feeDbErr);
       }
     }
 

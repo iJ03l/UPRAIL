@@ -432,9 +432,13 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
         // Dispatch the carve-out protocol fee from escrow now that the
         // recipient has been paid. Warn-only on purpose: the fee is held in
         // escrow until claim (it rides the same pooled balance), and a stuck
-        // fee must never roll back an already-settled claim.
+        // fee must never roll back an already-settled claim. The outcome is
+        // still recorded on the row — a fee that silently never arrives is
+        // indistinguishable from one that was never attempted.
         const feeAmount = parseFloat(payment.fee || '0') || 0;
         if (feeAmount > 0) {
+          let feeDispatchStatus = 'failed';
+          let feeDispatchError: string | null = null;
           try {
             const feeResult = await nearRpc.executeTransferFromEscrowIntent(
               c.env,
@@ -442,14 +446,29 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
               payment.asset,
               payment.fee || '0'
             );
-            if (!feeResult?.success) {
+            if (feeResult?.success) {
+              feeDispatchStatus = 'sent';
+            } else {
+              feeDispatchError = feeResult?.error || 'escrow fee transfer failed';
               console.error(
                 `[claim/execute] CRITICAL: fee dispatch failed for ${paymentId} (${payment.fee} ${payment.asset}):`,
                 feeResult?.error
               );
             }
-          } catch (feeErr) {
+          } catch (feeErr: any) {
+            feeDispatchError = feeErr?.message || String(feeErr);
             console.error(`[claim/execute] CRITICAL: fee dispatch error for ${paymentId}:`, feeErr);
+          }
+          if (c.env.DB) {
+            try {
+              await c.env.DB.prepare(
+                'UPDATE payments SET fee_dispatch_status = ?, fee_dispatch_error = ?, updated_at = ? WHERE id = ?'
+              )
+                .bind(feeDispatchStatus, feeDispatchError, Date.now(), paymentId)
+                .run();
+            } catch (feeDbErr) {
+              console.error(`[claim/execute] could not record fee dispatch for ${paymentId}:`, feeDbErr);
+            }
           }
         }
 
