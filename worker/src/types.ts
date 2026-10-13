@@ -79,6 +79,17 @@ export interface Payment {
   amount: string;
   fee?: string | null;
   fee_recipient?: string | null;
+  /**
+   * Outcome of routing `fee` to `fee_recipient`:
+   *   'sent'     — moved to the destination
+   *   'retained' — left in the escrow holding account (the default destination,
+   *                so the fee is already where it needs to be; no transfer)
+   *   'skipped'  — held in escrow, not yet due (recipient has not claimed)
+   *   'failed'   — attempted and did not arrive; the fee is unaccounted for
+   * null when no dispatch has been attempted yet.
+   */
+  fee_dispatch_status?: string | null;
+  fee_dispatch_error?: string | null;
   invite_code?: string | null;
   memo?: string | null;
   status: PaymentStatus;
