@@ -459,14 +459,35 @@ function mapApiToken(t: any): Token {
   };
 }
 
+/**
+ * Auth-state write barrier.
+ *
+ * Bumping this invalidates every in-flight getAuthStatus() result. Without it,
+ * a checkSession() that started BEFORE logout can resolve AFTER api.logout()
+ * has cleared storage and re-write the old user into localStorage — which
+ * re-hydrates the session mid-redirect and bounces the user back to the
+ * dashboard instead of a clean sign-out. logout() bumps the epoch first; any
+ * getAuthStatus() still in flight then finds it stale and drops its result.
+ */
+let authEpoch = 0;
+export function invalidateInFlightAuth(): void {
+  authEpoch += 1;
+}
+
 export const api = {
   // Auth endpoints
-  async getAuthStatus(): Promise<{ user: XUser | null }> {
+  async getAuthStatus(): Promise<{ user: XUser | null; stale?: boolean }> {
+    const epoch = authEpoch;
+    const stale = () => authEpoch !== epoch;
     try {
       const url = API_BASE ? `${API_BASE}/auth/status` : '/auth/status';
       const res = await fetch(url, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
+        // A logout happened while this request was in flight. Report the
+        // result as stale so the caller can distinguish it from a real 401
+        // and avoid wiping shared auth state that logout already reset.
+        if (stale()) return { user: null, stale: true };
         if (data?.authenticated && data?.user) {
           localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
           localStorage.setItem('uprail_user_cache_v1', JSON.stringify(data.user));
@@ -477,12 +498,29 @@ export const api = {
           return { user: null };
         }
       } else if (res.status === 401) {
-        localStorage.removeItem(STORAGE_KEYS.USER);
-        localStorage.removeItem('uprail_user_cache_v1');
-        return { user: null };
+        if (!stale()) {
+          localStorage.removeItem(STORAGE_KEYS.USER);
+          localStorage.removeItem('uprail_user_cache_v1');
+        }
+        return { user: null, stale: stale() };
+      } else {
+        // 5xx / 429: the server answered but not with a verdict we can act on.
+        // Do NOT clear the cache here — a transient outage must not sign a
+        // still-valid session out. Fall through to the cached read below.
+        console.warn(`Backend /auth/status returned ${res.status}, using cached session`);
+        const cached = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem('uprail_user_cache_v1');
+        if (cached) {
+          try {
+            return { user: JSON.parse(cached) };
+          } catch {}
+        }
       }
     } catch (e) {
-      console.warn('Backend /auth/status unavailable, checking cached session', e);
+      // Only a genuine network failure reaches here (fetch threw). The cache is
+      // a graceful offline read for a still-signed-in tab — it is NOT a logout
+      // path. Sign-out clears both keys before this runs, so a logged-out tab
+      // has nothing to resurrect even when the API is unreachable.
+      console.warn('Backend /auth/status unreachable, checking cached session', e);
       const cached = localStorage.getItem(STORAGE_KEYS.USER) || localStorage.getItem('uprail_user_cache_v1');
       if (cached) {
         try {
@@ -538,6 +576,11 @@ export const api = {
   },
 
   async logout(): Promise<void> {
+    // Invalidate every in-flight getAuthStatus() BEFORE clearing storage.
+    // Any checkSession() still awaiting a response would otherwise resolve
+    // after this function returns and re-write the old user into localStorage,
+    // re-hydrating the session and bouncing the user back to the dashboard.
+    invalidateInFlightAuth();
     try {
       const url = API_BASE ? `${API_BASE}/auth/logout` : '/auth/logout';
       await fetch(url, { method: 'POST', credentials: 'include' });

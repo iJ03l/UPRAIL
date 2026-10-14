@@ -67,6 +67,12 @@ export function useXAuth() {
       inFlightAuthPromise = api
         .getAuthStatus()
         .then((res) => {
+          // A logout landed while this request was in flight: logout already
+          // cleared globalUser, the cache keys, and the session cookie, and
+          // kicked off a hard redirect. Applying this stale result would
+          // re-write the old user into shared state and bounce the tab back
+          // to the dashboard mid-sign-out, so drop it entirely.
+          if (res.stale) return null;
           setGlobalUser(res.user);
           return res.user;
         })
@@ -109,12 +115,21 @@ export function useXAuth() {
   const logout = async () => {
     try {
       setIsLoading(true);
+      // api.logout() destroys the server cookie AND clears both user cache
+      // keys, so nothing here can re-hydrate the old session afterwards.
       await api.logout();
       setGlobalUser(null);
     } catch (err) {
       console.error('Logout error:', err);
+      // Even a failed backend call must end in a signed-out client: clear local
+      // state so ProtectedRoute sees no user and bounces to /login.
+      setGlobalUser(null);
     } finally {
       setIsLoading(false);
+      // Hard navigation, not a router push: a full unload guarantees no
+      // in-flight checkSession() or cached-module state survives to send the
+      // user back to the dashboard.
+      window.location.replace('/login');
     }
   };
 

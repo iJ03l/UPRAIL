@@ -72,9 +72,13 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     }
   };
 
-  const handleConfirmSignOut = () => {
+  const handleConfirmSignOut = async () => {
     setShowSignOutModal(false);
-    logout();
+    // Await logout before closing: the sidebar only renders while `isOpen`, so
+    // calling onClose() in the same tick as logout() unmounts this component
+    // and orphans the in-flight logout() — leaving the session half-alive and
+    // bouncing the user back to the dashboard instead of a clean sign-out.
+    await logout();
     onClose();
   };
 
