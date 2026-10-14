@@ -707,6 +707,7 @@ export const api = {
           quoteId: q.quoteId,
           quoteSignature: q.quoteSignature,
           expiresAt: q.expiresAt,
+          rail: q.rail === 'native' ? 'native' : 'intents',
           estimatedTimeSeconds: 2,
         };
       }

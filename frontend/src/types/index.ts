@@ -87,6 +87,13 @@ export interface PaymentQuote {
   quoteId?: string;
   quoteSignature?: string;
   expiresAt?: number;
+  /**
+   * Settlement rail the worker will use: 'intents' when the asset lives on
+   * intents.near, 'native' for NEAR-only assets (launchpad memes). Absent
+   * when the server did not say (older worker / probe outage) — the UI then
+   * falls back to the intents label, matching pre-rail behaviour.
+   */
+  rail?: 'intents' | 'native';
 }
 
 export interface MyInviteResponse {

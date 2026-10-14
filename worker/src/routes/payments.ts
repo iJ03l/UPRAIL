@@ -294,6 +294,10 @@ paymentsRouter.post('/quote', async (c) => {
     }
 
     let baseUnitsAmount: string;
+    // 'intents' until proven otherwise — null from the probe (RPC outage)
+    // keeps the empirical rail selection at send time rather than
+    // mis-routing an intents asset.
+    let rail: 'intents' | 'native' = 'intents';
     try {
       const tokens = await nearRpc.getSupportedTokens(c.env);
       let tokenInfo = nearRpc.resolveTokenForAsset(body.asset, tokens);
@@ -309,6 +313,11 @@ paymentsRouter.post('/quote', async (c) => {
         );
       }
       baseUnitsAmount = nearRpc.toBaseUnits(amountStr, tokenInfo.decimals);
+      const intentsSupported = await nearRpc.isIntentsSupportedAsset(
+        c.env,
+        tokenInfo.nearContractId
+      );
+      if (intentsSupported === false) rail = 'native';
     } catch (tokenErr) {
       console.warn('[send] token registry unavailable, cannot convert amount:', tokenErr);
       return c.json<ErrorResponse>(
@@ -318,18 +327,12 @@ paymentsRouter.post('/quote', async (c) => {
     }
 
     let quoteResult: any = null;
-    try {
-      quoteResult = await nearProxy.quote(c.env, {
-        recipientHandle: quoteRecipient,
-        asset: body.asset,
-        amount: baseUnitsAmount,
-        confidentiality: 'advanced',
-        // Sign with the X handle + human amount: that is exactly what
-        // /api/send verifies against.
-        signing: { recipient: cleanHandle, amount: body.amount },
-      });
-    } catch (proxyErr: any) {
-      console.warn('nearProxy.quote fallback to platform escrow holding wallet:', proxyErr);
+    // A locally-signed quote against the escrow holding account. Also the
+    // fallback when the 1Click proxy is down — and the ONLY quote a
+    // NEAR-native asset ever gets, since the 1Click solver route settles
+    // inside intents and cannot serve an asset whose contract has no intents
+    // storage. Native sends skip the proxy call entirely.
+    const localQuote = async () => {
       const fallbackQuoteId = crypto.randomUUID();
       const fallbackExpiresAt = Date.now() + 15 * 60 * 1000;
       const secret = requireQuoteSecret(c.env);
@@ -341,14 +344,31 @@ paymentsRouter.post('/quote', async (c) => {
         depositAddress: holdingAccount,
         expiresAt: fallbackExpiresAt,
       });
-
-      quoteResult = {
+      return {
         quoteId: fallbackQuoteId,
         depositAddress: holdingAccount,
         quoteSignature: sigToken,
         estimatedFees: '0',
         expiresAt: fallbackExpiresAt,
       };
+    };
+    if (rail === 'native') {
+      quoteResult = await localQuote();
+    } else {
+      try {
+        quoteResult = await nearProxy.quote(c.env, {
+          recipientHandle: quoteRecipient,
+          asset: body.asset,
+          amount: baseUnitsAmount,
+          confidentiality: 'advanced',
+          // Sign with the X handle + human amount: that is exactly what
+          // /api/send verifies against.
+          signing: { recipient: cleanHandle, amount: body.amount },
+        });
+      } catch (proxyErr: any) {
+        console.warn('nearProxy.quote fallback to platform escrow holding wallet:', proxyErr);
+        quoteResult = await localQuote();
+      }
     }
 
     const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
@@ -372,6 +392,7 @@ paymentsRouter.post('/quote', async (c) => {
       estimatedFees: quoteResult.estimatedFees || '0',
       protocolFee,
       feeRecipient,
+      rail,
       expiresAt: quoteResult.expiresAt || Date.now() + 15 * 60 * 1000,
     });
   } catch (err: any) {
@@ -638,6 +659,104 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     let claimTxHash: string | null = null;
     let escrowDepositTxHash: string | null = null;
 
+    // Decide the settlement rail BEFORE moving money, by asking the token
+    // contract whether it has registered storage on intents.near. The old
+    // flow detected native assets by attempting the intents deposit and
+    // reading the failure — a doomed onchain transaction per send. `null`
+    // from the probe (RPC outage, unresolvable token) keeps the empirical
+    // path below, which is unchanged and still correct for those cases.
+    let rail: 'intents' | 'native' | null = null;
+    try {
+      const railTokens = await nearRpc.getSupportedTokens(c.env);
+      let railToken = nearRpc.resolveTokenForAsset(body.asset, railTokens);
+      if (!railToken) railToken = await nearRpc.resolveRheaToken(c.env, body.asset);
+      if (railToken) {
+        const supported = await nearRpc.isIntentsSupportedAsset(c.env, railToken.nearContractId);
+        if (supported === false) rail = 'native';
+        else if (supported === true) rail = 'intents';
+      }
+    } catch (railErr) {
+      console.warn('[send] rail probe failed, using empirical selection:', railErr);
+    }
+
+    // Set by the native direct branch so the intents fee-dispatch block below
+    // does not retry a plain fee transfer through a ledger that cannot hold it.
+    let nativeFeeHandled = false;
+    // Declared here because the native direct branch dispatches the fee
+    // itself; the intents block below only fills these in when it ran.
+    let feeDispatchStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
+    let feeDispatchError: string | null = null;
+
+    if (rail === 'native' && isRecipientRegistered && recipientNearAccount) {
+      // NEAR-native asset, recipient already registered: two plain NEP-141
+      // transfers straight out of the sender's own account — net to the
+      // recipient, fee to the fee account. The old path locked the gross
+      // into escrow and then marked the payment CLAIMED with a NULL tx
+      // hash: the recipient saw "delivered", held nothing, and could
+      // neither claim nor refund, with the gross stranded in escrow
+      // forever. A real transfer with a real hash replaces it.
+      const direct = await nearRpc.executeDirectFtWithdraw(
+        c.env,
+        session!.x_id,
+        recipientNearAccount,
+        body.asset,
+        recipientAmount
+      );
+      if (!direct.success || !direct.txHash) {
+        console.error('[send] native direct transfer failed:', direct.error);
+        return await failSend(
+          'SETTLEMENT_FAILED',
+          publicErrorMessage(new Error(direct.error || ''), 'Onchain settlement failed'),
+          502
+        );
+      }
+      claimTxHash = direct.txHash;
+
+      // Fee: best-effort, same philosophy as the intents direct-send fee
+      // dispatch — the recipient has already been paid by this point, so a
+      // fee that cannot be routed must never roll the send back, but it
+      // must never be invisible either.
+      nativeFeeHandled = true;
+      if (parseFloat(protocolFee) > 0) {
+        try {
+          const feeTx = await nearRpc.executeDirectFtWithdraw(
+            c.env,
+            session!.x_id,
+            feeRecipient,
+            body.asset,
+            protocolFee
+          );
+          feeDispatchStatus = feeTx?.success ? 'sent' : 'failed';
+          feeDispatchError = feeTx?.success ? null : feeTx?.error || 'fee transfer failed';
+        } catch (feeErr: any) {
+          feeDispatchStatus = 'failed';
+          feeDispatchError = feeErr?.message || String(feeErr);
+          console.warn('[FeeRouting] native direct-send fee dispatch failed:', feeErr);
+        }
+      }
+    } else if (rail === 'native') {
+      // NEAR-native asset, recipient not registered yet: confidential escrow
+      // until they claim — lock the gross with a plain ft_transfer. The fee
+      // stays in escrow and is retained at claim time (the fee account IS
+      // the escrow holding account). Skip the intents deposit attempt
+      // entirely: its failure is guaranteed and costs a doomed transaction.
+      const lock = await nearRpc.depositPlainBalanceToEscrow(
+        c.env,
+        session!.x_id,
+        body.asset,
+        body.amount
+      );
+      if (lock.deposited && lock.txHash) {
+        escrowDepositTxHash = lock.txHash;
+      } else {
+        console.error('[send] plain escrow lock failed:', lock.reason);
+        return await failSend(
+          'SETTLEMENT_FAILED',
+          publicErrorMessage(new Error(lock.reason || ''), 'Onchain settlement failed'),
+          502
+        );
+      }
+    } else {
     // Plain-balance path: tokens received directly into the sender's own pk
     // sub-account move into intents with ft_transfer_call(msg = credit target)
     // — the recipient's platform account when registered, the escrow holding
@@ -660,11 +779,11 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       if (isRecipientRegistered) claimTxHash = plainDeposit.txHash;
       else escrowDepositTxHash = plainDeposit.txHash;
     } else if (plainDeposit.reason && plainDeposit.reason !== 'INSUFFICIENT_PLAIN_BALANCE') {
-      // Meme assets never make it into intents — their token contracts have
-      // never registered intents storage — so the intents rails below would
-      // only panic against an empty ledger. Lock the gross amount into the
-      // escrow holding account with a plain ft_transfer instead; the fee stays
-      // in escrow and is released at claim time, exactly like the escrowed
+      // The rail probe could not answer (RPC outage) and the empirical
+      // signal says this asset cannot enter intents — its token contract
+      // refused intents storage. Lock the gross amount into the escrow
+      // holding account with a plain ft_transfer instead; the fee stays in
+      // escrow and is released at claim time, exactly like the escrowed
       // path already does. Cross-chain destinations still need the 1Click
       // route and are rejected at claim time.
       const lock = await nearRpc.depositPlainBalanceToEscrow(
@@ -729,6 +848,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
         );
       }
     }
+    } // end empirical rail (probe could not answer)
 
     // ── 3. Finalize the record with the settlement hashes ──────────────────
     const paymentStatus = isRecipientRegistered ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED;
@@ -783,9 +903,9 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     // invisible. An unrecorded failure is indistinguishable from a fee that
     // was never attempted, which is how fees.uprail.near stayed at zero even
     // through two claimed payments.
-    let feeDispatchStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
-    let feeDispatchError: string | null = null;
-    if (isRecipientRegistered && parseFloat(protocolFee) > 0) {
+    // The native direct branch already dispatched (or recorded the failure
+    // of) its own plain fee transfer — do not retry it through intents.
+    if (!nativeFeeHandled && isRecipientRegistered && parseFloat(protocolFee) > 0) {
       try {
         const feeDeposit = await nearRpc.depositPlainBalanceToIntents(
           c.env,
@@ -816,7 +936,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
         feeDispatchError = feeErr?.message || String(feeErr);
         console.warn('[FeeRouting] Direct-send fee dispatch failed:', feeErr);
       }
-    } else if (parseFloat(protocolFee) > 0) {
+    } else if (!nativeFeeHandled && parseFloat(protocolFee) > 0) {
       feeDispatchStatus = 'skipped';
       feeDispatchError = 'held in escrow until claim';
     }

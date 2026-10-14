@@ -169,8 +169,12 @@ export const SendPage: React.FC = () => {
             }`}
           >
             <Wallet className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
-            <span className="hidden sm:inline">Send to Wallet via Intents</span>
-            <span className="sm:hidden">Wallet Intents</span>
+            <span className="hidden sm:inline">
+              {quote?.rail === 'native' ? 'Send to Wallet' : 'Send to Wallet via Intents'}
+            </span>
+            <span className="sm:hidden">
+              {quote?.rail === 'native' ? 'Wallet' : 'Wallet Intents'}
+            </span>
           </button>
         </div>
 
@@ -257,20 +261,32 @@ export const SendPage: React.FC = () => {
               <div className="flex items-center justify-between text-stone-500">
                 <span>Recipient Receives</span>
                 <span className="text-stone-900 font-bold">
-                  {quote.recipientAmount} {quote.token.symbol} ({formatUsd(quote.recipientAmountUsd)})
+                  {/* Wallet withdrawals take no fee — the destination gets the
+                      full amount. The quote's net figure is for handle sends. */}
+                  {sendMode === 'handle' ? quote.recipientAmount : quote.amount} {quote.token.symbol} (
+                  {formatUsd(sendMode === 'handle' ? quote.recipientAmountUsd : quote.amountUsd)})
                 </span>
               </div>
+              {/* Wallet withdrawals take no platform fee — only handle sends
+                  carve one out of the amount. Rendering it in wallet mode
+                  understated what the destination would receive. */}
+              {sendMode === 'handle' && (
+                <div className="flex items-center justify-between text-stone-500">
+                  <span>Platform Fee ({feePercentLabel}, deducted from amount)</span>
+                  <span className="text-stone-900 font-bold">
+                    {quote.protocolFee} {quote.token.symbol} ({formatUsd(quote.protocolFeeUsd)})
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between text-stone-500">
-                <span>Platform Fee ({feePercentLabel}, deducted from amount)</span>
-                <span className="text-stone-900 font-bold">
-                  {quote.protocolFee} {quote.token.symbol} ({formatUsd(quote.protocolFeeUsd)})
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-stone-500">
-                <span>Solver Routing</span>
+                <span>{sendMode === 'handle' ? 'Settlement Rail' : 'Withdrawal Rail'}</span>
                 <span className="text-stone-900 flex items-center font-bold">
                   <Zap className="w-3 h-3 text-stone-900 mr-1" />
-                  NEAR 1Click Intent
+                  {quote.rail === 'native'
+                    ? 'NEAR Native Transfer'
+                    : sendMode === 'handle'
+                      ? 'NEAR Intent'
+                      : 'NEAR Intent Withdrawal'}
                 </span>
               </div>
               <div className="pt-2 border-t border-stone-200 flex items-center justify-between font-bold text-stone-900 text-sm">
@@ -306,8 +322,10 @@ export const SendPage: React.FC = () => {
                       ? `Authorize & Send to @${recipient.replace(/^@/, '')}`
                       : 'Enter Handle to Send'
                     : walletAddress
-                    ? `Authorize & Route via Intents`
-                    : 'Enter Wallet Address'}
+                      ? quote?.rail === 'native'
+                        ? `Authorize & Send to Wallet`
+                        : `Authorize & Route via Intents`
+                      : 'Enter Wallet Address'}
                 </span>
                 <ArrowRight className="w-4 h-4 ml-1" />
               </>

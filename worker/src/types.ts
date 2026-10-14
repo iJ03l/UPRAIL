@@ -212,6 +212,14 @@ export interface QuoteResponse {
   estimatedFees: string;
   protocolFee?: string;
   feeRecipient?: string;
+  /**
+   * Settlement rail the worker will use for this asset: 'intents' when the
+   * token contract has registered storage on intents.near, 'native' for
+   * NEAR-only assets (launchpad memes) settled with plain NEP-141 transfers.
+   * Absent when the probe could not answer (RPC outage) — send-time rail
+   * selection then falls back to the empirical try-and-fail path.
+   */
+  rail?: 'intents' | 'native';
   expiresAt: number;
 }
 

@@ -90,6 +90,86 @@ export function isNearNativeMemeAsset(symbol: string, contractId?: string | null
   return isMemeAsset(symbol, contract);
 }
 
+// ─── Intents-support probe ──────────────────────────────────────────────────
+/**
+ * Decides a token's settlement rail before any money moves, instead of the
+ * old try-and-fail detection (attempt the intents deposit, fall over, notice
+ * the failure reason).
+ *
+ * The authoritative signal: a token can live on the intents ledger only if its
+ * contract has registered NEP-145 storage for `intents.near` itself — that is
+ * exactly the registration whose absence makes a meme deposit panic "The
+ * receiver is not registered". One view call answers it for both directions.
+ *
+ * Returns `null` when the check itself cannot be answered (RPC/KV outage), so
+ * callers keep the empirical try-and-fail path rather than mis-routing an
+ * intents asset to the native rail. `false` is a deliberate answer, not an
+ * error: the contract is reachable and has no intents storage.
+ */
+const intentsSupportMem = new Map<string, { at: number; supported: boolean }>();
+const INTENTS_SUPPORT_MEM_TTL_MS = 30 * 60 * 1000;
+const INTENTS_SUPPORT_KV_POS_TTL_S = 24 * 60 * 60;
+const INTENTS_SUPPORT_KV_NEG_TTL_S = 60 * 60;
+
+export async function isIntentsSupportedAsset(
+  env: Env,
+  contractId: string
+): Promise<boolean | null> {
+  const contract = (contractId || '').trim().toLowerCase();
+  if (!contract) return null;
+
+  const memo = intentsSupportMem.get(contract);
+  if (memo && Date.now() - memo.at < INTENTS_SUPPORT_MEM_TTL_MS) return memo.supported;
+
+  const kvKey = `intents-support:v1:${contract}`;
+  if (env.CACHE) {
+    try {
+      const raw = await env.CACHE.get(kvKey);
+      if (raw === '1' || raw === '0') {
+        const supported = raw === '1';
+        intentsSupportMem.set(contract, { at: Date.now(), supported });
+        return supported;
+      }
+    } catch (err) {
+      console.warn('[intentsSupport] KV read failed:', err);
+    }
+  }
+
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+  let supported: boolean;
+  try {
+    // A guarded read, not viewFunction: `storage_balance_of` legitimately
+    // answers `null` (empty bytes) for an unregistered receiver, and
+    // viewFunction JSON.parses the empty string, which throws — collapsing
+    // "not registered" into a transport error.
+    const result = await nearRpc(rpcUrl, 'query', {
+      request_type: 'call_function',
+      finality: 'final',
+      account_id: contract,
+      method_name: 'storage_balance_of',
+      args_base64: btoa(JSON.stringify({ account_id: intentsId })),
+    });
+    const text = new TextDecoder().decode(new Uint8Array(result?.result ?? []));
+    supported = text ? Boolean(JSON.parse(text)) : false;
+  } catch (err) {
+    console.warn('[intentsSupport] storage_balance_of failed:', err);
+    return null;
+  }
+
+  intentsSupportMem.set(contract, { at: Date.now(), supported });
+  if (env.CACHE) {
+    try {
+      await env.CACHE.put(kvKey, supported ? '1' : '0', {
+        expirationTtl: supported ? INTENTS_SUPPORT_KV_POS_TTL_S : INTENTS_SUPPORT_KV_NEG_TTL_S,
+      });
+    } catch (err) {
+      console.warn('[intentsSupport] KV write failed:', err);
+    }
+  }
+  return supported;
+}
+
 // ─── Rhea (Ref Finance) native NEAR token list ───────────────────────────────
 /**
  * The Intents registry only knows assets with solver routes. Native NEAR

@@ -128,7 +128,20 @@ export async function refundEscrowedPayment(env: Env, payment: Payment): Promise
     return { refunded: false, error: 'sender account could not be resolved' };
   }
 
-  const result = await nearRpc.executeTransferFromEscrowIntent(env, senderAccount, payment.asset, gross);
+  let result = await nearRpc.executeTransferFromEscrowIntent(env, senderAccount, payment.asset, gross);
+  if (!result.success && !result.ambiguous) {
+    // A NEAR-native asset (launchpad meme) was locked into escrow as a plain
+    // NEP-141 — escrow holds no intents ledger entry for it, so the intents
+    // transfer can never succeed. The claim payout already settles these with
+    // a plain ft_transfer; the refund must too, or expired and cancelled meme
+    // payments retry every hour forever with the gross stuck in escrow.
+    const plain = await nearRpc.executeEscrowFtWithdraw(env, senderAccount, payment.asset, gross);
+    if (plain.success && plain.txHash) {
+      result = { success: true, txHash: plain.txHash };
+    } else {
+      result = { success: false, error: plain.error || result.error };
+    }
+  }
   if (!result.success || !result.txHash) {
     console.error(`[refund] onchain refund failed for ${payment.id}:`, result.error);
     if (result.ambiguous) {

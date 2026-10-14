@@ -816,7 +816,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     // is not registered" and no intent can ever spend a balance that never
     // arrived. For those we settle the whole withdrawal with a plain
     // ft_transfer straight out of the sender's own account.
-    let settlementRail: 'intents' | 'escrow' = 'intents';
+    let settlementRail: 'intents' | 'native' = 'intents';
     let plainDeposit: { deposited: boolean; txHash?: string; reason?: string } = { deposited: false };
     let nearAccountForDeposit: string | null = null;
     try {
@@ -858,7 +858,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           console.warn(
             `[withdraw] intents rail unavailable for ${asset} (${plainDeposit.reason}) — settling with a direct ft_transfer`
           );
-          settlementRail = 'escrow';
+          settlementRail = 'native';
         }
       }
     } catch (plainErr) {
@@ -919,7 +919,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       // with a plain NEP-141 transfer straight out of the sender's own
       // account. Cross-chain still needs the 1Click solver route, which
       // settles inside intents and therefore cannot serve these assets.
-      if (settlementRail === 'escrow') {
+      if (settlementRail === 'native') {
         if (!isNearAccount) {
           throw new Error(
             'Cross-chain withdrawal is not available for this asset — withdraw to a NEAR account'
