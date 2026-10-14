@@ -313,7 +313,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             </div>
             <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-              <span>Biometric passkey signature required · 5% protocol fee</span>
+              <span>Biometric passkey signature required</span>
             </div>
             {stats.egressUnpriced > 0 && (
               <div className="text-[11px] font-mono text-amber-600">
