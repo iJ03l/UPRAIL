@@ -3097,6 +3097,31 @@ export async function plainBalanceAbsorbed(
 }
 
 /**
+ * Flattens the nested `error.data` an NEAR RPC attaches to a rejected
+ * transaction into a single readable reason. Both failure shapes matter: the
+ * tx-level rejections, which are one flat string, and contract panics, which
+ * nest several layers deep and must stay intact so the original panic text
+ * survives into the API response.
+ */
+function formatRpcErrorData(data: unknown): string {
+  if (data === undefined || data === null || data === '') return '';
+  if (typeof data === 'string') return `: ${data}`;
+  try {
+    const anyData = data as Record<string, unknown>;
+    const txErr = anyData.TxExecutionError;
+    if (typeof txErr === 'string') return `: ${txErr}`;
+    if (txErr && typeof txErr === 'object') {
+      const inner = txErr as Record<string, unknown>;
+      if (typeof inner.InvalidTxError === 'string') return `: ${inner.InvalidTxError}`;
+      return `: ${JSON.stringify(txErr)}`;
+    }
+    return `: ${JSON.stringify(data)}`;
+  } catch {
+    return `: ${String(data)}`;
+  }
+}
+
+/**
  * Signs and broadcasts a single-action FunctionCall transaction.
  * Mirrors the Borsh + ed25519 flow used by createOnchainSubAccount.
  */
@@ -3187,10 +3212,15 @@ async function signAndBroadcastFunctionCall(opts: {
       txResult?.result?.status?.SuccessValue !== undefined ||
       txResult?.result?.status?.SuccessReceiptId !== undefined;
     if (!ok) {
+      const rpcErr = txResult?.error;
       const errMsg =
-        txResult?.error?.message ||
+        rpcErr?.message ||
         JSON.stringify(txResult?.result?.status?.Failure || txResult?.result || txResult);
-      return { ok: false, error: errMsg };
+      // NEAR RPCs answer every rejected transaction with the same bare
+      // "Server error"; the actionable cause — InvalidNonce, Expired,
+      // NotEnoughBalance, or the contract's own panic — lives only in
+      // `error.data`, so dropping it makes every failure undiagnosable.
+      return { ok: false, error: `${errMsg}${formatRpcErrorData(rpcErr?.data)}` };
     }
     return { ok: true, txHash: txResult?.result?.transaction?.hash };
   } catch (err: any) {
@@ -3717,7 +3747,13 @@ export async function depositPlainBalanceToIntents(
     // intents must hold NEP-145 storage on this token contract before it can
     // receive it. Skipping this made every launchpad-meme deposit panic with
     // "The receiver is not registered" and every settlement after it fail.
-    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, intentsId, senderKey);
+    // The registration is a platform integration cost, so it is sponsored from
+    // the escrow balance instead of being charged to the user's own account.
+    const sponsor = escrowSigningKey(env, rpcUrl);
+    if ('error' in sponsor) {
+      return { deposited: false, reason: sponsor.error };
+    }
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, intentsId, sponsor);
     if (!storage.registered) {
       return { deposited: false, reason: storage.reason || 'intents is not registered on this token' };
     }
@@ -3846,7 +3882,13 @@ export async function depositPlainBalanceToEscrow(
     };
 
     // escrow must hold NEP-145 storage on the token before it can receive it.
-    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, escrowId, senderKey);
+    // Sponsored from escrow's own balance — registering itself, so the user's
+    // account never funds a platform cost just to send their own funds.
+    const sponsor = escrowSigningKey(env, rpcUrl);
+    if ('error' in sponsor) {
+      return { deposited: false, reason: sponsor.error };
+    }
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, escrowId, sponsor);
     if (!storage.registered) {
       return { deposited: false, reason: storage.reason || `escrow is not registered on ${contractId}` };
     }
