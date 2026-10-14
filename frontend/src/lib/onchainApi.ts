@@ -98,6 +98,12 @@ export interface OnchainTx {
   defuse_asset_id_out?: string;
   amount_in?: string;
   amount_out?: string;
+  /**
+   * Unit of `amount_in` / `amount_out`. Upstream intent rows carry raw NEP-141
+   * base units (yocto for NEAR, micro for USDC) and must not be priced as
+   * dollars; rows this worker built from its own records are marked 'human'.
+   */
+  amount_source?: 'human' | 'unknown';
   receiver_id?: string;
   sender_id?: string;
   block_height: number;

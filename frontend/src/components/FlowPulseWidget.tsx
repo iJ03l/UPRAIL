@@ -163,7 +163,13 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             tx.amount_out ||
             '0'
           ) || 0;
-        const price = usdFor(assetKeys(tx), symbolFor(tx));
+        // Upstream intent rows report raw NEP-141 base units — yocto for NEAR,
+        // micro for USDC — with no human figure attached. Multiplying those by a
+        // USD price is what turned a handful of small sends into $476,901.98.
+        // Only rows this worker built from its own D1 records (marked 'human')
+        // may be priced; everything else is reported as unpriced.
+        const humanReadable = tx.amount_source === 'human';
+        const price = humanReadable ? usdFor(assetKeys(tx), symbolFor(tx)) : null;
         const usd = price !== null && amt > 0 ? amt * price : null;
         const isDeposit =
           tx.type === 'deposit' ||
@@ -241,7 +247,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             </div>
             {stats.inflowUnpriced > 0 && (
               <div className="text-[11px] font-mono text-amber-600">
-                +{stats.inflowUnpriced} without a live price
+                Subtotal · {stats.inflowUnpriced} of {stats.inflowCount} txs unpriced
               </div>
             )}
           </div>
@@ -299,7 +305,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             </div>
             {stats.egressUnpriced > 0 && (
               <div className="text-[11px] font-mono text-amber-600">
-                +{stats.egressUnpriced} without a live price
+                Subtotal · {stats.egressUnpriced} of {stats.egressCount} txs unpriced
               </div>
             )}
           </div>

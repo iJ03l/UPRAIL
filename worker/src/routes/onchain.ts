@@ -468,6 +468,8 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
                 intent_type: 'deposit',
                 defuse_asset_id_in: originAsset,
                 amount_in: depAmt,
+                // Human-readable: taken from the API's *Formatted field.
+                amount_source: 'human',
                 sender_id: dep.address,
                 receiver_id: nearAccount,
                 block_height: 0,
@@ -493,6 +495,8 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
               intent_type: 'withdrawal',
               defuse_asset_id_in: w.asset,
               amount_in: w.amount,
+              // Human-readable: straight from this worker's own D1 row.
+              amount_source: 'human',
               sender_id: nearAccount,
               receiver_id: w.destination_address,
               block_height: 0,

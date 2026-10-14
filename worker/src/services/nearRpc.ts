@@ -381,6 +381,17 @@ export interface IntentTx {
   defuse_asset_id_out?: string;
   amount_in?: string;
   amount_out?: string;
+  /**
+   * Unit of `amount_in` / `amount_out`.
+   *
+   * Upstream intent rows come straight from the 1Click API, which reports NEP-141
+   * amounts in base units (yocto for NEAR, micro for USDC) and carries the human
+   * figure in separate `*Formatted` fields we do not receive. Rows this worker
+   * synthesizes from its own D1 records are already human-readable. Without this
+   * tag a consumer cannot tell them apart, and multiplying a raw base amount by
+   * a USD price produced totals like $476,901.98 for a handful of small sends.
+   */
+  amount_source?: 'human' | 'unknown';
   receiver_id?: string;
   sender_id?: string;
   block_height: number;
@@ -2405,6 +2416,8 @@ export async function getIntentHistory(
           defuse_asset_id_out: tx.asset_out || tx.defuse_asset_id_out,
           amount_in: tx.amount_in || tx.amount || '0',
           amount_out: tx.amount_out || '0',
+          // Raw upstream units — see IntentTx.amount_source.
+          amount_source: 'unknown',
           receiver_id: tx.receiver_id || tx.recipient || tx.to,
           sender_id: tx.sender_id || tx.sender || tx.from,
           block_height: Number(tx.block_height || 0),
