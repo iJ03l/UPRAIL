@@ -44,6 +44,12 @@ export interface UseOnchainDataResult {
   nearAccount: string | null;
   hasIntentAccount: boolean;
   isLoadingBalances: boolean;
+  /**
+   * Set when the balance read FAILED, as opposed to succeeding with an empty
+   * list. Consumers must not render a definitive `0.00` while this is set —
+   * that is how a recipient who was just paid can be shown an empty wallet.
+   */
+  balancesError: string | null;
   /** Why a missing intent account has not been provisioned yet (if known). */
   accountError: string | null;
 
@@ -210,6 +216,7 @@ export function useOnchainData(): UseOnchainDataResult {
   const [nearAccount, setNearAccount] = useState<string | null>(globalCache.nearAccount);
   const [hasIntentAccount, setHasIntentAccount] = useState(globalCache.hasIntentAccount);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [balancesError, setBalancesError] = useState<string | null>(null);
   const [isLoadingBalances, setIsLoadingBalances] = useState(
     globalCache.balances.length === 0 && !globalCache.hasIntentAccount
   );
@@ -275,10 +282,23 @@ export function useOnchainData(): UseOnchainDataResult {
         if (response) {
           setBalances(response.balances);
           persistCache({ balances: response.balances });
+          setBalancesError(null);
+        } else {
+          // fetchOnchainBalances swallows a 400 into `null`. That is a failed
+          // read, NOT an empty wallet — keeping the previous snapshot with no
+          // marker is what made a just-paid recipient see a confident 0.00.
+          setBalancesError('Could not load your balance.');
         }
+      } else {
+        // The account check failed or said "no account yet". Either way we
+        // have nothing authoritative, so say so rather than showing zeros.
+        setBalancesError(
+          account.provisionError || 'Could not confirm your on-chain account.'
+        );
       }
     } catch (err: any) {
       console.warn('[useOnchainData] balances:', err);
+      setBalancesError(err?.message || 'Could not load your balance.');
     } finally {
       setIsLoadingBalances(false);
     }
@@ -343,15 +363,29 @@ export function useOnchainData(): UseOnchainDataResult {
     return () => { mounted = false; };
   }, [loadTokens, loadBalances, loadDepositAddresses, loadHistory]);
 
-  // ── Keep prices live while the tab is open ────────────────────────────────
-  // Balances keep their own cadence; only the token/price payload is repolled
-  // so the number on screen does not freeze at whatever it was on mount.
+  // ── Keep prices and balances live while the tab is open ───────────────────
+  // Balances MUST be repolled too, not just prices: a payment can be claimed
+  // on-chain while this tab is open, and the old behaviour (prices only) left
+  // the recipient staring at the pre-claim balance until a full reload.
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void loadTokens();
+      if (document.visibilityState === 'visible') {
+        void loadTokens();
+        void loadBalances();
+      }
     }, PRICE_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [loadTokens]);
+  }, [loadTokens, loadBalances]);
+
+  // Returning to the tab is the moment a recipient most often wants to send,
+  // and it is also when a claim may have landed while they were away.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void loadBalances();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [loadBalances]);
 
   // ── Get deposit address for a specific chain & token ───────────────────────
   const getDepositAddress = useCallback(
@@ -408,6 +442,7 @@ export function useOnchainData(): UseOnchainDataResult {
     nearAccount,
     hasIntentAccount,
     isLoadingBalances,
+    balancesError,
     accountError,
     depositAddresses,
     getDepositAddress,

@@ -18,7 +18,7 @@ let globalHistoryCache: PaymentIntent[] = (() => {
 
 export function usePayments() {
   const { authorizeWithPasskey } = usePasskeyTxAuth();
-  const { tokens: onchainTokens, balances, refreshBalances } = useOnchainData();
+  const { tokens: onchainTokens, balances, balancesError, refreshBalances } = useOnchainData();
 
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
@@ -404,6 +404,8 @@ export function usePayments() {
     sendToWallet,
     loadHistory,
     resetCreatedPayment,
+    balancesError,
+    refreshBalances,
     clearError: () => setError(null),
   };
 }

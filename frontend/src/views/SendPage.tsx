@@ -30,6 +30,8 @@ export const SendPage: React.FC = () => {
     sendToWallet,
     updateQuote,
     clearError,
+    balancesError,
+    refreshBalances,
   } = usePayments();
 
   const [sendMode, setSendMode] = useState<'handle' | 'wallet'>('handle');
@@ -200,6 +202,22 @@ export const SendPage: React.FC = () => {
                 placeholder="0x... (EVM), Solana base58, or .near"
                 className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3.5 text-base sm:text-xs text-stone-900 font-mono placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
               />
+            </div>
+          )}
+
+          {/* A failed balance read must never look like an empty wallet. */}
+          {balancesError && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3">
+              <span className="text-xs font-medium text-amber-900">
+                {balancesError} Balances shown may be out of date.
+              </span>
+              <button
+                type="button"
+                onClick={() => void refreshBalances()}
+                className="text-xs font-bold text-amber-900 underline underline-offset-2 hover:text-amber-700 shrink-0 cursor-pointer"
+              >
+                Retry
+              </button>
             </div>
           )}
 

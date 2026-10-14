@@ -49,6 +49,57 @@ onchainRouter.get('/tokens', async (c) => {
  * onchain intents contract, merged with any virtual escrow vault balances.
  * Data is per-user and access-controlled by session.
  */
+// ---------------------------------------------------------------------------
+// GET /api/onchain/price
+// ---------------------------------------------------------------------------
+/**
+ * USD price for a single asset, by defuse id or contract id.
+ *
+ * The curated registry head is only ~484 tokens, so a launchpad meme is absent
+ * from it - yet the DCL pool pipeline still prices it, which is why a balance
+ * row can show $4.83 for a token the registry has never heard of. Exposing that
+ * lookup lets any consumer price a native NEP-141 instead of reporting it as
+ * unpriced.
+ *
+ * Public and cacheable: prices are not per-user data. Kept off /history so the
+ * per-invocation subrequest budget of the authenticated routes is untouched -
+ * this runs in its own invocation with its own budget, and pool lookups are
+ * already KV-cached.
+ */
+onchainRouter.get('/price', async (c) => {
+  const asset = (c.req.query('asset') || '').trim();
+  if (!asset) {
+    return c.json<ErrorResponse>(
+      { error: 'Missing asset query parameter', code: 'MISSING_ASSET' },
+      400
+    );
+  }
+
+  const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => [] as nearRpc.OnchainToken[]);
+  const known = nearRpc.resolveTokenForAsset(asset, tokens);
+  const token = known || (await nearRpc.resolveRheaToken(c.env, asset).catch(() => null));
+
+  const lower = asset.toLowerCase();
+  const contract =
+    token?.nearContractId || (lower.startsWith('nep141:') ? lower.slice(7) : lower) || null;
+
+  const priceUsd = await nearRpc.resolveTokenUsdPrice(c.env, {
+    nearContractId: contract,
+    contractId: contract,
+    symbol: token?.symbol ?? null,
+    decimals: token?.decimals ?? null,
+  });
+
+  c.header('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=300');
+  return c.json({
+    asset,
+    priceUsd,
+    symbol: token?.symbol ?? null,
+    decimals: token?.decimals ?? null,
+    source: priceUsd === null ? 'none' : known ? 'registry' : 'pool',
+  });
+});
+
 onchainRouter.get('/balances', requireAuth(), async (c) => {
   const session = c.get('session')!;
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
