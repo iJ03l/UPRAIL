@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
-    "test": "esbuild src/index.ts --bundle --format=esm --main-fields=module,main --outfile=dist/worker.js --external:cloudflare:workers --external:node:* && esbuild src/services/nearRpc.ts --bundle --format=esm --main-fields=module,main --outfile=dist/nearRpc.bundle.mjs --external:cloudflare:workers --external:node:* && node --test test/miniflare.test.mjs test/assets-match.test.mjs"
+    "test": "esbuild src/index.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/worker.js && esbuild src/services/nearRpc.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/nearRpc.bundle.mjs && node --test test/miniflare.test.mjs test/assets-match.test.mjs test/account-exists.test.mjs"
   },
   "dependencies": {
     "@noble/curves": "^2.4.0",

@@ -290,11 +290,10 @@ export function useOnchainData(): UseOnchainDataResult {
           setBalancesError('Could not load your balance.');
         }
       } else {
-        // The account check failed or said "no account yet". Either way we
-        // have nothing authoritative, so say so rather than showing zeros.
-        setBalancesError(
-          account.provisionError || 'Could not confirm your on-chain account.'
-        );
+        // The read SUCCEEDED and says there is no account yet — that is an
+        // onboarding state, not a failure, so it must not look like an error.
+        // A real failure throws above and lands in catch.
+        setBalancesError(account.provisionError || null);
       }
     } catch (err: any) {
       console.warn('[useOnchainData] balances:', err);

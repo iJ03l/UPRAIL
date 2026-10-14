@@ -268,7 +268,19 @@ export async function fetchIntentAccount(): Promise<{
   const res = await fetch(url('/api/onchain/account'), {
     credentials: 'include',
   });
-  if (!res.ok) return { hasIntentAccount: false, nearAccount: null, xHandle: '' };
+  if (!res.ok) {
+    // A failed read is not "you have no account". Returning the empty shape
+    // here is what made the Send page render a funded wallet as 0.00 with no
+    // error, so let the caller surface it instead.
+    let message = `Could not confirm your on-chain account (${res.status}).`;
+    try {
+      const body = await res.json();
+      if (typeof body?.error === 'string' && body.error) message = body.error;
+    } catch {
+      /* non-JSON error body — keep the status message */
+    }
+    throw new Error(message);
+  }
   const data = await res.json();
   return {
     hasIntentAccount: !!data.hasIntentAccount,

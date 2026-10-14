@@ -585,11 +585,22 @@ onchainRouter.get('/account', requireAuth(), async (c) => {
   const session = c.get('session')!;
   const report: nearRpc.ProvisionReport = { attempted: false, created: false };
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session, report);
-  // resolveUserNearAccount attempts provisioning; accountExists is the
-  // authoritative onchain check. The old `Boolean(nearAccount) || …` short-
-  // circuit made hasIntentAccount always true, leaving the UI waiting forever
-  // for an account that was never created.
-  const exists = await nearRpc.accountExists(c.env, nearAccount);
+  // accountExists distinguishes "definitely missing" (false) from "could not
+  // read" (throws). Collapsing both into hasIntentAccount:false is what made a
+  // funded recipient look like they had no account, and with it no balance.
+  let exists: boolean;
+  try {
+    exists = await nearRpc.accountExists(c.env, nearAccount);
+  } catch (existsErr: any) {
+    console.error('[onchain/account] accountExists failed:', existsErr);
+    return c.json<ErrorResponse>(
+      {
+        error: 'Could not verify your on-chain account right now. Please try again.',
+        code: 'ACCOUNT_LOOKUP_FAILED',
+      },
+      502
+    );
+  }
 
   return c.json({
     hasIntentAccount: exists,

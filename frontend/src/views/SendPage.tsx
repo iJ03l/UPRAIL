@@ -207,10 +207,11 @@ export const SendPage: React.FC = () => {
 
           {/* A failed balance read must never look like an empty wallet. */}
           {balancesError && (
-            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-amber-900">
-                {balancesError} Balances shown may be out of date.
-              </span>
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <p className="text-xs font-medium text-amber-900 min-w-0 flex-1 basis-44">
+                {balancesError.endsWith('.') ? balancesError : `${balancesError}.`}{' '}
+                Balances shown may be out of date.
+              </p>
               <button
                 type="button"
                 onClick={() => void refreshBalances()}

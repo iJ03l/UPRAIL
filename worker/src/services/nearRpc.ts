@@ -423,7 +423,14 @@ async function nearRpc(
 
   const json = await resp.json() as any;
   if (json.error) {
-    throw new Error(`NEAR RPC error [${json.error.code}]: ${json.error.message}`);
+    // The node hides the real reason in `cause.name` / `data` (e.g. a missing
+    // account is HANDLER_ERROR/"Server error" with cause UNKNOWN_ACCOUNT).
+    // Surfacing only code+message made every rejection look identical, so
+    // callers could not tell "does not exist" from "RPC is down".
+    const causeName = json.error?.cause?.name ? ` (${json.error.cause.name})` : '';
+    const detail =
+      typeof json.error.data === 'string' && json.error.data ? `: ${json.error.data}` : '';
+    throw new Error(`NEAR RPC error [${json.error.code}]: ${json.error.message}${causeName}${detail}`);
   }
   return json.result;
 }
@@ -2670,8 +2677,17 @@ export async function createOnchainSubAccount(
   userPrivKey?: Uint8Array
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
-  // Check if account already exists onchain
-  const alreadyExists = await accountExists(env, subAccount);
+  // Check if account already exists onchain. A failed RPC read is NOT evidence
+  // the account is missing — creating it again would burn a sponsored tx and
+  // leave the caller believing provisioning happened. Treat "unknown" as
+  // "assume it exists" and let the real registration path confirm.
+  let alreadyExists = false;
+  try {
+    alreadyExists = await accountExists(env, subAccount);
+  } catch (existsErr) {
+    console.warn('[nearRpc] accountExists unavailable during provisioning:', existsErr);
+    alreadyExists = true;
+  }
   if (alreadyExists) {
     if (userPubKey && userPrivKey) {
       await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch(() => {});
@@ -2799,9 +2815,25 @@ export async function accountExists(env: Env, accountId: string): Promise<boolea
       account_id: accountId,
     });
     return !!(res && (res.amount !== undefined || res.result?.amount !== undefined));
-  } catch {
-    return false;
+  } catch (err: any) {
+    // Only a definitive "no such account" answers false. Every other failure —
+    // RPC outage, rate limit, timeout — is an unknown, and answering false for
+    // those made /api/onchain/account report "no intent account", which is what
+    // silently withholds a recipient's real balance. Propagate it so the route
+    // can fail loudly instead of inventing an empty wallet.
+    if (isUnknownAccountError(err)) return false;
+    throw err;
   }
+}
+
+/**
+ * True when an RPC error definitively means "this account does not exist".
+ * The NEAR node reports that as HANDLER_ERROR / UNKNOWN_ACCOUNT; anything else
+ * (HTTP 5xx, rate limiting, JSON decode) says nothing about existence.
+ */
+function isUnknownAccountError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return msg.includes('UNKNOWN_ACCOUNT') || /does not exist while viewing/.test(msg);
 }
 
 export function isSyntheticTxHash(h?: string | null): boolean {
