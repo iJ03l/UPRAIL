@@ -2977,7 +2977,13 @@ export async function executeIntentsRelayed(
     }
 
     // The node replied with a definite outcome: the transaction did not land.
-    const err = bData?.error?.message || JSON.stringify(bData?.result?.status?.Failure || bData);
+    // The real reason lives in error.data / status.Failure — the bare message
+    // is always the useless "Server error".
+    const failure = bData?.result?.status?.Failure;
+    const err =
+      `${bData?.error?.message || 'broadcast rejected'}` +
+      `${formatRpcErrorData(bData?.error?.data)}` +
+      `${failure ? ` | ${JSON.stringify(failure)}` : ''}`;
     return { success: false, error: err, ambiguous: false };
   } catch (err: any) {
     return {
@@ -3770,18 +3776,26 @@ async function ensureReceiverStorageRegistered(
     };
   }
 
-  try {
-    const after = await viewStrict('storage_balance_of', { account_id: receiverId });
-    if (after) {
-      receiverStorageRegistered.set(cacheKey, { at: Date.now(), registered: true });
-      return { ok: true, registered: true };
+  // The deposit is included by the time the broadcast returns, but a
+  // `finality: 'final'` read immediately after can still land on the block
+  // before it and answer `null`. That reads as "the contract refused to
+  // register" and wrongly aborts a perfectly good withdrawal, so re-read a
+  // few times before believing it.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const after = await viewStrict('storage_balance_of', { account_id: receiverId });
+      if (after) {
+        receiverStorageRegistered.set(cacheKey, { at: Date.now(), registered: true });
+        return { ok: true, registered: true };
+      }
+    } catch (err: any) {
+      return {
+        ok: false,
+        registered: false,
+        reason: `Storage registration could not be confirmed: ${err?.message || String(err)}`,
+      };
     }
-  } catch (err: any) {
-    return {
-      ok: false,
-      registered: false,
-      reason: `Storage registration could not be confirmed: ${err?.message || String(err)}`,
-    };
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
   }
   return {
     ok: false,
@@ -4315,9 +4329,64 @@ export async function dropNearNativeMemeToNative(
       return { dropped: false, reason: 'INTENTS_BALANCE_NOT_PRESENT' };
     }
 
+    // The withdraw is a NEP-141 receipt into the recipient's own account, and
+    // the token contract refuses a receiver it has never registered:
+    // "The receiver is not registered". intents.near is strict about this and
+    // rolls the whole withdraw back — burning the intents balance and refunding
+    // it — so a recipient who has never held this meme natively would loop
+    // forever with a no-op withdraw. Register them first, sponsored from
+    // escrow so the registration cost is never charged to the recipient.
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const sponsor = escrowSigningKey(env, rpcUrl);
+    if ('error' in sponsor) {
+      return { dropped: false, reason: sponsor.error };
+    }
+    const storage = await ensureReceiverStorageRegistered(
+      rpcUrl,
+      contractId,
+      recipientNearAccount,
+      sponsor
+    );
+    if (!storage.registered) {
+      return {
+        dropped: false,
+        reason: storage.reason || `${recipientNearAccount} is not registered on ${contractId}`,
+      };
+    }
+
     const res = await executeWithdrawIntent(env, recipientXId, recipientNearAccount, asset, amount);
-    if (res?.success && res.txHash) return { dropped: true, txHash: res.txHash };
-    return { dropped: false, reason: res?.error || 'Withdraw intent failed' };
+    if (!res?.success || !res.txHash) {
+      return { dropped: false, reason: res?.error || 'Withdraw intent failed' };
+    }
+
+    // A successful broadcast is NOT proof the balance moved. intents.near
+    // accepts the ft_withdraw, burns the balance, and — when the token
+    // contract refuses the receipt — refunds it with an `mt_mint` marked
+    // "refund", all inside a transaction that reports SuccessValue. Verify the
+    // balance actually left intents rather than trusting the relay.
+    try {
+      const afterRaw = await viewFunction(
+        env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com',
+        env.INTENTS_CONTRACT_ID || 'intents.near',
+        'mt_balance_of',
+        {
+          account_id: recipientNearAccount,
+          token_id: token.defuse_asset_id || `nep141:${contractId}`,
+        }
+      );
+      const after = BigInt(String(afterRaw ?? '0'));
+      if (after >= wanted) {
+        return {
+          dropped: false,
+          txHash: res.txHash,
+          reason: 'WITHDRAW_ROLLED_BACK: token contract refused the receipt and intents refunded it',
+        };
+      }
+    } catch (verifyErr) {
+      console.warn('[dropNearNativeMemeToNative] post-withdraw verify failed:', verifyErr);
+    }
+
+    return { dropped: true, txHash: res.txHash };
   } catch (err: any) {
     return { dropped: false, reason: err?.message || String(err) };
   }
