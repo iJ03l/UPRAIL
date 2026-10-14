@@ -59,6 +59,36 @@ export function normalizeRecipientInput(raw: string): { recipient: string; isAdd
  * id (`nep141:usdc.near`, `near:wrap.near`) — all of which must resolve to
  * the same display token.
  */
+/**
+ * Builds a token for an asset the curated registry does not carry.
+ *
+ * The registry head is 484 tokens; a launchpad meme is not in it. Returning
+ * `tokens[0]` for such an asset labelled a UPTOBER payment as NEAR in history,
+ * shares and any other place that renders a payment's token. Derive the
+ * identity from the NEP-141 contract id instead — "nep141:uptober.nearlytrade.near"
+ * is UPTOBER on uptober.nearlytrade.near, and saying so is always better than
+ * substituting a different asset.
+ */
+function tokenFromAssetId(asset: string): Token {
+  const lower = (asset || '').trim().toLowerCase();
+  const contract = lower.startsWith('nep141:') ? lower.slice('nep141:'.length) : '';
+  const bare = contract || lower;
+  const symbol = ((bare.split('.')[0] || bare || 'UNKNOWN') as string).toUpperCase();
+  return {
+    id: lower || 'unknown',
+    symbol,
+    name: symbol,
+    iconUrl: getOnchainIcon(bare.split('.')[0] || '') || getOnchainIcon(symbol.toLowerCase()) || '',
+    decimals: bare === 'wrap.near' ? 24 : 18,
+    priceUsd: undefined,
+    nearContractId: contract,
+    chain: 'near',
+    badge: contract ? 'NEAR' : '—',
+    category: 'all',
+    balance: '0.00',
+  };
+}
+
 function resolveTokenForAsset(asset: string | null | undefined, tokens: Token[]): Token {
   const fallback = tokens[0] || SUPPORTED_TOKENS[0];
   const a = (asset || '').trim();
@@ -83,7 +113,8 @@ function resolveTokenForAsset(asset: string | null | undefined, tokens: Token[])
     const id = t.id.toLowerCase();
     return contract === suffix || id === suffix || contract.endsWith(`.${suffix}`) || suffix.endsWith(`.${id}`);
   });
-  return bySuffix || fallback;
+  // Registry miss: never substitute another asset — synthesize one from the id.
+  return bySuffix || tokenFromAssetId(lower);
 }
 
 /**

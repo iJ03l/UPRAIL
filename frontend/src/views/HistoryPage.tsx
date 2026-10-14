@@ -101,17 +101,20 @@ export const HistoryPage: React.FC = () => {
     for (const tx of transactions) {
       const isDeposit = tx.intent_type === 'deposit';
       const isWithdrawal = tx.intent_type === 'withdrawal';
+      // An outgoing transfer carries its asset in `defuse_asset_id_out`; only
+      // deposits populate `_in`. Reading `_in` alone left every send unlabelled
+      // and falling through to the NEAR default.
+      const txAssetId = tx.defuse_asset_id_in || tx.defuse_asset_id_out || '';
+      const txAssetLower = txAssetId.toLowerCase();
       const assetToken = tokens.find(
         (t) =>
-          t.id.toLowerCase() === (tx.defuse_asset_id_in || '').toLowerCase() ||
+          t.id.toLowerCase() === txAssetLower ||
           // Suffix, not substring: "wrap.near" is a substring of other account
           // ids, so `includes` could pick the wrong token.
           (!!t.nearContractId &&
-            (tx.defuse_asset_id_in || '')
-              .toLowerCase()
-              .endsWith(`:${t.nearContractId.toLowerCase()}`))
+            txAssetLower.endsWith(`:${t.nearContractId.toLowerCase()}`))
       );
-      const rawAssetId = (tx.defuse_asset_id_in || '').toLowerCase();
+      const rawAssetId = txAssetLower;
       const symbol =
         assetToken?.symbol ||
         (rawAssetId.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')
@@ -126,7 +129,7 @@ export const HistoryPage: React.FC = () => {
             // registry does not carry.
             (rawAssetId.startsWith('nep141:')
               ? rawAssetId.split(':').pop()!.split('.')[0]!.toUpperCase()
-              : tx.defuse_asset_id_in?.toUpperCase()) || '—');
+              : txAssetId.toUpperCase()) || '—');
       const amt = tx.amount_in || tx.amount_out || '0';
       const price = assetToken?.priceUsd;
       const amountUsd = price ? (parseFloat(amt) || 0) * price : null;
