@@ -814,8 +814,8 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     // Launchpad meme assets are the exception: their token contracts have never
     // registered `intents.near` storage, so the deposit panics "The receiver
     // is not registered" and no intent can ever spend a balance that never
-    // arrived. For those we settle the whole withdrawal with plain
-    // ft_transfers through the escrow holding account instead.
+    // arrived. For those we settle the whole withdrawal with a plain
+    // ft_transfer straight out of the sender's own account.
     let settlementRail: 'intents' | 'escrow' = 'intents';
     let plainDeposit: { deposited: boolean; txHash?: string; reason?: string } = { deposited: false };
     let nearAccountForDeposit: string | null = null;
@@ -856,7 +856,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           plainDeposit = { deposited: true };
         } else {
           console.warn(
-            `[withdraw] intents rail unavailable for ${asset} (${plainDeposit.reason}) — using the escrow ft_transfer rail`
+            `[withdraw] intents rail unavailable for ${asset} (${plainDeposit.reason}) — settling with a direct ft_transfer`
           );
           settlementRail = 'escrow';
         }
@@ -916,10 +916,9 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     try {
       // Meme assets never make it into intents — their token contracts have
       // never registered intents storage — so the whole withdrawal is settled
-      // with plain NEP-141 transfers instead: the sender's own balance locks
-      // into the escrow holding account, which then pays the destination.
-      // Cross-chain still needs the 1Click solver route, which settles inside
-      // intents and therefore cannot serve these assets.
+      // with a plain NEP-141 transfer straight out of the sender's own
+      // account. Cross-chain still needs the 1Click solver route, which
+      // settles inside intents and therefore cannot serve these assets.
       if (settlementRail === 'escrow') {
         if (!isNearAccount) {
           throw new Error(
@@ -927,26 +926,22 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           );
         }
 
-        const lock = await nearRpc.depositPlainBalanceToEscrow(
+        const direct = await nearRpc.executeDirectFtWithdraw(
           c.env,
           session.x_id,
-          asset,
-          amountStr
-        );
-        if (!lock.deposited) {
-          throw new Error(lock.reason || 'Could not lock the balance into the escrow account');
-        }
-
-        const payout = await nearRpc.executeEscrowFtWithdraw(
-          c.env,
           destinationAddress,
           asset,
           amountStr
         );
-        if (!payout.success || !payout.txHash) {
-          throw new Error(payout.error || 'Escrow payout to the destination failed');
+        if (!direct.success || !direct.txHash) {
+          if (direct.error === 'INSUFFICIENT_PLAIN_BALANCE') {
+            throw new Error(
+              `Your ${asset.toUpperCase()} balance is not available in your wallet account — no funds were moved`
+            );
+          }
+          throw new Error(direct.error || 'Direct transfer to the destination failed');
         }
-        txHash = payout.txHash;
+        txHash = direct.txHash;
       } else {
       let settlementNearRecipient = destinationAddress;
 

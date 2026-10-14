@@ -4093,6 +4093,112 @@ export async function executeEscrowFtWithdraw(
 }
 
 /**
+ * Direct NEP-141 payout from the sender's own pk sub-account to an external
+ * NEAR account — the withdrawal leg for NEAR-only assets that can never enter
+ * intents.
+ *
+ * A launchpad meme is an ordinary NEP-141 on the holder's own account, but its
+ * token contract has never registered storage on `intents.near`, so no intents
+ * intent can ever spend it. The previous settlement locked the balance into
+ * the escrow holding account and had escrow pay the destination out again — a
+ * pure custody hop that cost two transactions and left the funds commingled in
+ * escrow for the duration. This sends the balance straight from the sender to
+ * the destination in one transfer instead. No fee is taken: the destination
+ * receives exactly the requested amount.
+ *
+ * The destination is registered on the token first (sponsored from escrow, the
+ * same platform-borne cost the escrow rail paid) because a plain `ft_transfer`
+ * cannot auto-register a receiver and would otherwise panic with "The receiver
+ * is not registered".
+ */
+export async function executeDirectFtWithdraw(
+  env: Env,
+  senderXId: string,
+  destinationAddress: string,
+  asset: string,
+  amount: string
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token) return { success: false, error: `Unsupported asset: ${asset}` };
+
+    const contractId = token.nearContractId;
+    if (!contractId) return { success: false, error: `No NEAR contract for asset: ${asset}` };
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { success: false, error: `Invalid amount: ${amount}` };
+    }
+
+    // The signer must ALWAYS be the sender — the funds leave their own
+    // account, so no other key can move them.
+    const sender = await deriveUserNearKeypair(env, senderXId);
+    let senderAccountId = sender.accountId;
+    if (env.DB) {
+      try {
+        const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+          .bind(senderXId)
+          .first<{ near_account: string | null }>();
+        if (idRow?.near_account) senderAccountId = idRow.near_account;
+      } catch {}
+    }
+    await createOnchainSubAccount(env, senderAccountId, sender.publicKey, sender.privateKey);
+
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+
+    // Pre-check the plain balance rather than signing a transfer the token
+    // contract will reject. The withdrawable-balance preview counts intents
+    // and plain together, so a balance that is stranded inside intents passes
+    // the route-level check but can never be spent by a plain ft_transfer —
+    // that must surface as a clean refusal, not an onchain panic.
+    const plain = await getPlainFtBalance(rpcUrl, contractId, senderAccountId);
+    if (plain < BigInt(baseUnits)) {
+      return {
+        success: false,
+        error: 'INSUFFICIENT_PLAIN_BALANCE',
+      };
+    }
+
+    // The sender pays for their own transfer's gas; the destination's storage
+    // registration is a platform cost, sponsored from escrow exactly as the
+    // escrow rail did.
+    const sponsor = escrowSigningKey(env, rpcUrl);
+    if ('error' in sponsor) return { success: false, error: sponsor.error };
+    const storage = await ensureReceiverStorageRegistered(
+      rpcUrl,
+      contractId,
+      destinationAddress,
+      sponsor
+    );
+    if (!storage.registered) {
+      return {
+        success: false,
+        error: storage.reason || `destination is not registered on ${contractId}`,
+      };
+    }
+
+    const res = await signAndBroadcastFunctionCall({
+      rpcUrl,
+      signerId: senderAccountId,
+      signerPrivKey: sender.privateKey,
+      signerPubKey: sender.publicKey,
+      receiverId: contractId,
+      method: 'ft_transfer',
+      args: JSON.stringify({ receiver_id: destinationAddress, amount: baseUnits }),
+      gas: 30_000_000_000_000n,
+      deposit: 1n,
+    });
+    return res.ok
+      ? { success: true, txHash: res.txHash }
+      : { success: false, error: res.error || 'ft_transfer to destination failed' };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
  * Signs and settles an authentic onchain transfer intent from escrow.uprail.near to recipient on intents.near.
  * Used when releasing escrowed funds to an unregistered X user upon claiming.
  */
