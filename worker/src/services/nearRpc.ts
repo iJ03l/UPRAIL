@@ -3124,6 +3124,15 @@ function formatRpcErrorData(data: unknown): string {
 /**
  * Signs and broadcasts a single-action FunctionCall transaction.
  * Mirrors the Borsh + ed25519 flow used by createOnchainSubAccount.
+ *
+ * Retries a rejection that happened before inclusion, up to three times with a
+ * short backoff. The common case is back-to-back broadcasts — a token
+ * registration immediately followed by the transfer it exists to enable —
+ * where the second read of the access-key nonce has not caught up with the
+ * first transaction yet, so it signs a nonce that is no longer strictly
+ * greater and is refused with no history entry, which surfaces as a
+ * mysterious "Server error". A timeout is never retried: there the
+ * transaction may already be on chain.
  */
 async function signAndBroadcastFunctionCall(opts: {
   rpcUrl: string;
@@ -3136,6 +3145,44 @@ async function signAndBroadcastFunctionCall(opts: {
   gas: bigint;
   deposit: bigint;
 }): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  let last: BroadcastAttempt = { ok: false, error: 'not attempted' };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    }
+    last = await broadcastFunctionCallOnce(opts);
+    // `rejected` is set only when the node answered with a JSON-RPC error
+    // instead of a transaction: it refused the transaction before including
+    // it, so broadcasting again cannot double-spend. `result.status.Failure`
+    // is the opposite case — the transaction landed and failed — and is
+    // returned to the caller immediately.
+    if (last.ok || !last.rejected) return last;
+    console.warn(
+      `[nearRpc] ${opts.signerId} broadcast rejected before inclusion (attempt ${attempt + 1}): ${last.error}`
+    );
+  }
+  return last;
+}
+
+interface BroadcastAttempt {
+  ok: boolean;
+  txHash?: string;
+  error?: string;
+  /** True when the node refused the transaction before including it. */
+  rejected?: boolean;
+}
+
+async function broadcastFunctionCallOnce(opts: {
+  rpcUrl: string;
+  signerId: string;
+  signerPrivKey: Uint8Array;
+  signerPubKey: Uint8Array;
+  receiverId: string;
+  method: string;
+  args: string;
+  gas: bigint;
+  deposit: bigint;
+}): Promise<BroadcastAttempt> {
   const { rpcUrl, signerId, signerPrivKey, signerPubKey, receiverId, method, args, gas, deposit } = opts;
   try {
     const statusRes = await fetch(rpcUrl, {
@@ -3220,7 +3267,11 @@ async function signAndBroadcastFunctionCall(opts: {
       // "Server error"; the actionable cause — InvalidNonce, Expired,
       // NotEnoughBalance, or the contract's own panic — lives only in
       // `error.data`, so dropping it makes every failure undiagnosable.
-      return { ok: false, error: `${errMsg}${formatRpcErrorData(rpcErr?.data)}` };
+      return {
+        ok: false,
+        rejected: true,
+        error: `${errMsg}${formatRpcErrorData(rpcErr?.data)}`,
+      };
     }
     return { ok: true, txHash: txResult?.result?.transaction?.hash };
   } catch (err: any) {
