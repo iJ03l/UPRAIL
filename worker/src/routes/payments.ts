@@ -659,6 +659,38 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     if (plainDeposit.deposited && plainDeposit.txHash) {
       if (isRecipientRegistered) claimTxHash = plainDeposit.txHash;
       else escrowDepositTxHash = plainDeposit.txHash;
+    } else if (plainDeposit.reason && plainDeposit.reason !== 'INSUFFICIENT_PLAIN_BALANCE') {
+      // Meme assets never make it into intents — their token contracts have
+      // never registered intents storage — so the intents rails below would
+      // only panic against an empty ledger. Lock the gross amount into the
+      // escrow holding account with a plain ft_transfer instead; the fee stays
+      // in escrow and is released at claim time, exactly like the escrowed
+      // path already does. Cross-chain destinations still need the 1Click
+      // route and are rejected at claim time.
+      const lock = await nearRpc.depositPlainBalanceToEscrow(
+        c.env,
+        session!.x_id,
+        body.asset,
+        body.amount
+      );
+      if (lock.deposited && lock.txHash) {
+        escrowDepositTxHash = lock.txHash;
+      } else {
+        console.error(
+          '[send] plain escrow lock failed:',
+          lock.reason,
+          '| intents deposit error:',
+          plainDeposit.reason
+        );
+        return await failSend(
+          'SETTLEMENT_FAILED',
+          publicErrorMessage(
+            new Error(lock.reason || plainDeposit.reason || ''),
+            'Onchain settlement failed'
+          ),
+          502
+        );
+      }
     } else if (isRecipientRegistered && recipientNearAccount) {
       const transferResult = await nearRpc.executeTransferIntent(
         c.env,

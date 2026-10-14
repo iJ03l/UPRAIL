@@ -411,7 +411,28 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
               });
               continue;
             } else {
-              throw new Error(escrowTransfer?.error || 'Escrow transfer execution failed');
+              // Meme assets were locked into escrow as a plain NEP-141 balance
+              // rather than an intents ledger entry, so the intent cannot
+              // spend them — pay out with a plain ft_transfer instead.
+              const plainPayout = await nearRpc.executeEscrowFtWithdraw(
+                c.env,
+                recipientNearAccount,
+                payment.asset,
+                payment.amount
+              );
+              if (plainPayout?.success && plainPayout.txHash) {
+                txHash = plainPayout.txHash;
+              } else {
+                console.error(
+                  '[claim/execute] plain escrow payout failed:',
+                  plainPayout?.error,
+                  '| intents error:',
+                  escrowTransfer?.error
+                );
+                throw new Error(
+                  `Onchain settlement failed: ${plainPayout?.error || escrowTransfer?.error || 'escrow transfer error'}`
+                );
+              }
             }
           } catch (tErr: any) {
             console.error('[claim/execute] onchain escrow transfer failed:', tErr);
@@ -755,17 +776,68 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     // first — ft_transfer_call with the user's own address as memo — so the
     // 1Click withdrawal can spend directly-received tokens. No-op when the
     // balance already lives inside intents.
+    //
+    // Launchpad meme assets are the exception: their token contracts have never
+    // registered `intents.near` storage, so the deposit panics "The receiver
+    // is not registered" and no intent can ever spend a balance that never
+    // arrived. For those we settle the whole withdrawal with plain
+    // ft_transfers through the escrow holding account instead.
+    let settlementRail: 'intents' | 'escrow' = 'intents';
+    let plainDeposit: { deposited: boolean; txHash?: string; reason?: string } = { deposited: false };
+    let nearAccountForDeposit: string | null = null;
     try {
-      const nearAccountForDeposit = await nearRpc.resolveUserNearAccount(c.env, session);
-      await nearRpc.depositPlainBalanceToIntents(
+      nearAccountForDeposit = await nearRpc.resolveUserNearAccount(c.env, session);
+      const plainBefore = await nearRpc.getPlainAssetBalance(
+        c.env,
+        asset,
+        nearAccountForDeposit
+      );
+
+      plainDeposit = await nearRpc.depositPlainBalanceToIntents(
         c.env,
         session.x_id,
         asset,
         amountStr,
         nearAccountForDeposit
       );
+
+      if (
+        !plainDeposit.deposited &&
+        plainDeposit.reason &&
+        plainDeposit.reason !== 'INSUFFICIENT_PLAIN_BALANCE'
+      ) {
+        // A broadcast that timed out but landed would otherwise be spent a
+        // second time on the fallback rail, so compare the plain balance
+        // before switching.
+        const landed = await nearRpc.plainBalanceAbsorbed(
+          c.env,
+          asset,
+          nearAccountForDeposit,
+          plainBefore,
+          amountStr
+        );
+
+        if (landed) {
+          // The deposit did land — stay on the intents rail.
+          plainDeposit = { deposited: true };
+        } else {
+          console.warn(
+            `[withdraw] intents rail unavailable for ${asset} (${plainDeposit.reason}) — using the escrow ft_transfer rail`
+          );
+          settlementRail = 'escrow';
+        }
+      }
     } catch (plainErr) {
-      console.warn('[withdraw] plain-balance deposit skipped:', plainErr);
+      console.error('[withdraw] settlement rail selection failed:', plainErr);
+      return c.json<ErrorResponse>(
+        {
+          error: `Could not prepare your ${asset.toUpperCase()} balance for settlement: ${
+            plainErr instanceof Error ? plainErr.message : String(plainErr)
+          } — no funds were moved.`,
+          code: 'DEPOSIT_FAILED',
+        },
+        502
+      );
     }
 
     // 2. Atomically reserve the withdrawal — and refuse a second concurrent
@@ -808,6 +880,40 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     let txHash = '';
     let oneClickDepositAddress: string | null = null;
     try {
+      // Meme assets never make it into intents — their token contracts have
+      // never registered intents storage — so the whole withdrawal is settled
+      // with plain NEP-141 transfers instead: the sender's own balance locks
+      // into the escrow holding account, which then pays the destination.
+      // Cross-chain still needs the 1Click solver route, which settles inside
+      // intents and therefore cannot serve these assets.
+      if (settlementRail === 'escrow') {
+        if (!isNearAccount) {
+          throw new Error(
+            'Cross-chain withdrawal is not available for this asset — withdraw to a NEAR account'
+          );
+        }
+
+        const lock = await nearRpc.depositPlainBalanceToEscrow(
+          c.env,
+          session.x_id,
+          asset,
+          amountStr
+        );
+        if (!lock.deposited) {
+          throw new Error(lock.reason || 'Could not lock the balance into the escrow account');
+        }
+
+        const payout = await nearRpc.executeEscrowFtWithdraw(
+          c.env,
+          destinationAddress,
+          asset,
+          amountStr
+        );
+        if (!payout.success || !payout.txHash) {
+          throw new Error(payout.error || 'Escrow payout to the destination failed');
+        }
+        txHash = payout.txHash;
+      } else {
       let settlementNearRecipient = destinationAddress;
 
       if (!isNearAccount) {
@@ -852,6 +958,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       } catch (tErr: any) {
         console.error('[Withdrawal] onchain settlement error:', tErr);
         throw tErr;
+      }
       }
 
       if (oneClickDepositAddress && txHash && !nearRpc.isSyntheticTxHash(txHash)) {

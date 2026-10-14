@@ -3042,6 +3042,61 @@ async function getPlainNearBalance(rpcUrl: string, accountId: string): Promise<b
 }
 
 /**
+ * Plain (directly-held) NEP-141 balance of an account, in base units.
+ *
+ * Callers use this to tell a deposit that genuinely failed from one whose
+ * broadcast timed out but landed — the latter would otherwise be spent a
+ * second time on a fallback rail. Returns `null` when the balance cannot be
+ * read, so a transport failure is never mistaken for "nothing moved".
+ */
+export async function getPlainAssetBalance(
+  env: Env,
+  asset: string,
+  nearAccount: string
+): Promise<bigint | null> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token?.nearContractId) return null;
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    return await getPlainFtBalance(rpcUrl, token.nearContractId, nearAccount);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when an account's plain balance fell by at least `amount` since
+ * `before` — i.e. a deposit whose broadcast reported failure actually landed.
+ * Answering `false` from a null reading is deliberate: an unreadable balance
+ * is not evidence that nothing moved, and guessing wrong here spends the same
+ * tokens twice.
+ */
+export async function plainBalanceAbsorbed(
+  env: Env,
+  asset: string,
+  nearAccount: string,
+  before: bigint | null,
+  amount: string
+): Promise<boolean> {
+  if (before === null) return false;
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token) return false;
+    const requested = BigInt(toBaseUnits(amount, token.decimals) || '0');
+    if (requested <= 0n) return false;
+    const after = await getPlainAssetBalance(env, asset, nearAccount);
+    if (after === null) return false;
+    return before - after >= requested;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Signs and broadcasts a single-action FunctionCall transaction.
  * Mirrors the Borsh + ed25519 flow used by createOnchainSubAccount.
  */
@@ -3467,6 +3522,131 @@ export async function getPlainBalances(
 }
 
 /**
+ * The standard NEP-145 minimum for a 18-decimal token: 0.00125 NEAR. Used only
+ * when a launchpad contract omits `storage_balance_bounds`.
+ */
+const STORAGE_DEPOSIT_FALLBACK = 1_250_000_000_000_000_000_000n;
+
+/**
+ * `token|receiver` pairs whose NEP-145 storage entry is already known to exist.
+ * Scoped to the isolate, so a miss costs one extra view call and never a wrong
+ * answer — a stale hit would only re-send a registration the contract rejects as
+ * already-registered, and we confirm the balance after broadcasting anyway.
+ */
+const receiverStorageRegistered = new Map<string, { at: number; registered: boolean }>();
+const RECEIVER_STORAGE_TTL_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * NEP-145 storage is a hard precondition for delivering a NEP-141 to an
+ * account that has never held it: `ft_transfer` / `ft_transfer_call` panic with
+ * "The receiver is not registered" on any token contract where the receiver has
+ * no storage entry. `intents.near` is registered for established tokens (USDC,
+ * wNEAR) but not for launchpad memes, which is why a meme deposit used to fail
+ * and the settlement after it panic with the unrelated "insufficient balance or
+ * overflow". `escrow.uprail.near` has the same gap for memes, since it only
+ * ever held USDC.
+ *
+ * Registration is a one-time, per-token, on-chain cost (0.00125 NEAR for a
+ * standard 18-decimal token) paid by whoever sends first, after which every
+ * later transfer to that receiver is free. Confirms the entry exists after
+ * broadcasting rather than assuming the transfer worked — the next
+ * `ft_transfer_call` would only tell us the same thing as a panic.
+ */
+async function ensureReceiverStorageRegistered(
+  rpcUrl: string,
+  contractId: string,
+  receiverId: string,
+  senderKey: {
+    rpcUrl: string;
+    signerId: string;
+    signerPrivKey: Uint8Array;
+    signerPubKey: Uint8Array;
+  }
+): Promise<{ ok: boolean; registered: boolean; reason?: string }> {
+  const cacheKey = `${contractId}|${receiverId}`;
+  const cached = receiverStorageRegistered.get(cacheKey);
+  if (cached && cached.registered && Date.now() - cached.at < RECEIVER_STORAGE_TTL_MS) {
+    return { ok: true, registered: true };
+  }
+
+  // A strict view call: `storage_balance_of` legitimately answers `null` for
+  // "not registered", so an RPC failure must never collapse into that answer
+  // and trigger a registration we did not need.
+  const viewStrict = async (methodName: string, args: Record<string, unknown>): Promise<any> => {
+    const result = await nearRpc(rpcUrl, 'query', {
+      request_type: 'call_function',
+      finality: 'final',
+      account_id: contractId,
+      method_name: methodName,
+      args_base64: btoa(JSON.stringify(args)),
+    });
+    const text = new TextDecoder().decode(new Uint8Array(result?.result ?? []));
+    return text ? JSON.parse(text) : null;
+  };
+
+  let existing: unknown;
+  try {
+    existing = await viewStrict('storage_balance_of', { account_id: receiverId });
+  } catch (err: any) {
+    return {
+      ok: false,
+      registered: false,
+      reason: `Could not read token storage registry: ${err?.message || String(err)}`,
+    };
+  }
+  if (existing) {
+    receiverStorageRegistered.set(cacheKey, { at: Date.now(), registered: true });
+    return { ok: true, registered: true };
+  }
+
+  let min = STORAGE_DEPOSIT_FALLBACK;
+  try {
+    const bounds = await viewStrict('storage_balance_bounds', { registration_only: false });
+    const boundMin = bounds?.min;
+    if (typeof boundMin === 'string' && /^\d+$/.test(boundMin) && BigInt(boundMin) > 0n) {
+      min = BigInt(boundMin);
+    }
+  } catch {
+    // Some launchpad contracts omit bounds; the standard minimum applies.
+  }
+
+  const reg = await signAndBroadcastFunctionCall({
+    ...senderKey,
+    receiverId: contractId,
+    method: 'storage_deposit',
+    args: JSON.stringify({ account_id: receiverId, registration_only: false }),
+    gas: 10_000_000_000_000n,
+    deposit: min,
+  });
+  if (!reg.ok) {
+    return {
+      ok: false,
+      registered: false,
+      reason: `Could not register ${receiverId} on this token contract: ${reg.error || 'storage_deposit failed'}`,
+    };
+  }
+
+  try {
+    const after = await viewStrict('storage_balance_of', { account_id: receiverId });
+    if (after) {
+      receiverStorageRegistered.set(cacheKey, { at: Date.now(), registered: true });
+      return { ok: true, registered: true };
+    }
+  } catch (err: any) {
+    return {
+      ok: false,
+      registered: false,
+      reason: `Storage registration could not be confirmed: ${err?.message || String(err)}`,
+    };
+  }
+  return {
+    ok: false,
+    registered: false,
+    reason: `Token contract did not register storage for ${receiverId} — this asset cannot be moved to it`,
+  };
+}
+
+/**
  * Moves `amount` of `asset` from the user's own pk sub-account (plain,
  * directly-received balance) into intents.near with a memo:
  * `ft_transfer_call(receiver_id='intents.near', msg=creditAddress)`.
@@ -3477,7 +3657,10 @@ export async function getPlainBalances(
  *
  * Returns `deposited:false, reason:'INSUFFICIENT_PLAIN_BALANCE'` when the
  * plain balance cannot cover it — callers fall back to the signed-intent path
- * (which spends balances already held inside intents).
+ * (which spends balances already held inside intents). Every other `reason`
+ * means the deposit was attempted and failed; callers MUST NOT fall through to
+ * the signed-intent path in that case, because the intents ledger is still
+ * empty and the settlement would only panic.
  */
 export async function depositPlainBalanceToIntents(
   env: Env,
@@ -3531,6 +3714,14 @@ export async function depositPlainBalanceToIntents(
       signerPubKey: sender.publicKey,
     };
 
+    // intents must hold NEP-145 storage on this token contract before it can
+    // receive it. Skipping this made every launchpad-meme deposit panic with
+    // "The receiver is not registered" and every settlement after it fail.
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, intentsId, senderKey);
+    if (!storage.registered) {
+      return { deposited: false, reason: storage.reason || 'intents is not registered on this token' };
+    }
+
     // 1. Plain NEP-141 balance on the token contract covers it → single tx.
     const plainFt = await getPlainFtBalance(rpcUrl, contractId, senderAccountId);
     if (plainFt >= BigInt(baseUnits)) {
@@ -3581,6 +3772,153 @@ export async function depositPlainBalanceToIntents(
     return { deposited: false, reason: 'INSUFFICIENT_PLAIN_BALANCE' };
   } catch (err: any) {
     return { deposited: false, reason: err?.message || String(err) };
+  }
+}
+
+/** Resolves the platform escrow account's signing key for a real onchain tx. */
+function escrowSigningKey(
+  env: Env,
+  rpcUrl: string
+): { signerId: string; signerPrivKey: Uint8Array; signerPubKey: Uint8Array; rpcUrl: string } | { error: string } {
+  const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+  const privKeyStr = env.ESCROW_PRIVATE_KEY;
+  if (!privKeyStr) return { error: 'ESCROW_PRIVATE_KEY is missing' };
+  try {
+    const raw = base58Decode(privKeyStr);
+    const signerPrivKey = raw.slice(0, 32);
+    return { signerId: escrowId, signerPrivKey, signerPubKey: ed25519.getPublicKey(signerPrivKey), rpcUrl };
+  } catch (err: any) {
+    return { error: `ESCROW_PRIVATE_KEY is not a usable key: ${err?.message || String(err)}` };
+  }
+}
+
+/**
+ * Plain `ft_transfer` from the user's own pk sub-account into the platform
+ * escrow holding account. This is the settlement rail for launchpad meme
+ * assets whose token contract has never registered `intents.near` storage —
+ * `ft_transfer_call` into intents panics "The receiver is not registered" for
+ * those, and no intent can spend a balance that never made it into intents.
+ *
+ * Escrow is the only platform account that both holds custody for an escrowed
+ * payment and (once registered on the token) can deliver to any NEAR account,
+ * so every meme payment locks here and the payout leg releases from here.
+ */
+export async function depositPlainBalanceToEscrow(
+  env: Env,
+  senderXId: string,
+  asset: string,
+  amount: string
+): Promise<{ deposited: boolean; txHash?: string; reason?: string }> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token) return { deposited: false, reason: `Unsupported asset: ${asset}` };
+
+    const contractId = token.nearContractId;
+    if (!contractId) return { deposited: false, reason: `No NEAR contract for asset: ${asset}` };
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { deposited: false, reason: `Invalid amount: ${amount}` };
+    }
+
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+
+    const sender = await deriveUserNearKeypair(env, senderXId);
+    let senderAccountId = sender.accountId;
+    if (env.DB) {
+      try {
+        const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+          .bind(senderXId)
+          .first<{ near_account: string | null }>();
+        if (idRow?.near_account) senderAccountId = idRow.near_account;
+      } catch {}
+    }
+    await createOnchainSubAccount(env, senderAccountId, sender.publicKey, sender.privateKey);
+
+    const senderKey = {
+      rpcUrl,
+      signerId: senderAccountId,
+      signerPrivKey: sender.privateKey,
+      signerPubKey: sender.publicKey,
+    };
+
+    // escrow must hold NEP-145 storage on the token before it can receive it.
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, escrowId, senderKey);
+    if (!storage.registered) {
+      return { deposited: false, reason: storage.reason || `escrow is not registered on ${contractId}` };
+    }
+
+    const res = await signAndBroadcastFunctionCall({
+      ...senderKey,
+      receiverId: contractId,
+      method: 'ft_transfer',
+      args: JSON.stringify({ receiver_id: escrowId, amount: baseUnits }),
+      gas: 30_000_000_000_000n,
+      deposit: 1n,
+    });
+    return res.ok
+      ? { deposited: true, txHash: res.txHash }
+      : { deposited: false, reason: res.error || 'ft_transfer to escrow failed' };
+  } catch (err: any) {
+    return { deposited: false, reason: err?.message || String(err) };
+  }
+}
+
+/**
+ * Plain `ft_transfer` from the platform escrow account to an external NEAR
+ * account — the payout leg for meme assets that bypass intents. Registers the
+ * destination on the token contract first when it has never held it, since
+ * `ft_transfer` cannot auto-register a receiver and would otherwise panic with
+ * "The receiver is not registered".
+ *
+ * Only ever signs for a NEAR account: cross-chain destinations still need the
+ * 1Click route, which settles inside intents and so cannot serve these assets.
+ */
+export async function executeEscrowFtWithdraw(
+  env: Env,
+  destinationAddress: string,
+  asset: string,
+  amount: string
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token) return { success: false, error: `Unsupported asset: ${asset}` };
+
+    const contractId = token.nearContractId;
+    if (!contractId) return { success: false, error: `No NEAR contract for asset: ${asset}` };
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { success: false, error: `Invalid amount: ${amount}` };
+    }
+
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const signing = escrowSigningKey(env, rpcUrl);
+    if ('error' in signing) return { success: false, error: signing.error };
+
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, destinationAddress, signing);
+    if (!storage.registered) {
+      return { success: false, error: storage.reason || `destination is not registered on ${contractId}` };
+    }
+
+    const res = await signAndBroadcastFunctionCall({
+      ...signing,
+      receiverId: contractId,
+      method: 'ft_transfer',
+      args: JSON.stringify({ receiver_id: destinationAddress, amount: baseUnits }),
+      gas: 30_000_000_000_000n,
+      deposit: 1n,
+    });
+    return res.ok
+      ? { success: true, txHash: res.txHash }
+      : { success: false, error: res.error || 'ft_transfer from escrow failed' };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
   }
 }
 
