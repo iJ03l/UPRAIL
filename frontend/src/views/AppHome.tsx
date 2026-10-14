@@ -177,17 +177,29 @@ export const AppHome: React.FC = () => {
       const assetToken = tokens.find(
         (t) =>
           t.id.toLowerCase() === (tx.defuse_asset_id_in || '').toLowerCase() ||
-          (t.nearContractId && (tx.defuse_asset_id_in || '').includes(t.nearContractId))
+          // Suffix, not substring: "wrap.near" is a substring of other account
+          // ids, so `includes` could pick the wrong token.
+          (!!t.nearContractId &&
+            (tx.defuse_asset_id_in || '')
+              .toLowerCase()
+              .endsWith(`:${t.nearContractId.toLowerCase()}`))
       );
+      const rawAssetId = (tx.defuse_asset_id_in || '').toLowerCase();
       const symbol =
         assetToken?.symbol ||
-        (tx.defuse_asset_id_in?.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')
+        (rawAssetId.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')
           ? 'USDC'
-          : tx.defuse_asset_id_in?.includes('wrap.near')
+          : rawAssetId.includes('wrap.near')
           ? 'NEAR'
-          : tx.defuse_asset_id_in?.toLowerCase().includes('usdc')
+          : rawAssetId.includes('usdc')
           ? 'USDC'
-          : tx.defuse_asset_id_in?.toUpperCase() || 'NEAR');
+          : // Registry miss: derive the symbol from the NEP-141 contract id
+            // ("nep141:uptober.nearlytrade.near" -> "UPTOBER"). Dumping the raw
+            // id is unreadable, and defaulting to NEAR mislabels every meme the
+            // registry does not carry.
+            (rawAssetId.startsWith('nep141:')
+              ? rawAssetId.split(':').pop()!.split('.')[0]!.toUpperCase()
+              : tx.defuse_asset_id_in?.toUpperCase()) || '—');
       const amt = tx.amount_in || tx.amount_out || '0';
 
       const shortId = tx.id ? `${tx.id.slice(0, 6)}...${tx.id.slice(-4)}` : '';

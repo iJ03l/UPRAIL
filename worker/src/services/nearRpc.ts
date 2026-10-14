@@ -4288,25 +4288,22 @@ export function assetsMatch(assetA: string | null | undefined, assetB: string | 
   const cleanB = b.includes(':') ? b.split(':').pop()! : b;
   if (cleanA === cleanB) return true;
 
-  // Known USDC aliases
-  const usdcIds = ['usdc', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'];
-  if (usdcIds.some((id) => a.includes(id)) && usdcIds.some((id) => b.includes(id))) return true;
-
-  // Known USDT aliases
-  const usdtIds = ['usdt', 'usdt.tether-token.near'];
-  if (usdtIds.some((id) => a.includes(id)) && usdtIds.some((id) => b.includes(id))) return true;
-
-  // Known NEAR aliases
-  const nearIds = ['near', 'wrap.near', 'wnear'];
-  if (nearIds.some((id) => a.includes(id)) && nearIds.some((id) => b.includes(id))) return true;
-
-  // Known ETH aliases
-  const ethIds = ['eth', 'eth.bridge.near', 'weth'];
-  if (ethIds.some((id) => a.includes(id)) && ethIds.some((id) => b.includes(id))) return true;
-
-  // Known BTC aliases
-  const btcIds = ['btc', 'wbtc', '2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near', 'btc.omft.near'];
-  if (btcIds.some((id) => a.includes(id)) && btcIds.some((id) => b.includes(id))) return true;
+  // Alias groups, matched by EXACT equality against the part after the chain
+  // prefix. Substring tests are unusable here: "near" is a substring of every
+  // ".near" account id, so an `includes` alias made UPTOBER, USDT and ETH all
+  // match NEAR. That merged a meme's virtual balance into the NEAR row of
+  // /api/onchain/balances and inflated getUserAvailableBalance(NEAR) with it,
+  // so a token send showed up — and could be withdrawn — as NEAR.
+  const aliasGroups: string[][] = [
+    ['usdc', 'usdc.token.near', '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'],
+    ['usdt', 'usdt.tether-token.near'],
+    ['near', 'wrap.near', 'wnear'],
+    ['eth', 'eth.bridge.near', 'weth'],
+    ['btc', 'wbtc', '2260fac5e5542a773aa44fbcfedf7c193bc2c599.factory.bridge.near', 'btc.omft.near'],
+  ];
+  for (const group of aliasGroups) {
+    if (group.includes(cleanA) && group.includes(cleanB)) return true;
+  }
 
   return false;
 }
