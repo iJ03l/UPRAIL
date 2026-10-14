@@ -36,6 +36,26 @@ const STABLE_SYMBOLS = new Set([
  */
 const SETTLED_STATUSES = new Set(['claimed', 'ready']);
 
+/**
+ * The window these cards report on. All-time numbers on a dashboard read as
+ * a current figure; a week that rolls is what a "how much moved lately"
+ * card is actually asked for.
+ */
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Best-known instant a row represents money that actually moved, in epoch ms.
+ * Prefers the moment it settled (claimedAt) over the moment it was created —
+ * a payment claimed six days ago and created eight days ago is this week's
+ * flow, not last week's. Returns null when no usable instant exists, so an
+ * undated row is excluded rather than counted as "now".
+ */
+const settledAtMs = (item: PaymentIntent): number | null => {
+  const raw = item.claimedAt || item.createdAt;
+  const t = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(t) ? t : null;
+};
+
 export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
   history = [],
   transactions = [],
@@ -43,10 +63,11 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
 }) => {
   const { user } = useXAuth();
 
-  // Compute strictly authentic per-user Inflow & Egress data
+  // Compute per-user Inflow & Egress for the last 7 days only
   const stats = useMemo(() => {
     const userHandle = user?.handle?.trim().toLowerCase();
     const nearAccount = user?.nearAccount?.trim().toLowerCase();
+    const weekAgo = Date.now() - WEEK_MS;
 
     const priceById = new Map<string, number>();
     const priceBySymbol = new Map<string, number>();
@@ -129,6 +150,9 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
     if (Array.isArray(history)) {
       for (const item of history) {
         if (!SETTLED_STATUSES.has(item.status)) continue;
+        // Settled before the window opened: real flow, but last week's.
+        const settledAt = settledAtMs(item);
+        if (settledAt === null || settledAt < weekAgo) continue;
         const amt = parseFloat(item.amount) || 0;
         let usd: number | null = null;
         if (typeof item.amountUsd === 'number' && item.amountUsd > 0) {
@@ -167,6 +191,11 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
         // failed withdrawals as outflows is what made one UPTOBER send look
         // like three egress events.
         if (tx.status === 'failed') continue;
+        // Outside the window: this week's cards must not sum all-time flow.
+        // block_timestamp is epoch ms; an undated row is excluded, not
+        // counted as "now".
+        const ts = Number(tx.block_timestamp);
+        if (!Number.isFinite(ts) || ts < weekAgo) continue;
         const amt =
           parseFloat(
             tx.amount ||
@@ -233,11 +262,11 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
               </div>
               <div>
                 <h4 className="text-sm font-display font-bold text-stone-950 flex items-center space-x-1.5">
-                  <span>Shielded Inflow</span>
+                  <span>Received this week</span>
                   <Shield className="w-3.5 h-3.5 text-emerald-600" />
                 </h4>
                 <p className="text-[11px] font-mono text-stone-400">
-                  Cross-chain confidential receipts
+                  Money in · Last 7 days
                 </p>
               </div>
             </div>
@@ -255,7 +284,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             </div>
             <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>Zero mempool exposure · Settled via NEAR Intents</span>
+              <span>Deposits and payments you received</span>
             </div>
             {stats.inflowUnpriced > 0 && (
               <div className="text-[11px] font-mono text-amber-600">
@@ -268,7 +297,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
         {/* Action Button */}
         <div className="pt-6 border-t border-stone-100 flex items-center justify-between gap-2">
           <span className="text-[11px] font-mono text-stone-400 truncate">
-            Ephemeral 1-time ingress addresses
+            Add funds from any wallet or chain
           </span>
           <Link
             to="/app/receive"
@@ -291,11 +320,11 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
               </div>
               <div>
                 <h4 className="text-sm font-display font-bold text-stone-950 flex items-center space-x-1.5">
-                  <span>Confidential Egress</span>
+                  <span>Sent this week</span>
                   <Lock className="w-3.5 h-3.5 text-orange-600" />
                 </h4>
                 <p className="text-[11px] font-mono text-stone-400">
-                  Hardware passkey-authorized outlays
+                  Money out · Last 7 days
                 </p>
               </div>
             </div>
@@ -313,7 +342,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             </div>
             <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-              <span>Biometric passkey signature required</span>
+              <span>Sends and withdrawals you made</span>
             </div>
             {stats.egressUnpriced > 0 && (
               <div className="text-[11px] font-mono text-amber-600">
