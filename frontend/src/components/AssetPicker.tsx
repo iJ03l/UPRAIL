@@ -142,7 +142,13 @@ export const AssetPicker: React.FC<AssetPickerProps> = ({
         );
       }
       if (activeTab === 'memes') {
-        // The NEAR & Memes rail: native NEAR plus every meme-classified asset
+        // The NEAR & Memes rail only holds NEAR-native assets: native NEAR
+        // plus every meme-classified asset that actually lives on NEAR.
+        // A meme classified on Solana or Ethereum (DOGE, SHIB, WIF) is a
+        // cross-chain asset and belongs on the cross-chain tab — matching on
+        // category or ticker alone listed them here with no NEAR contract to
+        // receive to.
+        if (chainLower && chainLower !== 'near') return false;
         return (
           t.category === 'memes' ||
           isMemeToken(t.symbol, t.nearContractId || t.id) ||

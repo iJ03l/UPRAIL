@@ -499,13 +499,19 @@ export const ReceivePage: React.FC = () => {
   const depositAddressValue = currentAddress?.address || '';
   const nearDepositAddressValue = nearDepositAddress?.address || '';
 
-  // Registry head plus whatever the user actually holds. The backend registry
-  // is a curated slice, so a launchpad meme (e.g. UPTOBER) can be absent from
-  // it while still sitting in the vault — without this it would be impossible
-  // to pick it here or see it in the Receive picker.
+  // The curated registry plus whatever the user actually holds, cut down to
+  // NEAR-native assets. The backend registry carries every chain it can bridge
+  // from (Solana, Ethereum, BSC, ...), and this tab only receives to a NEAR
+  // passkey account, so anything not settling on NEAR belongs on the
+  // cross-chain tab. Filtering here is what stops ~150 foreign-chain assets
+  // from crowding the NEAR-native & memes picker.
+  // The backend registry is a curated slice, so a launchpad meme (e.g.
+  // UPTOBER) can be absent from it while still sitting in the vault — the
+  // held-asset pass below still surfaces those.
   const nearPickerTokens = useMemo<Token[]>(() => {
-    const seen = new Set(registryTokens.map((t) => (t.nearContractId || t.id || '').toLowerCase()));
-    const seenSymbols = new Set(registryTokens.map((t) => t.symbol.toUpperCase()));
+    const nearOnly = registryTokens.filter((t) => (t.chain || 'near').toLowerCase() === 'near');
+    const seen = new Set(nearOnly.map((t) => (t.nearContractId || t.id || '').toLowerCase()));
+    const seenSymbols = new Set(nearOnly.map((t) => t.symbol.toUpperCase()));
     const extra: Token[] = [];
     for (const b of balances || []) {
       const contract = (b.nearContractId || '').toLowerCase();
@@ -529,7 +535,7 @@ export const ReceivePage: React.FC = () => {
         balance: b.amountFormatted || b.amount || '0',
       });
     }
-    return extra.length > 0 ? [...registryTokens, ...extra] : registryTokens;
+    return extra.length > 0 ? [...nearOnly, ...extra] : nearOnly;
   }, [registryTokens, balances]);
 
   // Vault ingress addresses are reusable (no 1Click one-time quote), so the
