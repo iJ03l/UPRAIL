@@ -439,6 +439,40 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
             throw new Error(`Onchain settlement failed: ${tErr.message || 'escrow transfer error'}`);
           }
 
+          // A NEAR-native meme cannot be left on the intents ledger. Its token
+          // contract has never registered storage on intents.near, so the
+          // credit above is transient — the durable, spendable balance is the
+          // plain NEP-141 balance on the recipient's own account, which is what
+          // FastNEAR's FT index (and therefore the balance panel and the Send
+          // picker) actually reads. Drop it to native now, the same place a
+          // deposit lands.
+          //
+          // Warning-only: the recipient is already paid. Failing to drop must
+          // never roll back a settled claim.
+          try {
+            const drop = await nearRpc.dropNearNativeMemeToNative(
+              c.env,
+              session.x_id,
+              recipientNearAccount,
+              payment.asset,
+              payment.amount
+            );
+            if (drop.dropped) {
+              console.log(
+                `[claim/execute] ${paymentId}: NEAR-native meme dropped to native balance, tx ${drop.txHash}`
+              );
+            } else if (drop.reason && drop.reason !== 'NOT_A_NEAR_NATIVE_MEME' && drop.reason !== 'INTENTS_BALANCE_NOT_PRESENT') {
+              console.warn(
+                `[claim/execute] ${paymentId}: meme drop to native skipped (${drop.reason}) — recipient keeps the intents credit`
+              );
+            }
+          } catch (dropErr: any) {
+            console.warn(
+              `[claim/execute] ${paymentId}: meme drop to native failed:`,
+              dropErr?.message || dropErr
+            );
+          }
+
           claimResponse = {
             payment: {
               ...payment,

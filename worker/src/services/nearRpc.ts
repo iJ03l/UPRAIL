@@ -72,6 +72,24 @@ export function isMemeAsset(symbol: string, contractId: string): boolean {
   );
 }
 
+/**
+ * True for a launchpad meme that is an ordinary NEP-141 on a NEAR account.
+ *
+ * These are native assets by construction: the tokens sit in the holder's own
+ * account and are indexed by FastNEAR's FT index. Their token contracts have
+ * simply never registered storage on `intents.near`, so they cannot be held as
+ * an intents ledger entry in any durable way. Paying one out must therefore end
+ * on the recipient's native balance — the same place a deposit lands — rather
+ * than inside intents, where the balance panel's plain-balance scan would never
+ * see it.
+ */
+export function isNearNativeMemeAsset(symbol: string, contractId?: string | null): boolean {
+  const contract = (contractId || '').toLowerCase();
+  // A meme on another chain is not a native NEAR balance.
+  if (contract && !contract.endsWith('.near')) return false;
+  return isMemeAsset(symbol, contract);
+}
+
 // ─── Rhea (Ref Finance) native NEAR token list ───────────────────────────────
 /**
  * The Intents registry only knows assets with solver routes. Native NEAR
@@ -4224,6 +4242,87 @@ export async function executeWithdrawIntent(
     return { success: false, error: err?.message || String(err) };
   }
 }
+
+
+/**
+ * Moves a just-credited NEAR-native meme off the intents ledger and onto the
+ * recipient's own native balance.
+ *
+ * A meme payout is first credited into intents like any other asset, because
+ * that is where the escrow holds it. But a meme is an ordinary NEP-141 on the
+ * holder's account — its token contract has never registered storage on
+ * `intents.near`, so it cannot stay there as a durable balance. Leaving it
+ * inside intents hid it from FastNEAR's FT index, which is what
+ * `getPlainBalances` reads, so the recipient appeared to hold nothing and
+ * could not spend it.
+ *
+ * Warning-only by design: the recipient has already been paid at this point.
+ * A failure to drop the balance to native must never roll back a settled
+ * claim, so callers log the reason and continue.
+ */
+export async function dropNearNativeMemeToNative(
+  env: Env,
+  recipientXId: string,
+  recipientNearAccount: string,
+  asset: string,
+  amount: string
+): Promise<{ dropped: boolean; txHash?: string; reason?: string }> {
+  try {
+    if (!recipientXId || !recipientNearAccount) {
+      return { dropped: false, reason: 'Missing recipient' };
+    }
+
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token) return { dropped: false, reason: `Unsupported asset: ${asset}` };
+
+    const contractId =
+      token.nearContractId || (token.defuse_asset_id || '').replace(/^nep141:/, '');
+    if (!isNearNativeMemeAsset(token.symbol, contractId)) {
+      return { dropped: false, reason: 'NOT_A_NEAR_NATIVE_MEME' };
+    }
+
+    // Nothing to drop if the payout did not actually land in intents. Read it
+    // rather than assume it, so a payout that was settled natively in the
+    // first place is not mistaken for a failed drop.
+    let intentsBalance = 0n;
+    try {
+      const raw = await viewFunction(
+        env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com',
+        env.INTENTS_CONTRACT_ID || 'intents.near',
+        'mt_balance_of',
+        {
+          account_id: recipientNearAccount,
+          token_id: token.defuse_asset_id || `nep141:${contractId}`,
+        }
+      );
+      intentsBalance = BigInt(String(raw ?? '0'));
+    } catch (balErr) {
+      console.warn('[dropNearNativeMemeToNative] intents balance read failed:', balErr);
+      return { dropped: false, reason: 'Could not read the intents balance' };
+    }
+
+    const wantedStr = toBaseUnits(amount, token.decimals);
+    let wanted = 0n;
+    try {
+      wanted = BigInt(wantedStr || '0');
+    } catch {
+      return { dropped: false, reason: `Invalid amount: ${amount}` };
+    }
+    if (wanted === 0n) return { dropped: false, reason: `Invalid amount: ${amount}` };
+    if (intentsBalance < wanted) {
+      return { dropped: false, reason: 'INTENTS_BALANCE_NOT_PRESENT' };
+    }
+
+    const res = await executeWithdrawIntent(env, recipientXId, recipientNearAccount, asset, amount);
+    if (res?.success && res.txHash) return { dropped: true, txHash: res.txHash };
+    return { dropped: false, reason: res?.error || 'Withdraw intent failed' };
+  } catch (err: any) {
+    return { dropped: false, reason: err?.message || String(err) };
+  }
+}
+
 
 
 /**
