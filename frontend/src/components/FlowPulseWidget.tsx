@@ -29,6 +29,13 @@ const STABLE_SYMBOLS = new Set([
   'USDC', 'USDT', 'DAI', 'FRAX', 'USDD', 'USDE', 'USDG', 'FDUSD',
 ]);
 
+/**
+ * A payment only counts once it settled. A pending deposit never left the
+ * sender's balance, and a cancelled, expired or refunded one came back —
+ * counting any of them as flow invents money that never moved.
+ */
+const SETTLED_STATUSES = new Set(['claimed', 'ready']);
+
 export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
   history = [],
   transactions = [],
@@ -121,6 +128,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
     // 1. Calculate from user payment intents
     if (Array.isArray(history)) {
       for (const item of history) {
+        if (!SETTLED_STATUSES.has(item.status)) continue;
         const amt = parseFloat(item.amount) || 0;
         let usd: number | null = null;
         if (typeof item.amountUsd === 'number' && item.amountUsd > 0) {
@@ -155,6 +163,10 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
     // 2. Calculate from onchain transactions (deposits / withdrawals)
     if (Array.isArray(transactions)) {
       for (const tx of transactions) {
+        // A failed transaction moved nothing, so it is not flow. Counting
+        // failed withdrawals as outflows is what made one UPTOBER send look
+        // like three egress events.
+        if (tx.status === 'failed') continue;
         const amt =
           parseFloat(
             tx.amount ||
