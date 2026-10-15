@@ -3941,6 +3941,27 @@ async function ensureReceiverStorageRegistered(
 }
 
 /**
+ * Policy: register-then-transfer. Ensures `intents.near` holds NEP-145 storage
+ * on `contractId` so an asset whose token contract never registered intents can
+ * still be delivered through the intents rail instead of being permanently
+ * pinned to the native rail. NEP-145 `storage_deposit` is permissionless and
+ * the integration cost is sponsored from escrow, exactly like the per-deposit
+ * registration in `depositPlainBalanceToIntents`. Callers fall back to the
+ * native rail only when this returns `{ registered: false }`.
+ */
+export async function ensureIntentsStorageRegistered(
+  env: Env,
+  contractId: string
+): Promise<{ registered: boolean; reason?: string }> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+  const sponsor = escrowSigningKey(env, rpcUrl);
+  if ('error' in sponsor) return { registered: false, reason: sponsor.error };
+  const res = await ensureReceiverStorageRegistered(rpcUrl, contractId, intentsId, sponsor);
+  return { registered: res.registered, reason: res.reason };
+}
+
+/**
  * Moves `amount` of `asset` from the user's own pk sub-account (plain,
  * directly-received balance) into intents.near with a memo:
  * `ft_transfer_call(receiver_id='intents.near', msg=creditAddress)`.

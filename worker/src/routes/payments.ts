@@ -672,8 +672,17 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       if (!railToken) railToken = await nearRpc.resolveRheaToken(c.env, body.asset);
       if (railToken) {
         const supported = await nearRpc.isIntentsSupportedAsset(c.env, railToken.nearContractId);
-        if (supported === false) rail = 'native';
-        else if (supported === true) rail = 'intents';
+        if (supported === true) rail = 'intents';
+        else if (supported === false) {
+          // Policy: register-then-transfer. The token contract has not
+          // registered `intents.near` yet, but NEP-145 storage_deposit is
+          // permissionless, so register it (escrow-sponsored) and keep the
+          // intents rail; only fall back to the native rail if registration
+          // provably fails. Previously this short-circuited straight to the
+          // native rail, pinning every new launchpad asset to it forever.
+          const reg = await nearRpc.ensureIntentsStorageRegistered(c.env, railToken.nearContractId);
+          rail = reg.registered ? 'intents' : 'native';
+        }
       }
     } catch (railErr) {
       console.warn('[send] rail probe failed, using empirical selection:', railErr);
@@ -990,9 +999,14 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     }
 
     const appOrigin = resolveOrigin(c.env);
-    const shareLink = isRecipientRegistered
+    // Every X-handle recipient gets a link so the sender can always notify
+    // them. Unregistered recipients get the claim link (invite attached);
+    // already-registered recipients get a receipt link into the same page,
+    // which renders a "you received X" notice instead of a claim. Wallet
+    // addresses never get a link.
+    const shareLink = recipient.isAddress
       ? ''
-      : `${appOrigin}/claim/${paymentId}?invite=${inviteCode}`;
+      : `${appOrigin}/claim/${paymentId}${inviteCode ? `?invite=${inviteCode}` : ''}`;
 
     return c.json<SendResponse>(
       {
