@@ -14,6 +14,7 @@ import { HandleInput } from '../components/HandleInput';
 import { AmountInput } from '../components/AmountInput';
 import { BackBar } from '../components/BackBar';
 import { ShareModal } from '../components/ShareModal';
+import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareModal';
 import { usePayments } from '../hooks/usePayments';
 import { PROTOCOL_FEE_RATE, formatUsd } from '../lib/api';
 import { PaymentIntent } from '../types';
@@ -41,6 +42,8 @@ export const SendPage: React.FC = () => {
   const [memo, setMemo] = useState('');
   const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [walletReceipt, setWalletReceipt] = useState<WalletSendReceipt | null>(null);
+  const [showWalletModal, setShowWalletModal] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
 
   // Recalculate quote on token or amount changes
@@ -73,6 +76,20 @@ export const SendPage: React.FC = () => {
         // payment row, which no one would be able to claim.
         const result = await sendToWallet(target, amount, selectedToken.id);
         setCreatedPayment(null);
+        // Wallet sends now produce a public receipt link too, so the sender can
+        // share proof of payment the same way an X-handle send works.
+        if (result.shareLink) {
+          setWalletReceipt({
+            shareLink: result.shareLink,
+            amount,
+            symbol: selectedToken.symbol,
+            iconUrl: selectedToken.iconUrl,
+            destinationAddress: result.destinationAddress,
+            txHash: result.txHash,
+            amountUsd: quote?.amountUsd ?? null,
+          });
+          setShowWalletModal(true);
+        }
         setSuccessToast(
           `Sent ${amount} ${selectedToken.symbol} to ${target.slice(0, 12)}… · tx ${result.txHash.slice(0, 10)}…`
         );
@@ -124,9 +141,11 @@ export const SendPage: React.FC = () => {
             <CheckCircle2 className="w-4 h-4 text-stone-900 flex-shrink-0" />
             <span className="font-medium">{successToast}</span>
           </div>
-          {createdPayment && sendMode === 'handle' && (
+          {(createdPayment || walletReceipt) && (
             <button
-              onClick={() => setShowShareModal(true)}
+              onClick={() =>
+                walletReceipt ? setShowWalletModal(true) : setShowShareModal(true)
+              }
               className="ml-3 font-bold text-stone-900 underline hover:text-black cursor-pointer"
             >
               Share Link
@@ -344,6 +363,13 @@ export const SendPage: React.FC = () => {
           payment={createdPayment}
         />
       )}
+
+      {/* Wallet-send receipt Modal Dialog */}
+      <WalletShareModal
+        isOpen={showWalletModal}
+        onClose={() => setShowWalletModal(false)}
+        receipt={walletReceipt}
+      />
     </div>
   );
 };

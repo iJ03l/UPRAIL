@@ -8,6 +8,7 @@ import {
   ShieldedBalance,
   MyInviteResponse,
   RedeemInviteResponse,
+  WithdrawalReceipt,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
 
@@ -270,6 +271,52 @@ export function formatUsd(value: number | null | undefined): string {
   if (value === 0) return '$0.00';
   if (Math.abs(value) < 0.01) return `$${value.toFixed(4)}`;
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Picks the compact magnitude suffix for a number's absolute value. */
+function compactMagnitude(abs: number): { scaled: number; suffix: string } {
+  if (abs >= 1e12) return { scaled: abs / 1e12, suffix: 'T' };
+  if (abs >= 1e9) return { scaled: abs / 1e9, suffix: 'B' };
+  if (abs >= 1e6) return { scaled: abs / 1e6, suffix: 'M' };
+  if (abs >= 1e3) return { scaled: abs / 1e3, suffix: 'K' };
+  return { scaled: abs, suffix: '' };
+}
+
+function stripTrailingZeros(s: string): string {
+  if (!s.includes('.')) return s;
+  return s.replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function compactFixed(scaled: number): string {
+  const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+  return stripTrailingZeros(scaled.toFixed(digits));
+}
+
+/**
+ * Abbreviates large amounts for compact display: "12.5K", "3.4M". Values
+ * below 1,000 keep the caller's full-precision string so small balances are
+ * never lossily rounded. Frontend-only presentation helper.
+ */
+export function formatCompactAmount(raw: string | number | null | undefined): string {
+  if (raw === null || raw === undefined) return '0';
+  const str = typeof raw === 'string' ? raw.trim() : String(raw);
+  const num = parseFloat(str);
+  if (!isFinite(num)) return str || '0';
+  const abs = Math.abs(num);
+  if (abs < 1000) return str;
+  const { scaled, suffix } = compactMagnitude(abs);
+  return `${num < 0 ? '-' : ''}${compactFixed(scaled)}${suffix}`;
+}
+
+/**
+ * Compact USD: abbreviates to "$12.5K"/"$3.4M" at 1,000+ and otherwise defers
+ * to `formatUsd` (so cents and the em-dash for missing prices are preserved).
+ */
+export function formatUsdCompact(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !isFinite(value)) return '\u2014';
+  if (Math.abs(value) < 1000) return formatUsd(value);
+  const { scaled, suffix } = compactMagnitude(Math.abs(value));
+  return `${value < 0 ? '-$' : '$'}${compactFixed(scaled)}${suffix}`;
 }
 
 const API_BASE =
@@ -1061,6 +1108,8 @@ export const api = {
     destinationAddress: string;
     amount: string;
     asset: string;
+    /** Public receipt link for this wallet send (`/receipt/<withdrawalId>`). */
+    shareLink?: string;
     message: string;
   }> {
     const url = API_BASE ? `${API_BASE}/api/claim/withdraw` : '/api/claim/withdraw';
@@ -1076,6 +1125,21 @@ export const api = {
       throw new Error(err.error || 'Withdrawal failed');
     }
     return await res.json();
+  },
+
+  /** Public, share-safe receipt for a wallet send / withdrawal. */
+  async getWithdrawalReceipt(id: string): Promise<WithdrawalReceipt | null> {
+    const url = API_BASE
+      ? `${API_BASE}/api/claim/withdrawal/${encodeURIComponent(id)}`
+      : `/api/claim/withdrawal/${encodeURIComponent(id)}`;
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) return null;
+      return (await res.json()) as WithdrawalReceipt;
+    } catch (e) {
+      console.warn('Backend getWithdrawalReceipt error', e);
+      return null;
+    }
   },
 
   // Invite & Referral Endpoints

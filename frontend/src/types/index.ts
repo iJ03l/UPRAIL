@@ -96,6 +96,21 @@ export interface PaymentQuote {
   rail?: 'intents' | 'native';
 }
 
+/**
+ * Public, share-safe receipt for a wallet send / withdrawal, fetched by its
+ * unguessable `wth_…` id from `/api/claim/withdrawal/:id`.
+ */
+export interface WithdrawalReceipt {
+  id: string;
+  fromHandle: string | null;
+  destinationAddress: string;
+  asset: string;
+  amount: string;
+  txHash: string | null;
+  status: string;
+  createdAt: string;
+}
+
 export interface MyInviteResponse {
   inviteCode: string;
   status: 'ACTIVE' | 'USED';

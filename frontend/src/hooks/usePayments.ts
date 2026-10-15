@@ -288,7 +288,7 @@ export function usePayments() {
     destinationAddress: string,
     amount: string,
     asset?: string
-  ): Promise<{ txHash: string; withdrawalId?: string; destinationAddress: string }> => {
+  ): Promise<{ txHash: string; withdrawalId?: string; destinationAddress: string; shareLink?: string }> => {
     try {
       setIsSubmitting(true);
       setError(null);
@@ -347,6 +347,7 @@ export function usePayments() {
         txHash: result.txHash,
         withdrawalId: result.withdrawalId,
         destinationAddress: result.destinationAddress,
+        shareLink: result.shareLink,
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Wallet send failed';
