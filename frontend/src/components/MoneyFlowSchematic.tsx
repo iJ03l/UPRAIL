@@ -482,7 +482,7 @@ export const MoneyFlowSchematic: React.FC = () => {
           </div>
 
           <div className="p-2.5 rounded-xl bg-stone-900 text-white text-[11px] font-mono text-center">
-            Absolute Discretion: Illia claims securely with Touch ID. Public balance stays $0.00.
+            Absolute Discretion: Illia claims securely with a passkey. Public balance stays $0.00.
           </div>
         </div>
       </div>

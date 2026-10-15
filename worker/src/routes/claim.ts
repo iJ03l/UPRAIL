@@ -29,7 +29,7 @@ import {
   isValidDestinationAddress,
   isNearAccountAddress,
   chainMatchesAddress,
-  WITHDRAW_CHAIN_FAMILY,
+  getWithdrawChains,
   get1ClickWithdrawalQuote,
   submit1ClickDeposit,
 } from '../services/oneclickWithdraw';
@@ -793,6 +793,23 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
 });
 
 /**
+ * GET /api/claim/withdraw-chains?asset=<defuse id or symbol>
+ * Destination networks the asset can settle to, resolved live from 1Click.
+ * Drives the Send-screen network picker so it never falls behind what the
+ * solver actually supports (Sui, Robinhood, new L2s, …).
+ */
+claimRouter.get('/withdraw-chains', requireAuth(), async (c) => {
+  try {
+    const asset = c.req.query('asset') || 'usdc';
+    const chains = await getWithdrawChains(c.env, asset);
+    return c.json({ asset, chains });
+  } catch (err) {
+    console.error('[withdraw-chains] failed:', err);
+    return c.json({ asset: c.req.query('asset') || 'usdc', chains: [] });
+  }
+});
+
+/**
  * POST /api/claim/withdraw
  * Withdraws funds from virtual escrow vault to an external address (NEAR, EVM, Solana, Bitcoin).
  * Atomically relays a 1Click transfer from escrow pool.
@@ -853,12 +870,6 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         : undefined;
 
     if (destinationChain !== undefined) {
-      if (!(destinationChain in WITHDRAW_CHAIN_FAMILY)) {
-        return c.json<ErrorResponse>(
-          { error: `Unsupported destination network: ${destinationChain}`, code: 'INVALID_CHAIN' },
-          400
-        );
-      }
       if (!chainMatchesAddress(destinationChain, destinationAddress)) {
         return c.json<ErrorResponse>(
           {

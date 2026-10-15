@@ -235,9 +235,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     } catch (err: any) {
       console.error('Passkey login error:', err);
       if (err?.name === 'NotAllowedError') {
-        setError('Passkey prompt cancelled or not found on this device. Sign in with 𝕏 to enable Face ID on this iPhone.');
+        setError('Passkey prompt cancelled or not found on this device. Sign in with 𝕏 to add a passkey here.');
       } else {
-        setError('No passkey found on this iPhone yet. Sign in with 𝕏 to enable Face ID on this device.');
+        setError('No passkey found on this device yet. Sign in with 𝕏 to add one.');
       }
       setLoginMethod('x');
     } finally {
@@ -289,10 +289,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
               </h1>
               <p className="text-sm text-muted leading-relaxed max-w-sm mx-auto">
                 {isPasskeyHero
-                  ? 'Use Face ID, Touch ID or your security key to sign in.'
+                  ? 'Use your passkey to sign in.'
                   : isStep1
                   ? 'Use your 𝕏 account to get a payment handle. No wallet, no seed phrase.'
-                  : 'Add Face ID or Touch ID so you can sign in here without 𝕏 next time.'}
+                  : 'Add a passkey so you can sign in here without 𝕏 next time.'}
               </p>
             </div>
           </header>
@@ -371,7 +371,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                         <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
                           <Fingerprint className="w-4 h-4" />
                         </span>
-                        <span className="flex-1 text-center pr-2">Sign in with Face ID</span>
+                        <span className="flex-1 text-center pr-2">Sign in with passkey</span>
                         <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                       </>
                     )}
@@ -464,7 +464,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   <span className="text-sm">One-time setup</span>
                 </div>
                 <p className="text-xs leading-relaxed text-amber-800/90">
-                  Your device&apos;s Face ID or Touch ID creates a secure key for this account. There is no password or seed phrase to remember.
+                  Your device creates a secure passkey for this account. There is no password or seed phrase to remember.
                 </p>
               </div>
 
@@ -485,7 +485,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
                       <Fingerprint className="w-4 h-4" />
                     </span>
-                    <span className="flex-1 text-center pr-2">Turn on Face ID</span>
+                    <span className="flex-1 text-center pr-2">Create passkey</span>
                     <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                   </>
                 )}

@@ -475,7 +475,7 @@ export const ClaimPage: React.FC = () => {
               <h3 className="text-xl font-bold font-display text-stone-950">All Caught Up!</h3>
               <p className="text-xs text-stone-500 max-w-md mx-auto leading-relaxed">
                 You have no pending payments. When anyone sends funds to{' '}
-                <span className="font-mono font-bold text-stone-900">@{user.handle}</span>, they will automatically appear here ready to claim with your Touch ID / Face ID.
+                <span className="font-mono font-bold text-stone-900">@{user.handle}</span>, they will automatically appear here ready to claim with your passkey.
               </p>
             </div>
 

@@ -64,68 +64,190 @@ export function isNearAccountAddress(address: string): boolean {
 }
 
 /** Chain family used to sanity-check a chosen network against the address. */
-export const WITHDRAW_CHAIN_FAMILY: Record<string, 'evm' | 'sol' | 'btc' | 'near'> = {
+export type ChainFamily = 'evm' | 'sol' | 'btc' | 'near';
+
+/**
+ * Families we can confidently check an address against. Chains that are not
+ * listed (Sui, Aptos, TON, Tron, XRP, Stellar, …) are left to 1Click, which
+ * validates the recipient and rejects an invalid one with "recipient is not
+ * valid" — so the worker stays authoritative without mirroring 39 address
+ * formats.
+ */
+const CHAIN_FAMILY: Record<string, ChainFamily> = {
   eth: 'evm',
+  arb: 'evm',
   base: 'evm',
-  arbitrum: 'evm',
   op: 'evm',
   pol: 'evm',
   avax: 'evm',
   bsc: 'evm',
+  gnosis: 'evm',
+  scroll: 'evm',
+  bera: 'evm',
+  monad: 'evm',
+  xlayer: 'evm',
+  plasma: 'evm',
+  abs: 'evm',
+  hypercore: 'evm',
   sol: 'sol',
   btc: 'btc',
   near: 'near',
+};
+
+/** Human labels for the networks 1Click exposes (cosmetic only). */
+export const CHAIN_NAMES: Record<string, string> = {
+  near: 'NEAR',
+  eth: 'Ethereum',
+  arb: 'Arbitrum',
+  base: 'Base',
+  op: 'Optimism',
+  pol: 'Polygon',
+  avax: 'Avalanche',
+  bsc: 'BNB Chain',
+  gnosis: 'Gnosis',
+  scroll: 'Scroll',
+  bera: 'Berachain',
+  monad: 'Monad',
+  xlayer: 'X Layer',
+  plasma: 'Plasma',
+  abs: 'Abstract',
+  hypercore: 'Hyperliquid',
+  sol: 'Solana',
+  btc: 'Bitcoin',
+  doge: 'Dogecoin',
+  sui: 'Sui',
+  aptos: 'Aptos',
+  ton: 'TON',
+  tron: 'Tron',
+  xrp: 'XRP Ledger',
+  stellar: 'Stellar',
+  cardano: 'Cardano',
+  starknet: 'Starknet',
+  movement: 'Movement',
+  aleo: 'Aleo',
+  adi: 'ADI',
+  qtc: 'QTC',
+  fogo: 'Fogo',
+  litecoin: 'Litecoin',
+  ltc: 'Litecoin',
+  dash: 'Dash',
+  zec: 'Zcash',
+  bch: 'Bitcoin Cash',
 };
 
 /**
  * NEAR-side (intents) source assets, keyed by canonical symbol. The withdraw
  * path receives a full defuse asset id, so these are the exact origin assets
  * 1Click must be told escrow is depositing — a mismatch strands the transfer.
+ * Destination assets are resolved live from 1Click instead (below), so they
+ * never drift the way a static map did.
  */
-const ORIGIN_ASSETS: Record<string, { originAsset: string; decimals: number }> = {
+const ORIGIN_ASSETS: Record<string, { originAsset: string; decimals: number; destSymbol: string }> = {
   usdc: {
     originAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
     decimals: 6,
+    destSymbol: 'USDC',
   },
-  usdt: { originAsset: 'nep141:usdt.tether-token.near', decimals: 6 },
-  near: { originAsset: 'wrap.near', decimals: 24 },
-  btc: { originAsset: 'nep141:btc.omft.near', decimals: 8 },
-  eth: { originAsset: 'nep141:eth.bridge.near', decimals: 18 },
-  sol: { originAsset: 'nep141:sol.omft.near', decimals: 9 },
-  doge: { originAsset: 'nep141:doge.omft.near', decimals: 8 },
+  usdt: { originAsset: 'nep141:usdt.tether-token.near', decimals: 6, destSymbol: 'USDT' },
+  near: { originAsset: 'wrap.near', decimals: 24, destSymbol: 'NEAR' },
+  btc: { originAsset: 'nep141:btc.omft.near', decimals: 8, destSymbol: 'BTC' },
+  eth: { originAsset: 'nep141:eth.bridge.near', decimals: 18, destSymbol: 'ETH' },
+  sol: { originAsset: 'nep141:sol.omft.near', decimals: 9, destSymbol: 'SOL' },
+  doge: { originAsset: 'nep141:doge.omft.near', decimals: 8, destSymbol: 'DOGE' },
 };
 
+const ONE_CLICK_TOKENS_KEY = '1click_tokens:v1';
+const ONE_CLICK_TOKENS_TTL = 6 * 60 * 60;
+
+interface OneClickToken {
+  assetId: string;
+  blockchain: string;
+  symbol: string;
+  decimals: number;
+}
+
+function oneClickApiBase(env: Env): string {
+  return (env.NEAR_API_BASE || 'https://1click.chaindefuser.com').replace(/\/$/, '');
+}
+
 /**
- * Destination-chain asset ids 1Click understands, per canonical symbol. A
- * symbol/chain pair absent here fails closed rather than guessing a network.
+ * Live 1Click token catalogue, cached in KV for a few hours. This is the
+ * single source of truth for what can be sent where — hardcoding it rotted
+ * (stale Optimism/Avalanche ids, missing Sui/Robinhood) within one release.
  */
-const DESTINATION_ASSETS: Record<string, Record<string, string>> = {
-  usdc: {
-    base: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
-    arbitrum: 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near',
-    eth: 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near',
-    op: 'nep141:op-0x0b2c639c533813f4aa9d7837caf62653d097ff85.omft.near',
-    avax: 'nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omft.near',
-    pol: 'nep245:v2_1.omni.hot.tg:137_qiStmoQJDQPTebaPjgx5VBxZv6L',
-    sol: 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near',
-    near: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-  },
-  usdt: {
-    eth: 'nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near',
-    sol: 'nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near',
-    near: 'nep141:usdt.tether-token.near',
-    bsc: 'nep245:v2_1.omni.hot.tg:56_2CMMyVTGZkeyNZTSvS5sarzfir6g',
-  },
-  eth: {
-    eth: 'nep141:eth.omft.near',
-    base: 'nep141:base.omft.near',
-    arbitrum: 'nep141:arb.omft.near',
-  },
-  near: { near: 'wrap.near' },
-  btc: { btc: 'nep141:btc.omft.near' },
-  sol: { sol: 'nep141:sol.omft.near' },
-  doge: { doge: 'nep141:doge.omft.near' },
-};
+async function fetchOneClickTokens(env: Env, apiBase: string): Promise<OneClickToken[]> {
+  try {
+    const cached = await env.CACHE?.get(ONE_CLICK_TOKENS_KEY, 'json');
+    if (Array.isArray(cached) && cached.length > 0) return cached as OneClickToken[];
+  } catch {
+    // fall through to a live fetch
+  }
+
+  const resp = await fetch(`${apiBase}/v0/tokens`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'UPRAIL/1.0' },
+  });
+  if (!resp.ok) {
+    throw new Error(`1Click token list failed (${resp.status})`);
+  }
+  const data = (await resp.json()) as unknown;
+  const arr = Array.isArray(data)
+    ? data
+    : ((data as any)?.tokens || (data as any)?.data || []);
+  const tokens: OneClickToken[] = (arr as any[])
+    .map((t) => ({
+      assetId: String(t?.assetId || ''),
+      blockchain: String(t?.blockchain || ''),
+      symbol: String(t?.symbol || ''),
+      decimals: Number(t?.decimals ?? 0),
+    }))
+    .filter((t) => t.assetId && t.blockchain && t.symbol);
+
+  try {
+    await env.CACHE?.put(ONE_CLICK_TOKENS_KEY, JSON.stringify(tokens), {
+      expirationTtl: ONE_CLICK_TOKENS_TTL,
+    });
+  } catch {
+    // a cache write failure must not fail the withdrawal
+  }
+  return tokens;
+}
+
+export interface WithdrawChainInfo {
+  key: string;
+  name: string;
+  family: ChainFamily | null;
+}
+
+/**
+ * Destination networks a given spendable asset can settle to, straight from
+ * 1Click. `sourceAsset` may be a full defuse id or a bare symbol.
+ */
+export async function getWithdrawChains(env: Env, sourceAsset: string): Promise<WithdrawChainInfo[]> {
+  const symbol = canonicalAssetSymbol(sourceAsset);
+  const origin = ORIGIN_ASSETS[symbol];
+  if (!origin) return [];
+
+  const tokens = await fetchOneClickTokens(env, oneClickApiBase(env));
+  const seen = new Set<string>();
+  const chains: WithdrawChainInfo[] = [];
+
+  for (const token of tokens) {
+    if (token.symbol.toUpperCase() !== origin.destSymbol) continue;
+    if (seen.has(token.blockchain)) continue;
+    seen.add(token.blockchain);
+    chains.push({
+      key: token.blockchain,
+      name: CHAIN_NAMES[token.blockchain] || token.blockchain.toUpperCase(),
+      family: CHAIN_FAMILY[token.blockchain] || null,
+    });
+  }
+
+  // NEAR is the native rail (no 1Click quote); keep it first when relevant.
+  if (symbol === 'near' && !seen.has('near')) {
+    chains.unshift({ key: 'near', name: 'NEAR', family: 'near' });
+  }
+  return chains;
+}
 
 /** Normalizes a defuse asset id (or bare symbol) to a canonical symbol. */
 function canonicalAssetSymbol(asset: string): string {
@@ -149,10 +271,13 @@ export function inferChainFromAddress(address: string): string {
   return 'near';
 }
 
-/** True when `address` is valid for the requested chain's family. */
+/**
+ * True when `address` is valid for the requested chain's family. Unknown
+ * families return true and are left to 1Click's own recipient validation.
+ */
 export function chainMatchesAddress(chain: string, address: string): boolean {
-  const family = WITHDRAW_CHAIN_FAMILY[chain];
-  if (!family) return false;
+  const family = CHAIN_FAMILY[chain];
+  if (!family) return true;
   const clean = address.trim();
   if (family === 'evm') return EVM_ADDRESS_REGEX.test(clean);
   if (family === 'btc') return BITCOIN_ADDRESS_REGEX.test(clean);
@@ -167,15 +292,16 @@ export function chainMatchesAddress(chain: string, address: string): boolean {
   return isNearAccountAddress(clean);
 }
 
-function resolveAssetPair(
+async function resolveAssetPair(
+  env: Env,
   asset: string,
   destinationAddress: string,
   destinationChain?: string
-): {
+): Promise<{
   originAsset: string;
   destinationAsset: string;
   decimals: number;
-} {
+}> {
   const symbol = canonicalAssetSymbol(asset);
   const origin = ORIGIN_ASSETS[symbol];
   if (!origin) {
@@ -186,10 +312,20 @@ function resolveAssetPair(
     (destinationChain && destinationChain.trim().toLowerCase()) ||
     inferChainFromAddress(destinationAddress);
 
-  const destinationAsset = (DESTINATION_ASSETS[symbol] || {})[chain];
+  let destinationAsset: string | undefined;
+  if (chain === 'near') {
+    // Native NEAR settlement uses the same intents asset; no 1Click quote.
+    destinationAsset = origin.originAsset;
+  } else {
+    const tokens = await fetchOneClickTokens(env, oneClickApiBase(env));
+    destinationAsset = tokens.find(
+      (t) => t.blockchain === chain && t.symbol.toUpperCase() === origin.destSymbol
+    )?.assetId;
+  }
+
   if (!destinationAsset) {
     throw new Error(
-      `Sending ${symbol.toUpperCase()} to ${chain} is not supported yet — choose another network`
+      `Sending ${origin.destSymbol} to ${CHAIN_NAMES[chain] || chain} is not supported yet — choose another network`
     );
   }
 
@@ -199,6 +335,7 @@ function resolveAssetPair(
     decimals: origin.decimals,
   };
 }
+
 
 function toBaseUnits(amount: number, decimals: number): string {
   if (!Number.isFinite(amount) || amount <= 0) return '0';
@@ -220,7 +357,8 @@ export async function get1ClickWithdrawalQuote(
   env: Env,
   params: CrossChainQuoteParams
 ): Promise<CrossChainQuoteResult> {
-  const { originAsset, destinationAsset, decimals } = resolveAssetPair(
+  const { originAsset, destinationAsset, decimals } = await resolveAssetPair(
+    env,
     params.asset,
     params.destinationAddress,
     params.destinationChain

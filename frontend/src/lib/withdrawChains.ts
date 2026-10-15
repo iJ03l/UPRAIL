@@ -2,11 +2,11 @@
  * Destination networks offered when sending to an external wallet via the
  * NEAR Intents (1Click) rail.
  *
- * The worker owns the actual asset ids and is the authority: it rejects any
- * chain the chosen token cannot settle to. This module only drives the picker
- * and keeps the choice sensible for the address the user typed — an EVM
- * address is valid on every EVM chain, so without an explicit selection the
- * app has no way to know which one was meant.
+ * The list itself comes from the worker (`/api/claim/withdraw-chains`), which
+ * reads 1Click's live catalogue — so it always includes what the solver
+ * actually supports (Sui, Robinhood, new L2s, …) without a hardcoded copy to
+ * drift. This module only holds the address-shape helpers used to pick a
+ * sensible default and flag an obvious mismatch.
  */
 
 export type WithdrawChainFamily = 'evm' | 'sol' | 'btc' | 'near';
@@ -14,39 +14,7 @@ export type WithdrawChainFamily = 'evm' | 'sol' | 'btc' | 'near';
 export interface WithdrawChain {
   key: string;
   name: string;
-  family: WithdrawChainFamily;
-}
-
-const ALL_CHAINS: WithdrawChain[] = [
-  { key: 'base', name: 'Base', family: 'evm' },
-  { key: 'eth', name: 'Ethereum', family: 'evm' },
-  { key: 'arbitrum', name: 'Arbitrum', family: 'evm' },
-  { key: 'op', name: 'Optimism', family: 'evm' },
-  { key: 'pol', name: 'Polygon', family: 'evm' },
-  { key: 'avax', name: 'Avalanche', family: 'evm' },
-  { key: 'sol', name: 'Solana', family: 'sol' },
-  { key: 'btc', name: 'Bitcoin', family: 'btc' },
-  { key: 'near', name: 'NEAR', family: 'near' },
-];
-
-/**
- * Networks each spendable symbol can settle to. Mirrors the worker's
- * DESTINATION_ASSETS map; anything absent is a NEAR-only (native) asset.
- */
-const CHAINS_BY_SYMBOL: Record<string, string[]> = {
-  USDC: ['base', 'eth', 'arbitrum', 'op', 'pol', 'avax', 'sol', 'near'],
-  USDT: ['eth', 'sol', 'near'],
-  NEAR: ['near'],
-  ETH: ['eth', 'base', 'arbitrum'],
-  SOL: ['sol'],
-  BTC: ['btc'],
-};
-
-/** Cross-chain destinations for a token symbol (empty = NEAR-only asset). */
-export function withdrawChainsForSymbol(symbol: string): WithdrawChain[] {
-  const keys = CHAINS_BY_SYMBOL[(symbol || '').toUpperCase()];
-  if (!keys) return [];
-  return ALL_CHAINS.filter((chain) => keys.includes(chain.key));
+  family: WithdrawChainFamily | null;
 }
 
 const EVM_RE = /^0x[a-fA-F0-9]{40}$/;
@@ -65,10 +33,18 @@ export function addressFamily(address: string): WithdrawChainFamily | null {
   return null;
 }
 
-/** Narrow the options to the family the address actually belongs to. */
-export function chainsForAddress(chains: WithdrawChain[], address: string): WithdrawChain[] {
-  const family = addressFamily(address);
-  if (!family) return chains;
-  const filtered = chains.filter((chain) => chain.family === family);
-  return filtered.length > 0 ? filtered : chains;
+/** Human label for a detected family, used in mismatch hints. */
+export function familyLabel(family: WithdrawChainFamily | null): string {
+  switch (family) {
+    case 'evm':
+      return 'EVM';
+    case 'sol':
+      return 'Solana';
+    case 'btc':
+      return 'Bitcoin';
+    case 'near':
+      return 'NEAR';
+    default:
+      return '';
+  }
 }

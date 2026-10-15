@@ -78,7 +78,7 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
             <div>
               <p className="font-bold text-stone-900">No seed phrases or passwords</p>
               <p className="text-stone-500 text-[11px]">
-                Secured by Touch ID, Face ID, or your device passcode.
+                Secured by your device passkey.
               </p>
             </div>
           </div>
@@ -129,7 +129,7 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
           ) : (
             <>
               <Fingerprint className="w-4 h-4" />
-              <span>{hasExistingPasskey ? 'Authenticate with Touch ID' : 'Create & Claim with Passkey'}</span>
+              <span>{hasExistingPasskey ? 'Authenticate with passkey' : 'Create & Claim with Passkey'}</span>
             </>
           )}
         </button>

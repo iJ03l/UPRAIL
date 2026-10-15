@@ -287,7 +287,7 @@ export const AppHome: React.FC = () => {
               <Fingerprint className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0 text-left">
-              <div className="font-display font-bold text-sm tracking-tight">Enable Face ID / Touch ID on this device</div>
+              <div className="font-display font-bold text-sm tracking-tight">Enable a passkey on this device</div>
               <div className="text-xs text-stone-300 font-sans mt-0.5">Save a passkey to this device for instant biometric sign-in &amp; payments</div>
             </div>
           </div>
@@ -297,7 +297,7 @@ export const AppHome: React.FC = () => {
             disabled={isEnablingBiometrics}
             className="px-4 py-2.5 rounded-xl bg-white text-black font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-100 active:scale-[0.98] transition-all cursor-pointer flex-shrink-0 self-start sm:self-auto shadow-xs"
           >
-            {isEnablingBiometrics ? 'Activating...' : 'Enable Face ID'}
+            {isEnablingBiometrics ? 'Activating...' : 'Enable passkey'}
           </button>
         </div>
       )}
@@ -305,7 +305,7 @@ export const AppHome: React.FC = () => {
       {biometricsSuccess && (
         <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono flex items-center space-x-2 animate-fade-in mb-6">
           <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          <span>Face ID passkey enabled on this device! Native biometrics active.</span>
+          <span>Passkey enabled on this device! Biometric sign-in active.</span>
         </div>
       )}
 

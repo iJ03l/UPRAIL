@@ -109,12 +109,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
                   </span>
                 </div>
                 <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">
-                  Touch ID, Face ID, or PIN. Zero seed phrases. Instant private wallet.
+                  Your device passkey. Zero seed phrases. Instant private wallet.
                 </p>
               </div>
             </div>
             <div className="mt-3 pt-2.5 border-t border-stone-200 flex items-center justify-between text-xs text-stone-900 font-mono font-bold">
-              <span>{isPasskeyLoading ? 'Prompting device biometrics...' : 'Sign in with Touch ID / Face ID'}</span>
+              <span>{isPasskeyLoading ? 'Prompting device biometrics...' : 'Sign in with passkey'}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </button>

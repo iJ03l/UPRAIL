@@ -16,8 +16,8 @@ import { BackBar } from '../components/BackBar';
 import { ShareModal } from '../components/ShareModal';
 import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareModal';
 import { usePayments } from '../hooks/usePayments';
-import { PROTOCOL_FEE_RATE, formatUsd } from '../lib/api';
-import { withdrawChainsForSymbol, chainsForAddress } from '../lib/withdrawChains';
+import { PROTOCOL_FEE_RATE, formatUsd, api } from '../lib/api';
+import { addressFamily, familyLabel, WithdrawChain } from '../lib/withdrawChains';
 import { PaymentIntent } from '../types';
 
 export const SendPage: React.FC = () => {
@@ -40,6 +40,8 @@ export const SendPage: React.FC = () => {
   const [recipient, setRecipient] = useState('');
   const [walletAddress, setWalletAddress] = useState('');
   const [destinationChain, setDestinationChain] = useState('');
+  const [destinationChainTouched, setDestinationChainTouched] = useState(false);
+  const [withdrawChains, setWithdrawChains] = useState<WithdrawChain[]>([]);
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
@@ -63,28 +65,54 @@ export const SendPage: React.FC = () => {
     return `${PROTOCOL_FEE_RATE * 100}%`;
   }, [amount, quote?.protocolFee]);
 
-  // Destination networks this token can settle to cross-chain. Empty means a
-  // NEAR-only asset (settled natively), so the picker stays hidden.
-  const availableChains = useMemo(
-    () => withdrawChainsForSymbol(selectedToken.symbol),
-    [selectedToken.symbol]
-  );
-  const matchingChains = useMemo(
-    () => chainsForAddress(availableChains, walletAddress),
-    [availableChains, walletAddress]
-  );
-  const showChainSelector = sendMode === 'wallet' && availableChains.length > 0;
-  const selectedChainName =
-    matchingChains.find((chain) => chain.key === destinationChain)?.name || '';
+  // Live destination networks for the selected asset (from 1Click via the
+  // worker), so the picker can never fall behind what the solver supports.
+  useEffect(() => {
+    if (sendMode !== 'wallet') return;
+    let cancelled = false;
+    void api.getWithdrawChains(selectedToken.id).then((chains) => {
+      if (!cancelled) setWithdrawChains(chains);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sendMode, selectedToken.id]);
 
-  // Keep a valid selection: default to the network the address implies (or the
-  // first option) and re-point when the address switches families.
+  // Reset any manual pick when the asset changes so a fresh default is chosen.
+  useEffect(() => {
+    setDestinationChainTouched(false);
+  }, [selectedToken.id]);
+
+  const showChainSelector = sendMode === 'wallet' && withdrawChains.length > 0;
+  const detectedFamily = addressFamily(walletAddress);
+  const selectedChain = withdrawChains.find((chain) => chain.key === destinationChain);
+  const selectedChainName = selectedChain?.name || '';
+  // Only flag a conflict when the network's family is known and clearly differs
+  // from the address; opaque families are validated by 1Click on submit.
+  const chainFamilyMismatch =
+    showChainSelector &&
+    !!detectedFamily &&
+    !!selectedChain &&
+    selectedChain.family !== null &&
+    selectedChain.family !== detectedFamily;
+
+  // Default to the network the address implies, but never override a manual
+  // choice — the network is the user's to pick.
   useEffect(() => {
     if (!showChainSelector) return;
-    if (!matchingChains.some((chain) => chain.key === destinationChain)) {
-      setDestinationChain(matchingChains[0]?.key || '');
-    }
-  }, [showChainSelector, matchingChains, destinationChain]);
+    const current = withdrawChains.find((chain) => chain.key === destinationChain);
+    const currentOk =
+      !!current &&
+      (destinationChainTouched ||
+        !detectedFamily ||
+        current.family === null ||
+        current.family === detectedFamily);
+    if (currentOk) return;
+    const preferred =
+      (detectedFamily && withdrawChains.find((chain) => chain.family === detectedFamily)) ||
+      withdrawChains[0];
+    setDestinationChain(preferred?.key || '');
+  }, [showChainSelector, withdrawChains, destinationChain, destinationChainTouched, detectedFamily]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,6 +185,7 @@ export const SendPage: React.FC = () => {
   const isFormValid =
     (sendMode === 'handle' ? recipient.trim().length >= 2 : walletAddress.trim().length >= 5) &&
     parseFloat(amount) > 0 &&
+    !chainFamilyMismatch &&
     !isSubmitting;
 
   return (
@@ -262,8 +291,8 @@ export const SendPage: React.FC = () => {
 
               {/* Destination network — an EVM address is valid on every EVM
                   chain, so the network has to be chosen explicitly. The list
-                  narrows to the address family once one is entered. */}
-              {showChainSelector && matchingChains.length > 0 && (
+                  is the full live set 1Click supports for this token. */}
+              {showChainSelector && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
@@ -272,11 +301,14 @@ export const SendPage: React.FC = () => {
                     <span className="text-[11px] text-stone-500 font-mono">{selectedChainName}</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {matchingChains.map((chain) => (
+                    {withdrawChains.map((chain) => (
                       <button
                         key={chain.key}
                         type="button"
-                        onClick={() => setDestinationChain(chain.key)}
+                        onClick={() => {
+                          setDestinationChainTouched(true);
+                          setDestinationChain(chain.key);
+                        }}
                         disabled={isSubmitting}
                         className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer disabled:opacity-60 ${
                           destinationChain === chain.key
@@ -288,9 +320,9 @@ export const SendPage: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                  {matchingChains.length === 1 && (
-                    <p className="text-[11px] font-mono text-stone-500">
-                      Matched to the address format.
+                  {chainFamilyMismatch && (
+                    <p className="text-[11px] font-mono text-amber-600">
+                      This looks like a {familyLabel(detectedFamily)} address. Choose a {familyLabel(detectedFamily)} network.
                     </p>
                   )}
                 </div>

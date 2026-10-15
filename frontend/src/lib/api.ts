@@ -11,6 +11,7 @@ import {
   WithdrawalReceipt,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
+import type { WithdrawChain } from './withdrawChains';
 
 /**
  * Canonical claim link base. In production the origin is app.uprail.world
@@ -1093,6 +1094,20 @@ export const api = {
       console.warn('Backend getShieldedBalances error', e);
     }
     return [];
+  },
+
+  /** Destination networks a spendable asset can settle to (live from 1Click). */
+  async getWithdrawChains(asset: string): Promise<WithdrawChain[]> {
+    const q = `asset=${encodeURIComponent(asset)}`;
+    const url = API_BASE ? `${API_BASE}/api/claim/withdraw-chains?${q}` : `/api/claim/withdraw-chains?${q}`;
+    try {
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data?.chains) ? (data.chains as WithdrawChain[]) : [];
+    } catch {
+      return [];
+    }
   },
 
   // Withdraw shielded funds from virtual vault to external blockchain address
