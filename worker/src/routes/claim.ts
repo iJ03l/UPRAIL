@@ -63,6 +63,57 @@ function toPlainDecimalString(n: number): string {
 }
 
 /**
+ * GET /api/claim/withdrawal/:id
+ * Public, share-safe receipt for a wallet send / withdrawal. The id is an
+ * unguessable `wth_…` UUID, so possessing the link is the capability — the
+ * same model as claim links. Only non-sensitive receipt fields are returned.
+ */
+claimRouter.get('/withdrawal/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!/^wth_[A-Za-z0-9-]{1,64}$/.test(id)) {
+    return c.json<ErrorResponse>({ error: 'Receipt not found', code: 'NOT_FOUND' }, 404);
+  }
+  try {
+    const row = await c.env.DB.prepare(
+      `SELECT id, x_handle, destination_address, asset, amount, tx_hash, status, created_at
+         FROM withdrawals WHERE id = ?`
+    )
+      .bind(id)
+      .first<{
+        id: string;
+        x_handle: string | null;
+        destination_address: string;
+        asset: string;
+        amount: string;
+        tx_hash: string | null;
+        status: string;
+        created_at: string;
+      }>();
+
+    if (!row) {
+      return c.json<ErrorResponse>({ error: 'Receipt not found', code: 'NOT_FOUND' }, 404);
+    }
+
+    return c.json({
+      id: row.id,
+      fromHandle: row.x_handle,
+      destinationAddress: row.destination_address,
+      asset: row.asset,
+      amount: row.amount,
+      txHash: row.tx_hash,
+      status: row.status,
+      createdAt: row.created_at,
+    });
+  } catch (err) {
+    console.error('[withdrawal receipt] failed:', err);
+    return c.json<ErrorResponse>(
+      { error: 'Receipt lookup failed', code: 'RECEIPT_LOOKUP_FAILED' },
+      500
+    );
+  }
+});
+
+/**
  * GET /api/claim/pending
  * Returns pending escrow payments matching the logged-in user's X handle
  */
@@ -1064,6 +1115,9 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       destinationAddress,
       asset: asset.toUpperCase(),
       amount: parsedAmount.toFixed(2),
+      // Public receipt link so a wallet send is shareable too, mirroring the
+      // claim/receipt link an X-handle send produces.
+      shareLink: `${resolveOrigin(c.env)}/receipt/${withdrawalId}`,
       message: `Successfully withdrawn ${parsedAmount.toFixed(2)} ${asset.toUpperCase()} to ${destinationAddress}`,
     });
   } catch (err: any) {

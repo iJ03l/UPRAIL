@@ -99,6 +99,8 @@ app.use('*', async (c, next) => {
       url.pathname.startsWith('/receive/') ||
       url.pathname === '/claim' ||
       url.pathname.startsWith('/claim/') ||
+      url.pathname === '/receipt' ||
+      url.pathname.startsWith('/receipt/') ||
       url.pathname === '/history' ||
       url.pathname.startsWith('/history/') ||
       url.pathname === '/privacy' ||
@@ -158,6 +160,10 @@ app.onError((err, c) => {
 // Next.js static export cannot prerender unknown payment IDs, so these paths
 // are rewritten onto the static claim page, which reads the id from the URL.
 const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
+
+// Wallet-send receipt deep links: /receipt/<withdrawalId> and
+// /app/receipt/<withdrawalId>, rewritten onto the static receipt page.
+const RECEIPT_DEEP_LINK = /^\/(?:app\/)?receipt\/([A-Za-z0-9_-]{1,64})\/?$/;
 
 function isBotRequest(userAgent: string | null | undefined): boolean {
   if (!userAgent) return false;
@@ -297,6 +303,63 @@ app.notFound(async (c) => {
       const basePath = url.pathname.startsWith('/app/') ? '/app/claim' : '/claim';
       const target = new URL(basePath, url);
       // Keep ?invite= / ?payment= — the page reads them from the address bar.
+      target.search = url.search;
+      const assetResponse = await c.env.ASSETS.fetch(
+        new Request(target, {
+          method: 'GET',
+          headers: c.req.raw.headers,
+        })
+      );
+      if (assetResponse.ok) {
+        return assetResponse;
+      }
+    }
+
+    const receiptMatch = url.pathname.match(RECEIPT_DEEP_LINK);
+    if (receiptMatch) {
+      const withdrawalId = receiptMatch[1];
+      if (isBot) {
+        let amount = '';
+        let asset = '';
+        let destination = '';
+        if (c.env.DB) {
+          try {
+            const w = await c.env.DB.prepare(
+              'SELECT amount, asset, destination_address FROM withdrawals WHERE id = ?'
+            )
+              .bind(withdrawalId)
+              .first<{ amount: string; asset: string; destination_address: string }>();
+            if (w) {
+              amount = w.amount;
+              asset = w.asset;
+              destination = w.destination_address;
+            }
+          } catch {}
+        }
+        let ticker = '';
+        if (asset) {
+          try {
+            const tokens = await nearRpc.getSupportedTokens(c.env);
+            ticker = nearRpc.resolveTokenForAsset(asset, tokens)?.symbol || '';
+          } catch {}
+          if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset.toUpperCase();
+        }
+        const shortDest =
+          destination.length > 12
+            ? `${destination.slice(0, 6)}…${destination.slice(-4)}`
+            : destination;
+        return renderShareCardHtml({
+          title: 'Payment sent on UPRAIL',
+          description:
+            amount && ticker
+              ? `${amount} ${ticker} sent to ${shortDest} — confidential, cross-chain settlement on UPRAIL.`
+              : 'A confidential cross-chain payment sent on UPRAIL.',
+          imageUrl: 'https://app.uprail.world/og/og-send.png',
+          url: url.href,
+        });
+      }
+
+      const target = new URL('/receipt', url);
       target.search = url.search;
       const assetResponse = await c.env.ASSETS.fetch(
         new Request(target, {
