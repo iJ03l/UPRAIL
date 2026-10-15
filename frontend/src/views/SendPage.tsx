@@ -85,13 +85,15 @@ export const SendPage: React.FC = () => {
 
       const payment = await sendPayment(target, amount, memo);
       setCreatedPayment(payment);
+      // Every X-handle send produces a shareable link now — a claim link for
+      // new recipients, a receipt link for already-registered ones — so the
+      // modal opens either way and the sender can notify the recipient.
+      setShowShareModal(true);
       if (payment.isDirect || payment.status === 'claimed') {
-        setShowShareModal(false);
         setSuccessToast(
           `Successfully sent ${payment.amount} ${payment.token.symbol} directly to @${payment.recipientHandle}'s vault!`
         );
       } else {
-        setShowShareModal(true);
         setSuccessToast(
           `Successfully escrowed ${payment.amount} ${payment.token.symbol} for @${payment.recipientHandle}!`
         );
@@ -122,7 +124,7 @@ export const SendPage: React.FC = () => {
             <CheckCircle2 className="w-4 h-4 text-stone-900 flex-shrink-0" />
             <span className="font-medium">{successToast}</span>
           </div>
-          {createdPayment && sendMode === 'handle' && !createdPayment.isDirect && createdPayment.status !== 'claimed' && (
+          {createdPayment && sendMode === 'handle' && (
             <button
               onClick={() => setShowShareModal(true)}
               className="ml-3 font-bold text-stone-900 underline hover:text-black cursor-pointer"

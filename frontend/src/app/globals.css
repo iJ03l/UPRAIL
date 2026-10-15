@@ -24,15 +24,15 @@
 }
 
 .dark {
-  --bg: #0a0807;
-  --bg-subtle: #120e0c;
-  --bg-muted: #181310;
-  --bg-inset: #221b17;
-  --fg: #f5f2ef;
-  --fg-muted: #a8a29e;
-  --fg-subtle: #78716c;
-  --line: #2c221d;
-  --line-strong: #3a2e28;
+  --bg: #1b1c1e;
+  --bg-subtle: #212225;
+  --bg-muted: #282a2d;
+  --bg-inset: #333538;
+  --fg: #f3f4f5;
+  --fg-muted: #a6a9ad;
+  --fg-subtle: #7e8186;
+  --line: #313337;
+  --line-strong: #43464b;
   --accent: #e05326;
   --accent-fg: #ffffff;
   color-scheme: dark;
@@ -212,6 +212,28 @@
   /* placeholders */
   .dark .placeholder-stone-400::placeholder { color: var(--fg-subtle); }
   .dark .placeholder-stone-500::placeholder { color: var(--fg-subtle); }
+
+  /* Interactive controls: invert the black primary buttons so they read as a
+     raised surface on the grey page instead of blending into it. Scoped to
+     <button>/<a> so intentional dark accent cards (which are divs) keep their
+     look. Accent (orange) buttons have no bg-black class and are untouched. */
+  .dark button.bg-black.text-white,
+  .dark a.bg-black.text-white,
+  .dark button.bg-stone-900.text-white,
+  .dark a.bg-stone-900.text-white,
+  .dark button.bg-stone-950.text-white,
+  .dark a.bg-stone-950.text-white {
+    background-color: var(--fg);
+    color: var(--bg);
+  }
+  .dark button.bg-black.text-white:hover,
+  .dark a.bg-black.text-white:hover,
+  .dark button.bg-stone-900.text-white:hover,
+  .dark a.bg-stone-900.text-white:hover,
+  .dark button.bg-stone-950.text-white:hover,
+  .dark a.bg-stone-950.text-white:hover {
+    background-color: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  }
 
   /* translucent modal scrims stay dark (they sit over the page, either theme) */
 }

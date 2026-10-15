@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, useLocation, Link } from '../lib/router';
 import {
   Fingerprint,
@@ -17,7 +17,8 @@ import { PasskeyPrompt } from '../components/PasskeyPrompt';
 import { XAuthBanner } from '../components/XAuthBanner';
 import { TokenIcon } from '../components/TokenIcon';
 import { BackBar } from '../components/BackBar';
-import { formatUsd, sumUsd } from '../lib/api';
+import { formatUsd, sumUsd, api } from '../lib/api';
+import { PaymentIntent } from '../types';
 import { currentInvite, inviteFromSearch } from '../lib/invite';
 
 // ── Shielded balance withdraw card ──────────────────────────────────────────
@@ -122,6 +123,36 @@ export const ClaimPage: React.FC = () => {
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
 
+  // A share link may point at a payment that was already DELIVERED (an
+  // already-registered recipient, or a claim that already settled). In that
+  // case the page shows a receipt notice instead of the claim flow.
+  const [linkedPayment, setLinkedPayment] = useState<PaymentIntent | null>(null);
+  useEffect(() => {
+    if (!queryPaymentCode || !user) {
+      setLinkedPayment(null);
+      return;
+    }
+    let active = true;
+    api
+      .getPaymentByCode(queryPaymentCode)
+      .then((p) => {
+        if (active) setLinkedPayment(p);
+      })
+      .catch(() => {
+        if (active) setLinkedPayment(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [queryPaymentCode, user]);
+
+  const isReceipt = Boolean(
+    linkedPayment &&
+      user?.handle &&
+      linkedPayment.recipientHandle?.replace(/^@/, '').toLowerCase() === user.handle.toLowerCase() &&
+      (linkedPayment.isDirect || linkedPayment.status === 'claimed')
+  );
+
   const {
     pendingPayments,
     isLoading,
@@ -194,6 +225,62 @@ export const ClaimPage: React.FC = () => {
           <span className="text-[11px] text-stone-900 font-bold bg-white px-2.5 py-1 rounded-full border border-stone-200">
             Full Access Preloaded
           </span>
+        </div>
+      )}
+
+      {/* Receipt: the linked payment was already delivered to this vault */}
+      {isReceipt && linkedPayment && (
+        <div className="rounded-3xl p-6 sm:p-7 bg-stone-50 border border-stone-200 shadow-xs space-y-4 animate-fade-in">
+          <div className="flex items-center space-x-3">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 flex items-center justify-center">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold font-display text-stone-950">Payment received</h3>
+              <p className="text-xs text-stone-500 font-mono">
+                From @{linkedPayment.senderHandle || 'anonymous'} ·{' '}
+                {new Date(linkedPayment.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3.5 p-3.5 rounded-2xl bg-white border border-stone-200">
+            <TokenIcon
+              symbol={linkedPayment.token.symbol}
+              iconUrl={linkedPayment.token.iconUrl}
+              size="lg"
+            />
+            <div>
+              <div className="text-base font-extrabold font-display text-stone-950">
+                {linkedPayment.amount} {linkedPayment.token.symbol}
+              </div>
+              <div className="text-xs text-stone-500 font-mono">
+                ≈ {formatUsd(linkedPayment.amountUsd)} USD
+              </div>
+            </div>
+            <span className="ml-auto text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
+              Delivered to your vault
+            </span>
+          </div>
+
+          {linkedPayment.memo && (
+            <p className="text-xs text-stone-500 font-mono italic">"{linkedPayment.memo}"</p>
+          )}
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Link
+              to="/app/home"
+              className="py-2.5 px-4 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+            >
+              Open Dashboard
+            </Link>
+            <Link
+              to="/app/claim"
+              className="py-2.5 px-4 rounded-xl border border-stone-200 hover:border-black text-stone-700 hover:text-black font-display font-bold text-xs uppercase tracking-wider bg-white transition-colors cursor-pointer"
+            >
+              Claim Other Payments
+            </Link>
+          </div>
         </div>
       )}
 
@@ -275,7 +362,7 @@ export const ClaimPage: React.FC = () => {
       )}
 
       {/* Pending Payments List — AUTOMATICALLY DISCOVERED (No link/code input!) */}
-      {!isLoading && pendingPayments.length > 0 && (
+      {!isReceipt && !isLoading && pendingPayments.length > 0 && (
         <div className="space-y-4">
           {/* Batch Claim All CTA (if more than 1 payment) */}
           {pendingPayments.length > 1 && (
@@ -367,7 +454,8 @@ export const ClaimPage: React.FC = () => {
       )}
 
       {/* Authentication / Empty State Handling */}
-      {!user ? (
+      {!isReceipt &&
+        (!user ? (
         !isAuthLoading && (
           <XAuthBanner
             title="Sign In with 𝕏 to Discover Incoming Claims"
@@ -407,7 +495,7 @@ export const ClaimPage: React.FC = () => {
             </div>
           </div>
         )
-      )}
+      ))}
 
       {/* Passkey Authentication Modal Prompt */}
       <PasskeyPrompt

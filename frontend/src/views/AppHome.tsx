@@ -106,6 +106,42 @@ export const AppHome: React.FC = () => {
   const isFirstLoad = isLoadingBalances && totalBalanceUsd === null && balances.length === 0;
   const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
   const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>([]);
+
+  // Received-payment notifications. Direct sends land straight in the vault
+  // (no claim step), so the recipient is told here instead. Derived from the
+  // payments table — no schema change — with a local "seen" marker.
+  const RECEIPTS_SEEN_KEY = 'uprail_seen_receipts';
+  const [seenReceiptIds, setSeenReceiptIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(RECEIPTS_SEEN_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const receivedReceipts = useMemo(() => {
+    if (!user?.handle) return [];
+    const h = user.handle.toLowerCase();
+    return history
+      .filter((p) => p.recipientHandle?.replace(/^@/, '').toLowerCase() === h)
+      .filter((p) => p.isDirect || p.status === 'claimed')
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5);
+  }, [history, user?.handle]);
+
+  const unseenReceipts = receivedReceipts.filter((p) => !seenReceiptIds.includes(p.id));
+
+  const dismissReceipts = () => {
+    const ids = Array.from(new Set([...seenReceiptIds, ...receivedReceipts.map((p) => p.id)]));
+    setSeenReceiptIds(ids);
+    try {
+      window.localStorage.setItem(RECEIPTS_SEEN_KEY, JSON.stringify(ids));
+    } catch {
+      /* ignore */
+    }
+  };
   // One automatic provisioning retry: a fresh signup can land here before the
   // background account creation settles. Manual retry stays on the button.
   const autoRetried = React.useRef(false);
@@ -415,6 +451,37 @@ export const AppHome: React.FC = () => {
               </div>
               <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-1 transition-all" />
             </Link>
+          )}
+
+          {/* Received Payment Notice (direct sends land in the vault; tell the recipient) */}
+          {unseenReceipts.length > 0 && (
+            <div className="p-4 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 shadow-xs flex items-center justify-between gap-3 animate-fade-in">
+              <Link
+                to="/app/history"
+                className="flex items-center space-x-3.5 min-w-0 group"
+              >
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-600 flex items-center justify-center font-bold flex-shrink-0">
+                  <ArrowDownLeft className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold font-display text-stone-950 truncate">
+                    {unseenReceipts.length === 1
+                      ? `You received ${unseenReceipts[0].amount} ${unseenReceipts[0].token.symbol} from @${unseenReceipts[0].senderHandle || 'someone'}`
+                      : `You received ${unseenReceipts.length} payments`}
+                  </div>
+                  <div className="text-[11px] text-stone-600 font-mono truncate">
+                    Delivered privately to your vault · Tap to view history
+                  </div>
+                </div>
+              </Link>
+              <button
+                type="button"
+                onClick={dismissReceipts}
+                className="flex-shrink-0 text-[11px] font-mono font-bold text-stone-600 hover:text-stone-900 px-2.5 py-1.5 rounded-lg hover:bg-emerald-500/10 transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
           )}
 
           {/* Quick Action Buttons */}

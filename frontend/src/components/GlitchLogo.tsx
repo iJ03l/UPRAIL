@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from '../lib/router';
+import { useTheme } from './ThemeProvider';
 
 export interface GlitchLogoProps {
   /** Target link href/path (e.g. '/' or '/app'). If empty string or false, renders as a div */
@@ -28,7 +29,7 @@ export interface GlitchLogoProps {
 export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   href = '/',
   size = 'md',
-  variant = 'light',
+  variant = 'auto',
   mode = 'cycle',
   badge,
   className = '',
@@ -40,6 +41,11 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   const [isGlitching, setIsGlitching] = useState<boolean>(false);
   const glitchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const intervalTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const { resolved } = useTheme();
+  // 'auto' flips the wordmark with the active theme so the (black) wordmark is
+  // never left invisible against the dark background.
+  const effectiveVariant = variant === 'auto' ? (resolved === 'dark' ? 'dark' : 'light') : variant;
 
   const burstInterval = interval || fullDuration || 6500;
 
@@ -110,7 +116,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   }[size];
 
   const wordmarkSrc =
-    variant === 'dark'
+    effectiveVariant === 'dark'
       ? '/brand/uprail-wordmark-white.png'
       : '/brand/uprail-wordmark.png';
 
