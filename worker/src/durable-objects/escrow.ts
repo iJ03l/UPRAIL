@@ -6,6 +6,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { Env, Payment, PaymentStatus } from '../types';
 import * as nearProxy from '../services/nearProxy';
+import * as nearRpc from '../services/nearRpc';
 
 interface EscrowDbRow {
   payment_id: string;
@@ -212,7 +213,7 @@ export class EscrowDO extends DurableObject<Env> {
       console.log(`[EscrowDO ${state.id}] Alarm triggered: processing refund...`);
       try {
         const result = await nearProxy.refund(this.env, {
-          senderNearAccount: state.sender_x_handle ? `${state.sender_x_handle}.uprail.near` : null,
+          senderNearAccount: await this.resolveSenderNearAccount(),
           asset: state.asset,
           amount: state.amount,
           escrowAccountId: this.env.ESCROW_ACCOUNT_ID,
@@ -242,8 +243,10 @@ export class EscrowDO extends DurableObject<Env> {
           await this.ctx.storage.setAlarm(Date.now() + retryDelay);
           console.log(`[EscrowDO ${state.id}] Scheduled retry #${nextRetry} in ${retryDelay}ms`);
         } else {
-          console.error(`[EscrowDO ${state.id}] Max refund retries reached. Marking EXPIRED.`);
-          await this.updateStatus(PaymentStatus.EXPIRED);
+          console.error(
+            `[EscrowDO ${state.id}] Max refund retries reached. Marking REFUND_REVIEW — funds may still be in escrow; manual reconciliation required.`
+          );
+          await this.updateStatus(PaymentStatus.REFUND_REVIEW);
         }
       }
     } else {
@@ -336,6 +339,33 @@ export class EscrowDO extends DurableObject<Env> {
   }
 
   // --- Private Helpers ---
+
+  /**
+   * The original sender's own vault account. NEVER a `<handle>.uprail.near`
+   * (handles are mutable, and that shape was never a real vault — a refund
+   * sent there would leave the funds stranded) and never the pooled escrow.
+   * A vault is whatever the identity registered (`u_<hex>.<escrow>`) or the
+   * deterministic derivation for a never-registered user.
+   */
+  private async resolveSenderNearAccount(): Promise<string | null> {
+    const xId = this.getState()?.sender_x_id;
+    if (!xId) return null;
+    try {
+      const row = await this.env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+        .bind(xId)
+        .first<{ near_account: string | null }>();
+      if (row?.near_account) return row.near_account;
+    } catch (err) {
+      console.warn('[EscrowDO] sender account lookup failed:', err);
+    }
+    try {
+      const derived = await nearRpc.deriveUserNearKeypair(this.env, xId);
+      return derived.accountId;
+    } catch (err) {
+      console.warn('[EscrowDO] sender account derivation failed:', err);
+      return null;
+    }
+  }
 
   private getRawRow(): EscrowDbRow | null {
     const cursor = this.ctx.storage.sql.exec(`SELECT * FROM escrow_state LIMIT 1`);

@@ -87,48 +87,50 @@ export async function consumeChallenge(
 ): Promise<string | null> {
   const now = Date.now();
 
-  // 1. Try memory cache first
-  const mem = memoryChallenges.get(opts.key);
-  if (mem) {
-    memoryChallenges.delete(opts.key);
-    if (mem.expiresAt > now && mem.purpose === opts.purpose) {
-      if (!opts.expectedChallenge || mem.challenge === opts.expectedChallenge) {
-        // Asynchronously delete from D1 as well
-        if (env.DB) {
-          env.DB.prepare('DELETE FROM auth_challenges WHERE id = ?')
-            .bind(opts.key)
-            .run()
-            .catch(() => {});
-        }
-        return mem.challenge;
-      }
-    }
-  }
-
-  // 2. Fallback to D1 database
+  // 1. Authoritative single-use consume from D1. A single atomic
+  //    `DELETE ... RETURNING` validates and removes in one statement, so two
+  //    isolates racing the same challenge cannot both win. The previous
+  //    SELECT-then-DELETE had a window where both read the row (a passkey
+  //    assertion replay), and it deleted before validating expiry/match,
+  //    destroying a still-valid challenge on a mismatched attempt. The
+  //    per-isolate memory cache cannot arbitrate a cross-isolate race, so it
+  //    is only a fallback below.
   if (env.DB) {
     try {
-      const row = await env.DB.prepare(
-        'SELECT challenge, expires_at FROM auth_challenges WHERE id = ? AND purpose = ?'
+      const consume = await env.DB.prepare(
+        `DELETE FROM auth_challenges
+          WHERE id = ? AND purpose = ? AND expires_at > ?
+          ${opts.expectedChallenge ? 'AND challenge = ?' : ''}
+          RETURNING challenge`
       )
-        .bind(opts.key, opts.purpose)
-        .first<{ challenge: string; expires_at: number }>();
-
-      if (row) {
-        // Delete immediately (single-use)
-        await env.DB.prepare('DELETE FROM auth_challenges WHERE id = ?')
-          .bind(opts.key)
-          .run()
-          .catch(() => {});
-
-        if (row.expires_at > now) {
-          if (!opts.expectedChallenge || row.challenge === opts.expectedChallenge) {
-            return row.challenge;
-          }
-        }
+        .bind(
+          ...(opts.expectedChallenge
+            ? [opts.key, opts.purpose, now, opts.expectedChallenge]
+            : [opts.key, opts.purpose, now])
+        )
+        .first<{ challenge: string }>();
+      if (consume?.challenge) {
+        memoryChallenges.delete(opts.key);
+        return consume.challenge;
       }
     } catch (err) {
       console.warn('[challengeService] D1 consumeChallenge notice:', err);
+    }
+  }
+
+  // 2. Memory fallback — only reached when D1 is unavailable or the challenge
+  //    was only ever stored in memory (its D1 write failed). Validate before
+  //    deleting so a mismatched attempt cannot destroy a valid challenge.
+  const mem = memoryChallenges.get(opts.key);
+  if (mem) {
+    if (mem.expiresAt <= now) {
+      memoryChallenges.delete(opts.key);
+    } else if (
+      mem.purpose === opts.purpose &&
+      (!opts.expectedChallenge || mem.challenge === opts.expectedChallenge)
+    ) {
+      memoryChallenges.delete(opts.key);
+      return mem.challenge;
     }
   }
 

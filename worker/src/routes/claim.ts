@@ -52,6 +52,17 @@ async function getWithdrawableBalance(
 }
 
 /**
+ * Formats a JS number as a plain (non-exponential) decimal string. `String(n)`
+ * yields "1e-7" for dust, which `toBaseUnits` mis-parses and BigInt then
+ * throws on — failing a legitimate "withdraw all" of a small balance.
+ * `toFixed(18)` never produces exponent form; trailing zeros are trimmed.
+ */
+function toPlainDecimalString(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  return n.toFixed(18).replace(/\.?0+$/, '') || '0';
+}
+
+/**
  * GET /api/claim/pending
  * Returns pending escrow payments matching the logged-in user's X handle
  */
@@ -268,6 +279,10 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
 
     for (const paymentId of body.paymentIds) {
       let payment: Payment | null = null;
+      // Declared outside the try so the catch can distinguish "settlement was
+      // obtained" (funds may have moved — never revert) from "threw before any
+      // settlement" (safe to release the reservation).
+      let claimResponse: { payment: Payment; txHash: string } | undefined;
       try {
         // Fetch payment record from D1
         payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
@@ -360,8 +375,6 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
             continue;
           }
         }
-
-        let claimResponse: { payment: Payment; txHash: string };
 
         if (c.env.ESCROW) {
           const doId = c.env.ESCROW.idFromName(paymentId);
@@ -551,7 +564,14 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
               x_id: session.x_id,
               x_handle: session.x_handle,
             });
-          } catch {}
+          } catch (inviteErr) {
+            // The recipient is already paid; a failed redemption must not roll
+            // the claim back, but it must not be invisible either.
+            console.warn(
+              `[claim/execute] invite ${payment.invite_code} redemption failed for ${paymentId}:`,
+              inviteErr
+            );
+          }
         }
 
         // Persist the settlement tx hash on the already-reserved row.
@@ -560,7 +580,7 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
             await c.env.DB.prepare(
               'UPDATE payments SET claim_tx_hash = ?, updated_at = ? WHERE id = ?'
             )
-              .bind(claimResponse.txHash, Date.now(), paymentId)
+              .bind(claimResponse!.txHash, Date.now(), paymentId)
               .run();
           } catch (dbErr) {
             console.warn('[claim/execute] D1 payment update failed:', dbErr);
@@ -570,12 +590,15 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
         results.push({
           paymentId,
           status: PaymentStatus.CLAIMED,
-          txHash: claimResponse.txHash,
+          txHash: claimResponse!.txHash,
         });
       } catch (err: any) {
         console.error(`Claim error on payment ${paymentId}:`, err);
-        // Roll the reservation back so the payment stays claimable/retryable.
-        if (payment && c.env.DB) {
+        // Only roll the reservation back when NO settlement was obtained. If
+        // claimResponse is set, the transfer may already have moved funds —
+        // reverting to ESCROWED would re-enable a second claim from the
+        // pooled escrow.
+        if (!claimResponse && payment && c.env.DB) {
           try {
             await c.env.DB.prepare(
               `UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?`
@@ -785,7 +808,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       }
       amountStr = raw;
     } else {
-      amountStr = String(available);
+      amountStr = toPlainDecimalString(available);
     }
 
     const parsedAmount = parseFloat(amountStr);

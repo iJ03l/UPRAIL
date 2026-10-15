@@ -2934,8 +2934,28 @@ function isUnknownAccountError(err: unknown): boolean {
   return msg.includes('UNKNOWN_ACCOUNT') || /does not exist while viewing/.test(msg);
 }
 
+/**
+ * Prefix for a settlement recorded when the broadcast timed out AFTER the
+ * funds had already moved (verified by comparing the plain balance before and
+ * after). The transfer landed but its tx hash was lost with the connection.
+ *
+ * Unlike the other synthetic prefixes, a settled-unknown row is treated as
+ * SETTLED by the balance accounting (the onchain balance already reflects the
+ * movement, so subtracting it again would double-count the debit). It is the
+ * one synthetic form that `isSyntheticTxHash` deliberately answers `false` for.
+ */
+export const SETTLED_UNKNOWN_PREFIX = 'settled_unknown_';
+
+export function settledUnknownHash(id: string): string {
+  return `${SETTLED_UNKNOWN_PREFIX}${id}`;
+}
+
 export function isSyntheticTxHash(h?: string | null): boolean {
   if (!h) return true;
+  // Settled-unknown means the movement already happened — it must be counted
+  // as settled, not as an unsettled synthetic placeholder. Checked first so
+  // it can never be misclassified by the heuristics below.
+  if (h.startsWith(SETTLED_UNKNOWN_PREFIX)) return false;
   return (
     h.startsWith('virtual_') ||
     h.startsWith('direct_') ||
@@ -3191,6 +3211,42 @@ async function getPlainNearBalance(rpcUrl: string, accountId: string): Promise<b
 }
 
 /**
+ * Strict plain-balance reads for rail/decision logic: they return `null` when
+ * the RPC read failed instead of a fabricated `0n`. A transport failure must
+ * never be mistaken for "this account holds nothing", which misclassifies a
+ * funded deposit as INSUFFICIENT_PLAIN_BALANCE and routes the caller down the
+ * wrong rail (or refuses a withdrawal it should complete).
+ */
+async function getPlainFtBalanceStrict(
+  rpcUrl: string,
+  contractId: string,
+  accountId: string
+): Promise<bigint | null> {
+  try {
+    const res = await viewFunction(rpcUrl, contractId, 'ft_balance_of', { account_id: accountId });
+    return BigInt(res || '0');
+  } catch {
+    return null;
+  }
+}
+
+async function getPlainNearBalanceStrict(
+  rpcUrl: string,
+  accountId: string
+): Promise<bigint | null> {
+  try {
+    const res: any = await nearRpc(rpcUrl, 'query', {
+      request_type: 'view_account',
+      finality: 'final',
+      account_id: accountId,
+    });
+    return BigInt(res?.amount ?? res?.result?.amount ?? '0');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Plain (directly-held) NEP-141 balance of an account, in base units.
  *
  * Callers use this to tell a deposit that genuinely failed from one whose
@@ -3209,7 +3265,7 @@ export async function getPlainAssetBalance(
     if (!token) token = await resolveRheaToken(env, asset);
     if (!token?.nearContractId) return null;
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
-    return await getPlainFtBalance(rpcUrl, token.nearContractId, nearAccount);
+    return await getPlainFtBalanceStrict(rpcUrl, token.nearContractId, nearAccount);
   } catch {
     return null;
   }
@@ -3967,7 +4023,10 @@ export async function depositPlainBalanceToIntents(
     }
 
     // 1. Plain NEP-141 balance on the token contract covers it → single tx.
-    const plainFt = await getPlainFtBalance(rpcUrl, contractId, senderAccountId);
+    const plainFt = await getPlainFtBalanceStrict(rpcUrl, contractId, senderAccountId);
+    if (plainFt === null) {
+      return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
+    }
     if (plainFt >= BigInt(baseUnits)) {
       const res = await signAndBroadcastFunctionCall({
         ...senderKey,
@@ -3985,7 +4044,10 @@ export async function depositPlainBalanceToIntents(
     // 2. Plain native NEAR (NEAR asset only): wrap to wNEAR first, then the
     //    same ft_transfer_call — keeping a gas reserve for both transactions.
     if (isNearNative && contractId === 'wrap.near') {
-      const plainNear = await getPlainNearBalance(rpcUrl, senderAccountId);
+      const plainNear = await getPlainNearBalanceStrict(rpcUrl, senderAccountId);
+      if (plainNear === null) {
+        return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
+      }
       const gasReserve = 30000000000000000000000n; // 0.03 NEAR
       if (plainNear >= BigInt(baseUnits) + gasReserve) {
         const wrap = await signAndBroadcastFunctionCall({
@@ -4233,7 +4295,10 @@ export async function executeDirectFtWithdraw(
     // and plain together, so a balance that is stranded inside intents passes
     // the route-level check but can never be spent by a plain ft_transfer —
     // that must surface as a clean refusal, not an onchain panic.
-    const plain = await getPlainFtBalance(rpcUrl, contractId, senderAccountId);
+    const plain = await getPlainFtBalanceStrict(rpcUrl, contractId, senderAccountId);
+    if (plain === null) {
+      return { success: false, error: 'PLAIN_BALANCE_UNAVAILABLE' };
+    }
     if (plain < BigInt(baseUnits)) {
       return {
         success: false,

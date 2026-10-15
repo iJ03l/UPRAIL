@@ -106,13 +106,15 @@ function resolveAssetPair(asset: string, destinationAddress: string): {
 }
 
 function toBaseUnits(amount: number, decimals: number): string {
-  if (decimals === 24) {
-    const whole = Math.floor(amount);
-    const frac = Math.round((amount - whole) * 1e6);
-    return (BigInt(whole) * 10n ** 24n + BigInt(frac) * 10n ** 18n).toString();
-  }
-  const multiplier = 10 ** decimals;
-  return Math.round(amount * multiplier).toString();
+  if (!Number.isFinite(amount) || amount <= 0) return '0';
+  const d = Math.max(0, Math.min(Math.trunc(decimals), 30));
+  // Never multiply a float by 10**decimals: that loses precision at large
+  // magnitudes and for 8/24-decimal assets. `toFixed` emits a plain decimal
+  // string, so shifting the point by string surgery is exact for the
+  // precision the input number actually carries.
+  const [whole, frac = ''] = amount.toFixed(d).split('.');
+  const padded = (frac + '0'.repeat(d)).slice(0, d);
+  return BigInt(whole + padded).toString();
 }
 
 /**

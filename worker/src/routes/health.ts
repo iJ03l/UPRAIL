@@ -12,20 +12,14 @@ export const healthRouter = new Hono<AppContext>();
  * Status check endpoint
  */
 healthRouter.get('/', async (c) => {
+  // Public, unauthenticated endpoint: expose liveness only. Config values and
+  // secret-presence flags (rpId, settlement URL, escrow account, whether keys
+  // are set) are useful reconnaissance for an attacker and give no client any
+  // benefit — they were removed deliberately.
   return c.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     service: 'uprail-worker',
     version: '1.0.0',
-    env: {
-      rpId: c.env.WEBAUTHN_RP_ID,
-      nearApi: c.env.NEAR_API_BASE,
-      escrowAccount: c.env.ESCROW_ACCOUNT_ID,
-    },
-    configured: {
-      internalKeySet: !!c.env.INTERNAL_SERVICE_KEY,
-      escrowKeySet: !!c.env.ESCROW_PRIVATE_KEY,
-      sessionSecretSet: !!c.env.SESSION_SECRET,
-    },
   });
 });

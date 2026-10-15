@@ -9,6 +9,10 @@ export enum PaymentStatus {
   CLAIMED = 'CLAIMED',
   EXPIRED = 'EXPIRED',
   REFUNDED = 'REFUNDED',
+  // A refund whose broadcast was ambiguous (may or may not have landed). Kept
+  // out of every sweep so it can never be retried into a double-refund; it
+  // needs manual onchain reconciliation.
+  REFUND_REVIEW = 'REFUND_REVIEW',
   CANCELLED = 'CANCELLED',
 }
 

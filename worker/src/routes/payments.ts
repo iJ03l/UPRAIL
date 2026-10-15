@@ -767,6 +767,19 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
     const creditTarget =
       isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
     const creditAmount = isRecipientRegistered ? recipientAmount : body.amount;
+    // Snapshot the sender's plain balance before the deposit so a broadcast
+    // that times out AFTER landing is not debited a second time by the escrow
+    // fallback below — the plain-balance read is authoritative for "did the
+    // tokens actually leave the vault".
+    let senderPlainAccount: string | null = null;
+    let plainBefore: bigint | null = null;
+    try {
+      senderPlainAccount = await nearRpc.resolveUserNearAccount(c.env, session!);
+      plainBefore = await nearRpc.getPlainAssetBalance(c.env, body.asset, senderPlainAccount);
+    } catch (snapErr) {
+      console.warn('[send] plain balance snapshot failed:', snapErr);
+    }
+
     const plainDeposit = await nearRpc.depositPlainBalanceToIntents(
       c.env,
       session!.x_id,
@@ -779,6 +792,29 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       if (isRecipientRegistered) claimTxHash = plainDeposit.txHash;
       else escrowDepositTxHash = plainDeposit.txHash;
     } else if (plainDeposit.reason && plainDeposit.reason !== 'INSUFFICIENT_PLAIN_BALANCE') {
+      // The deposit reported failure. Before switching to the escrow rail,
+      // check whether it actually landed (a transport timeout after the tx
+      // was included): locking escrow on top of a landed deposit would debit
+      // the sender twice. The withdrawal flow guards this the same way.
+      const landed =
+        senderPlainAccount !== null && plainBefore !== null
+          ? await nearRpc.plainBalanceAbsorbed(
+              c.env,
+              body.asset,
+              senderPlainAccount,
+              plainBefore,
+              creditAmount
+            )
+          : false;
+
+      if (landed) {
+        // The tokens did leave the vault. Record the leg as settled (the tx
+        // hash was lost to the timeout) so it is never re-debited and, for an
+        // escrowed send, stays refundable/claimable.
+        const settled = nearRpc.settledUnknownHash(paymentId);
+        if (isRecipientRegistered) claimTxHash = settled;
+        else escrowDepositTxHash = settled;
+      } else {
       // The rail probe could not answer (RPC outage) and the empirical
       // signal says this asset cannot enter intents — its token contract
       // refused intents storage. Lock the gross amount into the escrow
@@ -809,6 +845,7 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
           ),
           502
         );
+      }
       }
     } else if (isRecipientRegistered && recipientNearAccount) {
       const transferResult = await nearRpc.executeTransferIntent(

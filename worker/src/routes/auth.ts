@@ -45,6 +45,17 @@ function sanitizeReturnTo(value: unknown): string {
 }
 
 /**
+ * True for the apex and any subdomain of uprail.world. A leading-dot suffix
+ * check plus an exact apex match — `endsWith('uprail.world')` alone would also
+ * match a lookalike like `evil-uprail.world` and scope the OAuth state cookie
+ * to it. Matches the host-only policy the session cookie already follows.
+ */
+function isUprailHost(hostname: string): boolean {
+  const h = (hostname || '').toLowerCase();
+  return h === 'uprail.world' || h.endsWith('.uprail.world');
+}
+
+/**
  * Initiates X OAuth 2.0 PKCE flow, sets signed cookie state, and generates canonical authorize URL
  */
 async function initiateXAuth(c: any): Promise<{ authorizeUrl: string; state: string }> {
@@ -78,7 +89,7 @@ async function initiateXAuth(c: any): Promise<{ authorizeUrl: string; state: str
     sameSite: 'Lax',
     maxAge: 600,
   };
-  if (reqUrl.hostname.endsWith('uprail.world')) {
+  if (isUprailHost(reqUrl.hostname)) {
     cookieOptions.domain = '.uprail.world';
   }
   setCookie(c, 'uprail_oauth_state', signedToken, cookieOptions);
@@ -206,7 +217,7 @@ authRouter.get('/callback', async (c) => {
         } catch {}
       }
       const deleteOptions: any = { path: '/' };
-      if (reqUrl.hostname.endsWith('uprail.world')) {
+      if (isUprailHost(reqUrl.hostname)) {
         deleteOptions.domain = '.uprail.world';
       }
       deleteCookie(c, 'uprail_oauth_state', deleteOptions);

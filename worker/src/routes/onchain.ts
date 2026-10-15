@@ -558,7 +558,12 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
         }
 
         transactions.sort((a: any, b: any) => (Number(b.block_timestamp) || 0) - (Number(a.block_timestamp) || 0));
-      } catch {}
+      } catch (enrichErr) {
+        // Do not fail the whole history response on an enrichment error, but
+        // never swallow it either — a silent drop here looks like the user
+        // simply has no local deposit/withdraw history.
+        console.warn('[onchain/history] local history enrichment failed:', enrichErr);
+      }
     }
 
     return c.json({

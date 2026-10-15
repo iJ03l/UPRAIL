@@ -115,7 +115,16 @@ export async function quote(
 
   const raw = (await response.json()) as any;
   const quoteId = raw.quoteId || raw.QuoteID || `q_${Date.now()}`;
-  const depositAddress = raw.depositAddress || raw.DepositAddress || env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+  const rawDepositAddress = raw.depositAddress || raw.DepositAddress;
+  if (!rawDepositAddress) {
+    // A degraded settlement response must never silently route the quote's
+    // deposit target to the pooled escrow — surface it so the operator sees
+    // the service misbehaving instead of users' funds landing in escrow.
+    console.warn(
+      '[nearProxy] quote response omitted depositAddress — falling back to the escrow account; verify the settlement service'
+    );
+  }
+  const depositAddress = rawDepositAddress || env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
   const expiresAt = raw.expiration
     ? (typeof raw.expiration === 'number' && raw.expiration < 1e11 ? raw.expiration * 1000 : raw.expiration)
     : Date.now() + 15 * 60 * 1000;

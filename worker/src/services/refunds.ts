@@ -78,6 +78,15 @@ async function resolveSenderAccount(env: Env, payment: Payment): Promise<string 
  * Safe to call concurrently: only one caller can win the ESCROWED flip.
  */
 export async function refundEscrowedPayment(env: Env, payment: Payment): Promise<RefundResult> {
+  if (payment.status === Status.REFUND_REVIEW) {
+    // Terminal: an earlier refund broadcast was ambiguous. Never retry — the
+    // onchain state must be reconciled by hand first.
+    return {
+      refunded: false,
+      alreadyRefunded: true,
+      error: 'refund is under manual review (ambiguous broadcast)',
+    };
+  }
   if (payment.status === Status.REFUNDED) {
     if (payment.refund_tx_hash) {
       return { refunded: false, alreadyRefunded: true };
@@ -145,11 +154,26 @@ export async function refundEscrowedPayment(env: Env, payment: Payment): Promise
   if (!result.success || !result.txHash) {
     console.error(`[refund] onchain refund failed for ${payment.id}:`, result.error);
     if (result.ambiguous) {
-      // Broadcast may have landed — reverting to ESCROWED would let the next
-      // retry double-refund from the pooled escrow. Leave the row REFUNDED
-      // (hash NULL) for the crash-recovery path; the double-risk is logged.
+      // The broadcast may have landed. Reverting to ESCROWED (or leaving the
+      // row REFUNDED with a NULL hash) would let the expiry or crash-recovery
+      // sweep run the transfer AGAIN and double-refund from the pooled escrow
+      // — the exact scenario this guard exists to prevent. Move it to a
+      // terminal REFUND_REVIEW state that no sweep selects; support reconciles
+      // onchain. Safe failure mode: at-most-once refund, not at-least-once.
+      try {
+        await env.DB.prepare(
+          'UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?'
+        )
+          .bind(Status.REFUND_REVIEW, Date.now(), payment.id, Status.REFUNDED)
+          .run();
+      } catch (markErr) {
+        console.error(
+          `[refund] CRITICAL: could not mark ${payment.id} REFUND_REVIEW — it may be retried:`,
+          markErr
+        );
+      }
       console.error(
-        `[refund] CRITICAL: ambiguous refund transfer for ${payment.id} — manual reconciliation may be required`
+        `[refund] CRITICAL: ambiguous refund transfer for ${payment.id} — manual reconciliation required (marked REFUND_REVIEW)`
       );
       return { refunded: false, error: result.error || 'refund transfer status unknown' };
     }
