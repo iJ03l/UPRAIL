@@ -31,11 +31,35 @@ import {
   chainMatchesAddress,
   getWithdrawChains,
   get1ClickWithdrawalQuote,
-  submit1ClickDeposit,
 } from '../services/oneclickWithdraw';
 import { publicErrorMessage } from '../utils/errors';
 
 export const claimRouter = new Hono<AppContext>();
+
+/**
+ * True when the reason the intents rail could not be prepared is a transient
+ * infrastructure failure (RPC throttle, subrequest budget, read timeout)
+ * rather than a genuine "this asset can't use intents" limitation. Transient
+ * failures must not downgrade a cross-chain withdraw to the plain-NEAR rail.
+ */
+function isTransientRailReason(reason: string | undefined): boolean {
+  if (!reason) return false;
+  const r = reason.toLowerCase();
+  return [
+    'too many subrequests',
+    'could not read',
+    'plain_balance_unavailable',
+    'near rpc',
+    'timeout',
+    'fetch failed',
+    'server error',
+    'throttl',
+    'rate limit',
+    '429',
+    'network',
+    'temporarily',
+  ].some((marker) => r.includes(marker));
+}
 
 /**
  * Withdrawable balance for a user in one asset:
@@ -326,6 +350,28 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
 
     // Resolve recipient virtual intent account ($0 onboarding cost)
     const recipientNearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
+
+    // A claim is a brand-new user's onboarding moment: authorize their signing
+    // key on the verifier contract now, so their first send/withdrawal never has
+    // to register mid-flight (where a lost race would strand the balance). This
+    // is best-effort — the intent rails re-assert registration before signing —
+    // but doing it here means a new user is ready before they touch a balance.
+    try {
+      const recipientDerived = await nearRpc.deriveUserNearKeypair(c.env, session.x_id);
+      const keyReady = await nearRpc.ensureKeyOnIntents(
+        c.env,
+        recipientNearAccount,
+        recipientDerived.publicKey,
+        recipientDerived.privateKey
+      );
+      if (!keyReady.registered) {
+        console.warn(
+          `[claim/execute] signing-key registration did not land for ${recipientNearAccount}: ${keyReady.reason}`
+        );
+      }
+    } catch (keyErr) {
+      console.warn('[claim/execute] signing-key registration failed:', keyErr);
+    }
 
     const results: ClaimExecuteResult[] = [];
     const normalizedUserHandle = session.x_handle.toLowerCase();
@@ -970,6 +1016,22 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         if (landed) {
           // The deposit did land — stay on the intents rail.
           plainDeposit = { deposited: true };
+        } else if (isTransientRailReason(plainDeposit.reason)) {
+          // An RPC/subrequest/read hiccup is NOT "this asset can't use intents".
+          // Downgrading on a transient failure switched a cross-chain withdraw to
+          // the plain-NEAR rail, which then failed with the misleading "not
+          // available for this asset". Fail retryably and leave funds untouched.
+          console.warn(
+            `[withdraw] transient intents-rail failure for ${asset}: ${plainDeposit.reason}`
+          );
+          return c.json<ErrorResponse>(
+            {
+              error:
+                'We could not prepare your balance for settlement right now — please try again in a moment.',
+              code: 'RAIL_UNAVAILABLE',
+            },
+            503
+          );
         } else {
           console.warn(
             `[withdraw] intents rail unavailable for ${asset} (${plainDeposit.reason}) — settling with a direct ft_transfer`
@@ -1023,12 +1085,12 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       );
     }
 
-    // 3. Execute settlement. For NEAR destinations, transfer directly to the
-    //    account. For external destinations (EVM, Solana, Bitcoin), obtain a
-    //    1Click swap quote, settle into the 1Click solver route on NEAR, and
-    //    notify 1Click for cross-chain execution.
+    // 3. Execute settlement. For NEAR destinations, settle with a plain
+    //    ft_withdraw intent to the account. For external destinations (EVM,
+    //    Solana, Bitcoin), obtain a 1Click swap quote and fund its INTENTS
+    //    deposit address with a signed transfer intent so the cross-chain swap
+    //    actually starts.
     let txHash = '';
-    let oneClickDepositAddress: string | null = null;
     try {
       // Meme assets never make it into intents — their token contracts have
       // never registered intents storage — so the whole withdrawal is settled
@@ -1058,25 +1120,13 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           throw new Error(direct.error || 'Direct transfer to the destination failed');
         }
         txHash = direct.txHash;
-      } else {
-      let settlementNearRecipient = destinationAddress;
-
-      if (!isNearAccount) {
-        const quote = await get1ClickWithdrawalQuote(c.env, {
-          destinationAddress,
-          asset,
-          amount: parsedAmount,
-          destinationChain,
-        });
-        settlementNearRecipient = quote.depositAddress;
-        oneClickDepositAddress = quote.depositAddress;
-      }
-
-      try {
+      } else if (isNearAccount) {
+        // NEAR destination: the user's own vault account is the receiver, so a
+        // plain ft_withdraw intent settles it directly.
         const withdrawResult = await nearRpc.executeWithdrawIntent(
           c.env,
           session.x_id,
-          settlementNearRecipient,
+          destinationAddress,
           asset,
           amountStr
         );
@@ -1101,14 +1151,42 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         } else {
           throw new Error(withdrawResult?.error || 'Withdrawal intent execution failed');
         }
-      } catch (tErr: any) {
-        console.error('[Withdrawal] onchain settlement error:', tErr);
-        throw tErr;
-      }
-      }
-
-      if (oneClickDepositAddress && txHash && !nearRpc.isSyntheticTxHash(txHash)) {
-        await submit1ClickDeposit(c.env, txHash, oneClickDepositAddress);
+      } else {
+        // External destination (EVM, Solana, Bitcoin, …): the 1Click quote is
+        // an INTENTS deposit, so the user's intents balance is moved to the
+        // quote's deposit address *inside* Intents — never as a native NEP-141
+        // transfer, which 1Click does not observe for an INTENTS quote and
+        // would leave the swap stuck at PENDING_DEPOSIT while the NEAR tx
+        // "succeeds".
+        const quote = await get1ClickWithdrawalQuote(c.env, {
+          destinationAddress,
+          asset,
+          amount: parsedAmount,
+          destinationChain,
+        });
+        const swapResult = await nearRpc.executeCrossChainSwapTransfer(
+          c.env,
+          session.x_id,
+          quote.depositAddress
+        );
+        if (swapResult?.success && swapResult.txHash) {
+          txHash = swapResult.txHash;
+        } else if (swapResult?.ambiguous) {
+          console.error(
+            `[Withdrawal] CRITICAL: ambiguous cross-chain settlement for ${withdrawalId}:`,
+            swapResult?.error
+          );
+          return c.json<ErrorResponse>(
+            {
+              error: `Withdrawal status unknown — quote withdrawal id ${withdrawalId} to support`,
+              code: 'WITHDRAWAL_UNRECORDED',
+              withdrawalId,
+            } as ErrorResponse,
+            500
+          );
+        } else {
+          throw new Error(swapResult?.error || 'Cross-chain settlement failed');
+        }
       }
     } catch (transferErr: any) {
       console.error('[Withdrawal] settlement failed:', transferErr);
@@ -1120,6 +1198,21 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           .run();
       } catch (releaseErr) {
         console.error('[Withdrawal] failed to release reservation:', releaseErr);
+      }
+      // A 1Click outage ("Failed to receive response within timeout …") or an
+      // RPC hiccup is not a broken request — the reservation is already
+      // released, so tell the user to simply retry instead of surfacing a
+      // cryptic "settlement failed".
+      const settlementMsg = transferErr?.message || String(transferErr);
+      if (isTransientRailReason(settlementMsg)) {
+        return c.json<ErrorResponse>(
+          {
+            error:
+              'The cross-chain network is temporarily unavailable — no funds were moved, please try again in a moment.',
+            code: 'RAIL_UNAVAILABLE',
+          },
+          503
+        );
       }
       return c.json<ErrorResponse>(
         {

@@ -11,6 +11,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58Decode, base58Encode } from '../utils/base58';
 import { getOnchainIcon } from './onchainIcons';
 import { getAssetMeta } from './assetMeta';
+import { generate1ClickSwapIntent } from './oneclickWithdraw';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -504,33 +505,63 @@ async function nearRpc(
   params: Record<string, unknown>
 ): Promise<any> {
   const targetUrl = rpcUrl || 'https://free.rpc.fastnear.com';
-  const resp = await fetch(targetUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 'uprail',
-      method,
-      params,
-    }),
+  const body = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 'uprail',
+    method,
+    params,
   });
 
-  if (!resp.ok) {
-    throw new Error(`NEAR RPC HTTP error: ${resp.status}`);
+  // Public NEAR RPC endpoints throttle aggressively (HTTP 429) and Workers share
+  // egress IPs, so a neighbour's burst can starve us. A 429/5xx is transient,
+  // not fatal: retrying with backoff prevents a momentary throttle from looking
+  // like a real failure — e.g. a key registration that silently no-ops and later
+  // strands a balance when the signed intent panics on intents.near.
+  let lastError: unknown;
+  // 2 attempts (1 retry): enough to ride out a transient throttle without
+  // multiplying subrequests — the Worker has a hard 50-subrequest budget and a
+  // retry storm here starves every other call in the same invocation.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    let resp: Response;
+    try {
+      resp = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+    } catch (netErr) {
+      lastError = netErr;
+      continue;
+    }
+
+    if (resp.status === 429 || resp.status >= 500) {
+      lastError = new Error(`NEAR RPC HTTP error: ${resp.status}`);
+      continue;
+    }
+
+    if (!resp.ok) {
+      throw new Error(`NEAR RPC HTTP error: ${resp.status}`);
+    }
+
+    const json = await resp.json() as any;
+    if (json.error) {
+      // The node hides the real reason in `cause.name` / `data` (e.g. a missing
+      // account is HANDLER_ERROR/"Server error" with cause UNKNOWN_ACCOUNT).
+      // Surfacing only code+message made every rejection look identical, so
+      // callers could not tell "does not exist" from "RPC is down".
+      const causeName = json.error?.cause?.name ? ` (${json.error.cause.name})` : '';
+      const detail =
+        typeof json.error.data === 'string' && json.error.data ? `: ${json.error.data}` : '';
+      throw new Error(`NEAR RPC error [${json.error.code}]: ${json.error.message}${causeName}${detail}`);
+    }
+    return json.result;
   }
 
-  const json = await resp.json() as any;
-  if (json.error) {
-    // The node hides the real reason in `cause.name` / `data` (e.g. a missing
-    // account is HANDLER_ERROR/"Server error" with cause UNKNOWN_ACCOUNT).
-    // Surfacing only code+message made every rejection look identical, so
-    // callers could not tell "does not exist" from "RPC is down".
-    const causeName = json.error?.cause?.name ? ` (${json.error.cause.name})` : '';
-    const detail =
-      typeof json.error.data === 'string' && json.error.data ? `: ${json.error.data}` : '';
-    throw new Error(`NEAR RPC error [${json.error.code}]: ${json.error.message}${causeName}${detail}`);
-  }
-  return json.result;
+  throw lastError instanceof Error ? lastError : new Error('NEAR RPC request failed');
 }
 
 // ─── Contract view call ───────────────────────────────────────────────────────
@@ -2652,6 +2683,87 @@ export async function deriveUserNearKeypair(
 }
 
 /**
+ * View-call check for whether `publicKey` is authorized to sign intents for
+ * `accountId` on the verifier contract. Returns the contract's own
+ * `has_public_key` answer; any RPC failure throws so callers can tell "not
+ * registered" apart from "could not tell".
+ */
+async function intentsHasPublicKey(
+  rpcUrl: string,
+  accountId: string,
+  publicKey: string
+): Promise<boolean> {
+  const res = await viewFunction(rpcUrl, 'intents.near', 'has_public_key', {
+    account_id: accountId,
+    public_key: publicKey,
+  });
+  return res === true;
+}
+
+/**
+ * Guarantees the account's signing key is authorized on the verifier contract
+ * (`intents.near`) before an intent is signed with it.
+ *
+ * Funds can be credited to a vault account without this registration, but every
+ * `execute_intents` the user signs is rejected — panicking with a public-key
+ * error — until the key is added. Because the first `add_public_key` is issued
+ * moments after the account itself is created, it routinely loses a race where
+ * the freshly added access key is not yet visible to the `finality: final` view
+ * query; that silent miss is what stranded balances. This retries the
+ * registration and, crucially, re-reads `has_public_key` to confirm it landed.
+ *
+ * Callers MUST refuse to submit a signed intent when this returns
+ * `{ registered: false }` — submitting anyway strands the balance in intents.
+ */
+export async function ensureKeyOnIntents(
+  env: Env,
+  accountId: string,
+  publicKey: Uint8Array,
+  privateKey: Uint8Array
+): Promise<{ registered: boolean; reason?: string }> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const publicKeyB58 = `ed25519:${base58Encode(publicKey)}`;
+
+  // Already registered? One view call keeps the hot path free for the common
+  // case (repeat requests, and a key registered on a previous call).
+  try {
+    if (await intentsHasPublicKey(rpcUrl, accountId, publicKeyB58)) {
+      return { registered: true };
+    }
+  } catch {
+    // A dead/behind RPC must not be read as "not registered"; fall through and
+    // let the registration attempt act as the source of truth.
+  }
+
+  // Sponsor the registration gas from escrow so the tx never depends on the
+  // user's own account balance — the registration is a platform cost, exactly
+  // like the intents storage registration.
+  await ensureRegistrationGas(env, accountId);
+
+  let lastError = '';
+  // 2 attempts (1 retry), see nearRpc(): keep the subrequest budget in check.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+    const ok = await registerKeyOnIntents(rpcUrl, accountId, publicKey, privateKey);
+    if (ok) return { registered: true };
+    // registerKeyOnIntents returns false both when the broadcast was rejected
+    // pre-inclusion (visibility race) and when the tx landed as a failure;
+    // either way, re-read to see whether a concurrent/prior attempt won.
+    try {
+      if (await intentsHasPublicKey(rpcUrl, accountId, publicKeyB58)) {
+        return { registered: true };
+      }
+    } catch {}
+    lastError = `add_public_key did not land for ${accountId}`;
+  }
+
+  console.warn(
+    `[ensureKeyOnIntents] ${publicKeyB58} still unregistered for ${accountId}: ${lastError}`
+  );
+  return { registered: false, reason: lastError };
+}
+
+/**
  * Checks whether a public key is registered on intents.near, and registers it if missing.
  */
 export async function registerKeyOnIntents(
@@ -2661,25 +2773,36 @@ export async function registerKeyOnIntents(
   userPrivKey: Uint8Array
 ): Promise<boolean> {
   const userPubKeyB58 = `ed25519:${base58Encode(userPubKey)}`;
+  // Retry transient RPC throttles (429) locally: this path broadcasts a signed
+  // tx, so a throttled status/view read would otherwise build a tx from a stale
+  // or empty block hash and surface as a bogus "Expired"/invalid tx.
+  const rpcPost = async (payload: unknown): Promise<Response> => {
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.status !== 429 || attempt >= 1) return res;
+      await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  };
+
   try {
-    const checkRes = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'query',
-        params: {
-          request_type: 'call_function',
-          finality: 'final',
-          account_id: 'intents.near',
-          method_name: 'has_public_key',
-          args_base64: btoa(JSON.stringify({
-            account_id: subAccount,
-            public_key: userPubKeyB58,
-          })),
-        },
-      }),
+    const checkRes = await rpcPost({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'query',
+      params: {
+        request_type: 'call_function',
+        finality: 'final',
+        account_id: 'intents.near',
+        method_name: 'has_public_key',
+        args_base64: btoa(JSON.stringify({
+          account_id: subAccount,
+          public_key: userPubKeyB58,
+        })),
+      },
     });
     const checkData = (await checkRes.json()) as any;
     if (checkData.result?.result) {
@@ -2689,28 +2812,20 @@ export async function registerKeyOnIntents(
   } catch {}
 
   try {
-    const statusRes = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'status', params: [] }),
-    });
+    const statusRes = await rpcPost({ jsonrpc: '2.0', id: 1, method: 'status', params: [] });
     const statusData = (await statusRes.json()) as any;
     const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
 
-    const keyRes = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'query',
-        params: {
-          request_type: 'view_access_key',
-          finality: 'final',
-          account_id: subAccount,
-          public_key: userPubKeyB58,
-        },
-      }),
+    const keyRes = await rpcPost({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'query',
+      params: {
+        request_type: 'view_access_key',
+        finality: 'final',
+        account_id: subAccount,
+        public_key: userPubKeyB58,
+      },
     });
     const keyData = (await keyRes.json()) as any;
     if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) return false;
@@ -2729,7 +2844,13 @@ export async function registerKeyOnIntents(
     const args = new TextEncoder().encode(JSON.stringify({ public_key: userPubKeyB58 }));
     w.writeU32(args.length);
     w.writeBytes(args);
-    w.writeU64(50000000000000n); // 50 TGas
+    // 40 TGas: ample for the key-mapping write with headroom for gas-price
+    // drift. The gas is escrow-sponsored (see ensureRegistrationGas) — the
+    // registration is a platform integration cost, so it is not charged to the
+    // user's own balance. Without that grant NEAR rejected this pre-flight
+    // (NotEnoughBalance): the sub-account is seeded with exactly 0.05 NEAR and
+    // 50 TGas costs ~0.0509 NEAR.
+    w.writeU64(40000000000000n); // 40 TGas
     w.writeU128(1n); // 1 yoctoNEAR
 
     const txBytes = w.toBytes();
@@ -2746,18 +2867,21 @@ export async function registerKeyOnIntents(
     for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
     const base64Tx = btoa(binary);
 
-    const regRes = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'broadcast_tx_commit',
-        params: [base64Tx],
-      }),
+    const regRes = await rpcPost({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'broadcast_tx_commit',
+      params: [base64Tx],
     });
     const regData = (await regRes.json()) as any;
-    return !!(regData?.result?.status?.SuccessValue !== undefined || regData?.result?.status?.SuccessReceiptId);
+    const ok = !!(regData?.result?.status?.SuccessValue !== undefined || regData?.result?.status?.SuccessReceiptId);
+    if (!ok) {
+      console.warn(
+        `[registerKeyOnIntents] broadcast rejected (http ${regRes.status}) for ${subAccount}:`,
+        JSON.stringify(regData).slice(0, 600)
+      );
+    }
+    return ok;
   } catch (err) {
     console.warn('[registerKeyOnIntents] failed:', err);
     return false;
@@ -2788,7 +2912,18 @@ export async function createOnchainSubAccount(
   }
   if (alreadyExists) {
     if (userPubKey && userPrivKey) {
-      await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch(() => {});
+      // Verify the intent signing key is actually registered, not merely attempt
+      // it: the account can exist while the key registration that followed its
+      // creation quietly failed (an RPC throttle or a finality-visibility race).
+      // Left unrepaired, a later signed intent panics on intents.near and strands
+      // the balance. This runs on every authenticated app load, so stuck users
+      // heal passively.
+      const ensure = await ensureKeyOnIntents(env, subAccount, userPubKey, userPrivKey);
+      if (!ensure.registered) {
+        console.warn(
+          `[nearRpc] intents key unregistered for ${subAccount} after ensure: ${ensure.reason}`
+        );
+      }
     }
     return { success: true };
   }
@@ -2885,7 +3020,9 @@ export async function createOnchainSubAccount(
     if (txResult?.result?.status?.SuccessValue !== undefined || txResult?.result?.status?.SuccessReceiptId) {
       const txHash = txResult.result.transaction?.hash || `created_${Date.now()}`;
       if (userPubKey && userPrivKey) {
-        await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch(() => {});
+        await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch((regErr) =>
+        console.warn('[nearRpc] registerKeyOnIntents (provision) failed:', regErr)
+      );
       }
       return { success: true, txHash };
     }
@@ -3135,6 +3272,23 @@ export async function executeTransferIntent(
 
     // Ensure sender subaccount is live & key registered onchain
     await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
+
+    // A signed intent is only accepted if intents.near already knows this key.
+    // Prove it — and register it now if the provisioning step lost the
+    // post-creation visibility race — before signing, so a new account's first
+    // transfer does not panic inside the contract.
+    const keyReady = await ensureKeyOnIntents(
+      env,
+      senderId,
+      senderDerived.publicKey,
+      senderDerived.privateKey
+    );
+    if (!keyReady.registered) {
+      return {
+        success: false,
+        error: 'Your signing key is not set up on NEAR Intents yet — please try again in a moment.',
+      };
+    }
 
     const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
     let nonceB64 = '';
@@ -3477,6 +3631,102 @@ async function broadcastFunctionCallOnce(opts: {
         rejected: true,
         error: `${errMsg}${formatRpcErrorData(rpcErr?.data)}`,
       };
+    }
+    return { ok: true, txHash: txResult?.result?.transaction?.hash };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Signs and broadcasts a plain NEAR transfer from `signerId` to `receiverId`.
+ * Used to sponsor a platform cost (e.g. gas for registering a user's intents
+ * key) out of the escrow wallet instead of the user's own account.
+ */
+async function signAndBroadcastNearTransfer(opts: {
+  rpcUrl: string;
+  signerId: string;
+  signerPrivKey: Uint8Array;
+  signerPubKey: Uint8Array;
+  receiverId: string;
+  amount: bigint;
+}): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  const { rpcUrl, signerId, signerPrivKey, signerPubKey, receiverId, amount } = opts;
+  try {
+    const statusRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'tr_status', method: 'status', params: [] }),
+    });
+    const statusData = (await statusRes.json()) as any;
+    const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
+    if (!latestBlockHash.length) return { ok: false, error: 'Failed to fetch latest block hash' };
+
+    const signerPubKeyB58 = `ed25519:${base58Encode(signerPubKey)}`;
+    const keyRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'tr_nonce',
+        method: 'query',
+        params: {
+          request_type: 'view_access_key',
+          finality: 'final',
+          account_id: signerId,
+          public_key: signerPubKeyB58,
+        },
+      }),
+    });
+    const keyData = (await keyRes.json()) as any;
+    if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) {
+      return { ok: false, error: `Access key query failed for ${signerId}` };
+    }
+    const nonce = BigInt(keyData.result.nonce) + 1n;
+
+    const w = new BorshWriter();
+    w.writeString(signerId);
+    w.writePublicKey(signerPubKey);
+    w.writeU64(nonce);
+    w.writeString(receiverId);
+    w.writeBytes(latestBlockHash);
+    w.writeU32(1); // 1 action
+    w.writeU8(3);  // Transfer
+    w.writeU128(amount);
+
+    const txBytes = w.toBytes();
+    const digest = await crypto.subtle.digest('SHA-256', txBytes);
+    const sig = ed25519.sign(new Uint8Array(digest), signerPrivKey);
+
+    const signedW = new BorshWriter();
+    signedW.writeBytes(txBytes);
+    signedW.writeU8(0);
+    signedW.writeBytes(sig);
+    const signedBytes = signedW.toBytes();
+
+    let binary = '';
+    for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
+
+    const txRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'tr_tx',
+        method: 'broadcast_tx_commit',
+        params: [btoa(binary)],
+      }),
+    });
+    const txResult = (await txRes.json()) as any;
+    const ok =
+      txResult?.result?.status?.SuccessValue !== undefined ||
+      txResult?.result?.status?.SuccessReceiptId !== undefined;
+    if (!ok) {
+      const rpcErr = txResult?.error;
+      const errMsg =
+        rpcErr?.message ||
+        JSON.stringify(txResult?.result?.status?.Failure || txResult?.result || txResult);
+      return { ok: false, error: `${errMsg}${formatRpcErrorData(rpcErr?.data)}` };
     }
     return { ok: true, txHash: txResult?.result?.transaction?.hash };
   } catch (err: any) {
@@ -4170,6 +4420,45 @@ function escrowSigningKey(
   }
 }
 
+// Gas the user's own account must hold to broadcast its add_public_key tx.
+// 40 TGas costs ~0.041 NEAR at ~1.0e9 yocto/Gas; 0.06 NEAR leaves headroom for
+// gas-price drift.
+const INTENTS_KEY_REGISTRATION_GAS = 60000000000000000000000n; // 0.06 NEAR
+
+/**
+ * Guarantees the user's own account can pay for its `intents.near.add_public_key`
+ * registration transaction. The registration is a platform integration cost, so
+ * any shortfall is transferred in from the escrow wallet rather than being
+ * charged against the user's balance. No-op once the account is already funded.
+ */
+export async function ensureRegistrationGas(env: Env, accountId: string): Promise<boolean> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  try {
+    const balance = await getPlainNearBalanceStrict(rpcUrl, accountId);
+    if (balance === null) return false;
+    if (balance >= INTENTS_KEY_REGISTRATION_GAS) return true;
+
+    const sponsor = escrowSigningKey(env, rpcUrl);
+    if ('error' in sponsor) {
+      console.warn('[ensureRegistrationGas]', sponsor.error);
+      return false;
+    }
+    const res = await signAndBroadcastNearTransfer({
+      ...sponsor,
+      receiverId: accountId,
+      amount: INTENTS_KEY_REGISTRATION_GAS - balance,
+    });
+    if (!res.ok) {
+      console.warn(`[ensureRegistrationGas] top-up failed for ${accountId}:`, res.error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[ensureRegistrationGas] failed:', err);
+    return false;
+  }
+}
+
 /**
  * Plain `ft_transfer` from the user's own pk sub-account into the platform
  * escrow holding account. This is the settlement rail for launchpad meme
@@ -4537,6 +4826,24 @@ export async function executeWithdrawIntent(
     // Ensure sender subaccount is live & key registered onchain
     await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
 
+    // Every ft_withdraw intent is signed with the user's key, and intents.near
+    // rejects any signature from a key it never authorized. Prove the key is
+    // registered — registering it now if a prior attempt lost the race — before
+    // signing, so a new account's first withdrawal does not panic and strand
+    // the balance inside intents.
+    const keyReady = await ensureKeyOnIntents(
+      env,
+      senderId,
+      senderDerived.publicKey,
+      senderDerived.privateKey
+    );
+    if (!keyReady.registered) {
+      return {
+        success: false,
+        error: 'Your signing key is not set up on NEAR Intents yet — please try again in a moment.',
+      };
+    }
+
     const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
     let nonceB64 = '';
     for (let i = 0; i < nonceBytes.length; i++) nonceB64 += String.fromCharCode(nonceBytes[i]);
@@ -4588,6 +4895,93 @@ export async function executeWithdrawIntent(
         message: messageStr,
         nonce: nonceB64,
         recipient: 'intents.near',
+      },
+      public_key: senderDerived.publicKeyB58,
+      signature: `ed25519:${base58Encode(sigBytes)}`,
+    };
+
+    return await executeIntentsRelayed(env, signedPayload);
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Settles a cross-chain withdrawal by moving the user's intents balance to the
+ * 1Click quote's deposit address *inside* Intents — the deposit method 1Click
+ * requires for a `depositType: INTENTS` quote.
+ *
+ * The quote's deposit address is an account within the Intents ledger (the
+ * verifier contract), so the funds must arrive on that ledger. Sending a native
+ * NEP-141 transfer to the address instead (`ft_withdraw`, as the native rail
+ * does) credits its on-chain balance, which 1Click never observes for an
+ * INTENTS quote: the swap stays PENDING_DEPOSIT forever and, because the NEAR
+ * tx itself succeeds, the withdrawal is recorded COMPLETED while the
+ * destination wallet receives nothing.
+ *
+ * 1Click hands back the exact NEP-413 intent to sign via `generate-intent`, so
+ * the asset id, amount and receiver come straight from the quote and can never
+ * drift here. We sign it with the user's derived key and relay it from escrow,
+ * exactly like every other intents execution in this module.
+ */
+export async function executeCrossChainSwapTransfer(
+  env: Env,
+  senderXId: string,
+  depositAddress: string
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
+  try {
+    const senderDerived = await deriveUserNearKeypair(env, senderXId);
+    let senderId = senderDerived.accountId;
+
+    if (env.DB) {
+      try {
+        const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+          .bind(senderXId)
+          .first<{ near_account: string | null }>();
+        if (idRow?.near_account) {
+          senderId = idRow.near_account;
+        }
+      } catch {}
+    }
+
+    // Ensure the sender subaccount is live & its key is registered onchain
+    // before it signs anything 1Click may present for execution.
+    await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
+
+    const keyReady = await ensureKeyOnIntents(
+      env,
+      senderId,
+      senderDerived.publicKey,
+      senderDerived.privateKey
+    );
+    if (!keyReady.registered) {
+      return {
+        success: false,
+        error: 'Your signing key is not set up on NEAR Intents yet — please try again in a moment.',
+      };
+    }
+
+    const intent = await generate1ClickSwapIntent(env, depositAddress, senderId);
+
+    const nonceBytes = base64ToBytes(intent.payload.nonce);
+    const nep413Bytes = nep413Serialize(intent.payload.message, nonceBytes, intent.payload.recipient);
+    const digest = await crypto.subtle.digest('SHA-256', nep413Bytes);
+    const sigBytes = ed25519.sign(new Uint8Array(digest), senderDerived.privateKey);
+
+    const signedPayload = {
+      standard: 'nep413',
+      payload: {
+        message: intent.payload.message,
+        nonce: intent.payload.nonce,
+        recipient: intent.payload.recipient,
       },
       public_key: senderDerived.publicKeyB58,
       signature: `ed25519:${base58Encode(sigBytes)}`,

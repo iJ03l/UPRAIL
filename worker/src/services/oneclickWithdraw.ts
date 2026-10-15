@@ -415,31 +415,65 @@ export async function get1ClickWithdrawalQuote(
   };
 }
 
+export interface OneClickSwapIntent {
+  standard: 'nep413';
+  payload: { message: string; nonce: string; recipient: string };
+}
+
 /**
- * Notifies 1Click that the escrow transfer has been submitted to the deposit address.
+ * Asks 1Click to build the exact intent the user must sign to fund a quote
+ * whose `depositType` is `INTENTS`.
+ *
+ * For an INTENTS quote the funds are already inside NEAR Intents, so the
+ * deposit is NOT an on-chain transfer to the deposit address. The user
+ * authorizes the swap by signing an intent that moves their intents balance to
+ * the quote's deposit address (the deposit address is an account *within*
+ * Intents). 1Click returns that intent verbatim, so the asset id, amount and
+ * receiver are never re-derived here and cannot drift from the quote.
+ *
+ * A native NEP-141 transfer to the deposit address instead (what the old
+ * `ft_withdraw` path did) lands on the account's *native* balance, which 1Click
+ * never watches for an INTENTS quote — the swap then sits at PENDING_DEPOSIT
+ * forever while the NEAR tx itself "succeeds".
  */
-export async function submit1ClickDeposit(
+export async function generate1ClickSwapIntent(
   env: Env,
-  txHash: string,
-  depositAddress: string
-): Promise<void> {
-  const apiBase = (env.NEAR_API_BASE || 'https://1click.chaindefuser.com').replace(/\/$/, '');
-  try {
-    const resp = await fetch(`${apiBase}/v0/deposit/submit`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        txHash,
-        depositAddress,
-      }),
-    });
-    if (!resp.ok) {
-      console.warn(`[1Click] submit deposit non-200 (${resp.status}) for ${depositAddress}`);
-    }
-  } catch (err) {
-    console.warn('[1Click] submit deposit network notice:', err);
+  depositAddress: string,
+  signerId: string
+): Promise<OneClickSwapIntent> {
+  const apiBase = oneClickApiBase(env);
+  const resp = await fetch(`${apiBase}/v0/generate-intent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+    },
+    body: JSON.stringify({
+      type: 'swap_transfer',
+      standard: 'nep413',
+      signerId,
+      depositAddress,
+    }),
+  });
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`1Click generate-intent failed (${resp.status}): ${errText}`);
   }
+
+  const data = (await resp.json()) as any;
+  const payload = data?.intent?.payload;
+  const message = payload?.message;
+  const nonce = payload?.nonce;
+  const recipient = payload?.recipient;
+  if (
+    typeof message !== 'string' ||
+    typeof nonce !== 'string' ||
+    typeof recipient !== 'string'
+  ) {
+    throw new Error('1Click generate-intent returned no signable payload');
+  }
+
+  return { standard: 'nep413', payload: { message, nonce, recipient } };
 }

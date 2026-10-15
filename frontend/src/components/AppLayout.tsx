@@ -91,6 +91,33 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         {children}
       </main>
 
+      {/* Slim footer credit */}
+      <footer className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-10 pt-2 pb-8 flex flex-col sm:flex-row items-center justify-center gap-2 text-[11px] font-mono text-stone-400 text-center">
+        <span>
+          Built by{' '}
+          <a
+            href="https://x.com/xy63ry0rx"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-stone-700 hover:text-black transition-colors"
+          >
+            @5194
+          </a>{' '}
+          · for UP (
+          <a
+            href="https://x.com/Uptoberonnear"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-bold text-stone-700 hover:text-black transition-colors"
+          >
+            @Uptoberonnear
+          </a>
+          )
+        </span>
+        <span className="hidden sm:inline text-stone-300">—</span>
+        <span>crypto payments, not promises · private by default</span>
+      </footer>
+
       {/* Slide-over Settings Sidebar */}
       <SettingsSidebar
         isOpen={isSettingsOpen}

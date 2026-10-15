@@ -244,6 +244,33 @@ function renderShareCardHtml(opts: {
   });
 }
 
+/**
+ * A crawler that fetches the og:image or any other static file must receive the
+ * real asset — never the generated HTML preview card. Without this, X's
+ * Twitterbot request for `/og/og-claim.png` matched the catch-all bot branch
+ * and got `text/html`, so the image never loaded and the card rendered blank.
+ */
+const STATIC_ASSET_RE =
+  /\.(png|jpe?g|gif|webp|avif|svg|ico|css|js|mjs|map|woff2?|ttf|otf|eot|mp4|webm|pdf|txt|xml|json|webmanifest)$/i;
+
+/** Resolves a stored asset id to a plain-English ticker (never `nep141:…`). */
+async function resolveShareTicker(env: AppContext['Bindings'], asset: string): Promise<string> {
+  if (!asset) return '';
+  let ticker = '';
+  try {
+    const tokens = await nearRpc.getSupportedTokens(env);
+    ticker = nearRpc.resolveTokenForAsset(asset, tokens)?.symbol || '';
+  } catch {}
+  if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset.toUpperCase();
+  return ticker;
+}
+
+/** "12.5 USDC" — degrades gracefully when amount or ticker is missing. */
+function plainAmount(amount: string, ticker: string): string {
+  if (amount && ticker) return `${amount} ${ticker}`;
+  return ticker || amount || '';
+}
+
 // 404 / Asset Fallback Handler
 app.notFound(async (c) => {
   if (c.env.ASSETS) {
@@ -254,43 +281,33 @@ app.notFound(async (c) => {
 
     if (claimMatch) {
       const paymentId = claimMatch[1];
-      if (isBot) {
-        let recipient = '';
+      if (isBot && !STATIC_ASSET_RE.test(url.pathname)) {
+        let sender = '';
         let amount = '';
         let asset = '';
         if (c.env.DB) {
           try {
             const p = await c.env.DB.prepare(
-              'SELECT recipient_handle, amount, asset FROM payments WHERE id = ?'
+              'SELECT sender_x_handle, amount, asset FROM payments WHERE id = ?'
             )
               .bind(paymentId)
-              .first<{ recipient_handle: string; amount: string; asset: string }>();
+              .first<{ sender_x_handle: string | null; amount: string; asset: string }>();
             if (p) {
-              recipient = p.recipient_handle;
+              sender = p.sender_x_handle || '';
               amount = p.amount;
               asset = p.asset || '';
             }
           } catch {}
         }
-        // Resolve the stored asset id to a plain-English ticker — a share card
-        // must never print a token contract (nep141:...).
-        let ticker = '';
-        if (asset) {
-          try {
-            const tokens = await nearRpc.getSupportedTokens(c.env);
-            ticker = nearRpc.resolveTokenForAsset(asset, tokens)?.symbol || '';
-          } catch {}
-          if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset.toUpperCase();
-        }
-        const title = recipient
-          ? `Payment waiting for @${recipient} on UPRAIL`
-          : 'Payment Ready to Claim on UPRAIL';
+        const ticker = await resolveShareTicker(c.env, asset);
+        const amountLabel = plainAmount(amount, ticker);
+        const title = sender
+          ? `@${sender} sent you ${amountLabel || 'crypto'}`
+          : amountLabel
+          ? `${amountLabel} is waiting for you`
+          : 'You have crypto waiting on UPRAIL';
         const description =
-          amount && recipient && ticker
-            ? `${amount} ${ticker} is waiting for @${recipient} to claim — private and instant with a passkey on UPRAIL.`
-            : recipient
-            ? `A confidential payment is waiting for @${recipient} to claim — private and instant with a passkey on UPRAIL.`
-            : 'Claim a confidential payment on UPRAIL. Instant passkey settlement on NEAR Intents.';
+          'Claim it by linking your X account and passkey — no wallet, no seed phrase.';
 
         return renderShareCardHtml({
           title,
@@ -318,42 +335,28 @@ app.notFound(async (c) => {
     const receiptMatch = url.pathname.match(RECEIPT_DEEP_LINK);
     if (receiptMatch) {
       const withdrawalId = receiptMatch[1];
-      if (isBot) {
+      if (isBot && !STATIC_ASSET_RE.test(url.pathname)) {
         let amount = '';
         let asset = '';
-        let destination = '';
         if (c.env.DB) {
           try {
             const w = await c.env.DB.prepare(
-              'SELECT amount, asset, destination_address FROM withdrawals WHERE id = ?'
+              'SELECT amount, asset FROM withdrawals WHERE id = ?'
             )
               .bind(withdrawalId)
-              .first<{ amount: string; asset: string; destination_address: string }>();
+              .first<{ amount: string; asset: string }>();
             if (w) {
               amount = w.amount;
               asset = w.asset;
-              destination = w.destination_address;
             }
           } catch {}
         }
-        let ticker = '';
-        if (asset) {
-          try {
-            const tokens = await nearRpc.getSupportedTokens(c.env);
-            ticker = nearRpc.resolveTokenForAsset(asset, tokens)?.symbol || '';
-          } catch {}
-          if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset.toUpperCase();
-        }
-        const shortDest =
-          destination.length > 12
-            ? `${destination.slice(0, 6)}…${destination.slice(-4)}`
-            : destination;
+        const ticker = await resolveShareTicker(c.env, asset);
+        const amountLabel = plainAmount(amount, ticker);
         return renderShareCardHtml({
-          title: 'Payment sent on UPRAIL',
+          title: amountLabel ? `Payment of ${amountLabel} sent` : 'Payment sent on UPRAIL',
           description:
-            amount && ticker
-              ? `${amount} ${ticker} sent to ${shortDest} — confidential, cross-chain settlement on UPRAIL.`
-              : 'A confidential cross-chain payment sent on UPRAIL.',
+            'Settled confidentially across chains on UPRAIL — no wallet, no seed phrase.',
           imageUrl: 'https://app.uprail.world/og/og-send.png',
           url: url.href,
         });
@@ -372,18 +375,65 @@ app.notFound(async (c) => {
       }
     }
 
-    if (isBot) {
-      if (url.pathname.includes('refer') || url.pathname.includes('invite')) {
+    if (isBot && !STATIC_ASSET_RE.test(url.pathname)) {
+      // Invite links arrive as `/login?invite=CODE` (plus `/invite/CODE` and
+      // legacy `/refer…` shapes), so the code lives in the query string, not
+      // the path — the old pathname-only check rendered the generic card.
+      const inviteCode =
+        url.searchParams.get('invite') ||
+        url.searchParams.get('code') ||
+        url.pathname.match(/\/(?:invite|refer)\/([A-Za-z0-9_-]{1,32})/)?.[1] ||
+        '';
+
+      if (inviteCode) {
+        let creator = '';
+        let amount = '';
+        let asset = '';
+        if (c.env.DB) {
+          try {
+            const inv = await c.env.DB.prepare(
+              'SELECT creator_x_handle, payment_id FROM invites WHERE code = ? COLLATE NOCASE'
+            )
+              .bind(inviteCode)
+              .first<{ creator_x_handle: string | null; payment_id: string | null }>();
+            if (inv) {
+              creator = inv.creator_x_handle || '';
+              const paymentId = inv.payment_id || url.searchParams.get('payment') || '';
+              if (paymentId) {
+                const p = await c.env.DB.prepare(
+                  'SELECT amount, asset FROM payments WHERE id = ?'
+                )
+                  .bind(paymentId)
+                  .first<{ amount: string; asset: string }>();
+                if (p) {
+                  amount = p.amount;
+                  asset = p.asset || '';
+                }
+              }
+            }
+          } catch {}
+        }
+        const ticker = await resolveShareTicker(c.env, asset);
+        const amountLabel = plainAmount(amount, ticker);
+        const title = creator
+          ? amountLabel
+            ? `@${creator} sent you ${amountLabel}`
+            : `@${creator} invited you to UPRAIL`
+          : amountLabel
+          ? `${amountLabel} is waiting for you on UPRAIL`
+          : 'You are invited to UPRAIL';
         return renderShareCardHtml({
-          title: 'Join UPRAIL — The Confidential Value Railway for X',
-          description: 'Send and receive value across all chains directly with X handles. Instant passkey settlement.',
+          title,
+          description: 'Claim by linking your X account and passkey — no wallet, no seed phrase.',
           imageUrl: 'https://app.uprail.world/og/og-refer.png',
           url: url.href,
         });
       }
+
       return renderShareCardHtml({
         title: 'UPRAIL — The Confidential Value Railway for X',
-        description: 'Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world.',
+        description:
+          'Send confidential payments to any X handle on NEAR Intents. Claim instantly with a passkey — no wallet, no seed phrase.',
         imageUrl: 'https://app.uprail.world/og/og-landing.png',
         url: url.href,
       });

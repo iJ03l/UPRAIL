@@ -29,3 +29,6 @@ go-near-service/server
 go-near-service/bin/
 bin/
 *.tsbuildinfo
+
+# UPRAIL Motion Studio (motion framework & AI generation assets)
+motion-studio/
