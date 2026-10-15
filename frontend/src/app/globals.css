@@ -171,6 +171,9 @@
   .dark .bg-stone-100\/80 { background-color: color-mix(in srgb, var(--bg-muted) 80%, transparent); }
   .dark .bg-stone-200 { background-color: var(--bg-inset); }
   .dark .bg-stone-300 { background-color: var(--bg-inset); }
+  .dark .bg-stone-50\/60 { background-color: color-mix(in srgb, var(--bg-subtle) 60%, transparent); }
+  .dark .bg-stone-200\/70 { background-color: color-mix(in srgb, var(--bg-inset) 70%, transparent); }
+  .dark .bg-stone-200\/80 { background-color: color-mix(in srgb, var(--bg-inset) 80%, transparent); }
 
   /* text */
   .dark .text-black,
@@ -187,6 +190,10 @@
   .dark .border-stone-100,
   .dark .border-stone-200 { border-color: var(--line); }
   .dark .border-stone-300 { border-color: var(--line-strong); }
+  .dark .border-stone-200\/60 { border-color: color-mix(in srgb, var(--line) 60%, transparent); }
+  .dark .border-stone-200\/70 { border-color: color-mix(in srgb, var(--line) 70%, transparent); }
+  .dark .border-stone-200\/80 { border-color: color-mix(in srgb, var(--line) 80%, transparent); }
+  .dark .border-stone-200\/90 { border-color: color-mix(in srgb, var(--line) 90%, transparent); }
   .dark .divide-stone-100 > :not([hidden]) ~ :not([hidden]),
   .dark .divide-stone-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line); }
 
@@ -195,6 +202,13 @@
   .dark .hover\:bg-stone-50:hover { background-color: var(--bg-subtle); }
   .dark .hover\:bg-stone-100:hover { background-color: var(--bg-muted); }
   .dark .hover\:bg-stone-200:hover { background-color: var(--bg-inset); }
+  .dark .hover\:bg-stone-300:hover { background-color: var(--bg-inset); }
+  .dark .hover\:bg-stone-200\/60:hover { background-color: color-mix(in srgb, var(--bg-inset) 60%, transparent); }
+  .dark .hover\:bg-stone-100\/70:hover { background-color: color-mix(in srgb, var(--bg-muted) 70%, transparent); }
+  .dark .hover\:bg-stone-100\/80:hover { background-color: color-mix(in srgb, var(--bg-muted) 80%, transparent); }
+  .dark .hover\:bg-stone-50\/70:hover { background-color: color-mix(in srgb, var(--bg-subtle) 70%, transparent); }
+  .dark .hover\:bg-stone-50\/80:hover { background-color: color-mix(in srgb, var(--bg-subtle) 80%, transparent); }
+  .dark .hover\:border-black:hover { border-color: var(--line-strong); }
   .dark .hover\:text-black:hover,
   .dark .hover\:text-stone-900:hover { color: var(--fg); }
   .dark .hover\:text-stone-600:hover { color: var(--fg-muted); }
@@ -207,6 +221,10 @@
   .dark .focus\:border-stone-900:focus { border-color: var(--fg); }
   .dark .focus\:bg-white:focus { background-color: var(--bg); }
   .dark .focus-within\:bg-white:focus-within { background-color: var(--bg); }
+  .dark .focus\:border-black:focus { border-color: var(--fg); }
+  .dark .focus-within\:border-black:focus-within { border-color: var(--fg); }
+  .dark .focus\:ring-black\/10:focus { --tw-ring-color: color-mix(in srgb, var(--fg) 12%, transparent); }
+  .dark .focus-within\:ring-black\/10:focus-within { --tw-ring-color: color-mix(in srgb, var(--fg) 12%, transparent); }
   .dark .focus-visible\:ring-stone-900:focus-visible { --tw-ring-color: var(--fg); }
 
   /* placeholders */

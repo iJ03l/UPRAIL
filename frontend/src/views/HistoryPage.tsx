@@ -304,7 +304,11 @@ export const HistoryPage: React.FC = () => {
                   {/* Right: Amount, Badge, and Action buttons */}
                   <div className="flex items-center justify-between sm:justify-end space-x-3 pl-12 sm:pl-0">
                     <div className="text-right">
-                      <div className="text-xs font-mono font-bold text-stone-900">
+                      <div
+                        className={`text-xs font-mono font-bold ${
+                          tx.isSent ? 'text-red-600' : 'text-emerald-600'
+                        }`}
+                      >
                         {tx.isSent ? '-' : '+'}{tx.amount} {tx.symbol}
                       </div>
                       <div className="flex items-center space-x-1.5 justify-end">

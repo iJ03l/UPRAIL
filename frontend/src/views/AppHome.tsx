@@ -19,7 +19,14 @@ import {
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData, balanceUsd } from '../hooks/useOnchainData';
-import { api, formatRecipientDisplay, formatUsd, sumUsd } from '../lib/api';
+import {
+  api,
+  formatCompactAmount,
+  formatRecipientDisplay,
+  formatUsd,
+  formatUsdCompact,
+  sumUsd,
+} from '../lib/api';
 import { webauthn } from '../lib/webauthn';
 import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
@@ -351,7 +358,7 @@ export const AppHome: React.FC = () => {
                 <div className="text-4xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums">
                   <RollingNumber
                     value={hideBalance ? null : totalBalanceUsd}
-                    format={formatUsd}
+                    format={formatUsdCompact}
                     fallback={hideBalance ? '••••••••' : '—'}
                   />
                 </div>
@@ -408,9 +415,9 @@ export const AppHome: React.FC = () => {
                       className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700"
                       title={b.defuse_asset_id}
                     >
-                      {b.amountFormatted} {b.symbol}
+                      {formatCompactAmount(b.amountFormatted)} {b.symbol}
                       {usd !== null && usd > 0 ? (
-                        <span className="text-stone-400"> · {formatUsd(usd)}</span>
+                        <span className="text-stone-400"> · {formatUsdCompact(usd)}</span>
                       ) : null}
                     </span>
                   );

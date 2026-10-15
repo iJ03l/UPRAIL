@@ -11,7 +11,11 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },
-      { url: '/brand/uprail-icon.png', type: 'image/png' },
+      {
+        url: '/brand/uprail-favicon.png',
+        type: 'image/png',
+        sizes: '128x128',
+      },
     ],
     apple: '/brand/apple-touch-icon.png',
   },
@@ -68,7 +72,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="UPRAIL" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
-        <link rel="icon" type="image/png" href="/brand/uprail-icon.png" />
+        <link rel="icon" type="image/png" href="/brand/uprail-favicon.png" />
         <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
 
         {/* Primary Meta Tags for Social Previews */}
