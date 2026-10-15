@@ -82,7 +82,7 @@ export const InteractiveRailSimulator: React.FC = () => {
   const cleanHandle = handle.replace(/^@/, '').trim() || 'vitalik';
 
   return (
-    <div className="relative w-full border-y border-stone-200/90 bg-[#FBFBFA] py-14 sm:py-20 md:py-24 overflow-hidden">
+    <div className="relative w-full border-y border-stone-200/90 bg-surface-subtle py-14 sm:py-20 md:py-24 overflow-hidden">
       {/* Full-width tactical tile grid background */}
       <div
         className="absolute inset-0 pointer-events-none opacity-45"

@@ -16,8 +16,12 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  Sun,
+  Moon,
+  Monitor,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
+import { useTheme } from './ThemeProvider';
 import { api, clearAppStorage } from '../lib/api';
 import { MyInviteResponse } from '../types';
 
@@ -31,6 +35,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   onClose,
 }) => {
   const { user, logout } = useXAuth();
+  const { mode, setMode } = useTheme();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
@@ -353,6 +358,38 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   <span className="text-stone-500">Solver Latency:</span>
                   <span className="text-stone-900 font-bold">~42ms</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Appearance / Theme */}
+            <div className="space-y-2">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
+                Appearance
+              </span>
+              <div className="p-1.5 rounded-2xl bg-stone-50 border border-stone-200 grid grid-cols-3 gap-1.5">
+                {([
+                  { value: 'light', label: 'Light', Icon: Sun },
+                  { value: 'dark', label: 'Dark', Icon: Moon },
+                  { value: 'system', label: 'System', Icon: Monitor },
+                ] as const).map(({ value, label, Icon }) => {
+                  const active = mode === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setMode(value)}
+                      aria-pressed={active}
+                      className={`py-2 rounded-xl text-[11px] font-mono font-bold flex flex-col items-center gap-1 border transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-black text-white border-black'
+                          : 'bg-transparent text-stone-600 border-transparent hover:bg-stone-100'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { DomainGate } from '@/components/DomainGate';
+import { ThemeProvider } from '@/components/ThemeProvider';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://app.uprail.world'),
@@ -48,13 +49,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
         />
-        <meta name="theme-color" content="#000000" />
+        <meta name="theme-color" content="#FFFFFF" />
+        {/* Apply the stored theme before first paint to avoid a light flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var m=localStorage.getItem('uprail_theme');m=(m==='light'||m==='dark'||m==='system')?m:'system';var d=m==='dark'||(m==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;if(d){e.classList.add('dark');}else{e.classList.remove('dark');}}catch(e){}})();",
+          }}
+        />
         <link rel="manifest" href="/manifest.webmanifest" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -90,7 +98,9 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-white text-stone-900 min-h-screen selection:bg-black selection:text-white antialiased overflow-x-hidden">
-        <DomainGate>{children}</DomainGate>
+        <ThemeProvider>
+          <DomainGate>{children}</DomainGate>
+        </ThemeProvider>
       </body>
     </html>
   );

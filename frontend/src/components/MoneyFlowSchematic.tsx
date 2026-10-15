@@ -122,7 +122,7 @@ export const MoneyFlowSchematic: React.FC = () => {
               <polygon
                 points="200,70 320,260 80,260"
                 fill="none"
-                stroke="#1C1917"
+                stroke="var(--fg)"
                 strokeWidth="2"
                 strokeDasharray="6 6"
               />
@@ -133,7 +133,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                 y="155"
                 textAnchor="middle"
                 transform="rotate(57 275 155)"
-                fill="#78716C"
+                fill="var(--fg-muted)"
                 fontSize="8"
                 fontFamily="monospace"
               >
@@ -145,7 +145,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                 x="200"
                 y="278"
                 textAnchor="middle"
-                fill="#78716C"
+                fill="var(--fg-muted)"
                 fontSize="8"
                 fontFamily="monospace"
               >
@@ -154,11 +154,11 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* Animated Money Packet Moving along Dotted Legs */}
               <g transform={`translate(${pos.x}, ${pos.y})`}>
-                <circle r="12" fill="#1C1917" stroke="#FFFFFF" strokeWidth="2" />
+                <circle r="12" fill="var(--fg)" stroke="var(--bg)" strokeWidth="2" />
                 <text
                   textAnchor="middle"
                   dy="3.5"
-                  fill="#FFFFFF"
+                  fill="var(--bg)"
                   fontSize="8"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -174,14 +174,14 @@ export const MoneyFlowSchematic: React.FC = () => {
                     width="84"
                     height="16"
                     rx="8"
-                    fill="#FFFFFF"
-                    stroke="#1C1917"
+                    fill="var(--bg)"
+                    stroke="var(--fg)"
                     strokeWidth="1"
                   />
                   <text
                     textAnchor="middle"
                     dy="2.5"
-                    fill="#1C1917"
+                    fill="var(--fg)"
                     fontSize="7"
                     fontFamily="monospace"
                     fontWeight="bold"
@@ -193,7 +193,7 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* POINT 1: Apex (Top) - @mert (Sender) */}
               <g transform="translate(200, 70)">
-                <circle r="22" fill="#FFFFFF" stroke="#1C1917" strokeWidth="2" />
+                <circle r="22" fill="var(--bg)" stroke="var(--fg)" strokeWidth="2" />
                 <foreignObject x="-10" y="-10" width="20" height="20">
                   <div className="w-5 h-5 flex items-center justify-center text-stone-900">
                     <Smartphone className="w-4 h-4" />
@@ -203,7 +203,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="-30"
                   textAnchor="middle"
-                  fill="#1C1917"
+                  fill="var(--fg)"
                   fontSize="10"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -214,7 +214,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="-20"
                   textAnchor="middle"
-                  fill="#78716C"
+                  fill="var(--fg-muted)"
                   fontSize="8"
                   fontFamily="monospace"
                 >
@@ -224,7 +224,7 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* POINT 2: Bottom Right - MEV Bots (Snooper) */}
               <g transform="translate(320, 260)">
-                <circle r="22" fill="#FFFFFF" stroke="#1C1917" strokeWidth="2" />
+                <circle r="22" fill="var(--bg)" stroke="var(--fg)" strokeWidth="2" />
                 <foreignObject x="-10" y="-10" width="20" height="20">
                   <div className="w-5 h-5 flex items-center justify-center text-stone-900">
                     <Bot className="w-4 h-4" />
@@ -234,7 +234,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="36"
                   textAnchor="middle"
-                  fill="#1C1917"
+                  fill="var(--fg)"
                   fontSize="10"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -245,7 +245,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="46"
                   textAnchor="middle"
-                  fill="#78716C"
+                  fill="var(--fg-muted)"
                   fontSize="8"
                   fontFamily="monospace"
                 >
@@ -255,7 +255,7 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* POINT 3: Bottom Left - @alex (Exposed Recipient) */}
               <g transform="translate(80, 260)">
-                <circle r="22" fill="#FFFFFF" stroke="#1C1917" strokeWidth="2" />
+                <circle r="22" fill="var(--bg)" stroke="var(--fg)" strokeWidth="2" />
                 <foreignObject x="-10" y="-10" width="20" height="20">
                   <div className="w-5 h-5 flex items-center justify-center text-stone-900">
                     <Eye className="w-4 h-4" />
@@ -265,7 +265,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="36"
                   textAnchor="middle"
-                  fill="#1C1917"
+                  fill="var(--fg)"
                   fontSize="10"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -276,7 +276,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="46"
                   textAnchor="middle"
-                  fill="#78716C"
+                  fill="var(--fg-muted)"
                   fontSize="8"
                   fontFamily="monospace"
                 >
@@ -317,7 +317,7 @@ export const MoneyFlowSchematic: React.FC = () => {
               <polygon
                 points="200,70 320,260 80,260"
                 fill="none"
-                stroke="#1C1917"
+                stroke="var(--fg)"
                 strokeWidth="2.5"
                 strokeDasharray="6 6"
               />
@@ -328,7 +328,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                 y="155"
                 textAnchor="middle"
                 transform="rotate(57 275 155)"
-                fill="#78716C"
+                fill="var(--fg-muted)"
                 fontSize="8"
                 fontFamily="monospace"
               >
@@ -340,7 +340,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                 x="200"
                 y="278"
                 textAnchor="middle"
-                fill="#78716C"
+                fill="var(--fg-muted)"
                 fontSize="8"
                 fontFamily="monospace"
               >
@@ -349,11 +349,11 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* Animated Shielded Packet Moving along Dotted Legs */}
               <g transform={`translate(${pos.x}, ${pos.y})`}>
-                <circle r="12" fill="#1C1917" stroke="#FFFFFF" strokeWidth="2" />
+                <circle r="12" fill="var(--fg)" stroke="var(--bg)" strokeWidth="2" />
                 <text
                   textAnchor="middle"
                   dy="3.5"
-                  fill="#FFFFFF"
+                  fill="var(--bg)"
                   fontSize="9"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -369,14 +369,14 @@ export const MoneyFlowSchematic: React.FC = () => {
                     width="90"
                     height="16"
                     rx="8"
-                    fill="#1C1917"
-                    stroke="#FFFFFF"
+                    fill="var(--fg)"
+                    stroke="var(--bg)"
                     strokeWidth="1"
                   />
                   <text
                     textAnchor="middle"
                     dy="2.5"
-                    fill="#FFFFFF"
+                    fill="var(--bg)"
                     fontSize="7"
                     fontFamily="monospace"
                     fontWeight="bold"
@@ -388,7 +388,7 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* POINT 1: Apex (Top) - @mert (Sender) */}
               <g transform="translate(200, 70)">
-                <circle r="22" fill="#FFFFFF" stroke="#1C1917" strokeWidth="2" />
+                <circle r="22" fill="var(--bg)" stroke="var(--fg)" strokeWidth="2" />
                 <foreignObject x="-10" y="-10" width="20" height="20">
                   <div className="w-5 h-5 flex items-center justify-center text-stone-900">
                     <Smartphone className="w-4 h-4" />
@@ -398,7 +398,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="-30"
                   textAnchor="middle"
-                  fill="#1C1917"
+                  fill="var(--fg)"
                   fontSize="10"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -409,7 +409,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="-20"
                   textAnchor="middle"
-                  fill="#78716C"
+                  fill="var(--fg-muted)"
                   fontSize="8"
                   fontFamily="monospace"
                 >
@@ -419,7 +419,7 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* POINT 2: Bottom Right - NEAR Intents (Solver) */}
               <g transform="translate(320, 260)">
-                <circle r="22" fill="#1C1917" stroke="#1C1917" strokeWidth="2" />
+                <circle r="22" fill="var(--fg)" stroke="var(--fg)" strokeWidth="2" />
                 <foreignObject x="-10" y="-10" width="20" height="20">
                   <div className="w-5 h-5 flex items-center justify-center text-white">
                     <Shield className="w-4 h-4" />
@@ -429,7 +429,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="36"
                   textAnchor="middle"
-                  fill="#1C1917"
+                  fill="var(--fg)"
                   fontSize="10"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -440,7 +440,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="46"
                   textAnchor="middle"
-                  fill="#78716C"
+                  fill="var(--fg-muted)"
                   fontSize="8"
                   fontFamily="monospace"
                 >
@@ -450,7 +450,7 @@ export const MoneyFlowSchematic: React.FC = () => {
 
               {/* POINT 3: Bottom Left - @illia (Passkey Vault) */}
               <g transform="translate(80, 260)">
-                <circle r="22" fill="#1C1917" stroke="#1C1917" strokeWidth="2" />
+                <circle r="22" fill="var(--fg)" stroke="var(--fg)" strokeWidth="2" />
                 <foreignObject x="-10" y="-10" width="20" height="20">
                   <div className="w-5 h-5 flex items-center justify-center text-white">
                     <Fingerprint className="w-4 h-4" />
@@ -460,7 +460,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="36"
                   textAnchor="middle"
-                  fill="#1C1917"
+                  fill="var(--fg)"
                   fontSize="10"
                   fontFamily="monospace"
                   fontWeight="bold"
@@ -471,7 +471,7 @@ export const MoneyFlowSchematic: React.FC = () => {
                   x="0"
                   y="46"
                   textAnchor="middle"
-                  fill="#78716C"
+                  fill="var(--fg-muted)"
                   fontSize="8"
                   fontFamily="monospace"
                 >

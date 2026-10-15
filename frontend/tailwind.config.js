@@ -8,6 +8,25 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Semantic tokens driven by CSS variables in globals.css. Prefer these
+        // in new code — they flip automatically with the `.dark` class.
+        surface: {
+          DEFAULT: 'var(--bg)',
+          subtle: 'var(--bg-subtle)',
+          muted: 'var(--bg-muted)',
+          inset: 'var(--bg-inset)',
+        },
+        ink: 'var(--fg)',
+        muted: 'var(--fg-muted)',
+        subtle: 'var(--fg-subtle)',
+        line: {
+          DEFAULT: 'var(--line)',
+          strong: 'var(--line-strong)',
+        },
+        accent: {
+          DEFAULT: 'var(--accent)',
+          fg: 'var(--accent-fg)',
+        },
         // Hero Burnt Orange Palette
         burnt: {
           50: '#FFF6F2',

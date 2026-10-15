@@ -48,7 +48,8 @@ export const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({
 
   return (
     <div
-      className={`p-3 bg-white rounded-2xl border border-stone-200 shadow-sm inline-flex items-center justify-center ${className}`}
+      style={{ backgroundColor: '#FFFFFF' }}
+      className={`p-3 rounded-2xl border border-stone-200 shadow-sm inline-flex items-center justify-center ${className}`}
     >
       {dataUrl ? (
         <img

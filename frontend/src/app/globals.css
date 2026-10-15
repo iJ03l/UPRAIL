@@ -2,9 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Semantic color tokens. Light is the default (the app shipped light); `.dark`
+ * on <html> flips every token. Components read these through Tailwind semantic
+ * colors (surface/ink/muted/line) or the existing neutral utilities, which are
+ * remapped in the `.dark` block near the bottom of this file.
+ */
+:root {
+  --bg: #ffffff;
+  --bg-subtle: #fafaf9;
+  --bg-muted: #f5f5f4;
+  --bg-inset: #e7e5e4;
+  --fg: #1c1917;
+  --fg-muted: #78716c;
+  --fg-subtle: #a8a29e;
+  --line: #e7e5e4;
+  --line-strong: #d6d3d1;
+  --accent: #e05326;
+  --accent-fg: #ffffff;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #0a0807;
+  --bg-subtle: #120e0c;
+  --bg-muted: #181310;
+  --bg-inset: #221b17;
+  --fg: #f5f2ef;
+  --fg-muted: #a8a29e;
+  --fg-subtle: #78716c;
+  --line: #2c221d;
+  --line-strong: #3a2e28;
+  --accent: #e05326;
+  --accent-fg: #ffffff;
+  color-scheme: dark;
+}
+
 @layer base {
   * {
-    border-color: #2C221D;
+    border-color: var(--line);
   }
 
   html {
@@ -24,8 +60,8 @@
   }
 
   body {
-    background-color: #0A0807;
-    color: #F5F2EF;
+    background-color: var(--bg);
+    color: var(--fg);
     font-family: "Cabinet Grotesk", "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
     overflow-x: hidden;
   }
@@ -40,39 +76,39 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #0A0807;
+    background: var(--bg);
   }
   ::-webkit-scrollbar-thumb {
-    background: #2C221D;
+    background: var(--line);
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #525252;
+    background: var(--line-strong);
   }
 }
 
 @layer utilities {
   .glass-card {
-    background: rgba(24, 19, 16, 0.78);
+    background: color-mix(in srgb, var(--bg-muted) 85%, transparent);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
-    border: 1px solid rgba(44, 34, 29, 0.9);
+    border: 1px solid var(--line);
   }
 
   .glass-card-hover {
     transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .glass-card-hover:hover {
-    background: rgba(34, 27, 23, 0.88);
-    border-color: rgba(0, 0, 0, 0.4);
+    background: color-mix(in srgb, var(--bg-inset) 90%, transparent);
+    border-color: var(--line-strong);
     box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.25);
   }
 
   .glass-input {
-    background: rgba(14, 11, 9, 0.7);
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(44, 34, 29, 0.85);
+    border: 1px solid var(--line);
   }
 
   .text-gradient-burnt {
@@ -94,15 +130,90 @@
   }
 
   .rail-pattern {
-    background-image: radial-gradient(rgba(0, 0, 0, 0.08) 1px, transparent 1px);
+    background-image: radial-gradient(
+      color-mix(in srgb, var(--fg) 8%, transparent) 1px,
+      transparent 1px
+    );
     background-size: 28px 28px;
   }
 
   .rail-grid-lines {
-    background-image: linear-gradient(to right, rgba(44, 34, 29, 0.35) 1px, transparent 1px),
-                      linear-gradient(to bottom, rgba(44, 34, 29, 0.35) 1px, transparent 1px);
+    background-image: linear-gradient(
+        to right,
+        color-mix(in srgb, var(--line) 60%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, color-mix(in srgb, var(--line) 60%, transparent) 1px, transparent 1px);
     background-size: 64px 64px;
   }
+}
+
+/*
+ * Dark-mode remap of the app's light neutral utilities onto the semantic
+ * tokens above. The app was built as a single light theme with ~1,000 neutral
+ * utility usages across ~30 components; mapping them here flips the whole UI
+ * from one token set instead of editing every element. Deliberately NOT
+ * remapped: `bg-black`, `bg-stone-900/950` and `text-white` — those are
+ * intentional high-contrast accent surfaces (buttons, banners) that must keep
+ * their contrast in both themes.
+ */
+@layer utilities {
+  /* surfaces */
+  .dark .bg-white { background-color: var(--bg); }
+  .dark .bg-white\/95 { background-color: color-mix(in srgb, var(--bg) 95%, transparent); }
+  .dark .bg-white\/90 { background-color: color-mix(in srgb, var(--bg) 90%, transparent); }
+  .dark .bg-white\/80 { background-color: color-mix(in srgb, var(--bg) 80%, transparent); }
+  .dark .bg-white\/70 { background-color: color-mix(in srgb, var(--bg) 70%, transparent); }
+  .dark .bg-stone-50 { background-color: var(--bg-subtle); }
+  .dark .bg-stone-50\/50 { background-color: color-mix(in srgb, var(--bg-subtle) 50%, transparent); }
+  .dark .bg-stone-50\/80 { background-color: color-mix(in srgb, var(--bg-subtle) 80%, transparent); }
+  .dark .bg-stone-100 { background-color: var(--bg-muted); }
+  .dark .bg-stone-100\/80 { background-color: color-mix(in srgb, var(--bg-muted) 80%, transparent); }
+  .dark .bg-stone-200 { background-color: var(--bg-inset); }
+  .dark .bg-stone-300 { background-color: var(--bg-inset); }
+
+  /* text */
+  .dark .text-black,
+  .dark .text-stone-900,
+  .dark .text-stone-950,
+  .dark .text-stone-800 { color: var(--fg); }
+  .dark .text-stone-700,
+  .dark .text-stone-600,
+  .dark .text-stone-500 { color: var(--fg-muted); }
+  .dark .text-stone-400,
+  .dark .text-stone-300 { color: var(--fg-subtle); }
+
+  /* borders / dividers / rings */
+  .dark .border-stone-100,
+  .dark .border-stone-200 { border-color: var(--line); }
+  .dark .border-stone-300 { border-color: var(--line-strong); }
+  .dark .divide-stone-100 > :not([hidden]) ~ :not([hidden]),
+  .dark .divide-stone-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line); }
+
+  /* hovers */
+  .dark .hover\:bg-white:hover { background-color: var(--bg); }
+  .dark .hover\:bg-stone-50:hover { background-color: var(--bg-subtle); }
+  .dark .hover\:bg-stone-100:hover { background-color: var(--bg-muted); }
+  .dark .hover\:bg-stone-200:hover { background-color: var(--bg-inset); }
+  .dark .hover\:text-black:hover,
+  .dark .hover\:text-stone-900:hover { color: var(--fg); }
+  .dark .hover\:text-stone-600:hover { color: var(--fg-muted); }
+  .dark .hover\:border-stone-200:hover { border-color: var(--line); }
+  .dark .hover\:border-stone-300:hover { border-color: var(--line-strong); }
+  .dark .hover\:border-stone-400:hover { border-color: var(--line-strong); }
+
+  /* focus states (inputs flip their focus ring from ink to the theme fg) */
+  .dark .focus\:ring-stone-900:focus { --tw-ring-color: var(--fg); }
+  .dark .focus\:border-stone-900:focus { border-color: var(--fg); }
+  .dark .focus\:bg-white:focus { background-color: var(--bg); }
+  .dark .focus-within\:bg-white:focus-within { background-color: var(--bg); }
+  .dark .focus-visible\:ring-stone-900:focus-visible { --tw-ring-color: var(--fg); }
+
+  /* placeholders */
+  .dark .placeholder-stone-400::placeholder { color: var(--fg-subtle); }
+  .dark .placeholder-stone-500::placeholder { color: var(--fg-subtle); }
+
+  /* translucent modal scrims stay dark (they sit over the page, either theme) */
 }
 
 /* Cinematic Glitch & Signal Disruption Styles for UPRAIL Brand */
