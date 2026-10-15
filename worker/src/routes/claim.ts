@@ -28,6 +28,8 @@ import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import {
   isValidDestinationAddress,
   isNearAccountAddress,
+  chainMatchesAddress,
+  WITHDRAW_CHAIN_FAMILY,
   get1ClickWithdrawalQuote,
   submit1ClickDeposit,
 } from '../services/oneclickWithdraw';
@@ -806,11 +808,13 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       destinationAddress: string;
       asset?: string;
       amount?: string;
+      destinationChain?: string;
       passkeyAssertion?: unknown;
     }>().catch(() => null)) as {
       destinationAddress: string;
       asset?: string;
       amount?: string;
+      destinationChain?: string;
       passkeyAssertion?: unknown;
     } | null;
 
@@ -838,6 +842,33 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     }
 
     const isNearAccount = isNearAccountAddress(destinationAddress);
+
+    // An explicit destination network lets the caller disambiguate EVM, where
+    // the same 0x address exists on every chain. Reject a network that does
+    // not match the address family so we never quote a route the address
+    // cannot receive on.
+    const destinationChain =
+      typeof body.destinationChain === 'string' && body.destinationChain.trim()
+        ? body.destinationChain.trim().toLowerCase()
+        : undefined;
+
+    if (destinationChain !== undefined) {
+      if (!(destinationChain in WITHDRAW_CHAIN_FAMILY)) {
+        return c.json<ErrorResponse>(
+          { error: `Unsupported destination network: ${destinationChain}`, code: 'INVALID_CHAIN' },
+          400
+        );
+      }
+      if (!chainMatchesAddress(destinationChain, destinationAddress)) {
+        return c.json<ErrorResponse>(
+          {
+            error: 'The destination address does not match the selected network',
+            code: 'INVALID_DESTINATION',
+          },
+          400
+        );
+      }
+    }
 
     // 1. Read-only balance preview (authoritative check happens in the
     //    reservation query below, inside the same statement).
@@ -1024,6 +1055,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           destinationAddress,
           asset,
           amount: parsedAmount,
+          destinationChain,
         });
         settlementNearRecipient = quote.depositAddress;
         oneClickDepositAddress = quote.depositAddress;

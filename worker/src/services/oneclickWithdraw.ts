@@ -18,6 +18,12 @@ export interface CrossChainQuoteParams {
   destinationAddress: string;
   asset: string;
   amount: number;
+  /**
+   * Explicit destination network for an EVM address, which is otherwise
+   * ambiguous (one 0x address lives on every EVM chain). When omitted, the
+   * chain is inferred from the address shape exactly as before.
+   */
+  destinationChain?: string;
 }
 
 export interface CrossChainQuoteResult {
@@ -57,51 +63,140 @@ export function isNearAccountAddress(address: string): boolean {
   return clean.length <= 64 && NEAR_ACCOUNT_REGEX.test(clean);
 }
 
-function resolveAssetPair(asset: string, destinationAddress: string): {
+/** Chain family used to sanity-check a chosen network against the address. */
+export const WITHDRAW_CHAIN_FAMILY: Record<string, 'evm' | 'sol' | 'btc' | 'near'> = {
+  eth: 'evm',
+  base: 'evm',
+  arbitrum: 'evm',
+  op: 'evm',
+  pol: 'evm',
+  avax: 'evm',
+  bsc: 'evm',
+  sol: 'sol',
+  btc: 'btc',
+  near: 'near',
+};
+
+/**
+ * NEAR-side (intents) source assets, keyed by canonical symbol. The withdraw
+ * path receives a full defuse asset id, so these are the exact origin assets
+ * 1Click must be told escrow is depositing — a mismatch strands the transfer.
+ */
+const ORIGIN_ASSETS: Record<string, { originAsset: string; decimals: number }> = {
+  usdc: {
+    originAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    decimals: 6,
+  },
+  usdt: { originAsset: 'nep141:usdt.tether-token.near', decimals: 6 },
+  near: { originAsset: 'wrap.near', decimals: 24 },
+  btc: { originAsset: 'nep141:btc.omft.near', decimals: 8 },
+  eth: { originAsset: 'nep141:eth.bridge.near', decimals: 18 },
+  sol: { originAsset: 'nep141:sol.omft.near', decimals: 9 },
+  doge: { originAsset: 'nep141:doge.omft.near', decimals: 8 },
+};
+
+/**
+ * Destination-chain asset ids 1Click understands, per canonical symbol. A
+ * symbol/chain pair absent here fails closed rather than guessing a network.
+ */
+const DESTINATION_ASSETS: Record<string, Record<string, string>> = {
+  usdc: {
+    base: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
+    arbitrum: 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near',
+    eth: 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near',
+    op: 'nep141:op-0x0b2c639c533813f4aa9d7837caf62653d097ff85.omft.near',
+    avax: 'nep141:avax-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e.omft.near',
+    pol: 'nep245:v2_1.omni.hot.tg:137_qiStmoQJDQPTebaPjgx5VBxZv6L',
+    sol: 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near',
+    near: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+  },
+  usdt: {
+    eth: 'nep141:eth-0xdac17f958d2ee523a2206206994597c13d831ec7.omft.near',
+    sol: 'nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near',
+    near: 'nep141:usdt.tether-token.near',
+    bsc: 'nep245:v2_1.omni.hot.tg:56_2CMMyVTGZkeyNZTSvS5sarzfir6g',
+  },
+  eth: {
+    eth: 'nep141:eth.omft.near',
+    base: 'nep141:base.omft.near',
+    arbitrum: 'nep141:arb.omft.near',
+  },
+  near: { near: 'wrap.near' },
+  btc: { btc: 'nep141:btc.omft.near' },
+  sol: { sol: 'nep141:sol.omft.near' },
+  doge: { doge: 'nep141:doge.omft.near' },
+};
+
+/** Normalizes a defuse asset id (or bare symbol) to a canonical symbol. */
+function canonicalAssetSymbol(asset: string): string {
+  const a = (asset || '').trim().toLowerCase();
+  if (a.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')) return 'usdc';
+  if (a.includes('usdt.tether-token.near')) return 'usdt';
+  if (a.includes('wrap.near') || a === 'near' || a === 'native') return 'near';
+  if (a.includes('btc.omft.near') || a.includes('2260fac5e5542a773aa44fbcfedf7c193bc2c599')) return 'btc';
+  if (a.includes('eth.bridge.near') || a === 'eth') return 'eth';
+  if (a.includes('sol.omft.near') || a === 'sol') return 'sol';
+  if (a.includes('doge.omft.near')) return 'doge';
+  return a;
+}
+
+/** Best-guess chain when the caller did not choose one. EVM defaults to Base. */
+export function inferChainFromAddress(address: string): string {
+  const clean = address.trim();
+  if (EVM_ADDRESS_REGEX.test(clean)) return 'base';
+  if (BITCOIN_ADDRESS_REGEX.test(clean)) return 'btc';
+  if (!clean.includes('.') && SOLANA_ADDRESS_REGEX.test(clean)) return 'sol';
+  return 'near';
+}
+
+/** True when `address` is valid for the requested chain's family. */
+export function chainMatchesAddress(chain: string, address: string): boolean {
+  const family = WITHDRAW_CHAIN_FAMILY[chain];
+  if (!family) return false;
+  const clean = address.trim();
+  if (family === 'evm') return EVM_ADDRESS_REGEX.test(clean);
+  if (family === 'btc') return BITCOIN_ADDRESS_REGEX.test(clean);
+  if (family === 'sol') {
+    return (
+      !EVM_ADDRESS_REGEX.test(clean) &&
+      !BITCOIN_ADDRESS_REGEX.test(clean) &&
+      !clean.includes('.') &&
+      SOLANA_ADDRESS_REGEX.test(clean)
+    );
+  }
+  return isNearAccountAddress(clean);
+}
+
+function resolveAssetPair(
+  asset: string,
+  destinationAddress: string,
+  destinationChain?: string
+): {
   originAsset: string;
   destinationAsset: string;
   decimals: number;
 } {
-  const cleanAsset = asset.toLowerCase();
-  const isEvm = EVM_ADDRESS_REGEX.test(destinationAddress);
-  const isSol = !destinationAddress.includes('.') && SOLANA_ADDRESS_REGEX.test(destinationAddress);
-  const isBtc = BITCOIN_ADDRESS_REGEX.test(destinationAddress);
-
-  if (cleanAsset === 'btc' || isBtc) {
-    return {
-      originAsset: 'nep141:btc.omft.near',
-      destinationAsset: 'nep141:btc.omft.near',
-      decimals: 8,
-    };
+  const symbol = canonicalAssetSymbol(asset);
+  const origin = ORIGIN_ASSETS[symbol];
+  if (!origin) {
+    throw new Error(`Withdrawals are not supported for this asset yet`);
   }
 
-  if (cleanAsset === 'usdt') {
-    let dest = 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near';
-    if (isSol) dest = 'nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near';
-    return {
-      originAsset: 'nep141:usdt.tether-token.near',
-      destinationAsset: dest,
-      decimals: 6,
-    };
+  const chain =
+    (destinationChain && destinationChain.trim().toLowerCase()) ||
+    inferChainFromAddress(destinationAddress);
+
+  const destinationAsset = (DESTINATION_ASSETS[symbol] || {})[chain];
+  if (!destinationAsset) {
+    throw new Error(
+      `Sending ${symbol.toUpperCase()} to ${chain} is not supported yet — choose another network`
+    );
   }
 
-  if (cleanAsset === 'near') {
-    return {
-      originAsset: 'wrap.near',
-      destinationAsset: 'wrap.near',
-      decimals: 24,
-    };
-  }
-
-  // Default: USDC
-  let dest = 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near'; // Base USDC default for EVM
-  if (isSol) {
-    dest = 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near';
-  }
   return {
-    originAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    destinationAsset: dest,
-    decimals: 6,
+    originAsset: origin.originAsset,
+    destinationAsset,
+    decimals: origin.decimals,
   };
 }
 
@@ -125,7 +220,11 @@ export async function get1ClickWithdrawalQuote(
   env: Env,
   params: CrossChainQuoteParams
 ): Promise<CrossChainQuoteResult> {
-  const { originAsset, destinationAsset, decimals } = resolveAssetPair(params.asset, params.destinationAddress);
+  const { originAsset, destinationAsset, decimals } = resolveAssetPair(
+    params.asset,
+    params.destinationAddress,
+    params.destinationChain
+  );
   const amountInBaseUnits = toBaseUnits(params.amount, decimals);
   const apiBase = (env.NEAR_API_BASE || 'https://1click.chaindefuser.com').replace(/\/$/, '');
   const escrowAccount = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';

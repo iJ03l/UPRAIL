@@ -1100,6 +1100,7 @@ export const api = {
     destinationAddress: string;
     asset?: string;
     amount?: string;
+    destinationChain?: string;
     passkeyAssertion: unknown;
   }): Promise<{
     success: boolean;

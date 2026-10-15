@@ -87,6 +87,44 @@
   }
 }
 
+/*
+ * Design-system action primitives. Prefer these over hand-rolled
+ * `bg-black text-white` buttons: they read the fg/bg token pair, so a primary
+ * CTA is a dark pill on the light theme and a light pill on the dark theme
+ * automatically, and their children can inherit the foreground instead of
+ * hardcoding white (which vanished on the inverted dark surface).
+ */
+@layer components {
+  .btn-primary {
+    background-color: var(--fg);
+    color: var(--bg);
+    transition: background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--fg) 86%, var(--bg));
+  }
+  .btn-primary:disabled {
+    background-color: var(--bg-inset);
+    color: var(--fg-subtle);
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    background-color: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--line-strong);
+    transition: background-color 150ms ease, border-color 150ms ease;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--bg-muted);
+    border-color: var(--fg-muted);
+  }
+  .btn-secondary:disabled {
+    color: var(--fg-subtle);
+    cursor: not-allowed;
+  }
+}
+
 @layer utilities {
   .glass-card {
     background: color-mix(in srgb, var(--bg-muted) 85%, transparent);
@@ -251,6 +289,53 @@
   .dark button.bg-stone-950.text-white:hover,
   .dark a.bg-stone-950.text-white:hover {
     background-color: color-mix(in srgb, var(--fg) 82%, var(--bg));
+  }
+
+  /* Those inverted buttons carry children with explicit `text-white`,
+     `bg-white/10`, `border-white` (icons, spinners, arrow hints). Left alone
+     they turn white-on-white and disappear, so flip them onto the button's
+     inverted foreground/background too. */
+  .dark button.bg-black.text-white .text-white,
+  .dark a.bg-black.text-white .text-white,
+  .dark button.bg-stone-900.text-white .text-white,
+  .dark a.bg-stone-900.text-white .text-white,
+  .dark button.bg-stone-950.text-white .text-white,
+  .dark a.bg-stone-950.text-white .text-white {
+    color: var(--bg);
+  }
+  .dark button.bg-black.text-white .border-white,
+  .dark a.bg-black.text-white .border-white,
+  .dark button.bg-stone-900.text-white .border-white,
+  .dark a.bg-stone-900.text-white .border-white,
+  .dark button.bg-stone-950.text-white .border-white,
+  .dark a.bg-stone-950.text-white .border-white {
+    border-color: var(--bg);
+  }
+  .dark button.bg-black.text-white .bg-white\/10,
+  .dark a.bg-black.text-white .bg-white\/10,
+  .dark button.bg-stone-900.text-white .bg-white\/10,
+  .dark a.bg-stone-900.text-white .bg-white\/10,
+  .dark button.bg-stone-950.text-white .bg-white\/10,
+  .dark a.bg-stone-950.text-white .bg-white\/10 {
+    background-color: color-mix(in srgb, var(--bg) 14%, transparent);
+  }
+  .dark button.bg-black.text-white .text-stone-400,
+  .dark a.bg-black.text-white .text-stone-400,
+  .dark button.bg-black.text-white .text-stone-300,
+  .dark a.bg-black.text-white .text-stone-300,
+  .dark button.bg-stone-900.text-white .text-stone-400,
+  .dark a.bg-stone-900.text-white .text-stone-400 {
+    color: color-mix(in srgb, var(--bg) 60%, transparent);
+  }
+  /* `group-hover:text-white` on the trailing arrow must not flip back to
+     white when the surface has inverted. */
+  .dark button.bg-black.text-white .group-hover\:text-white,
+  .dark a.bg-black.text-white .group-hover\:text-white,
+  .dark button.bg-stone-900.text-white .group-hover\:text-white,
+  .dark a.bg-stone-900.text-white .group-hover\:text-white,
+  .dark button.bg-stone-950.text-white .group-hover\:text-white,
+  .dark a.bg-stone-950.text-white .group-hover\:text-white {
+    color: var(--bg);
   }
 
   /* translucent modal scrims stay dark (they sit over the page, either theme) */

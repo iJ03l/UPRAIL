@@ -17,6 +17,7 @@ import { ShareModal } from '../components/ShareModal';
 import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareModal';
 import { usePayments } from '../hooks/usePayments';
 import { PROTOCOL_FEE_RATE, formatUsd } from '../lib/api';
+import { withdrawChainsForSymbol, chainsForAddress } from '../lib/withdrawChains';
 import { PaymentIntent } from '../types';
 
 export const SendPage: React.FC = () => {
@@ -38,6 +39,7 @@ export const SendPage: React.FC = () => {
   const [sendMode, setSendMode] = useState<'handle' | 'wallet'>('handle');
   const [recipient, setRecipient] = useState('');
   const [walletAddress, setWalletAddress] = useState('');
+  const [destinationChain, setDestinationChain] = useState('');
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
@@ -61,6 +63,29 @@ export const SendPage: React.FC = () => {
     return `${PROTOCOL_FEE_RATE * 100}%`;
   }, [amount, quote?.protocolFee]);
 
+  // Destination networks this token can settle to cross-chain. Empty means a
+  // NEAR-only asset (settled natively), so the picker stays hidden.
+  const availableChains = useMemo(
+    () => withdrawChainsForSymbol(selectedToken.symbol),
+    [selectedToken.symbol]
+  );
+  const matchingChains = useMemo(
+    () => chainsForAddress(availableChains, walletAddress),
+    [availableChains, walletAddress]
+  );
+  const showChainSelector = sendMode === 'wallet' && availableChains.length > 0;
+  const selectedChainName =
+    matchingChains.find((chain) => chain.key === destinationChain)?.name || '';
+
+  // Keep a valid selection: default to the network the address implies (or the
+  // first option) and re-point when the address switches families.
+  useEffect(() => {
+    if (!showChainSelector) return;
+    if (!matchingChains.some((chain) => chain.key === destinationChain)) {
+      setDestinationChain(matchingChains[0]?.key || '');
+    }
+  }, [showChainSelector, matchingChains, destinationChain]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
@@ -74,7 +99,12 @@ export const SendPage: React.FC = () => {
       if (sendMode === 'wallet') {
         // Withdraw own shielded balance to the destination chain — never a
         // payment row, which no one would be able to claim.
-        const result = await sendToWallet(target, amount, selectedToken.id);
+        const result = await sendToWallet(
+          target,
+          amount,
+          selectedToken.id,
+          showChainSelector ? destinationChain : undefined
+        );
         setCreatedPayment(null);
         // Wallet sends now produce a public receipt link too, so the sender can
         // share proof of payment the same way an X-handle send works.
@@ -210,23 +240,61 @@ export const SendPage: React.FC = () => {
             />
           ) : (
             /* Mode 2: Wallet Address Input (EVM, Solana, NEAR) */
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
-                  Recipient Wallet Address
-                </label>
-                <span className="text-xs text-stone-700 font-mono font-bold">
-                  Cross-Chain Solver
-                </span>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                    Recipient Wallet Address
+                  </label>
+                  <span className="text-xs text-stone-700 font-mono font-bold">
+                    Cross-Chain Solver
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={walletAddress}
+                  onChange={(e) => setWalletAddress(e.target.value.trim())}
+                  disabled={isSubmitting}
+                  placeholder="0x... (EVM), Solana base58, or .near"
+                  className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3.5 text-base sm:text-xs text-stone-900 font-mono placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
+                />
               </div>
-              <input
-                type="text"
-                value={walletAddress}
-                onChange={(e) => setWalletAddress(e.target.value.trim())}
-                disabled={isSubmitting}
-                placeholder="0x... (EVM), Solana base58, or .near"
-                className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3.5 text-base sm:text-xs text-stone-900 font-mono placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
-              />
+
+              {/* Destination network — an EVM address is valid on every EVM
+                  chain, so the network has to be chosen explicitly. The list
+                  narrows to the address family once one is entered. */}
+              {showChainSelector && matchingChains.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                      Destination Network
+                    </label>
+                    <span className="text-[11px] text-stone-500 font-mono">{selectedChainName}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {matchingChains.map((chain) => (
+                      <button
+                        key={chain.key}
+                        type="button"
+                        onClick={() => setDestinationChain(chain.key)}
+                        disabled={isSubmitting}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold border transition-all cursor-pointer disabled:opacity-60 ${
+                          destinationChain === chain.key
+                            ? 'bg-stone-900 text-white border-stone-900'
+                            : 'bg-stone-50 text-stone-600 border-stone-200 hover:border-stone-400 hover:text-black'
+                        }`}
+                      >
+                        {chain.name}
+                      </button>
+                    ))}
+                  </div>
+                  {matchingChains.length === 1 && (
+                    <p className="text-[11px] font-mono text-stone-500">
+                      Matched to the address format.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

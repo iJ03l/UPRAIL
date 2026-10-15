@@ -287,7 +287,8 @@ export function usePayments() {
   const sendToWallet = async (
     destinationAddress: string,
     amount: string,
-    asset?: string
+    asset?: string,
+    destinationChain?: string
   ): Promise<{ txHash: string; withdrawalId?: string; destinationAddress: string; shareLink?: string }> => {
     try {
       setIsSubmitting(true);
@@ -317,6 +318,7 @@ export function usePayments() {
         destinationAddress: destination,
         asset: tokenId,
         amount,
+        destinationChain,
         passkeyAssertion: assertion,
       });
 
