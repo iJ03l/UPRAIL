@@ -20,6 +20,22 @@ function warnMissingSecret(): void {
   console.error('SESSION_SECRET is not configured — all sessions are rejected (fail closed)');
 }
 
+// Sessions issued between 85abc57 and d948918 were written with
+// `Domain=.uprail.world`. A host-only delete does not match a domain-scoped
+// cookie, so the legacy one kept the user authenticated and bounced them
+// straight back to the dashboard after sign-out. Every cleanup path therefore
+// deletes BOTH variants.
+function deleteSessionCookies(c: Context<AppContext>): void {
+  const reqUrl = new URL(c.req.url);
+  const base: any = {
+    path: '/',
+    secure: reqUrl.protocol === 'https:',
+    sameSite: 'Lax',
+  };
+  deleteCookie(c, SESSION_COOKIE_NAME, base);
+  deleteCookie(c, SESSION_COOKIE_NAME, { ...base, domain: 'uprail.world' });
+}
+
 export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
     const rawCookie = getCookie(c, SESSION_COOKIE_NAME);
@@ -30,7 +46,7 @@ export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
       if (!secret) {
         // Fail closed: never authenticate against an unsigned/unguessable-cookie-free deployment.
         warnMissingSecret();
-        deleteCookie(c, SESSION_COOKIE_NAME, { path: '/' });
+        deleteSessionCookies(c);
         return await next();
       }
 
@@ -44,12 +60,7 @@ export const sessionMiddleware = (): MiddlewareHandler<AppContext> => {
               c.set('session', session);
             } else {
               // Expired
-              const reqUrl = new URL(c.req.url);
-              deleteCookie(c, SESSION_COOKIE_NAME, {
-                path: '/',
-                secure: reqUrl.protocol === 'https:',
-                sameSite: 'Lax',
-              });
+              deleteSessionCookies(c);
             }
           }
         } catch (err) {
@@ -124,6 +135,16 @@ export async function createSession(
   };
 
   setCookie(c, SESSION_COOKIE_NAME, signedToken, cookieOptions);
+  // Retire any lingering `Domain=.uprail.world` session cookie from before
+  // d948918 so the browser holds exactly one (host-only) session cookie.
+  // getCookie returns the first match, so a stale domain cookie that survives
+  // would shadow the fresh host-only one and pin the user to an old session.
+  deleteCookie(c, SESSION_COOKIE_NAME, {
+    path: '/',
+    secure: reqUrl.protocol === 'https:',
+    sameSite: 'Lax',
+    domain: 'uprail.world',
+  });
 
   c.set('session', session);
   return session;
@@ -169,13 +190,7 @@ export async function updateSession(
  * 0 KV writes.
  */
 export async function destroySession(c: Context<AppContext>): Promise<void> {
-  const reqUrl = new URL(c.req.url);
-  const deleteOptions: any = {
-    path: '/',
-    secure: reqUrl.protocol === 'https:',
-    sameSite: 'Lax',
-  };
-  deleteCookie(c, SESSION_COOKIE_NAME, deleteOptions);
+  deleteSessionCookies(c);
 }
 
 /**

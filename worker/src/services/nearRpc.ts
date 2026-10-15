@@ -4408,6 +4408,25 @@ export async function executeWithdrawIntent(
     const deadline = new Date(Date.now() + 3600000).toISOString();
     const contractId = token.nearContractId || token.defuse_asset_id.replace(/^nep141:/, '');
 
+    // The destination must hold storage on the token contract before an
+    // ft_withdraw intent can credit it. intents.near accepts the intent,
+    // burns the balance, and when the token refuses the receipt it refunds
+    // the whole withdraw — so a destination that has never held this token
+    // would loop forever with a no-op. Register it first, sponsored from
+    // escrow, exactly as the native and escrow payout rails do.
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const sponsor = escrowSigningKey(env, rpcUrl);
+    if ('error' in sponsor) {
+      return { success: false, error: sponsor.error };
+    }
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, destinationAddress, sponsor);
+    if (!storage.registered) {
+      return {
+        success: false,
+        error: storage.reason || `destination is not registered on ${contractId}`,
+      };
+    }
+
     const intentMessageObj = {
       signer_id: senderId,
       deadline,
