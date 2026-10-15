@@ -488,6 +488,7 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
             })
         );
 
+        const detectedDeposits: any[] = [];
         for (const entry of depositStatuses) {
           if (!entry) continue;
           const { dep, statusData } = entry;
@@ -507,15 +508,21 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
             const rawDest = swapDetails?.destinationChainTxHashes?.[0];
             const destTx = typeof rawDest === 'string' ? rawDest : rawDest?.hash;
             const nearTx = swapDetails?.nearTxHashes?.[0];
-            const primaryId = originTx || destTx || nearTx || dep.address;
+            // correlationId is unique per deposit quote, so it keeps two
+            // deposits to the same address distinct even when the tx hashes are
+            // absent and we would otherwise fall back to the shared address.
+            const correlationId = statusData?.correlationId;
+            const primaryId =
+              originTx || destTx || nearTx || correlationId || dep.address;
 
-            if (primaryId && !transactions.some((t: any) => t.id === primaryId || (destTx && t.id === destTx))) {
+            if (primaryId) {
               const originAsset =
                 statusData?.quoteResponse?.quoteRequest?.originAsset ||
                 (dep.chain === 'near' ? 'wrap.near' : `nep141:${dep.chain}.omft.near`);
 
-              transactions.unshift({
+              detectedDeposits.push({
                 id: primaryId,
+                alt_id: destTx,
                 intent_type: 'deposit',
                 defuse_asset_id_in: originAsset,
                 amount_in: depAmt,
@@ -529,6 +536,22 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
               });
             }
           } catch {}
+        }
+
+        // The per-address status API reports only that address's latest deposit,
+        // so a second deposit to a reused address used to *replace* the first in
+        // the client's "Received this week" total. Persist each distinct deposit
+        // and merge the accumulated set instead of the current snapshot only.
+        const accumulatedDeposits = await nearRpc.recordOneClickDepositEvents(
+          c.env,
+          nearAccount,
+          detectedDeposits
+        );
+        for (const dep of accumulatedDeposits) {
+          const altId = (dep as any).alt_id as string | undefined;
+          if (!transactions.some((t: any) => t.id === dep.id || (altId && t.id === altId))) {
+            transactions.push(dep);
+          }
         }
 
         // Include withdrawals recorded for this user

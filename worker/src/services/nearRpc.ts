@@ -3612,6 +3612,57 @@ export async function getPlainFtDepositEvents(
   return state?.events || [];
 }
 
+// ─── 1Click deposit-address deposit events ───────────────────────────────────
+/**
+ * Deposits made through a 1Click deposit address are reconstructed from the
+ * per-address status API — but that API only ever reports the address's
+ * *latest* deposit. Two deposits to the same (reused) address therefore looked
+ * like the second replaced the first, both in the transaction list and in the
+ * "Received this week" total. We persist each distinct deposit (keyed by its
+ * origin tx) so history accumulates instead of overwriting.
+ */
+const ONECLICK_DEPOSIT_EVENTS_KEY = (account: string) => `onclick_deposits:v1:${account}`;
+const ONECLICK_DEPOSIT_TTL_S = 30 * 24 * 3600;
+const ONECLICK_DEPOSIT_EVENT_LIMIT = 50;
+
+async function readOneClickDepositEvents(env: Env, nearAccount: string): Promise<IntentTx[]> {
+  const cache = (env as any).CACHE;
+  if (!cache) return [];
+  try {
+    const raw = await cache.get(ONECLICK_DEPOSIT_EVENTS_KEY(nearAccount));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as IntentTx[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Persist newly detected deposits and return the accumulated (deduped) list. */
+export async function recordOneClickDepositEvents(
+  env: Env,
+  nearAccount: string,
+  detected: IntentTx[]
+): Promise<IntentTx[]> {
+  if (!nearAccount) return detected;
+  const prev = await readOneClickDepositEvents(env, nearAccount);
+  const merged = [...detected, ...prev]
+    .filter((e, i, arr) => arr.findIndex((x) => x.id === e.id) === i)
+    .slice(0, ONECLICK_DEPOSIT_EVENT_LIMIT);
+
+  const cache = (env as any).CACHE;
+  if (cache && detected.length > 0) {
+    try {
+      await cache.put(ONECLICK_DEPOSIT_EVENTS_KEY(nearAccount), JSON.stringify(merged), {
+        expirationTtl: ONECLICK_DEPOSIT_TTL_S,
+      });
+    } catch (err) {
+      console.warn('[nearRpc] 1Click deposit event write failed:', err);
+    }
+  }
+  return merged;
+}
+
 /**
  * Upper bound on the secondary registry scan that patches FastNEAR's index lag
  * for high-value assets (wNEAR, USDC, ETH, …). Chosen so that a full
