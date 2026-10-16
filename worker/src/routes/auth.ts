@@ -308,9 +308,14 @@ authRouter.get('/callback', async (c) => {
       } catch {}
     }
 
-    // Check if user has registered passkey
-    let hasPasskey = !!nearAccount;
-    if (!hasPasskey && c.env.DB) {
+    // A passkey exists only if a credential row was registered. `near_account`
+    // is provisioned independently of passkey setup (ensureIntentAccount runs
+    // on OAuth), so it must NOT stand in for one — otherwise a user with a
+    // vault account but no passkey is treated as fully set up, skips the
+    // create-passkey step, and every fund-moving prompt ends up "looking for"
+    // a credential that was never created.
+    let hasPasskey = false;
+    if (c.env.DB) {
       try {
         const pk = await c.env.DB.prepare('SELECT id FROM passkeys WHERE x_id = ?')
           .bind(xUser.id)
@@ -418,8 +423,11 @@ const getSessionHandler = async (c: any) => {
     } catch {}
   }
 
-  let hasPasskey = !!nearAccount;
-  if (!hasPasskey && c.env.DB) {
+  // Row-based, never inferred from `near_account`: a provisioned vault account
+  // without a registered credential must read as "no passkey" so the client
+  // sends the user through create-passkey instead of a doomed credential lookup.
+  let hasPasskey = false;
+  if (c.env.DB) {
     try {
       const pk = await c.env.DB.prepare('SELECT id FROM passkeys WHERE x_id = ?')
         .bind(session.x_id)

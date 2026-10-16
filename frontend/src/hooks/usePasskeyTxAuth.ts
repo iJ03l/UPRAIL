@@ -49,12 +49,20 @@ export function usePasskeyTxAuth() {
       // A device that never registered its own passkey can only answer with
       // cross-device "scan QR code" / security-key prompts. Register this
       // device first so the ceremony uses the phone's native biometrics.
-      // Best-effort: a synced passkey may still answer the assertion below,
-      // so any failure (including the user declining) falls through.
       if (user?.handle && !webauthn.hasLocalPasskey(user.handle)) {
         try {
           await webauthn.registerPasskey(user.handle);
-        } catch {
+        } catch (regErr) {
+          // When the account already holds a passkey elsewhere the assertion
+          // below may still be answered by a synced/another-device credential,
+          // so falling through is right. But when the server confirms there is
+          // NO passkey at all, a lookup can only fail — surface the create
+          // failure instead of a confusing "looking for" prompt.
+          if (user.hasPasskey === false) {
+            const msg = describePasskeyError(regErr);
+            setError(msg);
+            throw new Error(msg);
+          }
           /* fall through to the assertion */
         }
       }

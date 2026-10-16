@@ -217,7 +217,16 @@ export function useClaimFlow(initialCode?: string) {
         try {
           await webauthn.registerPasskey(user.handle);
           setHasPasskey(true);
-        } catch {
+        } catch (regErr) {
+          // A synced passkey can still answer the assertion below, so fall
+          // through — unless the server confirmed no passkey exists, in which
+          // case a lookup is guaranteed to fail and the create error is the
+          // real, actionable message.
+          if (user.hasPasskey === false) {
+            const described = describePasskeyError(regErr);
+            setError(described);
+            throw new Error(described);
+          }
           /* fall through to the assertion */
         }
       }
