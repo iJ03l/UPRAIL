@@ -11,7 +11,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
-import { webauthn } from '../lib/webauthn';
+import { webauthn, describePasskeyError } from '../lib/webauthn';
 import { currentInvite, sanitizeReturnPath, withInvite } from '../lib/invite';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
@@ -192,11 +192,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       }
     } catch (err: any) {
       console.error('Passkey creation error:', err);
-      if (err?.name === 'NotAllowedError') {
-        setError('Passkey prompt was cancelled on your device.');
-      } else {
-        setError(err?.message || 'Failed to register passkey. Please try again.');
-      }
+      setError(describePasskeyError(err));
     } finally {
       setIsPasskeyLoading(false);
     }
@@ -235,11 +231,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       }
     } catch (err: any) {
       console.error('Passkey login error:', err);
-      if (err?.name === 'NotAllowedError') {
-        setError('Passkey prompt cancelled or not found on this device. Sign in with 𝕏 to add a passkey here.');
-      } else {
-        setError('No passkey found on this device yet. Sign in with 𝕏 to add one.');
-      }
+      const described = describePasskeyError(err);
+      setError(
+        err?.name === 'NotAllowedError' || err?.name === 'InvalidStateError'
+          ? `${described} Sign in with 𝕏 to add a passkey here.`
+          : described
+      );
       setLoginMethod('x');
     } finally {
       setIsPasskeyLoading(false);

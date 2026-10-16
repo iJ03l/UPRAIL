@@ -27,7 +27,7 @@ import {
   formatUsdCompact,
   sumUsd,
 } from '../lib/api';
-import { webauthn } from '../lib/webauthn';
+import { webauthn, describePasskeyError } from '../lib/webauthn';
 import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { RollingNumber } from '../components/RollingNumber';
@@ -40,6 +40,7 @@ export const AppHome: React.FC = () => {
   });
   const [isEnablingBiometrics, setIsEnablingBiometrics] = useState<boolean>(false);
   const [biometricsSuccess, setBiometricsSuccess] = useState<boolean>(false);
+  const [biometricsError, setBiometricsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.handle) {
@@ -50,6 +51,7 @@ export const AppHome: React.FC = () => {
   const handleEnableDeviceBiometrics = async () => {
     if (!user?.handle || isEnablingBiometrics) return;
     setIsEnablingBiometrics(true);
+    setBiometricsError(null);
     try {
       const res = await webauthn.registerPasskey(user.handle);
       if (res.success) {
@@ -59,6 +61,7 @@ export const AppHome: React.FC = () => {
       }
     } catch (e) {
       console.warn('Device passkey creation notice:', e);
+      setBiometricsError(describePasskeyError(e));
     } finally {
       setIsEnablingBiometrics(false);
     }
@@ -306,6 +309,13 @@ export const AppHome: React.FC = () => {
         <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono flex items-center space-x-2 animate-fade-in mb-6">
           <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
           <span>Passkey enabled on this device! Biometric sign-in active.</span>
+        </div>
+      )}
+
+      {biometricsError && (
+        <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-900 text-xs font-mono flex items-start space-x-2 animate-fade-in mb-6">
+          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+          <span>{biometricsError}</span>
         </div>
       )}
 

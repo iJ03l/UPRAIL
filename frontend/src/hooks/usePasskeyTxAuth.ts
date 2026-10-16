@@ -22,8 +22,7 @@ import { useState, useCallback } from 'react';
 import { startAuthentication } from '@simplewebauthn/browser';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 import { api } from '../lib/api';
-import { webauthn } from '../lib/webauthn';
-import { detectInAppBrowser, inAppBrowserLabel } from '../lib/inAppBrowser';
+import { webauthn, describePasskeyError } from '../lib/webauthn';
 import { useXAuth } from './useXAuth';
 
 export type PasskeyAssertion = AuthenticationResponseJSON;
@@ -76,16 +75,10 @@ export function usePasskeyTxAuth() {
 
       return assertion;
     } catch (err: any) {
-      // A NotAllowedError is the generic refusal the OS returns both when the
-      // user dismisses the prompt AND when an embedded webview blocks WebAuthn
-      // outright. Disambiguate so in-app users aren't told they cancelled.
-      const inApp = detectInAppBrowser();
-      const msg =
-        err?.name === 'NotAllowedError'
-          ? inApp.isInApp
-            ? `Passkeys can't be used inside ${inAppBrowserLabel(inApp)} — open this link in Safari or Chrome, then try again.`
-            : 'Passkey authorization was cancelled or timed out'
-          : err?.message || 'Passkey authorization failed';
+      // Turn the raw DOMException into an actionable explanation — the same
+      // failure means very different things (user cancel vs. in-app webview vs.
+      // a device credential-manager hiccup).
+      const msg = describePasskeyError(err);
       setError(msg);
       throw new Error(msg);
     } finally {

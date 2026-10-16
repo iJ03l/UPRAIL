@@ -5,7 +5,83 @@ import {
   platformAuthenticatorIsAvailable,
 } from '@simplewebauthn/browser';
 import { api } from './api';
+import { detectInAppBrowser, inAppBrowserLabel } from './inAppBrowser';
 import { XUser } from '../types';
+
+/**
+ * Maps a WebAuthn ceremony failure to a short, actionable explanation.
+ *
+ * The raw DOMException text is meaningless to users — e.g. Android Chrome's
+ * Credential Manager throws `UnknownError: An unknown error occurred while
+ * talking to your credential manager` for a device/provider hiccup, and
+ * `NotAllowedError` is shared by both a real cancellation and an embedded
+ * webview refusing WebAuthn. Neither tells the user what to do next.
+ */
+const WEBAUTHN_ERROR_NAMES = new Set([
+  'NotAllowedError',
+  'InvalidStateError',
+  'UnknownError',
+  'NotSupportedError',
+  'SecurityError',
+  'AbortError',
+  'ConstraintError',
+  'TimeoutError',
+]);
+
+export function describePasskeyError(err: any): string {
+  const name = err?.name || '';
+  const msg = String(err?.message || '').toLowerCase();
+
+  // Only reinterpret genuine WebAuthn failures. Non-ceremony errors (e.g. an
+  // API 4xx surfaced through the same catch) must pass through untouched.
+  const isWebAuthnError =
+    WEBAUTHN_ERROR_NAMES.has(name) ||
+    msg.includes('credential manager') ||
+    msg.includes('unknown error') ||
+    msg.includes('unknown transient') ||
+    msg.includes('not supported') ||
+    msg.includes('no create options') ||
+    msg.includes('rp id') ||
+    msg.includes('cannot be validated') ||
+    msg.includes('timed out') ||
+    msg.includes('not allowed');
+  if (!isWebAuthnError) {
+    return err?.message || 'Something went wrong. Please try again.';
+  }
+
+  const inApp = detectInAppBrowser();
+  if (inApp.isInApp) {
+    return `Passkeys can't be used inside ${inAppBrowserLabel(inApp)} — open this page in Safari or Chrome, then try again.`;
+  }
+  if (name === 'InvalidStateError' || msg.includes('already registered')) {
+    return 'A passkey for this account already exists on this device — sign in with your passkey instead.';
+  }
+  if (name === 'NotAllowedError' || msg.includes('timed out') || msg.includes('not allowed')) {
+    return 'The passkey prompt was cancelled or timed out. Tap again and complete Face ID, fingerprint, or your screen lock.';
+  }
+  if (
+    name === 'UnknownError' ||
+    msg.includes('credential manager') ||
+    msg.includes('unknown error') ||
+    msg.includes('unknown transient')
+  ) {
+    return "Your device's passkey manager didn't respond. Update Google Play Services and your password manager, make sure a screen lock is set, then try again — or use another browser or device.";
+  }
+  if (
+    name === 'NotSupportedError' ||
+    msg.includes('not supported') ||
+    msg.includes('no create options')
+  ) {
+    return 'This browser or device can’t create a passkey. Try Safari or Chrome on a device with Face ID, fingerprint, or Windows Hello.';
+  }
+  if (name === 'SecurityError' || msg.includes('rp id') || msg.includes('cannot be validated')) {
+    return 'Passkeys are blocked on this address. Open uprail.world directly in your browser and try again.';
+  }
+  if (name === 'AbortError') {
+    return 'The passkey prompt was interrupted (a call, rotation, or app switch). Please try again.';
+  }
+  return err?.message || 'Could not create a passkey on this device. Please try again.';
+}
 
 export interface WebAuthnSupportStatus {
   supported: boolean;

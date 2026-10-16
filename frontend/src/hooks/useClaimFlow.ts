@@ -12,7 +12,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PaymentIntent, ClaimPaymentResult, ShieldedBalance } from '../types';
 import { api } from '../lib/api';
-import { webauthn } from '../lib/webauthn';
+import { webauthn, describePasskeyError } from '../lib/webauthn';
 import { useXAuth } from './useXAuth';
 
 const PENDING_CACHE_KEY = 'uprail_pending_payments_cache';
@@ -182,7 +182,7 @@ export function useClaimFlow(initialCode?: string) {
 
       return result;
     } catch (err: any) {
-      const msg = err instanceof Error ? err.message : 'Claim failed. Please try again.';
+      const msg = describePasskeyError(err);
       setError(msg);
       throw err;
     } finally {
@@ -237,7 +237,7 @@ export function useClaimFlow(initialCode?: string) {
       await loadShieldedBalances();
       return { success: result.success, txHash: result.txHash };
     } catch (err: any) {
-      const msg = err instanceof Error ? err.message : 'Withdrawal failed. Please try again.';
+      const msg = describePasskeyError(err);
       setError(msg);
       throw err;
     } finally {
@@ -287,7 +287,7 @@ export function useClaimFlow(initialCode?: string) {
 
       return result;
     } catch (err: any) {
-      const msg = err instanceof Error ? err.message : 'Claim failed. Please try again.';
+      const msg = describePasskeyError(err);
       setError(msg);
       throw err;
     } finally {
