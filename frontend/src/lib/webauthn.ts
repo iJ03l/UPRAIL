@@ -225,7 +225,10 @@ export const webauthn = {
    * Authenticate / Sign with the device passkey (Touch ID, Face ID, PIN)
    * to claim confidential payments.
    */
-  async authenticatePasskey(handle: string): Promise<{ success: boolean; credentialId: string; authPayload: unknown }> {
+  async authenticatePasskey(
+    handle: string,
+    opts?: { hasServerPasskey?: boolean }
+  ): Promise<{ success: boolean; credentialId: string; authPayload: unknown }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
     const isSupported = browserSupportsWebAuthn();
     if (!isSupported) {
@@ -235,7 +238,15 @@ export const webauthn = {
     if (cleanHandle && cleanHandle !== 'passkey_holder' && !this.hasLocalPasskey(cleanHandle)) {
       try {
         await this.registerPasskey(cleanHandle);
-      } catch {
+      } catch (regErr) {
+        // When the server confirms the account has NO passkey, the assertion
+        // below can only fail — surface the create failure instead of a
+        // confusing "looking for" prompt. When a passkey exists elsewhere the
+        // assertion may still be answered by a synced credential, so fall
+        // through.
+        if (opts?.hasServerPasskey === false) {
+          throw new Error(describePasskeyError(regErr));
+        }
         /* fall through to assertion */
       }
     }

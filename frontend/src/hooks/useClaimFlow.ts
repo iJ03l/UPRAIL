@@ -159,7 +159,9 @@ export function useClaimFlow(initialCode?: string) {
       }
 
       // Step 2: Sign with device passkey (Touch ID / Face ID)
-      const assertion = await webauthn.authenticatePasskey(cleanHandle);
+      const assertion = await webauthn.authenticatePasskey(cleanHandle, {
+        hasServerPasskey: user?.hasPasskey,
+      });
 
       // Step 3: Complete confidential claim on NEAR intent
       const result = await api.claimPayment(
@@ -233,7 +235,9 @@ export function useClaimFlow(initialCode?: string) {
 
       // Passkey authorization (identical to claim: tx_auth challenge + assertion)
       const handle = user?.handle || 'wallet';
-      const assertion = await webauthn.authenticatePasskey(handle);
+      const assertion = await webauthn.authenticatePasskey(handle, {
+        hasServerPasskey: user?.hasPasskey,
+      });
 
       const result = await api.withdraw({
         destinationAddress: destination,
@@ -277,7 +281,9 @@ export function useClaimFlow(initialCode?: string) {
       }
 
       // Step 2: Single passkey touch to authorize all claims
-      const assertion = await webauthn.authenticatePasskey(cleanHandle);
+      const assertion = await webauthn.authenticatePasskey(cleanHandle, {
+        hasServerPasskey: user?.hasPasskey,
+      });
 
       // Step 3: Execute batch claim
       const result = await api.claimAllPayments(
