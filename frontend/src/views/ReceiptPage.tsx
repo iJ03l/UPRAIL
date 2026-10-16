@@ -119,11 +119,20 @@ export const ReceiptPage: React.FC<ReceiptPageProps> = ({ id }) => {
                 <statusBadge.Icon className="w-3 h-3" />
                 {statusBadge.label}
               </span>
-              <h3 className="text-xl font-extrabold text-stone-950 font-display">Payment Sent</h3>
+              <h3 className="text-xl font-extrabold text-stone-950 font-display">
+                {statusBadge.label === 'Failed' ? 'Withdrawal Failed' : 'Payment Sent'}
+              </h3>
               <div className="text-3xl font-display font-extrabold text-stone-950 tracking-tight font-mono">
                 {receipt.amount} {receipt.asset}
               </div>
             </div>
+
+            {statusBadge.label === 'Failed' && receipt.failureReason && (
+              <div className="rounded-2xl bg-red-50 border border-red-200 p-3.5 flex items-start gap-2.5 text-xs">
+                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+                <p className="text-red-800 leading-relaxed">{receipt.failureReason}</p>
+              </div>
+            )}
 
             <div className="rounded-2xl bg-stone-50 border border-stone-200 divide-y divide-stone-200 text-xs font-mono">
               {receipt.fromHandle && (

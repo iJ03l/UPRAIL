@@ -108,6 +108,8 @@ export interface WithdrawalReceipt {
   amount: string;
   txHash: string | null;
   status: string;
+  /** Why a FAILED withdrawal failed — a user-safe, actionable explanation. */
+  failureReason?: string | null;
   createdAt: string;
 }
 

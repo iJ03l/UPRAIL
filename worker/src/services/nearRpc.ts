@@ -4395,6 +4395,17 @@ export async function depositPlainBalanceToIntents(
           ? { deposited: true, txHash: res.txHash }
           : { deposited: false, reason: res.error || 'ft_transfer_call (wNEAR) failed' };
       }
+      if (plainNear > 0n) {
+        // Native NEAR is held but withdrawing this amount would leave less than
+        // the gas reserve needed to wrap + transfer. Return the exact shortfall
+        // so the caller can explain it, instead of failing later on an empty
+        // intents balance with a cryptic error.
+        const shortfall = BigInt(baseUnits) + gasReserve - plainNear;
+        return {
+          deposited: false,
+          reason: `NEAR_GAS_RESERVE_SHORTFALL:${shortfall.toString()}`,
+        };
+      }
     }
 
     return { deposited: false, reason: 'INSUFFICIENT_PLAIN_BALANCE' };

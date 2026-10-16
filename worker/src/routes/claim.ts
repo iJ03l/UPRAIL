@@ -62,6 +62,40 @@ function isTransientRailReason(reason: string | undefined): boolean {
 }
 
 /**
+ * Turns a raw settlement error into a short explanation the user can act on.
+ * The withdraw endpoint returns this string directly, so it must name the
+ * cause and the next step without leaking RPC/node internals.
+ */
+function explainSettlementFailure(
+  rail: 'native' | 'intents' | 'cross_chain',
+  raw: string,
+  asset: string
+): string {
+  const r = (raw || '').toLowerCase();
+  const symbol = asset.includes(':') ? asset.split(':').pop() || asset : asset;
+
+  // Multi-token (nep245 / NEAR Intents) assets carry an EVM `nearContractId`,
+  // so the NEP-141 fallback registers a non-NEAR account and dies with
+  // "… is not registered on 0x…". Intents-native settlement isn't wired up yet.
+  if (asset.toLowerCase().startsWith('nep245:') || /not registered on 0x[0-9a-f]{40}/i.test(raw)) {
+    return `This token settles through NEAR Intents and can't be withdrawn to an address yet. No funds left your account — try a different token, and contact support if you need this one out.`;
+  }
+  if (/not registered|doesn't have enough balance for storage|storage_deposit/.test(r)) {
+    return `The destination account isn't set up to receive ${symbol}. It has to be registered first — then retry the withdrawal.`;
+  }
+  if (/insufficient|not enough balance|notenoughbalance|exceeded the balance/.test(r)) {
+    return `You don't have enough ${symbol} to cover the amount plus network fees. Lower the amount and try again.`;
+  }
+  if (/does not exist|account.*not found|unknown account/.test(r)) {
+    return `The destination account doesn't exist. Double-check the address and try again.`;
+  }
+  if (rail === 'native') {
+    return `${symbol} can't be sent on this route right now. No funds left your account — please try again, or contact support if it keeps failing.`;
+  }
+  return `The withdrawal couldn't be completed and no funds left your account. Please try again, or contact support with the withdrawal id if it keeps failing.`;
+}
+
+/**
  * Withdrawable balance for a user in one asset:
  *   sum(claimed payments for this user, this asset)
  *   - sum(withdrawals in COMPLETED or PENDING state)
@@ -101,7 +135,7 @@ claimRouter.get('/withdrawal/:id', async (c) => {
   }
   try {
     const row = await c.env.DB.prepare(
-      `SELECT id, x_handle, destination_address, asset, amount, tx_hash, status, created_at
+      `SELECT id, x_handle, destination_address, asset, amount, tx_hash, status, error, created_at
          FROM withdrawals WHERE id = ?`
     )
       .bind(id)
@@ -113,6 +147,7 @@ claimRouter.get('/withdrawal/:id', async (c) => {
         amount: string;
         tx_hash: string | null;
         status: string;
+        error: string | null;
         created_at: string;
       }>();
 
@@ -128,6 +163,8 @@ claimRouter.get('/withdrawal/:id', async (c) => {
       amount: row.amount,
       txHash: row.tx_hash,
       status: row.status,
+      // Only the stored human-readable explanation — never raw RPC internals.
+      failureReason: row.status === 'FAILED' ? row.error : null,
       createdAt: row.created_at,
     });
   } catch (err) {
@@ -997,6 +1034,22 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         nearAccountForDeposit
       );
 
+      // Whole-balance NEAR withdraw: the user has native NEAR but no room for
+      // the gas needed to wrap it. Explain it up front (400) rather than failing
+      // at settlement with "insufficient balance" on an empty intents account.
+      if (!plainDeposit.deposited && plainDeposit.reason?.startsWith('NEAR_GAS_RESERVE_SHORTFALL')) {
+        const shortfallYocto = BigInt(plainDeposit.reason.split(':')[1] || '0');
+        const shortfallNear = Number(shortfallYocto) / 1e24;
+        const pretty = shortfallNear > 0 ? shortfallNear.toFixed(4) : '0.03';
+        return c.json<ErrorResponse>(
+          {
+            error: `You're withdrawing your whole NEAR balance — about ${pretty} NEAR has to stay in your wallet to pay network gas. Lower the amount and try again.`,
+            code: 'INSUFFICIENT_PLAIN_BALANCE',
+          },
+          400
+        );
+      }
+
       if (
         !plainDeposit.deposited &&
         plainDeposit.reason &&
@@ -1228,18 +1281,19 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     } catch (transferErr: any) {
       const settlementMsg = transferErr?.message || String(transferErr);
       const transient = isTransientRailReason(settlementMsg);
-      // Structured context + the persisted reason so a support report can be
-      // answered from the DB instead of a live tail that is gone by then.
+      // The explanation is what the user sees and what we persist, so a
+      // "my withdrawal failed" report is answered in plain language from the
+      // DB. The raw error goes to logs for deeper debugging.
+      const explanation = explainSettlementFailure(railUsed, settlementMsg, asset);
       console.error(
-        `[Withdrawal] settlement failed id=${withdrawalId} x=${session.x_handle} asset=${asset} rail=${railUsed} dest=${destinationAddress} transient=${transient}:`,
-        transferErr
+        `[Withdrawal] settlement failed id=${withdrawalId} x=${session.x_handle} asset=${asset} rail=${railUsed} dest=${destinationAddress} transient=${transient} reason=${settlementMsg.slice(0, 200)}`
       );
       try {
         await c.env.DB.prepare(
           "UPDATE withdrawals SET status = 'FAILED', error = ?, error_code = ?, rail = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'"
         )
           .bind(
-            settlementMsg.slice(0, 500),
+            explanation.slice(0, 500),
             transient ? 'RAIL_UNAVAILABLE' : 'SETTLEMENT_FAILED',
             railUsed,
             Date.now(),
@@ -1264,10 +1318,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         );
       }
       return c.json<ErrorResponse>(
-        {
-          error: `Withdrawal settlement failed: ${publicErrorMessage(transferErr, 'settlement error')}`,
-          code: 'WITHDRAWAL_FAILED',
-        },
+        { error: explanation, code: 'WITHDRAWAL_FAILED' },
         502
       );
     }
