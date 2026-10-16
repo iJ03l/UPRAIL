@@ -29,6 +29,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   const [isXLoading, setIsXLoading] = useState(false);
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
   const [successStepMessage, setSuccessStepMessage] = useState('');
@@ -195,6 +196,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       setError(describePasskeyError(err));
     } finally {
       setIsPasskeyLoading(false);
+    }
+  };
+
+  // Full reset for a stuck device: destroy the 𝕏 session cookie AND clear
+  // every local key, including the passkey device records a normal logout
+  // keeps. A stale `uprail_registered_passkeys` marker makes the client LOOK
+  // FOR a passkey this device never created (the passkey manager then "does
+  // not respond") instead of offering to create one — so we wipe it and land
+  // back on step 1 to start over.
+  const handleDisconnect = async () => {
+    if (isDisconnecting) return;
+    try {
+      setIsDisconnecting(true);
+      setError(null);
+      await api.disconnect();
+    } finally {
+      // Hard navigation, not a router push: drop all in-memory auth/module
+      // state so nothing can re-hydrate the old session.
+      window.location.replace('/login');
     }
   };
 
@@ -437,24 +457,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
             <div className="space-y-5 animate-fade-in">
               {/* Identity */}
               <div className="flex items-center justify-between rounded-2xl bg-surface-subtle border border-line px-4 py-3.5">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <img
                     src={user.avatarUrl}
                     alt={user.handle}
-                    className="w-8 h-8 rounded-full border border-line"
+                    className="w-8 h-8 rounded-full border border-line flex-shrink-0"
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
                   />
-                  <div className="text-left">
-                    <div className="text-sm font-bold text-ink">{user.name}</div>
-                    <div className="text-xs font-mono text-muted">@{user.handle}</div>
+                  <div className="text-left min-w-0">
+                    <div className="text-sm font-bold text-ink truncate">{user.name}</div>
+                    <div className="text-xs font-mono text-muted flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                      <span className="truncate">@{user.handle}</span>
+                    </div>
                   </div>
                 </div>
-                <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  <CheckCircle2 className="w-3 h-3" />
-                  <span>Connected</span>
-                </span>
+                <button
+                  type="button"
+                  onClick={handleDisconnect}
+                  disabled={isInteracting || isDisconnecting}
+                  title="Disconnect this 𝕏 account and clear this device"
+                  className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-stone-600 hover:text-red-600 bg-surface px-2.5 py-1 rounded-md border border-line hover:border-red-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                >
+                  <XGlyph className="w-3 h-3" />
+                  <span>{isDisconnecting ? 'Disconnecting…' : 'Disconnect'}</span>
+                </button>
               </div>
 
               {/* Explanation */}

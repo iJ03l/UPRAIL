@@ -638,6 +638,28 @@ export const api = {
     clearAppStorage();
   },
 
+  /**
+   * Full device reset: destroys the server session cookie AND clears every
+   * local key, including the device passkey records a normal logout keeps.
+   *
+   * Used when a user is stuck mid-onboarding (e.g. the platform passkey
+   * manager will not respond) and needs to start over. A stale
+   * `uprail_registered_passkeys` marker otherwise makes the client LOOK FOR a
+   * passkey that this device never actually created, instead of creating one.
+   */
+  async disconnect(): Promise<void> {
+    // Same write barrier as logout(): drop any in-flight getAuthStatus() so it
+    // cannot resurrect the session after storage is cleared.
+    invalidateInFlightAuth();
+    try {
+      const url = API_BASE ? `${API_BASE}/auth/logout` : '/auth/logout';
+      await fetch(url, { method: 'POST', credentials: 'include' });
+    } catch (e) {
+      console.warn('Backend disconnect/logout failed', e);
+    }
+    clearAppStorage(true);
+  },
+
   // Passkey Login Endpoints
   async getPasskeyLoginOptions(handle?: string) {
     const query = handle ? `?handle=${encodeURIComponent(handle)}` : '';
