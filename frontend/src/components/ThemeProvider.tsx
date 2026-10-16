@@ -21,14 +21,14 @@ function systemTheme(): ResolvedTheme {
 }
 
 function readStoredMode(): ThemeMode {
-  if (typeof window === 'undefined') return 'system';
+  if (typeof window === 'undefined') return 'light';
   try {
     const v = window.localStorage.getItem(STORAGE_KEY);
     if (v === 'light' || v === 'dark' || v === 'system') return v;
   } catch {
-    /* storage blocked (private mode) — fall through to system */
+    /* storage blocked (private mode) — fall through to light */
   }
-  return 'system';
+  return 'light';
 }
 
 function applyTheme(resolved: ResolvedTheme) {
@@ -39,7 +39,7 @@ function applyTheme(resolved: ResolvedTheme) {
 }
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, setModeState] = useState<ThemeMode>('system');
+  const [mode, setModeState] = useState<ThemeMode>('light');
   const [resolved, setResolved] = useState<ResolvedTheme>('light');
 
   // The inline <head> script already applied the class before paint; this

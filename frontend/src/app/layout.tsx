@@ -64,7 +64,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var m=localStorage.getItem('uprail_theme');m=(m==='light'||m==='dark'||m==='system')?m:'system';var d=m==='dark'||(m==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;if(d){e.classList.add('dark');}else{e.classList.remove('dark');}}catch(e){}})();",
+              "(function(){try{var m=localStorage.getItem('uprail_theme');m=(m==='light'||m==='dark'||m==='system')?m:'light';var d=m==='dark'||(m==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;if(d){e.classList.add('dark');}else{e.classList.remove('dark');}}catch(e){}})();",
           }}
         />
         <link rel="manifest" href="/manifest.webmanifest" />

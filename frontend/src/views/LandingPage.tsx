@@ -2,12 +2,13 @@
 
 import React, { useState } from 'react';
 import { Link } from '../lib/router';
-import { ArrowRight, ExternalLink } from 'lucide-react';
+import { ArrowRight, ExternalLink, Moon, Sun } from 'lucide-react';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { TextReveal } from '../components/TextReveal';
 import { MoneyFlowSchematic } from '../components/MoneyFlowSchematic';
 import { InteractiveRailSimulator } from '../components/InteractiveRailSimulator';
 import { GlitchLogo } from '../components/GlitchLogo';
+import { useTheme } from '../components/ThemeProvider';
 
 const getAppSubdomainUrl = () => {
   if (typeof window !== 'undefined') {
@@ -21,6 +22,8 @@ const getAppSubdomainUrl = () => {
 
 export const LandingPage: React.FC = () => {
   const [quickSendHandle, setQuickSendHandle] = useState('');
+  const { resolved, setMode } = useTheme();
+  const isDark = resolved === 'dark';
   const appSubdomainUrl = getAppSubdomainUrl();
 
   const handleQuickLaunch = (e: React.FormEvent) => {
@@ -177,7 +180,17 @@ export const LandingPage: React.FC = () => {
             <span>NEAR Intents</span>
           </div>
 
-          <div className="flex items-center space-x-5">
+          <div className="flex items-center space-x-4">
+            <button
+              type="button"
+              onClick={() => setMode(isDark ? 'light' : 'dark')}
+              aria-label="Toggle color theme"
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border border-stone-200 hover:border-stone-300 hover:bg-stone-50 text-stone-500 hover:text-black transition-colors cursor-pointer"
+            >
+              {isDark ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
+              <span>{isDark ? 'Light' : 'Dark'}</span>
+            </button>
             <a
               href="https://docs.near-intents.org"
               target="_blank"
