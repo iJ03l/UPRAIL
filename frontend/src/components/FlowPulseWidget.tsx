@@ -303,7 +303,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             to="/app/receive"
             className="px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95 flex-shrink-0"
           >
-            <span>Receive</span>
+            <span>Deposit</span>
             <ArrowDownLeft className="w-3.5 h-3.5" />
           </Link>
         </div>
