@@ -19,6 +19,7 @@ import {
   Sun,
   Moon,
   Monitor,
+  LifeBuoy,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { useTheme } from './ThemeProvider';
@@ -359,6 +360,34 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   <span className="text-stone-900 font-bold">~42ms</span>
                 </div>
               </div>
+            </div>
+
+            {/* Help & Support */}
+            <div className="space-y-2">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
+                Need Help?
+              </span>
+              <a
+                href="https://t.me/uptoberonnear"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group w-full py-3 px-3 rounded-2xl bg-stone-50 hover:bg-stone-100 border border-stone-200 transition-colors flex items-center justify-between gap-2"
+              >
+                <span className="flex items-center space-x-2.5 min-w-0">
+                  <span className="w-8 h-8 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-900 flex-shrink-0">
+                    <LifeBuoy className="w-4 h-4" />
+                  </span>
+                  <span className="text-left min-w-0">
+                    <span className="block text-xs font-mono font-bold text-stone-900">
+                      Get help on Telegram
+                    </span>
+                    <span className="block text-[10px] text-stone-500 font-mono truncate">
+                      @uptoberonnear
+                    </span>
+                  </span>
+                </span>
+                <ExternalLink className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-900 transition-colors flex-shrink-0" />
+              </a>
             </div>
 
             {/* Appearance / Theme */}

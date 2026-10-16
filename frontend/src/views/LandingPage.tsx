@@ -223,16 +223,15 @@ export const LandingPage: React.FC = () => {
             >
               @5194
             </a>{' '}
-            · for UP (
+            · for{' '}
             <a
               href="https://x.com/Uptoberonnear"
               target="_blank"
               rel="noopener noreferrer"
               className="font-bold text-stone-700 hover:text-black transition-colors"
             >
-              @Uptoberonnear
+              UP
             </a>
-            )
           </span>
           <span className="hidden sm:inline text-stone-300">—</span>
           <span>crypto payments, not promises · private by default</span>
