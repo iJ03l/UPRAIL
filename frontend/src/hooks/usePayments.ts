@@ -67,7 +67,12 @@ export function usePayments() {
         name: ot.name,
         iconUrl: ot.iconUrl,
         decimals: ot.decimals,
-        priceUsd: tokenUsdPrice(ot as any) ?? undefined,
+        // Prefer the registry price, but fall back to the price the balances
+        // API attached to this exact holding. Launchpad tokens (e.g. UPTOBER)
+        // are listed with no registry price yet are DEX-priced on the balance
+        // row — without this the Send estimate showed "—" while the dashboard,
+        // which reads the balance price first, showed a value.
+        priceUsd: tokenUsdPrice(ot as any) ?? tokenUsdPrice(balRecord) ?? undefined,
         nearContractId: ot.nearContractId,
         chain: ot.chain || 'near',
         badge: (ot.chain || 'near').toUpperCase(),
