@@ -108,6 +108,11 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   amount TEXT NOT NULL,
   tx_hash TEXT,
   status TEXT NOT NULL DEFAULT 'PENDING',
+  -- Failure diagnostics (migration 0003): the reason a withdrawal reached
+  -- FAILED, the machine code, and which settlement rail was attempted.
+  error TEXT,
+  error_code TEXT,
+  rail TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL DEFAULT 0
 );

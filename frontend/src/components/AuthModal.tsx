@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { webauthn } from '../lib/webauthn';
+import { detectInAppBrowser, inAppBrowserLabel } from '../lib/inAppBrowser';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -43,7 +44,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       }
     } catch (err: any) {
       console.error('Passkey authentication error:', err);
-      setPasskeyError(err?.message || 'Passkey canceled or unsupported.');
+      const inApp = detectInAppBrowser();
+      setPasskeyError(
+        inApp.isInApp
+          ? `Passkeys don't work in ${inAppBrowserLabel(inApp)} — open this page in Safari or Chrome.`
+          : err?.message || 'Passkey canceled or unsupported.'
+      );
     } finally {
       setIsPasskeyLoading(false);
     }

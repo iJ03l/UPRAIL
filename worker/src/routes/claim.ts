@@ -1038,6 +1038,15 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
           );
           settlementRail = 'native';
         }
+      } else if (!plainDeposit.deposited && plainDeposit.reason === 'INSUFFICIENT_PLAIN_BALANCE') {
+        // No plain balance to move. Usually the funds already sit in intents
+        // (fine), but a whole-balance native-NEAR withdraw also lands here:
+        // wrapping needs the amount PLUS a gas reserve, so the deposit is
+        // skipped and the later intents ft_withdraw fails on an empty balance.
+        // Log the decision so the persisted failure can be traced back to it.
+        console.warn(
+          `[withdraw] no plain balance to move for ${asset} (${session.x_handle}) — settling from intents`
+        );
       }
     } catch (plainErr) {
       console.error('[withdraw] settlement rail selection failed:', plainErr);
@@ -1090,6 +1099,12 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     //    Solana, Bitcoin), obtain a 1Click swap quote and fund its INTENTS
     //    deposit address with a signed transfer intent so the cross-chain swap
     //    actually starts.
+    // Which settlement rail is being attempted — recorded on the row so a
+    // failure is diagnosable after the fact (a NEAR-account intents withdraw
+    // and a cross-chain 1Click swap fail for entirely different reasons).
+    const railUsed: 'native' | 'intents' | 'cross_chain' =
+      settlementRail === 'native' ? 'native' : isNearAccount ? 'intents' : 'cross_chain';
+
     let txHash = '';
     try {
       // Meme assets never make it into intents — their token contracts have
@@ -1140,6 +1155,17 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
             `[Withdrawal] CRITICAL: ambiguous settlement for ${withdrawalId}:`,
             withdrawResult?.error
           );
+          await c.env.DB.prepare(
+            "UPDATE withdrawals SET error = ?, error_code = 'AMBIGUOUS', rail = ?, updated_at = ? WHERE id = ?"
+          )
+            .bind(
+              String(withdrawResult?.error || 'ambiguous').slice(0, 500),
+              railUsed,
+              Date.now(),
+              withdrawalId
+            )
+            .run()
+            .catch(() => {});
           return c.json<ErrorResponse>(
             {
               error: `Withdrawal status unknown — quote withdrawal id ${withdrawalId} to support`,
@@ -1176,6 +1202,17 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
             `[Withdrawal] CRITICAL: ambiguous cross-chain settlement for ${withdrawalId}:`,
             swapResult?.error
           );
+          await c.env.DB.prepare(
+            "UPDATE withdrawals SET error = ?, error_code = 'AMBIGUOUS', rail = ?, updated_at = ? WHERE id = ?"
+          )
+            .bind(
+              String(swapResult?.error || 'ambiguous').slice(0, 500),
+              railUsed,
+              Date.now(),
+              withdrawalId
+            )
+            .run()
+            .catch(() => {});
           return c.json<ErrorResponse>(
             {
               error: `Withdrawal status unknown — quote withdrawal id ${withdrawalId} to support`,
@@ -1189,12 +1226,25 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
         }
       }
     } catch (transferErr: any) {
-      console.error('[Withdrawal] settlement failed:', transferErr);
+      const settlementMsg = transferErr?.message || String(transferErr);
+      const transient = isTransientRailReason(settlementMsg);
+      // Structured context + the persisted reason so a support report can be
+      // answered from the DB instead of a live tail that is gone by then.
+      console.error(
+        `[Withdrawal] settlement failed id=${withdrawalId} x=${session.x_handle} asset=${asset} rail=${railUsed} dest=${destinationAddress} transient=${transient}:`,
+        transferErr
+      );
       try {
         await c.env.DB.prepare(
-          "UPDATE withdrawals SET status = 'FAILED' WHERE id = ? AND status = 'PENDING'"
+          "UPDATE withdrawals SET status = 'FAILED', error = ?, error_code = ?, rail = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'"
         )
-          .bind(withdrawalId)
+          .bind(
+            settlementMsg.slice(0, 500),
+            transient ? 'RAIL_UNAVAILABLE' : 'SETTLEMENT_FAILED',
+            railUsed,
+            Date.now(),
+            withdrawalId
+          )
           .run();
       } catch (releaseErr) {
         console.error('[Withdrawal] failed to release reservation:', releaseErr);
@@ -1203,8 +1253,7 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       // RPC hiccup is not a broken request — the reservation is already
       // released, so tell the user to simply retry instead of surfacing a
       // cryptic "settlement failed".
-      const settlementMsg = transferErr?.message || String(transferErr);
-      if (isTransientRailReason(settlementMsg)) {
+      if (transient) {
         return c.json<ErrorResponse>(
           {
             error:
@@ -1225,9 +1274,9 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
 
     // 4. Finalize the reservation with the real transaction hash.
     const finalize = await c.env.DB.prepare(
-      "UPDATE withdrawals SET tx_hash = ?, status = 'COMPLETED' WHERE id = ? AND status = 'PENDING'"
+      "UPDATE withdrawals SET tx_hash = ?, status = 'COMPLETED', rail = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'"
     )
-      .bind(txHash, withdrawalId)
+      .bind(txHash, railUsed, Date.now(), withdrawalId)
       .run();
 
     if ((finalize.meta?.changes ?? 0) === 0) {

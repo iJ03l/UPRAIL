@@ -17,6 +17,7 @@ import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { LegalModal, LegalTab } from '../components/LegalModal';
 import { GlitchLogo } from '../components/GlitchLogo';
+import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 
 interface LoginPageProps {
   initialLegalTab?: LegalTab;
@@ -263,7 +264,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       <QuantusInteractiveCanvas fullScreenRoam={true} />
 
       {/* Main Multi-Stage Card */}
-      <main className="relative z-10 w-full max-w-md">
+      <main className="relative z-10 w-full max-w-md space-y-4">
+        {/* Passkeys are unavailable inside X/Telegram webviews — warn early */}
+        <InAppBrowserNotice />
         <div className="bg-surface border border-line rounded-3xl p-7 sm:p-9 shadow-xl space-y-8">
 
           {/* Brand & Heading */}

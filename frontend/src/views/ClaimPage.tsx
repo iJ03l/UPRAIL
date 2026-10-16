@@ -15,6 +15,7 @@ import { useClaimFlow } from '../hooks/useClaimFlow';
 import { useXAuth } from '../hooks/useXAuth';
 import { PasskeyPrompt } from '../components/PasskeyPrompt';
 import { XAuthBanner } from '../components/XAuthBanner';
+import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 import { TokenIcon } from '../components/TokenIcon';
 import { BackBar } from '../components/BackBar';
 import { formatUsd, sumUsd, api } from '../lib/api';
@@ -196,6 +197,9 @@ export const ClaimPage: React.FC = () => {
     <div className="w-full space-y-6">
       {/* Back navigation — wide bar on desktop, floating round on mobile */}
       <BackBar label="Back to Home" />
+
+      {/* Passkeys are unavailable inside X/Telegram webviews — warn early */}
+      <InAppBrowserNotice />
 
       {/* Refresh (page title removed — the back bar owns the top now) */}
       <div className="flex items-center justify-end">
