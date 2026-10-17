@@ -11,7 +11,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
-import { webauthn, describePasskeyError } from '../lib/webauthn';
+import { webauthn, describePasskeyError, WebAuthnSupportStatus } from '../lib/webauthn';
 import { currentInvite, sanitizeReturnPath, withInvite } from '../lib/invite';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
@@ -48,6 +48,26 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     setLegalTab('terms');
     setLegalModalOpen(true);
   };
+
+  // Whether this device can create an on-device (platform) passkey. On Android
+  // this is false when no screen lock is configured — which is exactly why
+  // Chrome then offers only a security key / "another device" instead of the
+  // device lock. Surfaced as a hint so the user can fix it before tapping.
+  const [support, setSupport] = useState<WebAuthnSupportStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    webauthn
+      .checkSupport()
+      .then((s) => {
+        if (!cancelled) setSupport(s);
+      })
+      .catch(() => {
+        if (!cancelled) setSupport({ supported: false, platformAuthenticator: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Capture ?invite=CODE, ?error=..., and legal query params if present.
   // The invite is also remembered so it survives the next hop (passkey step,
@@ -496,6 +516,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   Your device creates a secure passkey for this account. There is no password or seed phrase to remember.
                 </p>
               </div>
+
+              {/* No platform authenticator: device lock missing or wrong provider */}
+              {support && support.supported && !support.platformAuthenticator && (
+                <div className="flex items-start gap-2.5 rounded-2xl bg-red-50 border border-red-200 px-4 py-3.5 text-xs text-red-700">
+                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">
+                    This device can&apos;t store a passkey on-device. Set a screen lock (PIN, pattern,
+                    fingerprint, or face) in your device settings, and make sure Google Password
+                    Manager is your passkey provider — then tap <strong>Create passkey</strong>. You can
+                    also use a security key or another device.
+                  </span>
+                </div>
+              )}
 
               {/* Primary Action: Create Passkey */}
               <button

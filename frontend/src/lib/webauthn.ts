@@ -65,14 +65,14 @@ export function describePasskeyError(err: any): string {
     msg.includes('unknown error') ||
     msg.includes('unknown transient')
   ) {
-    return "Your device's passkey manager didn't respond. Update Google Play Services and your password manager, make sure a screen lock is set, then try again — or use another browser or device.";
+    return "Your device's passkey manager didn't respond. Make sure a screen lock (PIN, pattern, or biometric) is set and that Google Password Manager is your passkey provider, then update Google Play Services and try again — or use a security key or another device.";
   }
   if (
     name === 'NotSupportedError' ||
     msg.includes('not supported') ||
     msg.includes('no create options')
   ) {
-    return 'This browser or device can’t create a passkey. Try Safari or Chrome on a device with Face ID, fingerprint, or Windows Hello.';
+    return 'This device can’t create an on-device passkey. Set a screen lock (PIN, pattern, or biometric) in your device settings, or use a security key or another device.';
   }
   if (name === 'SecurityError' || msg.includes('rp id') || msg.includes('cannot be validated')) {
     return 'Passkeys are blocked on this address. Open uprail.world directly in your browser and try again.';
@@ -223,6 +223,10 @@ export const webauthn = {
 
     const options: any = {
       ...rawOptions,
+      // WebAuthn client hints (Chrome 128+, ignored by other browsers) steer
+      // the authenticator chooser and are kept aligned with the attachment
+      // below: prefer the device passkey, fall back to cross-device.
+      hints: platformAvailable ? ['client-device', 'hybrid'] : ['security-key', 'hybrid'],
       authenticatorSelection: {
         ...(rawOptions.authenticatorSelection || {}),
         userVerification: 'preferred',
@@ -254,6 +258,7 @@ export const webauthn = {
         },
       };
       delete relaxed.authenticatorSelection.authenticatorAttachment;
+      delete relaxed.hints;
       attResp = await startRegistration(
         relaxed as unknown as Parameters<typeof startRegistration>[0]
       );
