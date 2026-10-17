@@ -26,6 +26,7 @@ import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
 import { x402Router } from './routes/x402';
 import { mcpRouter } from './routes/mcp';
+import { feesRouter } from './routes/fees';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import * as nearRpc from './services/nearRpc';
@@ -143,6 +144,9 @@ apiRouter.route('/x402', x402Router);
 
 // MCP server (JSON-RPC over Streamable HTTP) — Bearer agent key
 apiRouter.route('/mcp', mcpRouter);
+
+// Creator-fee rail (launchpad fees → @handle)
+apiRouter.route('/fees', feesRouter);
 
 // Live onchain data (balances, tokens, deposit addresses, history)
 // All scoped per authenticated user — no data leakage across users

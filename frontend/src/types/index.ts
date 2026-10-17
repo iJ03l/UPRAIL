@@ -181,6 +181,32 @@ export interface ClaimPaymentResult {
   message: string;
 }
 
+export interface FeeLaunchpad {
+  id: string;
+  name: string;
+  url: string;
+  creatorLabel: string;
+  steps: string[];
+}
+
+export interface FeeConfig {
+  handle: string;
+  payoutAddress: string;
+  registered: boolean;
+  launchpads: FeeLaunchpad[];
+}
+
+export interface FeeEvent {
+  id: string;
+  intent_type: string;
+  amount_in?: string;
+  defuse_asset_id_in?: string;
+  receiver_id?: string;
+  sender_id?: string;
+  block_timestamp?: number;
+  status: string;
+}
+
 export type AgentMode = 'always_ask' | 'autonomous';
 
 /** A scoped programmatic key an agent uses to move funds under policy. */
