@@ -43,9 +43,26 @@ export async function generateRegistrationOptions(params: {
   userName: string;
   rpId?: string;
   rpName: string;
+  /**
+   * Credentials already registered for this user. Passing them makes the
+   * authenticator refuse to create a duplicate on the same device
+   * (`InvalidStateError`) instead of silently registering a second passkey.
+   */
+  excludeCredentials?: Array<{ id: string; transports?: string[] }>;
 }) {
   const encoder = new TextEncoder();
   const userIdBytes = encoder.encode(params.userId);
+
+  const excludeCredentials =
+    params.excludeCredentials && params.excludeCredentials.length > 0
+      ? params.excludeCredentials.map((cred) => ({
+          id: cred.id,
+          type: 'public-key' as const,
+          ...(cred.transports && cred.transports.length > 0
+            ? { transports: cred.transports as any }
+            : {}),
+        }))
+      : undefined;
 
   return await simpleGenerateRegOptions({
     rpName: params.rpName || 'UPRAIL',
@@ -56,11 +73,19 @@ export async function generateRegistrationOptions(params: {
     attestationType: 'none',
     // Alg -7: ES256 (ECDSA w/ SHA-256 on secp256r1 / P-256 curve for NEAR)
     supportedAlgorithmIDs: [-7],
+    // NOTE: `authenticatorAttachment` is deliberately left unset. Forcing
+    // 'platform' made Chrome on Android abort creation with a Credential
+    // Manager `UnknownError` whenever Google Password Manager was not the
+    // active provider; leaving it unconstrained lets Credential Manager offer
+    // device biometrics first and fall back to any available provider.
+    // `residentKey: 'required'` guarantees a discoverable credential, which our
+    // allowCredentials-less login depends on.
     authenticatorSelection: {
-      authenticatorAttachment: 'platform',
-      residentKey: 'preferred',
+      residentKey: 'required',
+      requireResidentKey: true,
       userVerification: 'preferred',
     },
+    ...(excludeCredentials ? { excludeCredentials } : {}),
   });
 }
 

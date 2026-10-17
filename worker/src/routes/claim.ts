@@ -216,11 +216,40 @@ claimRouter.get('/register-options', requireAuth(), async (c) => {
     const rpId = resolveRpId(c.env);
     const rpName = c.env.WEBAUTHN_RP_NAME || 'UPRAIL';
 
+    // Existing credentials for this user, so the authenticator refuses to mint
+    // a duplicate passkey for the same device (InvalidStateError) — and the
+    // client can surface "sign in instead" rather than creating a second row.
+    let excludeCredentials: Array<{ id: string; transports?: string[] }> = [];
+    if (c.env.DB) {
+      try {
+        const rows = await c.env.DB.prepare(
+          'SELECT credential_id, transports FROM passkeys WHERE x_id = ?'
+        )
+          .bind(session.x_id)
+          .all<{ credential_id: string; transports: string | null }>();
+        excludeCredentials = (rows.results || [])
+          .filter((r) => r.credential_id)
+          .map((r) => {
+            let transports: string[] | undefined;
+            try {
+              const parsed = r.transports ? JSON.parse(r.transports) : null;
+              if (Array.isArray(parsed) && parsed.length > 0) transports = parsed;
+            } catch {
+              /* ignore malformed transports */
+            }
+            return { id: r.credential_id, transports };
+          });
+      } catch (err) {
+        console.warn('register-options excludeCredentials lookup failed:', err);
+      }
+    }
+
     const options = await webauthn.generateRegistrationOptions({
       userId: session.x_id,
       userName: session.x_handle,
       rpId,
       rpName,
+      excludeCredentials,
     });
 
     // Store challenge via challengeService (zero KV writes)

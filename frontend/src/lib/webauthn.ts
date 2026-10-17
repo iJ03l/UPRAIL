@@ -83,6 +83,29 @@ export function describePasskeyError(err: any): string {
   return err?.message || 'Could not create a passkey on this device. Please try again.';
 }
 
+/**
+ * True when a WebAuthn failure came from the credential provider itself
+ * (Android's Credential Manager and equivalents) rather than a genuine user
+ * cancel. These are the failures worth retrying once with relaxed options —
+ * e.g. Android Chrome throws `UnknownError` on creation when a resident key is
+ * required but the active provider cannot mint one.
+ *
+ * `NotAllowedError` is deliberately excluded: it is the user cancelling the
+ * prompt, and retrying would re-prompt them.
+ */
+export function isCredentialManagerError(err: any): boolean {
+  const name = err?.name || '';
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    name === 'UnknownError' ||
+    name === 'NotSupportedError' ||
+    name === 'ConstraintError' ||
+    msg.includes('credential manager') ||
+    msg.includes('unknown error') ||
+    msg.includes('unknown transient')
+  );
+}
+
 export interface WebAuthnSupportStatus {
   supported: boolean;
   platformAuthenticator: boolean;
@@ -183,18 +206,47 @@ export const webauthn = {
     }
 
     const rawOptions = await api.getPasskeyRegisterOptions(cleanHandle);
+    // `authenticatorAttachment` is intentionally not constrained here: the
+    // server no longer forces 'platform', so Credential Manager offers device
+    // biometrics first but may fall back to any available provider. Forcing
+    // 'platform' is what made Chrome on Android abort creation with a
+    // Credential Manager `UnknownError`.
     const options: any = {
       ...rawOptions,
       authenticatorSelection: {
         ...(rawOptions.authenticatorSelection || {}),
-        authenticatorAttachment: 'platform',
         userVerification: 'preferred',
       },
     };
-    const attResp = await startRegistration(
-      // DOM lib and @simplewebauthn/types ship structurally duplicate definitions
-      options as unknown as Parameters<typeof startRegistration>[0]
-    );
+
+    let attResp: any;
+    try {
+      attResp = await startRegistration(
+        // DOM lib and @simplewebauthn/types ship structurally duplicate definitions
+        options as unknown as Parameters<typeof startRegistration>[0]
+      );
+    } catch (err: any) {
+      // A provider hiccup (e.g. Android Credential Manager `UnknownError`) is
+      // sometimes resolved by retrying once with resident keys relaxed to
+      // 'preferred', which a provider that cannot mint a required resident key
+      // will accept. The same server challenge is reused; it is only consumed
+      // by the POST below.
+      if (!isCredentialManagerError(err)) throw err;
+      console.warn('[webauthn] create failed, retrying with relaxed selection:', err?.name);
+
+      const relaxed: any = {
+        ...options,
+        authenticatorSelection: {
+          ...options.authenticatorSelection,
+          residentKey: 'preferred',
+          requireResidentKey: false,
+        },
+      };
+      delete relaxed.authenticatorSelection.authenticatorAttachment;
+      attResp = await startRegistration(
+        relaxed as unknown as Parameters<typeof startRegistration>[0]
+      );
+    }
 
     // Register with backend
     await api.registerPasskeyAttestation(attResp);
