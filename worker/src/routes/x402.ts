@@ -87,10 +87,7 @@ x402Router.post('/challenge', async (c) => {
     );
   } catch (err: any) {
     console.error('[x402] challenge mint failed:', err);
-    return c.json(
-      { error: 'Could not create a payment challenge.', code: 'X402_CHALLENGE_FAILED', detail: err?.message },
-      502
-    );
+    return c.json({ error: 'Could not create a payment challenge.', code: 'X402_CHALLENGE_FAILED' }, 502);
   }
 });
 

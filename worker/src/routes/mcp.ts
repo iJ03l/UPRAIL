@@ -142,8 +142,30 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
         return toolText(data, blocked.status >= 400);
       }
 
+      // A send needs a signed quote (depositAddress + quoteSignature); obtain
+      // one from the public quote endpoint exactly as the web client does, so a
+      // tool caller never has to know the two-step protocol.
+      const quoteUrl = new URL('/api/quote', c.req.url);
+      const quoteRes = await fetch(quoteUrl.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipientHandle, asset, amount }),
+      });
+      if (!quoteRes.ok) {
+        const err = (await quoteRes.json().catch(() => ({}))) as { error?: string; code?: string };
+        return toolText({ error: err.error || 'Failed to quote payment', code: err.code }, true);
+      }
+      const quote = (await quoteRes.json()) as { quoteSignature?: string; depositAddress?: string };
+
       // Run the exact human send pipeline with the tool arguments as the body.
-      c.set('parsedBody' as any, { recipientHandle, asset, amount, memo: args?.memo });
+      c.set('parsedBody' as any, {
+        recipientHandle,
+        asset,
+        amount,
+        memo: args?.memo,
+        quoteSignature: quote.quoteSignature,
+        depositAddress: quote.depositAddress,
+      });
       const response = await handleSendPayment(c);
       const payload = await response.json().catch(() => ({}));
       if (response.status === 201) {
