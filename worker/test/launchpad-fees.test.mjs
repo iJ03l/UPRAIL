@@ -4,6 +4,10 @@ import {
   normalizeHandle,
   fromAtomic,
   contractFromToken,
+  splitProtocolFee,
+  deriveHandleFromDescription,
+  protocolFeePercent,
+  minFeeUsd,
 } from '../dist/launchpadFees.bundle.mjs';
 import {
   generatePartnerKey,
@@ -59,6 +63,64 @@ describe('atomic → decimal conversion', () => {
     assert.equal(fromAtomic('0', 6), '0');
     assert.equal(fromAtomic('', 6), '0');
     assert.equal(fromAtomic('not-a-number', 6), '0');
+  });
+});
+
+describe('protocol fee split', () => {
+  it('carves 5% with integer math and never loses wei', () => {
+    const { netAtomic, feeAtomic } = splitProtocolFee(1000000n, 0.05);
+    assert.equal(feeAtomic, 50000n);
+    assert.equal(netAtomic, 950000n);
+    assert.equal(netAtomic + feeAtomic, 1000000n);
+  });
+
+  it('floors the fee and leaves the remainder in the net', () => {
+    const { netAtomic, feeAtomic } = splitProtocolFee(3n, 0.05);
+    assert.equal(feeAtomic, 0n);
+    assert.equal(netAtomic, 3n);
+  });
+
+  it('is a no-op at 0% and for non-positive amounts', () => {
+    assert.deepEqual(splitProtocolFee(12345n, 0), { netAtomic: 12345n, feeAtomic: 0n });
+    assert.deepEqual(splitProtocolFee(0n, 0.05), { netAtomic: 0n, feeAtomic: 0n });
+  });
+
+  it('reads FEE_PERCENT with a 5% fallback', () => {
+    assert.equal(protocolFeePercent({}), 0.05);
+    assert.equal(protocolFeePercent({ FEE_PERCENT: '0.05' }), 0.05);
+    assert.equal(protocolFeePercent({ FEE_PERCENT: '0' }), 0);
+    assert.equal(protocolFeePercent({ FEE_PERCENT: 'nonsense' }), 0.05);
+    assert.equal(protocolFeePercent({ FEE_PERCENT: '1' }), 0.05);
+  });
+});
+
+describe('creator-fee recipient from token description', () => {
+  it('reads the canonical line', () => {
+    assert.equal(deriveHandleFromDescription('Fees to @elonmusk via UPRAIL'), 'elonmusk');
+    assert.equal(deriveHandleFromDescription('Fees to elonmusk via uprail'), 'elonmusk');
+    assert.equal(
+      deriveHandleFromDescription('A token. Fees to @creator via UPRAIL. DYOR.'),
+      'creator'
+    );
+  });
+
+  it('falls back to the first @handle', () => {
+    assert.equal(deriveHandleFromDescription('launched for @alice, enjoy'), 'alice');
+  });
+
+  it('returns null when there is no handle', () => {
+    for (const bad of ['', 'no handles here', null, undefined, 42]) {
+      assert.equal(deriveHandleFromDescription(bad), null, `expected null for ${String(bad)}`);
+    }
+  });
+});
+
+describe('creator-fee dust threshold', () => {
+  it('defaults to $1 and honours an override', () => {
+    assert.equal(minFeeUsd({}), 1);
+    assert.equal(minFeeUsd({ MIN_FEE_USD: '0.5' }), 0.5);
+    assert.equal(minFeeUsd({ MIN_FEE_USD: '0' }), 0);
+    assert.equal(minFeeUsd({ MIN_FEE_USD: 'nope' }), 1);
   });
 });
 

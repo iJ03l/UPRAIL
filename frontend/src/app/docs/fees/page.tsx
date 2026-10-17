@@ -35,8 +35,8 @@ export default function FeesDocsPage() {
           </li>
           <li>
             That&apos;s it. Every creator fee the launchpad pays is credited to{' '}
-            <code className="font-mono text-[13px]">@yourhandle</code> on UPRAIL, claimable with your
-            passkey at{' '}
+            <code className="font-mono text-[13px]">@yourhandle</code> on UPRAIL (net of the 5%
+            protocol fee), claimable with your passkey at{' '}
             <a className="text-stone-900 underline" href="https://app.uprail.world/fees">
               app.uprail.world/fees
             </a>
@@ -45,7 +45,9 @@ export default function FeesDocsPage() {
         </ol>
         <Callout>
           Because fees are paid in the launchpad&apos;s <strong className="text-stone-900">paired token</strong>,
-          they arrive as that token. Hold it on UPRAIL or cash out to any chain from your vault.
+          they arrive as that token. The standard <strong className="text-stone-900">5% protocol fee</strong>{' '}
+          is carved out at source, exactly like a peer send; the rest is yours to hold on UPRAIL or
+          cash out to any chain from your vault.
         </Callout>
       </section>
 
@@ -77,11 +79,66 @@ export default function FeesDocsPage() {
           Integration — for launchpads
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          A launchpad integrates with a signed webhook. UPRAIL issues a per-launchpad{' '}
+          Two ways in. The <strong className="text-stone-900">zero-integration</strong> path needs no
+          key, no signing and no approval — point the token&apos;s creator fees at escrow and name the
+          recipient. The <strong className="text-stone-900">signed webhook</strong> is the accelerated
+          path for launchpads that want verified delivery plus pre-registration on token launch.
+        </p>
+
+        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
+          Zero-integration (no key, no signing)
+        </h3>
+        <ol className="space-y-2 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
+          <li>
+            Point <strong className="text-stone-900">100% of the token&apos;s creator fees</strong> at{' '}
+            <code className="font-mono text-[13px]">escrow.uprail.near</code>, permanently.
+          </li>
+          <li>
+            Put one line in the token description:{' '}
+            <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code>. UPRAIL reads the
+            recipient from there.
+          </li>
+          <li>
+            Register the token once, then report each fee push by its tx hash. Crediting is gated on
+            the on-chain transfer to escrow, so neither call can mint balance.
+          </li>
+        </ol>
+        <Endpoint verb="POST" path="/api/fees/prepare" auth="public" />
+        <Code title="prepare">{`// request
+{ "token": "token.near" }
+
+// response
+{
+  "token": "token.near",
+  "address": "escrow.uprail.near",
+  "registered": true,
+  "feePercent": 0.05,
+  "minFeeUsd": 1
+}`}</Code>
+        <Endpoint verb="POST" path="/api/fees/route" auth="public" />
+        <Code title="route → 201">{`// request — handle is optional; read from the description if omitted
+{ "token": "token.near", "txHash": "…" }
+
+// response
+{
+  "id": "fee_…",
+  "handle": "creator",
+  "asset": "token.near",
+  "amount": "118.75",   // net of the 5% protocol fee
+  "fee": "6.25",
+  "routing": "direct",  // or "escrow"
+  "status": "CLAIMED"
+}`}</Code>
+
+        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
+          Signed webhook (accelerated)
+        </h3>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          UPRAIL issues a per-launchpad{' '}
           <strong className="text-stone-900">bearer partner key</strong> and a{' '}
           <strong className="text-stone-900">webhook secret</strong>; every request carries both, and
-          the secret signs the raw body so fees can&apos;t be spoofed. Onboarding is by request —
-          contact the team.
+          the secret signs the raw body so fees can&apos;t be spoofed. It also lets you pre-register
+          escrow the moment a token launches. Onboarding is by request — contact the team.
         </p>
 
         <Endpoint verb="POST" path="/api/fees/webhook" auth="Bearer + HMAC" />
@@ -169,7 +226,9 @@ X-UPRAIL-Signature: t=<unix-seconds>,v1=<hex hmac_sha256(secret, "<t>.<raw body>
   "token": "token.near",
   "address": "escrow.uprail.near",
   "mode": "direct",     // or "escrow"
-  "registered": true
+  "registered": true,
+  "feePercent": 0.05,
+  "minFeeUsd": 1
 }`}</Code>
         <Endpoint verb="POST" path="/api/fees/ingest" auth="Bearer partner key" />
         <Code title="ingest → 201">{`// request
@@ -180,10 +239,18 @@ X-UPRAIL-Signature: t=<unix-seconds>,v1=<hex hmac_sha256(secret, "<t>.<raw body>
   "id": "pay_…",
   "handle": "creator",
   "asset": "token.near",
-  "amount": "125.0",
+  "amount": "118.75",   // net of the 5% protocol fee
+  "fee": "6.25",
   "routing": "direct",
   "status": "CLAIMED"
 }`}</Code>
+
+        <Callout tone="warn">
+          <strong className="text-stone-900">Dust guard.</strong> A fee whose USD value is known and
+          below <code className="font-mono text-[13px]">minFeeUsd</code> is held rather than settled
+          immediately, so escrow gas is never spent settling dust. It stays claimable and is credited
+          on the next claim.
+        </Callout>
       </section>
 
       <section id="launchpads" className="space-y-3">

@@ -4381,6 +4381,9 @@ export interface FtContractMetadata {
   symbol: string;
   name: string;
   decimals: number;
+  /** NEP-141 `description`, when the contract exposes one. Used to resolve a
+   *  creator-fee recipient from the token itself ("Fees to @handle via UPRAIL"). */
+  description?: string;
 }
 
 /**
@@ -4403,6 +4406,7 @@ export async function getFtContractMetadata(
       symbol: typeof meta.symbol === 'string' ? meta.symbol : '',
       name: typeof meta.name === 'string' ? meta.name : '',
       decimals: Number.isFinite(decimals) ? decimals : 18,
+      description: typeof meta.description === 'string' ? meta.description : undefined,
     };
   } catch {
     return null;

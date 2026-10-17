@@ -47,6 +47,18 @@ export interface Env {
   // by default — see wrangler.jsonc for why fees.uprail.near cannot receive)
   FEE_ACCOUNT_ID?: string;
   FEE_PERCENT?: string;
+  /**
+   * Creator-fee dust guard: a launchpad fee whose USD value is known and below
+   * this threshold is held (claimed later) instead of spending escrow gas to
+   * settle it immediately. Unknown price → routed as normal. Default 1.
+   */
+  MIN_FEE_USD?: string;
+  /**
+   * Daily cap on escrow storage registrations triggered by the
+   * unauthenticated zero-integration path, bounding the gas a stranger can
+   * make escrow spend. Default 50.
+   */
+  PUBLIC_REG_DAILY_CAP?: string;
 
   // Worker Secrets
   X_CLIENT_SECRET?: string;

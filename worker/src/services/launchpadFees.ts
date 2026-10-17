@@ -9,9 +9,13 @@
  *   - unknown handle → held as an ESCROWED receivable, claimable the moment the
  *                      handle signs up (via the normal claim flow)
  *
- * Tokens are held as-is; no protocol fee is taken. Launchpad-sourced rows carry
- * `origin = 'launchpad:<name>'`, and are stamped with a far-future expiry so the
- * refund sweep can never claw a creator's fee back to the launchpad.
+ * The standard protocol fee (FEE_PERCENT, 5%) is carved out at source, exactly
+ * like a peer send: the launchpad pushes the gross token amount and the creator
+ * is credited the net, with the 5% left in escrow (which is also the fee
+ * account). A known-price fee below MIN_FEE_USD is held rather than settled
+ * immediately, so escrow gas is never spent settling dust. Launchpad-sourced
+ * rows carry `origin = 'launchpad:<name>'`, and are stamped with a far-future
+ * expiry so the refund sweep can never claw a creator's fee back.
  */
 
 import { PaymentStatus, type Env } from '../types';
@@ -24,8 +28,43 @@ export const LAUNCHPAD_FEE_EXPIRES_AT = 4102444800000;
 /** How long a successful escrow registration is remembered. */
 const REG_CACHE_TTL_SECONDS = 30 * 24 * 3600;
 
+/** Default daily cap on unauthenticated (zero-integration) registrations. */
+const PUBLIC_REG_DAILY_CAP = 50;
+
 export function escrowHoldingAccount(env: Env): string {
   return env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+}
+
+/** Where the protocol fee is routed. Same escrow account by default. */
+export function feeAccount(env: Env): string {
+  return env.FEE_ACCOUNT_ID || escrowHoldingAccount(env);
+}
+
+/** The protocol fee rate as a percent float (FEE_PERCENT, default 5%). */
+export function protocolFeePercent(env: Env): number {
+  const p = parseFloat(env.FEE_PERCENT ?? '0.05');
+  return Number.isFinite(p) && p >= 0 && p < 1 ? p : 0.05;
+}
+
+/** Creator-fee dust guard in USD (MIN_FEE_USD, default 1). */
+export function minFeeUsd(env: Env): number {
+  const p = parseFloat(env.MIN_FEE_USD ?? '1');
+  return Number.isFinite(p) && p >= 0 ? p : 1;
+}
+
+/**
+ * Splits a gross atomic amount into (net, fee) using integer math only, so no
+ * wei is ever lost to float rounding. The fee is floored; the net absorbs the
+ * remainder. Returns fee 0n when the rate is zero.
+ */
+export function splitProtocolFee(
+  grossAtomic: bigint,
+  percent: number
+): { netAtomic: bigint; feeAtomic: bigint } {
+  if (grossAtomic <= 0n || percent <= 0) return { netAtomic: grossAtomic, feeAtomic: 0n };
+  const bps = BigInt(Math.round(percent * 10000));
+  const feeAtomic = (grossAtomic * bps) / 10000n;
+  return { netAtomic: grossAtomic - feeAtomic, feeAtomic };
 }
 
 /** Normalizes '@Handle ' → 'handle'. Returns null when it is not a valid handle. */
@@ -61,6 +100,10 @@ export interface LaunchpadToken {
   symbol: string;
   /** Canonical asset string stored on the payment row. */
   asset: string;
+  /** Live USD price from the registry when known; absent for brand-new tokens. */
+  priceUsd?: number;
+  /** NEP-141 description, when the contract exposes one. */
+  description?: string;
 }
 
 /**
@@ -87,6 +130,7 @@ export async function resolveLaunchpadToken(
         decimals: hit.decimals ?? 18,
         symbol: hit.symbol || '',
         asset: hit.defuse_asset_id || `nep141:${hit.nearContractId}`,
+        priceUsd: typeof hit.priceUsd === 'number' ? hit.priceUsd : undefined,
       };
     }
   } catch {
@@ -95,7 +139,28 @@ export async function resolveLaunchpadToken(
 
   const meta = await nearRpc.getFtContractMetadata(env, contractId);
   if (!meta) return null;
-  return { contractId, decimals: meta.decimals, symbol: meta.symbol, asset: `nep141:${contractId}` };
+  return {
+    contractId,
+    decimals: meta.decimals,
+    symbol: meta.symbol,
+    asset: `nep141:${contractId}`,
+    description: meta.description,
+  };
+}
+
+/**
+ * Reads a creator-fee recipient handle straight from a token's NEP-141
+ * description. Recognizes the canonical line and falls back to the first
+ * `@handle` mentioned:
+ *
+ *   "Fees to @handle via UPRAIL"  → handle
+ */
+export function deriveHandleFromDescription(description: unknown): string | null {
+  if (typeof description !== 'string' || !description) return null;
+  const canonical = description.match(/fees\s+to\s+@?([a-z0-9_]{1,15})\s+via\s+uprail/i);
+  if (canonical) return normalizeHandle(canonical[1]);
+  const first = description.match(/@([a-z0-9_]{1,15})\b/i);
+  return first ? normalizeHandle(first[1]) : null;
 }
 
 /**
@@ -141,6 +206,54 @@ export async function registerEscrowForToken(
         .run();
     } catch (err) {
       console.warn('[launchpadFees] registration quota update failed:', err);
+    }
+  }
+  return res;
+}
+
+/**
+ * Escrow registration for the unauthenticated zero-integration path. No partner
+ * key is required — a token that points its creator fees at escrow can be
+ * prepared by anyone. Abuse (a stranger making escrow spend storage gas) is
+ * bounded by the same per-contract KV cache plus a global daily counter, so the
+ * first registration of a token is the only one that can cost anything.
+ */
+export async function registerEscrowForTokenPublic(
+  env: Env,
+  contractId: string
+): Promise<{ registered: boolean; reason?: string }> {
+  const cacheKey = `fees:reg:${contractId}`;
+  if (env.CACHE) {
+    try {
+      if (await env.CACHE.get(cacheKey)) return { registered: true };
+    } catch {
+      // KV miss on error: fall through and (re)register.
+    }
+  }
+
+  const cap = parseInt(env.PUBLIC_REG_DAILY_CAP ?? '', 10);
+  const dailyCap = Number.isFinite(cap) && cap >= 0 ? cap : PUBLIC_REG_DAILY_CAP;
+  const day = new Date().toISOString().slice(0, 10);
+  const counterKey = `fees:pubreg:${day}`;
+  let used = 0;
+  if (env.CACHE) {
+    try {
+      used = parseInt((await env.CACHE.get(counterKey)) || '0', 10) || 0;
+    } catch {
+      // treat an unreadable counter as 0
+    }
+    if (used >= dailyCap) {
+      return { registered: false, reason: 'Daily public escrow-registration cap reached.' };
+    }
+  }
+
+  const res = await nearRpc.ensureEscrowStorageRegistered(env, contractId);
+  if (res.registered && env.CACHE) {
+    try {
+      await env.CACHE.put(cacheKey, '1', { expirationTtl: REG_CACHE_TTL_SECONDS });
+      await env.CACHE.put(counterKey, String(used + 1), { expirationTtl: 2 * 24 * 3600 });
+    } catch {
+      // Best-effort; the in-isolate cache still prevents repeat txs.
     }
   }
   return res;
@@ -198,9 +311,13 @@ export interface RecordFeeResult {
   id?: string;
   asset?: string;
   amount?: string;
+  /** Protocol fee carved out of the gross (5% by default). */
+  fee?: string;
   routing?: 'direct' | 'escrow';
   status?: PaymentStatus;
   claimTxHash?: string;
+  /** True when a known-price dust fee was held instead of settled immediately. */
+  deferred?: boolean;
   error?: string;
 }
 
@@ -222,15 +339,16 @@ export async function recordLaunchpadFee(
   // Idempotency: the same inbound tx must never be credited twice.
   try {
     const existing = await env.DB.prepare(
-      'SELECT id, status, claim_tx_hash FROM payments WHERE intent_hash = ? LIMIT 1'
+      'SELECT id, status, fee, claim_tx_hash FROM payments WHERE intent_hash = ? LIMIT 1'
     )
       .bind(params.txHash)
-      .first<{ id: string; status: string; claim_tx_hash: string | null }>();
+      .first<{ id: string; status: string; fee: string | null; claim_tx_hash: string | null }>();
     if (existing) {
       return {
         ok: true,
         id: existing.id,
         asset: token.asset,
+        fee: existing.fee || undefined,
         routing: existing.status === PaymentStatus.CLAIMED ? 'direct' : 'escrow',
         status: existing.status as PaymentStatus,
         claimTxHash: existing.claim_tx_hash || undefined,
@@ -244,7 +362,25 @@ export async function recordLaunchpadFee(
   if (!inbound.ok || !inbound.amountAtomic) {
     return { ok: false, error: inbound.error || 'inbound verification failed' };
   }
-  const amount = fromAtomic(inbound.amountAtomic, token.decimals);
+
+  // Carve the standard protocol fee (FEE_PERCENT, 5%) at source, exactly like a
+  // peer send: the launchpad pushed the gross, the creator is credited the net,
+  // and the 5% stays in escrow (which is also the fee account).
+  const grossAtomic = BigInt(inbound.amountAtomic);
+  const { netAtomic, feeAtomic } = splitProtocolFee(grossAtomic, protocolFeePercent(env));
+  const netAtomicStr = netAtomic.toString();
+  const amount = fromAtomic(netAtomicStr, token.decimals);
+  const fee = fromAtomic(feeAtomic.toString(), token.decimals);
+  const feeRecipient = feeAccount(env);
+
+  // Dust guard: when the token's USD price is known and the net is worth less
+  // than MIN_FEE_USD, hold it (claimable) instead of spending escrow gas to
+  // settle it now. Unknown price → route as normal.
+  const netUsd =
+    typeof token.priceUsd === 'number' && token.priceUsd > 0
+      ? parseFloat(amount) * token.priceUsd
+      : null;
+  const dustGuard = netUsd !== null && netUsd < minFeeUsd(env);
 
   const identity = await env.DB.prepare(
     'SELECT x_id, x_handle, near_account FROM x_identities WHERE LOWER(x_handle) = ?'
@@ -256,21 +392,25 @@ export async function recordLaunchpadFee(
   const now = Date.now();
   const memo = params.memo || `${params.launchpad} creator fees`;
 
-  // Unknown handle: hold as an escrowed receivable.
-  if (!identity) {
+  // Unknown handle — or a known-handle dust fee — holds as an escrowed
+  // receivable, claimable via the normal pending-claim flow.
+  if (!identity || dustGuard) {
     await env.DB.prepare(
       `INSERT INTO payments (
          id, sender_x_id, sender_x_handle, recipient_handle, recipient_x_id,
          asset, amount, fee, fee_recipient, memo, status, intent_hash,
          created_at, expires_at, updated_at, origin
-       ) VALUES (?, NULL, ?, ?, NULL, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`
+       ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         id,
         origin,
         params.handle,
+        identity?.x_id ?? null,
         token.asset,
         amount,
+        fee,
+        feeRecipient,
         memo,
         PaymentStatus.ESCROWED,
         params.txHash,
@@ -280,10 +420,19 @@ export async function recordLaunchpadFee(
         origin
       )
       .run();
-    return { ok: true, id, asset: token.asset, amount, routing: 'escrow', status: PaymentStatus.ESCROWED };
+    return {
+      ok: true,
+      id,
+      asset: token.asset,
+      amount,
+      fee,
+      routing: 'escrow',
+      status: PaymentStatus.ESCROWED,
+      deferred: dustGuard && !!identity,
+    };
   }
 
-  // Known handle: settle straight into the vault (instant credit).
+  // Known handle: settle straight into the vault (instant credit of the net).
   let claimTxHash: string | undefined;
   let settled = false;
   try {
@@ -296,7 +445,7 @@ export async function recordLaunchpadFee(
       env,
       token.contractId,
       vault,
-      inbound.amountAtomic
+      netAtomicStr
     );
     if (payout.success && payout.txHash) {
       claimTxHash = payout.txHash;
@@ -313,7 +462,7 @@ export async function recordLaunchpadFee(
        id, sender_x_id, sender_x_handle, recipient_handle, recipient_x_id,
        asset, amount, fee, fee_recipient, memo, status, intent_hash, claim_tx_hash,
        created_at, expires_at, updated_at, origin
-     ) VALUES (?, NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id,
@@ -322,6 +471,8 @@ export async function recordLaunchpadFee(
       identity.x_id,
       token.asset,
       amount,
+      fee,
+      feeRecipient,
       memo,
       settled ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED,
       params.txHash,
@@ -338,6 +489,7 @@ export async function recordLaunchpadFee(
     id,
     asset: token.asset,
     amount,
+    fee,
     routing: settled ? 'direct' : 'escrow',
     status: settled ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED,
     claimTxHash,

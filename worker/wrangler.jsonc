@@ -35,6 +35,12 @@
     // this once a treasury account is registered on intents.
     "FEE_ACCOUNT_ID": "escrow.uprail.near",
     "FEE_PERCENT": "0.05",
+    // Creator-fee dust guard. A launchpad fee whose USD value is known and below
+    // this is held (claimable) instead of spending escrow gas settling dust.
+    "MIN_FEE_USD": "1",
+    // Daily cap on escrow registrations triggered by the unauthenticated
+    // zero-integration fee path, bounding gas a stranger can make escrow spend.
+    "PUBLIC_REG_DAILY_CAP": "50",
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",

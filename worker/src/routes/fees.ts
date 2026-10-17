@@ -26,8 +26,13 @@ import {
   normalizeHandle,
   escrowHoldingAccount,
   registerEscrowForToken,
+  registerEscrowForTokenPublic,
   recordLaunchpadFee,
   contractFromToken,
+  deriveHandleFromDescription,
+  minFeeUsd,
+  protocolFeePercent,
+  resolveLaunchpadToken,
 } from '../services/launchpadFees';
 
 export const feesRouter = new Hono<AppContext>();
@@ -234,8 +239,10 @@ feesRouter.post('/webhook', async (c) => {
           id: result.id,
           asset: result.asset,
           amount: result.amount,
+          fee: result.fee,
           routing: result.routing,
           status: result.status,
+          deferred: result.deferred || false,
         },
         202
       );
@@ -276,7 +283,91 @@ feesRouter.post('/resolve', async (c) => {
     address: escrowHoldingAccount(c.env),
     mode: known ? 'direct' : 'escrow',
     registered: true,
+    feePercent: protocolFeePercent(c.env),
+    minFeeUsd: minFeeUsd(c.env),
   });
+});
+
+/**
+ * POST /api/fees/prepare
+ * Zero-integration path (no partner key): a token that points its creator fees
+ * at escrow can be prepared by anyone. Registers escrow on the token so the
+ * launchpad's push is accepted, and reports where to send. Bounded by a global
+ * daily registration cap.
+ */
+feesRouter.post('/prepare', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { token?: unknown } | null;
+  const contractId = contractFromToken(body?.token);
+  if (!contractId) return jsonError(c, 400, 'A valid NEP-141 token contract is required.', 'INVALID_TOKEN');
+
+  const reg = await registerEscrowForTokenPublic(c.env, contractId);
+  if (!reg.registered) {
+    return jsonError(c, 422, reg.reason || 'Could not prepare escrow for this token.', 'REGISTRATION_FAILED');
+  }
+  return c.json({
+    token: contractId,
+    address: escrowHoldingAccount(c.env),
+    registered: true,
+    feePercent: protocolFeePercent(c.env),
+    minFeeUsd: minFeeUsd(c.env),
+    note: 'Point this token\'s creator fees here (100%, permanent) and name the recipient in its description as: Fees to @handle via UPRAIL',
+  });
+});
+
+/**
+ * POST /api/fees/route
+ * Zero-integration path (no partner key): report an inbound creator fee by tx
+ * hash. The recipient handle is read from the token's description unless one is
+ * supplied. Crediting is gated on the on-chain transfer to escrow, so this
+ * endpoint cannot be used to mint balance.
+ */
+feesRouter.post('/route', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as
+    | { token?: unknown; txHash?: unknown; handle?: unknown; memo?: unknown }
+    | null;
+  const contractId = contractFromToken(body?.token);
+  if (!contractId) return jsonError(c, 400, 'A valid NEP-141 token contract is required.', 'INVALID_TOKEN');
+  const txHash = typeof body?.txHash === 'string' ? body.txHash.trim() : '';
+  if (!txHash) return jsonError(c, 400, 'txHash is required.', 'INVALID_TX_HASH');
+
+  let handle = normalizeHandle(body?.handle);
+  if (!handle) {
+    // Zero-integration: derive the recipient from the token's own description.
+    const token = await resolveLaunchpadToken(c.env, contractId);
+    handle = deriveHandleFromDescription(token?.description);
+  }
+  if (!handle) {
+    return jsonError(
+      c,
+      422,
+      'No recipient handle provided and none found in the token description. Add "Fees to @handle via UPRAIL" or pass `handle`.',
+      'NO_RECIPIENT'
+    );
+  }
+
+  const result = await recordLaunchpadFee(c.env, {
+    launchpad: 'direct',
+    handle,
+    token: contractId,
+    txHash,
+    memo: typeof body?.memo === 'string' ? body.memo : undefined,
+  });
+  if (!result.ok) {
+    return jsonError(c, 422, result.error || 'Could not route this fee.', 'FEE_NOT_ROUTED');
+  }
+  return c.json(
+    {
+      id: result.id,
+      handle,
+      asset: result.asset,
+      amount: result.amount,
+      fee: result.fee,
+      routing: result.routing,
+      status: result.status,
+      deferred: result.deferred || false,
+    },
+    201
+  );
 });
 
 /**
@@ -316,8 +407,10 @@ feesRouter.post('/ingest', async (c) => {
       handle,
       asset: result.asset,
       amount: result.amount,
+      fee: result.fee,
       routing: result.routing,
       status: result.status,
+      deferred: result.deferred || false,
     },
     201
   );
