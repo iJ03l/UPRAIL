@@ -24,6 +24,7 @@ import { healthRouter } from './routes/health';
 import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
+import { x402Router } from './routes/x402';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import * as nearRpc from './services/nearRpc';
@@ -135,6 +136,9 @@ apiRouter.route('/claim', claimRouter);
 
 // Agent payment rail (scoped Bearer keys + Always-Ask approvals)
 apiRouter.route('/agent', agentRouter);
+
+// x402 / MPP facilitator (402 challenge, verify, settle) — public
+apiRouter.route('/x402', x402Router);
 
 // Live onchain data (balances, tokens, deposit addresses, history)
 // All scoped per authenticated user — no data leakage across users
