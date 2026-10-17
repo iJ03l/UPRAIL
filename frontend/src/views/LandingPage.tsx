@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Link } from '../lib/router';
-import { ArrowRight, ExternalLink, Moon, Sun } from 'lucide-react';
+import { ArrowRight, ExternalLink, Moon, Sun, Bot, Coins, Network } from 'lucide-react';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { TextReveal } from '../components/TextReveal';
 import { MoneyFlowSchematic } from '../components/MoneyFlowSchematic';
@@ -126,7 +126,80 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* 
-          5. Fast Send Portal
+          5. Coming Soon: new developer surfaces
+        */}
+        <section id="coming-soon" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24 space-y-6">
+          <div className="space-y-3">
+            <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
+              // Coming soon
+            </span>
+            <h2 className="text-2xl sm:text-4xl md:text-5xl font-display font-extrabold tracking-tight text-stone-950 max-w-3xl">
+              UPRAIL is opening up to agents and creators.
+            </h2>
+            <p className="text-sm sm:text-base text-stone-600 max-w-2xl leading-relaxed">
+              The same confidential rail, now programmable. These surfaces are in preview — read
+              the{' '}
+              <a
+                href="https://docs.uprail.world"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold text-stone-900 underline underline-offset-2"
+              >
+                developer docs
+              </a>{' '}
+              while they ship.
+            </p>
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-4">
+            {[
+              {
+                icon: Bot,
+                tag: 'Agent rail',
+                title: 'Pay by agent, safely',
+                body: 'Scoped keys let an AI agent pay any 𝕏 handle within limits and an allowlist you set. Always-Ask approvals, or fully autonomous.',
+              },
+              {
+                icon: Network,
+                tag: 'Agent rail',
+                title: 'x402 & MCP, built in',
+                body: 'Charge for any resource with a standards-shaped HTTP 402 settled over NEAR Intents — and plug UPRAIL into any MCP client.',
+              },
+              {
+                icon: Coins,
+                tag: 'Payouts',
+                title: 'Creator fees to 𝕏',
+                body: 'Launch on Nearly or JustHoot, point your creator fees at an 𝕏 handle, and UPRAIL routes them straight to it.',
+              },
+            ].map((f) => (
+              <div
+                key={f.title}
+                className="rounded-3xl border border-stone-200 bg-stone-50 p-6 space-y-3 flex flex-col"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-10 h-10 rounded-2xl bg-stone-950 text-white flex items-center justify-center">
+                    <f.icon className="w-5 h-5" />
+                  </div>
+                  <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                    Coming soon
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-stone-400 font-bold">
+                    {f.tag}
+                  </div>
+                  <h3 className="font-display font-extrabold text-stone-950 text-lg leading-tight">
+                    {f.title}
+                  </h3>
+                </div>
+                <p className="text-sm text-stone-600 leading-relaxed flex-1">{f.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 
+          6. Fast Send Portal
         */}
         <section className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12">
           <div className="relative rounded-3xl border border-stone-200 bg-stone-950 text-white p-6 sm:p-10 lg:p-12 overflow-hidden shadow-xl">
@@ -191,6 +264,15 @@ export const LandingPage: React.FC = () => {
               {isDark ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
               <span>{isDark ? 'Light' : 'Dark'}</span>
             </button>
+            <a
+              href="https://docs.uprail.world"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-black transition-colors flex items-center"
+            >
+              <span>Docs</span>
+              <ExternalLink className="w-3 h-3 ml-1" />
+            </a>
             <a
               href="https://docs.near-intents.org"
               target="_blank"
