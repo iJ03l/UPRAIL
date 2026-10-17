@@ -29,13 +29,37 @@ interface ChallengeBody {
   maxTimeoutSeconds?: number | string;
 }
 
+/**
+ * Accepts either a full x402 PaymentPayload (with a nested `payload`), or a
+ * flat credential ({ reference, txHash, sender, … }) and wraps the latter, so
+ * a caller does not have to hand-build the envelope.
+ */
 function asPaymentPayload(body: any): x402.X402PaymentPayload | null {
   if (!body || typeof body !== 'object') return null;
   const candidate = body.paymentPayload || body.payment || body;
-  if (candidate && typeof candidate.payload === 'object' && candidate.payload !== null) {
+  if (typeof candidate !== 'object' || candidate === null) return null;
+
+  if (typeof candidate.payload === 'object' && candidate.payload !== null) {
     return candidate as x402.X402PaymentPayload;
   }
-  return null;
+
+  const flat = {
+    reference: candidate.reference,
+    id: candidate.id,
+    depositAddress: candidate.depositAddress,
+    payTo: candidate.payTo,
+    txHash: candidate.txHash,
+    transaction: candidate.transaction,
+    sender: candidate.sender,
+  };
+  if (!Object.values(flat).some((v) => typeof v === 'string' && v)) return null;
+
+  return {
+    x402Version: candidate.x402Version || x402.X402_VERSION,
+    scheme: candidate.scheme || 'exact',
+    network: candidate.network || x402.NEAR_MAINNET,
+    payload: flat,
+  };
 }
 
 /**

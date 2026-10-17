@@ -33,6 +33,9 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         WEBAUTHN_ORIGIN: 'https://app.uprail.world',
         SESSION_SECRET: 'test_session_secret_do_not_use_in_production',
         INTERNAL_SERVICE_KEY: 'test_internal_service_key',
+        // Points at a closed local port: the settlement service is "configured"
+        // but unreachable, exercising the x402 local-escrow fallback.
+        SETTLEMENT_SERVICE_URL: 'http://127.0.0.1:1',
         // Throwaway ed25519 key generated for this test run. It is NOT a
         // real escrow key and must never appear in .dev.vars or a deployment.
         ESCROW_PRIVATE_KEY:
@@ -383,6 +386,41 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(res.status, 400);
     const body = await res.json();
     assert.equal(body.code, 'MISSING_RECIPIENT');
+  });
+
+  it('x402 mints a local-escrow challenge when settlement is unreachable', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/x402/challenge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientHandle: 'uprail', asset: 'USDC', amount: '0.01' }),
+    });
+    assert.equal(res.status, 201);
+    const body = await res.json();
+    assert.equal(body.rail, 'local');
+    assert.equal(body.depositAddress, 'escrow.uprail.near');
+    assert.match(body.reference, /^x402_/);
+    assert.equal(body.requirement.accepts[0].amount, '10000');
+    assert.equal(body.requirement.accepts[0].payTo, 'escrow.uprail.near');
+  });
+
+  it('x402 verify accepts a flat credential and reports missing tx hash', async () => {
+    const challenge = await mf.dispatchFetch('http://localhost/api/x402/challenge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientHandle: 'uprail', asset: 'USDC', amount: '0.01' }),
+    });
+    const { reference } = await challenge.json();
+
+    const res = await mf.dispatchFetch('http://localhost/api/x402/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reference }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.isValid, false);
+    assert.equal(body.reason, 'missing_tx_hash');
+    assert.equal(body.rail, 'local');
   });
 
   it('agent authentication resolves a seeded key and lists MCP tools', async () => {
