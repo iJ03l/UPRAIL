@@ -206,16 +206,27 @@ export const webauthn = {
     }
 
     const rawOptions = await api.getPasskeyRegisterOptions(cleanHandle);
-    // `authenticatorAttachment` is intentionally not constrained here: the
-    // server no longer forces 'platform', so Credential Manager offers device
-    // biometrics first but may fall back to any available provider. Forcing
-    // 'platform' is what made Chrome on Android abort creation with a
-    // Credential Manager `UnknownError`.
+
+    // Prefer the device's built-in authenticator (fingerprint / face / screen
+    // lock). When one is available we constrain to 'platform' so Chrome skips
+    // the "choose a device" sheet — which on Android only lists security
+    // key / NFC / other device when no on-device passkey provider is set up —
+    // and prompts for the device lock directly. When it is NOT available we
+    // leave it unconstrained so a security key or another device still works,
+    // and the error path explains how to enable the on-device option.
+    let platformAvailable = false;
+    try {
+      platformAvailable = await platformAuthenticatorIsAvailable();
+    } catch {
+      platformAvailable = false;
+    }
+
     const options: any = {
       ...rawOptions,
       authenticatorSelection: {
         ...(rawOptions.authenticatorSelection || {}),
         userVerification: 'preferred',
+        ...(platformAvailable ? { authenticatorAttachment: 'platform' } : {}),
       },
     };
 
