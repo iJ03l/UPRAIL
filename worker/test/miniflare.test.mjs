@@ -1,6 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { Miniflare } from 'miniflare';
 
 describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
@@ -44,20 +45,26 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     // `wrangler d1 migrations apply` does in production. Route handlers
     // (invites, payments, claim, ...) depend on these tables existing.
     const db = await mf.getD1Database('DB');
-    const migrations = ['0001_initial.sql', '0002_payment_identity_and_missing_tables.sql'];
+    const migrations = [
+      '0001_initial.sql',
+      '0002_payment_identity_and_missing_tables.sql',
+      '0003_withdrawal_error_diagnostics.sql',
+      '0004_agent_rail.sql',
+    ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
+      // Strip line comments BEFORE splitting on ';' — a ';' inside a comment
+      // (e.g. "never stored; only its hash") would otherwise split a comment
+      // line and leave a fragment as a bogus statement.
+      const withoutComments = raw
+        .split('\n')
+        .filter((line) => !line.trim().startsWith('--'))
+        .join('\n');
       // Run statements one at a time: D1's exec() mis-chunks multi-line
       // CREATE TABLE statements and rejects comment-only chunks.
-      const statements = raw
+      const statements = withoutComments
         .split(';')
-        .map((stmt) =>
-          stmt
-            .split('\n')
-            .filter((line) => !line.trim().startsWith('--'))
-            .join('\n')
-            .trim()
-        )
+        .map((stmt) => stmt.trim())
         .filter(Boolean);
       for (const stmt of statements) {
         await db.prepare(stmt).run();
@@ -354,6 +361,83 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(res.status, 401);
     const body = await res.json();
     assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('POST /api/mcp requires an agent key', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'AGENT_KEY_REQUIRED');
+  });
+
+  it('POST /api/x402/challenge validates its input', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/x402/challenge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset: 'USDC' }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.code, 'MISSING_RECIPIENT');
+  });
+
+  it('agent authentication resolves a seeded key and lists MCP tools', async () => {
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    const rawKey = 'up_agent_' + 'a'.repeat(48);
+    const keyHash = createHash('sha256').update(rawKey).digest('hex');
+
+    await db
+      .prepare(
+        `INSERT INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`
+      )
+      .bind('xid_mcp_1', 'mcp_tester', 'MCP Tester', 'mcp_tester.near', now, now)
+      .run();
+    await db
+      .prepare(
+        'INSERT INTO agents (id, x_id, name, mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .bind('agent_mcp_1', 'xid_mcp_1', 'MCP Agent', 'autonomous', now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO agent_keys (id, agent_id, x_id, label, key_hash, key_prefix, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind('key_mcp_1', 'agent_mcp_1', 'xid_mcp_1', 'MCP Agent', keyHash, 'up_agent_aaaaaa', now)
+      .run();
+
+    const listed = await mf.dispatchFetch('http://localhost/api/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    });
+    assert.equal(listed.status, 200);
+    const listedBody = await listed.json();
+    const names = listedBody.result.tools.map((t) => t.name).sort();
+    assert.deepEqual(names, ['create_payment_request', 'get_balance', 'pay_handle', 'resolve_handle']);
+
+    const resolved = await mf.dispatchFetch('http://localhost/api/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'resolve_handle', arguments: { handle: '@mcp_tester' } },
+      }),
+    });
+    assert.equal(resolved.status, 200);
+    const resolvedBody = await resolved.json();
+    assert.ok(!resolvedBody.result.isError);
+    const payload = JSON.parse(resolvedBody.result.content[0].text);
+    assert.equal(payload.exists, true);
+    assert.equal(payload.nearAccount, 'mcp_tester.near');
   });
 });
 

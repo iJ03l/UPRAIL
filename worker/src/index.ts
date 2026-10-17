@@ -25,6 +25,7 @@ import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
 import { x402Router } from './routes/x402';
+import { mcpRouter } from './routes/mcp';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import * as nearRpc from './services/nearRpc';
@@ -139,6 +140,9 @@ apiRouter.route('/agent', agentRouter);
 
 // x402 / MPP facilitator (402 challenge, verify, settle) — public
 apiRouter.route('/x402', x402Router);
+
+// MCP server (JSON-RPC over Streamable HTTP) — Bearer agent key
+apiRouter.route('/mcp', mcpRouter);
 
 // Live onchain data (balances, tokens, deposit addresses, history)
 // All scoped per authenticated user — no data leakage across users

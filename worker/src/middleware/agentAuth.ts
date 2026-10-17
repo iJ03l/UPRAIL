@@ -154,87 +154,113 @@ export const requireAgent = (): MiddlewareHandler<AppContext> => {
       return await next();
     }
 
-    const amount = parseFloat(String(body.amount)) || 0;
-    const intent = {
+    const blocked = await handleAgentPaymentIntent(c, principal, {
       recipientHandle: String(body.recipientHandle),
       asset: String(body.asset || ''),
-      amount,
-    };
-
-    if (mode === 'always_ask') {
-      const approvalId = (c.req.header('X-Agent-Approval') || '').trim();
-      if (approvalId) {
-        const approval = await c.env.DB.prepare(
-          `SELECT id, payload FROM agent_approvals
-            WHERE id = ? AND x_id = ? AND agent_key_id = ? AND status = 'APPROVED' AND expires_at > ?`
-        )
-          .bind(approvalId, row.x_id, row.id, now)
-          .first<{ id: string; payload: string }>();
-
-        if (approval && approvalMatches(approval.payload, intent)) {
-          await c.env.DB.prepare(
-            "UPDATE agent_approvals SET status = 'CONSUMED', decided_at = ? WHERE id = ? AND status = 'APPROVED'"
-          )
-            .bind(now, approvalId)
-            .run();
-          return await next();
-        }
-      }
-
-      // No matching approval: queue one for the user to decide on device.
-      const id = crypto.randomUUID();
-      try {
-        await c.env.DB.prepare(
-          `INSERT INTO agent_approvals (id, x_id, agent_key_id, payload, status, created_at, expires_at)
-           VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
-        )
-          .bind(
-            id,
-            row.x_id,
-            row.id,
-            JSON.stringify({
-              recipientHandle: intent.recipientHandle,
-              asset: intent.asset,
-              amount: intent.amount,
-              memo: typeof body.memo === 'string' ? body.memo : undefined,
-            }),
-            now,
-            now + APPROVAL_TTL_MS
-          )
-          .run();
-      } catch (err) {
-        console.error('[agentAuth] could not queue approval:', err);
-        return jsonError(c, 403, 'Could not queue an approval for this payment.', 'AGENT_APPROVAL_FAILED');
-      }
-
-      return c.json(
-        {
-          status: 'PENDING_APPROVAL',
-          approvalId: id,
-          code: 'AGENT_APPROVAL_REQUIRED',
-          detail: 'This agent is in Always-Ask mode. Approve on device, then retry with the X-Agent-Approval header.',
-        },
-        202
-      );
-    }
-
-    // Autonomous: enforce the hard policy now.
-    const spentToday = await getAgentSpendToday(c.env, row.id);
-    const verdict = evaluateAgentPolicy(principal, intent, spentToday);
-    if (!verdict.allowed) {
-      return c.json(
-        {
-          error: verdict.detail || 'Payment denied by agent policy.',
-          code: 'AGENT_POLICY_DENIED',
-          reason: verdict.reason,
-        },
-        403
-      );
-    }
+      amount: parseFloat(String(body.amount)) || 0,
+      memo: typeof body.memo === 'string' ? body.memo : undefined,
+    });
+    if (blocked) return blocked;
 
     return await next();
   };
 };
+
+export interface AgentIntent {
+  recipientHandle: string;
+  asset: string;
+  amount: number;
+  memo?: string;
+}
+
+/**
+ * Applies an agent's spend policy to a payment intent. Returns a Response when
+ * the intent must be blocked (a queued Always-Ask approval, or a policy denial),
+ * or null when the caller may proceed.
+ *
+ * Shared by the Bearer middleware and the MCP `pay_handle` tool so a payment is
+ * gated identically no matter which surface submitted it.
+ */
+export async function handleAgentPaymentIntent(
+  c: Context<AppContext>,
+  principal: AgentPrincipal,
+  intent: AgentIntent
+): Promise<Response | null> {
+  const now = Date.now();
+
+  if (principal.mode === 'always_ask') {
+    const approvalId = (c.req.header('X-Agent-Approval') || '').trim();
+    if (approvalId) {
+      const approval = await c.env.DB.prepare(
+        `SELECT id, payload FROM agent_approvals
+          WHERE id = ? AND x_id = ? AND agent_key_id = ? AND status = 'APPROVED' AND expires_at > ?`
+      )
+        .bind(approvalId, principal.x_id, principal.key_id, now)
+        .first<{ id: string; payload: string }>();
+
+      if (approval && approvalMatches(approval.payload, intent)) {
+        await c.env.DB.prepare(
+          "UPDATE agent_approvals SET status = 'CONSUMED', decided_at = ? WHERE id = ? AND status = 'APPROVED'"
+        )
+          .bind(now, approvalId)
+          .run();
+        return null;
+      }
+    }
+
+    // No matching approval: queue one for the user to decide on device.
+    const id = crypto.randomUUID();
+    try {
+      await c.env.DB.prepare(
+        `INSERT INTO agent_approvals (id, x_id, agent_key_id, payload, status, created_at, expires_at)
+         VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
+      )
+        .bind(
+          id,
+          principal.x_id,
+          principal.key_id,
+          JSON.stringify({
+            recipientHandle: intent.recipientHandle,
+            asset: intent.asset,
+            amount: intent.amount,
+            memo: intent.memo,
+          }),
+          now,
+          now + APPROVAL_TTL_MS
+        )
+        .run();
+    } catch (err) {
+      console.error('[agentAuth] could not queue approval:', err);
+      return jsonError(c, 403, 'Could not queue an approval for this payment.', 'AGENT_APPROVAL_FAILED');
+    }
+
+    return c.json(
+      {
+        status: 'PENDING_APPROVAL',
+        approvalId: id,
+        code: 'AGENT_APPROVAL_REQUIRED',
+        detail: 'This agent is in Always-Ask mode. Approve on device, then retry with the X-Agent-Approval header.',
+      },
+      202
+    );
+  }
+
+  // Autonomous: enforce the hard policy now.
+  const spentToday = await getAgentSpendToday(c.env, principal.key_id);
+  const verdict = evaluateAgentPolicy(principal, intent, spentToday);
+  if (!verdict.allowed) {
+    return c.json(
+      {
+        error: verdict.detail || 'Payment denied by agent policy.',
+        code: 'AGENT_POLICY_DENIED',
+        reason: verdict.reason,
+      },
+      403
+    );
+  }
+
+  return null;
+}
 
 /** True when a stored approval's payload matches the retried intent exactly. */
 function approvalMatches(
