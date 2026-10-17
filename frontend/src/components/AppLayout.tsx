@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Link } from '../lib/router';
-import { Users, Bot, Coins } from 'lucide-react';
+import { Users, Bot } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { SettingsSidebar } from './SettingsSidebar';
 import { QuantusInteractiveCanvas } from './QuantusInteractiveCanvas';
@@ -51,16 +51,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                 >
                   <Bot className="w-3.5 h-3.5 text-stone-700 group-hover:text-black flex-shrink-0" />
                   <span className="hidden sm:inline">Agents</span>
-                </Link>
-
-                {/* Creator Fees Link */}
-                <Link
-                  to="/app/fees"
-                  className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer text-xs font-mono font-bold text-stone-900 group flex-shrink-0"
-                  title="Route launchpad creator fees to your @handle"
-                >
-                  <Coins className="w-3.5 h-3.5 text-stone-700 group-hover:text-black flex-shrink-0" />
-                  <span className="hidden sm:inline">Fees</span>
                 </Link>
 
                 {/* Invite Button Badge */}

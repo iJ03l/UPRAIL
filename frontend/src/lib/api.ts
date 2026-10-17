@@ -13,8 +13,6 @@ import {
   CreatedAgentKey,
   AgentApproval,
   AgentMode,
-  FeeConfig,
-  FeeEvent,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
 import type { WithdrawChain } from './withdrawChains';
@@ -1353,24 +1351,5 @@ export const api = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to record decision');
     }
-  },
-
-  // ── Creator fees ───────────────────────────────────────────────────────────
-
-  async getFeeConfig(): Promise<FeeConfig> {
-    const url = API_BASE ? `${API_BASE}/api/fees` : '/api/fees';
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to load creator fee settings');
-    }
-    return await res.json();
-  },
-
-  async getFeeEvents(): Promise<{ payoutAddress: string | null; events: FeeEvent[] }> {
-    const url = API_BASE ? `${API_BASE}/api/fees/events` : '/api/fees/events';
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) return { payoutAddress: null, events: [] };
-    return await res.json();
   },
 };

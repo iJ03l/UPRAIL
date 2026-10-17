@@ -60,6 +60,7 @@
   "routes": [
     { "pattern": "api.uprail.world", "custom_domain": true },
     { "pattern": "app.uprail.world", "custom_domain": true },
+    { "pattern": "docs.uprail.world", "custom_domain": true },
     { "pattern": "uprail.world/*", "zone_name": "uprail.world" }
   ],
   "d1_databases": [

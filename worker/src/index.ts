@@ -26,7 +26,6 @@ import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
 import { x402Router } from './routes/x402';
 import { mcpRouter } from './routes/mcp';
-import { feesRouter } from './routes/fees';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import * as nearRpc from './services/nearRpc';
@@ -49,6 +48,25 @@ app.use('*', corsMiddleware());
 app.use('*', sessionMiddleware());
 // 5. Rate limiting (keyed on verified user or IP)
 app.use('*', rateLimit({ limit: 300, prefix: 'global' }));
+
+// Docs subdomain: serve the exported /docs section as the root of
+// docs.uprail.world (e.g. /agents → /docs/agents). Assets with a file
+// extension and the framework/api prefixes are left untouched.
+app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+  if (url.hostname.toLowerCase() === 'docs.uprail.world') {
+    const hasExt = /\.[a-z0-9]+$/i.test(url.pathname);
+    const isReserved =
+      url.pathname.startsWith('/_next') || url.pathname.startsWith('/api');
+    if (!url.pathname.startsWith('/docs') && !hasExt && !isReserved) {
+      url.pathname = `/docs${url.pathname === '/' ? '' : url.pathname}`;
+    }
+    if (c.env.ASSETS) {
+      return c.env.ASSETS.fetch(new Request(url.toString(), c.req.raw));
+    }
+  }
+  return await next();
+});
 
 // Enforce strict separation: /app is strictly forbidden on apex uprail.world,
 // and all login/app routes on apex are redirected to app.uprail.world
@@ -144,9 +162,6 @@ apiRouter.route('/x402', x402Router);
 
 // MCP server (JSON-RPC over Streamable HTTP) — Bearer agent key
 apiRouter.route('/mcp', mcpRouter);
-
-// Creator-fee rail (launchpad fees → @handle)
-apiRouter.route('/fees', feesRouter);
 
 // Live onchain data (balances, tokens, deposit addresses, history)
 // All scoped per authenticated user — no data leakage across users
