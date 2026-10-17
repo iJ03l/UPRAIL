@@ -15,7 +15,11 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
       <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <a href="/docs" className="flex items-center space-x-2">
-            <span className="font-display font-extrabold tracking-tight text-stone-950">UPRAIL</span>
+            <img
+              src="/brand/uprail-wordmark.png"
+              alt="uprail"
+              className="h-5 w-auto object-contain"
+            />
             <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-stone-900 text-white">
               Docs
             </span>
@@ -57,8 +61,8 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             <a href="https://app.uprail.world" className="hover:text-stone-700">
               app.uprail.world
             </a>
-            <a href="https://x.com/uprail_app" className="hover:text-stone-700">
-              @uprail_app
+            <a href="https://x.com/Uptoberonnear" className="hover:text-stone-700">
+              @Uptoberonnear
             </a>
           </div>
         </div>

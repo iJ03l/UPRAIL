@@ -41,8 +41,8 @@ export const metadata: Metadata = {
     title: 'UPRAIL — The Confidential Value Railway for X',
     description:
       'Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion.',
-    site: '@uprail_app',
-    creator: '@uprail_app',
+    site: '@Uptoberonnear',
+    creator: '@Uptoberonnear',
     images: ['https://app.uprail.world/og/og-landing.png'],
   },
 };
@@ -83,7 +83,7 @@ export default function RootLayout({
         <meta property="og:image:height" content="630" />
         <meta property="og:type" content="website" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:site" content="@uprail_app" />
+        <meta name="twitter:site" content="@Uptoberonnear" />
         <meta name="twitter:title" content="UPRAIL — The Confidential Value Railway for X" />
         <meta name="twitter:description" content="Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion." />
         <meta name="twitter:image" content="https://app.uprail.world/og/og-landing.png" />
