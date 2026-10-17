@@ -79,7 +79,9 @@ x402Router.post('/challenge', async (c) => {
         requirement,
         // Ready-to-send header value for a server returning its own 402.
         paymentRequiredHeader: x402.encodePaymentRequired(requirement),
-        depositAddress: challenge.depositAddress,
+        reference: challenge.id,
+        rail: challenge.rail,
+        depositAddress: challenge.payTo,
         expiresAt: challenge.expiresAt,
       },
       201,
@@ -111,10 +113,11 @@ x402Router.post('/verify', async (c) => {
   const result = await verifySettlement(c.env, payload, { consume: false });
   return c.json({
     isValid: result.ok,
-    payer: result.probe?.payer,
-    transaction: result.probe?.txHashes?.[0],
+    payer: result.settlement.payer || result.probe?.payer || result.tx?.signer || undefined,
+    transaction: result.settlement.transaction,
     amount: result.challenge?.amount,
     recipient: result.challenge?.recipientHandle,
+    rail: result.challenge?.rail,
     reason: result.ok ? undefined : result.settlement.errorReason,
     detail: result.ok ? undefined : result.settlement.errorDetail,
   });

@@ -2441,6 +2441,102 @@ export async function probeNativeFtDeposit(
   };
 }
 
+export interface NearTxTransfer {
+  kind: 'native' | 'ft';
+  /** Destination account credited by the transfer. */
+  to: string;
+  amountAtomic: string;
+  /** For `ft`: the token contract (the transaction's executor). */
+  contract?: string;
+  memo?: string;
+}
+
+export interface NearTxProbe {
+  found: boolean;
+  success: boolean;
+  signer: string | null;
+  executor: string | null;
+  transfers: NearTxTransfer[];
+  error?: string;
+}
+
+/** Decodes a base64 UTF-8 string (NEAR FunctionCall args). */
+function decodeB64Utf8(b64: string): string {
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Fetches a single transaction by hash and normalizes its value-moving actions
+ * so a caller can confirm "this tx paid `to` at least `amount`". No indexer is
+ * required — the RPC `tx` method is authoritative for one known hash.
+ *
+ * Used by the local-escrow x402 fallback, where deposits land on the pooled
+ * escrow account and must be attributed to a specific (echoed) transaction.
+ */
+export async function probeNearTransaction(
+  env: Env,
+  txHash: string,
+  senderAccountId?: string
+): Promise<NearTxProbe> {
+  const empty = (error?: string): NearTxProbe => ({
+    found: false,
+    success: false,
+    signer: null,
+    executor: null,
+    transfers: [],
+    error,
+  });
+  if (!txHash) return empty('missing tx hash');
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const params: Record<string, unknown> = { tx_hash: txHash, wait_until: 'FINAL' };
+  if (senderAccountId) params.sender_account_id = senderAccountId;
+
+  let result: any;
+  try {
+    result = await nearRpc(rpcUrl, 'tx', params);
+  } catch (err: any) {
+    return empty(err?.message || 'tx lookup failed');
+  }
+  const tx = result?.transaction;
+  if (!tx) return empty('transaction not found');
+
+  const executor: string | null = tx.receiver_id || null;
+  const signer: string | null = tx.signer_id || null;
+  const status = result?.status;
+  const success = Boolean(status) && !('Failure' in status);
+
+  const transfers: NearTxTransfer[] = [];
+  for (const action of tx.actions || []) {
+    if (action?.Transfer?.deposit !== undefined) {
+      transfers.push({ kind: 'native', to: executor || '', amountAtomic: String(action.Transfer.deposit) });
+    } else if (action?.FunctionCall) {
+      const method = action.FunctionCall.method_name;
+      if (method === 'ft_transfer' || method === 'ft_transfer_call') {
+        try {
+          const a = JSON.parse(decodeB64Utf8(action.FunctionCall.args || ''));
+          if (a?.receiver_id && a?.amount !== undefined) {
+            transfers.push({
+              kind: 'ft',
+              to: String(a.receiver_id),
+              amountAtomic: String(a.amount),
+              contract: executor || undefined,
+              memo: a.memo ? String(a.memo) : undefined,
+            });
+          }
+        } catch {}
+      }
+    }
+  }
+  return { found: true, success, signer, executor, transfers };
+}
+
 /**
  * Fetches deposit addresses for ALL supported chains for a user.
  * Concurrently generates/retrieves valid addresses across all chains.

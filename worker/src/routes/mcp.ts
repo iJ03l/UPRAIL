@@ -190,7 +190,9 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
       });
       return toolText({
         requirement,
-        depositAddress: challenge.depositAddress,
+        reference: challenge.id,
+        rail: challenge.rail,
+        payTo: challenge.payTo,
         expiresAt: challenge.expiresAt,
         recipientHandle: session.x_handle,
       });
