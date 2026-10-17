@@ -141,6 +141,22 @@ export interface Session {
   expires_at: number;
 }
 
+/**
+ * Resolved agent credential for a single request. Set by the agentAuth()
+ * middleware; carries the full spend policy so routes can enforce/record it.
+ */
+export interface AgentPrincipal {
+  key_id: string;
+  agent_id: string;
+  x_id: string;
+  mode: 'always_ask' | 'autonomous';
+  asset: string | null;
+  per_tx_limit: number | null;
+  daily_limit: number | null;
+  /** Normalized '@handle' / wallet addresses; null = any recipient. */
+  allowlist: string[] | null;
+}
+
 export interface Invite {
   code: string;
   creator_x_id?: string | null;
@@ -302,6 +318,7 @@ export interface BalanceResponse {
 export interface Variables {
   session?: Session;
   user?: XIdentity;
+  agent?: AgentPrincipal;
 }
 
 export type AppContext = {

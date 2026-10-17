@@ -3,7 +3,7 @@
  * Send flow: Resolve handle, Request quote, Send escrow, List/get/cancel payments
  */
 
-import { Hono } from 'hono';
+import { Context, Hono } from 'hono';
 import {
   AppContext,
   ErrorResponse,
@@ -415,9 +415,10 @@ paymentsRouter.post('/quote', async (c) => {
  * The client must include `passkeyAssertion` (from /api/auth-challenge flow) in the body.
  * This ensures every fund movement is authorized by the user's physical device.
  */
-paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
+export async function handleSendPayment(c: Context<AppContext>): Promise<Response> {
   try {
-    // Body was already parsed and validated by requirePasskeyAuth()
+    // Body was already parsed and validated by requirePasskeyAuth() (human
+    // flow) or by agentAuth() (agent flow). Both cache it as `parsedBody`.
     const body = (c.get('parsedBody' as any) || await c.req.json<SendRequest>().catch(() => null)) as SendRequest | null;
     if (
       !body ||
@@ -1033,7 +1034,12 @@ paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), async (c) => {
       500
     );
   }
-});
+}
+
+// Human send: session + physical passkey. Agent send is mounted separately in
+// routes/agent.ts with agentAuth(), reusing this exact handler so the money
+// path is identical for both callers.
+paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), handleSendPayment);
 
 /**
  * GET /api/payments

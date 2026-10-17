@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS payments (
   amount TEXT NOT NULL,
   fee TEXT,
   fee_recipient TEXT,
+  -- Settlement diagnostics for the carved-out protocol fee (migration 0004).
+  fee_dispatch_status TEXT,
+  fee_dispatch_error TEXT,
   invite_code TEXT,
   memo TEXT,
   status TEXT NOT NULL,
@@ -132,4 +135,71 @@ CREATE TABLE IF NOT EXISTS auth_challenges (
 
 CREATE INDEX IF NOT EXISTS idx_challenges_x_id ON auth_challenges(x_id);
 CREATE INDEX IF NOT EXISTS idx_challenges_lookup ON auth_challenges(challenge, purpose);
+
+-- ── Agent payment rail (migration 0004) ─────────────────────────────────────
+-- A user authorizes a named agent to move funds from their own vault under an
+-- explicit, passkey-approved policy. Agent sends settle through the same
+-- pipeline as a human send.
+
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY,
+  x_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'always_ask', -- 'always_ask' | 'autonomous'
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agents_x_id ON agents(x_id);
+
+CREATE TABLE IF NOT EXISTS agent_keys (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  x_id TEXT NOT NULL,
+  label TEXT,
+  key_hash TEXT NOT NULL UNIQUE,
+  key_prefix TEXT NOT NULL,
+  asset TEXT,
+  per_tx_limit TEXT,
+  daily_limit TEXT,
+  allowlist TEXT,
+  expires_at INTEGER,
+  last_used_at INTEGER,
+  revoked_at INTEGER,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_keys_agent ON agent_keys(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_keys_x_id ON agent_keys(x_id);
+
+CREATE TABLE IF NOT EXISTS agent_spend (
+  agent_key_id TEXT NOT NULL,
+  day TEXT NOT NULL,
+  spent TEXT NOT NULL DEFAULT '0',
+  PRIMARY KEY (agent_key_id, day)
+);
+
+CREATE TABLE IF NOT EXISTS agent_approvals (
+  id TEXT PRIMARY KEY,
+  x_id TEXT NOT NULL,
+  agent_key_id TEXT,
+  payload TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING', -- PENDING | APPROVED | DENIED | EXPIRED
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  decided_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_approvals_x_id ON agent_approvals(x_id, status);
+
+CREATE TABLE IF NOT EXISTS agent_requests (
+  id TEXT PRIMARY KEY,
+  agent_key_id TEXT NOT NULL,
+  idempotency_key TEXT,
+  payment_id TEXT,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(agent_key_id, idempotency_key)
+);
 

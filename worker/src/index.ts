@@ -23,6 +23,7 @@ import { claimRouter } from './routes/claim';
 import { healthRouter } from './routes/health';
 import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
+import { agentRouter } from './routes/agent';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import * as nearRpc from './services/nearRpc';
@@ -131,6 +132,9 @@ const apiRouter = new Hono<AppContext>();
 apiRouter.route('/', paymentsRouter);
 apiRouter.route('/invites', invitesRouter);
 apiRouter.route('/claim', claimRouter);
+
+// Agent payment rail (scoped Bearer keys + Always-Ask approvals)
+apiRouter.route('/agent', agentRouter);
 
 // Live onchain data (balances, tokens, deposit addresses, history)
 // All scoped per authenticated user — no data leakage across users
