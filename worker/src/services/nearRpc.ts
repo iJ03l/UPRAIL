@@ -4359,6 +4359,57 @@ export async function ensureIntentsStorageRegistered(
 }
 
 /**
+ * Registers the platform escrow holding account on a NEP-141 contract so a
+ * launchpad's fee push is accepted. Registration is permissionless and
+ * sponsored from escrow itself; the memo cache makes it one transaction per
+ * token at most, so subsequent webhook calls are free.
+ */
+export async function ensureEscrowStorageRegistered(
+  env: Env,
+  contractId: string
+): Promise<{ registered: boolean; reason?: string }> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+  const sponsor = escrowSigningKey(env, rpcUrl);
+  if ('error' in sponsor) return { registered: false, reason: sponsor.error };
+  const res = await ensureReceiverStorageRegistered(rpcUrl, contractId, escrowId, sponsor);
+  return { registered: res.registered, reason: res.reason };
+}
+
+export interface FtContractMetadata {
+  contractId: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+}
+
+/**
+ * Reads NEP-141 `ft_metadata` straight from the contract. Used for launchpad
+ * paired tokens that a launchpad names by contract id but that the curated /
+ * Rhea registries do not (yet) list. Returns null when the contract does not
+ * answer, so callers can reject an unknown or non-FT contract.
+ */
+export async function getFtContractMetadata(
+  env: Env,
+  contractId: string
+): Promise<FtContractMetadata | null> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  try {
+    const meta = await viewFunction(rpcUrl, contractId, 'ft_metadata', {});
+    if (!meta || typeof meta !== 'object') return null;
+    const decimals = Number(meta.decimals);
+    return {
+      contractId,
+      symbol: typeof meta.symbol === 'string' ? meta.symbol : '',
+      name: typeof meta.name === 'string' ? meta.name : '',
+      decimals: Number.isFinite(decimals) ? decimals : 18,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Moves `amount` of `asset` from the user's own pk sub-account (plain,
  * directly-received balance) into intents.near with a memo:
  * `ft_transfer_call(receiver_id='intents.near', msg=creditAddress)`.
@@ -4677,6 +4728,49 @@ export async function executeEscrowFtWithdraw(
       return { success: false, error: `Invalid amount: ${amount}` };
     }
 
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const signing = escrowSigningKey(env, rpcUrl);
+    if ('error' in signing) return { success: false, error: signing.error };
+
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, destinationAddress, signing);
+    if (!storage.registered) {
+      return { success: false, error: storage.reason || `destination is not registered on ${contractId}` };
+    }
+
+    const res = await signAndBroadcastFunctionCall({
+      ...signing,
+      receiverId: contractId,
+      method: 'ft_transfer',
+      args: JSON.stringify({ receiver_id: destinationAddress, amount: baseUnits }),
+      gas: 30_000_000_000_000n,
+      deposit: 1n,
+    });
+    return res.ok
+      ? { success: true, txHash: res.txHash }
+      : { success: false, error: res.error || 'ft_transfer from escrow failed' };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Plain `ft_transfer` from the platform escrow account to a destination,
+ * addressed by NEP-141 contract id rather than a registry asset. Used by
+ * launchpad creator-fee routing, where the paired token may not be in the
+ * curated/Rhea registries. Registers the destination on the token first
+ * (sponsored from escrow) so the transfer cannot panic with "receiver is not
+ * registered".
+ */
+export async function executeEscrowFtTransferByContract(
+  env: Env,
+  contractId: string,
+  destinationAddress: string,
+  baseUnits: string
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    if (!contractId || !baseUnits || baseUnits === '0') {
+      return { success: false, error: 'Invalid contract or amount' };
+    }
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
     const signing = escrowSigningKey(env, rpcUrl);
     if ('error' in signing) return { success: false, error: signing.error };

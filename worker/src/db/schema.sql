@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS payments (
   -- Settlement diagnostics for the carved-out protocol fee (migration 0004).
   fee_dispatch_status TEXT,
   fee_dispatch_error TEXT,
+  -- NULL for an ordinary send; 'launchpad:<name>' for a routed creator fee.
+  origin TEXT,
   invite_code TEXT,
   memo TEXT,
   status TEXT NOT NULL,
@@ -67,6 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at);
 CREATE INDEX IF NOT EXISTS idx_payments_invite ON payments(invite_code);
 CREATE INDEX IF NOT EXISTS idx_payments_recipient_x_id ON payments(recipient_x_id, status);
+CREATE INDEX IF NOT EXISTS idx_payments_origin ON payments(recipient_handle, origin);
 
 -- Deposit addresses: cached 1Click one-time cross-chain deposit addresses
 CREATE TABLE IF NOT EXISTS deposit_addresses (
@@ -202,4 +205,41 @@ CREATE TABLE IF NOT EXISTS agent_requests (
   created_at INTEGER NOT NULL,
   UNIQUE(agent_key_id, idempotency_key)
 );
+
+-- ── Launchpad creator-fee routing (migration 0005) ──────────────────────────
+-- A launchpad points creator fees at an X handle and reports each fee by
+-- webhook. The paired token lands in the pooled escrow account and rides the
+-- same claim pipeline as a human send.
+
+CREATE TABLE IF NOT EXISTS launchpad_partners (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  key_hash TEXT NOT NULL UNIQUE,
+  key_prefix TEXT NOT NULL,
+  webhook_secret TEXT NOT NULL,
+  daily_reg_cap INTEGER NOT NULL DEFAULT 25,
+  regs_today INTEGER NOT NULL DEFAULT 0,
+  regs_day TEXT,
+  created_at INTEGER NOT NULL,
+  revoked_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_launchpad_partners_name ON launchpad_partners(name);
+
+CREATE TABLE IF NOT EXISTS launchpad_events (
+  id TEXT PRIMARY KEY,
+  partner_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  token TEXT,
+  handle TEXT,
+  tx_hash TEXT,
+  status TEXT NOT NULL,
+  error TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(partner_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_launchpad_events_tx ON launchpad_events(tx_hash);
+CREATE INDEX IF NOT EXISTS idx_launchpad_events_token ON launchpad_events(partner_id, token);
 
