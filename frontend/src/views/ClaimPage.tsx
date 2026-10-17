@@ -99,7 +99,7 @@ const WithdrawCard: React.FC<{
   );
 };
 
-export const ClaimPage: React.FC = () => {
+export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }) => {
   const { user, isLoading: isAuthLoading } = useXAuth();
   const [searchParams] = useSearchParams();
   const { pathname } = useLocation();
@@ -109,7 +109,11 @@ export const ClaimPage: React.FC = () => {
   const pathSegments = pathname.split('/').filter(Boolean);
   const lastSegment = pathSegments[pathSegments.length - 1] || '';
   const isRouteName =
-    lastSegment === '' || lastSegment === 'claim' || lastSegment === 'app' || lastSegment === 'id';
+    lastSegment === '' ||
+    lastSegment === 'claim' ||
+    lastSegment === 'fees' ||
+    lastSegment === 'app' ||
+    lastSegment === 'id';
   const pathPaymentCode = isRouteName ? '' : lastSegment;
 
   const queryPaymentCode =
@@ -191,7 +195,8 @@ export const ClaimPage: React.FC = () => {
     }
   };
 
-  const totalPendingUsd = sumUsd(pendingPayments.map((p) => p.amountUsd));
+  const visiblePayments = feesOnly ? pendingPayments.filter((p) => p.isCreatorFee) : pendingPayments;
+  const totalPendingUsd = sumUsd(visiblePayments.map((p) => p.amountUsd));
 
   return (
     <div className="w-full space-y-6">
@@ -366,16 +371,16 @@ export const ClaimPage: React.FC = () => {
       )}
 
       {/* Pending Payments List — AUTOMATICALLY DISCOVERED (No link/code input!) */}
-      {!isReceipt && !isLoading && pendingPayments.length > 0 && (
+      {!isReceipt && !isLoading && visiblePayments.length > 0 && (
         <div className="space-y-4">
           {/* Batch Claim All CTA (if more than 1 payment) */}
-          {pendingPayments.length > 1 && (
+          {visiblePayments.length > 1 && (
             <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="flex items-center space-x-2.5">
                 <Sparkles className="w-5 h-5 text-stone-900" />
                 <div>
                   <div className="text-xs font-bold text-stone-950 font-display">
-                    {pendingPayments.length} Payments Waiting
+                    {visiblePayments.length} {feesOnly ? 'Creator Fees' : 'Payments'} Waiting
                   </div>
                   <div className="text-[11px] text-stone-500 font-mono">
                     Total: ≈ {formatUsd(totalPendingUsd)} USD
@@ -397,7 +402,7 @@ export const ClaimPage: React.FC = () => {
 
           {/* Individual Payment Cards */}
           <div className="space-y-3">
-            {pendingPayments.map((p) => (
+            {visiblePayments.map((p) => (
               <div
                 key={p.id}
                 className="rounded-3xl p-5 sm:p-6 bg-white border border-stone-200 shadow-xs hover:border-stone-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -418,14 +423,30 @@ export const ClaimPage: React.FC = () => {
                       <span className="text-xs text-stone-500 font-mono">
                         ≈ {formatUsd(p.amountUsd)} USD
                       </span>
+                      {p.isCreatorFee && (
+                        <span className="text-[9px] font-mono uppercase font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                          Creator fee
+                        </span>
+                      )}
                       <span className="text-[9px] font-mono uppercase font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-200">
                         {p.status}
                       </span>
                     </div>
 
                     <div className="text-xs font-mono text-stone-600 flex items-center space-x-1.5">
-                      <span>Sent by:</span>
-                      <span className="font-bold text-stone-900">@{p.senderHandle || 'anonymous'}</span>
+                      {p.isCreatorFee ? (
+                        <>
+                          <span>From:</span>
+                          <span className="font-bold text-stone-900">
+                            {p.creatorLaunchpad || 'launchpad'} launchpad
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Sent by:</span>
+                          <span className="font-bold text-stone-900">@{p.senderHandle || 'anonymous'}</span>
+                        </>
+                      )}
                       <span className="text-stone-400">·</span>
                       <span className="text-stone-400">{new Date(p.createdAt).toLocaleDateString()}</span>
                     </div>
@@ -469,17 +490,27 @@ export const ClaimPage: React.FC = () => {
         )
       ) : (
         /* Empty State: Authenticated but NO pending payments */
-        !isLoading && pendingPayments.length === 0 && (
+        !isLoading && visiblePayments.length === 0 && (
           <div className="rounded-3xl p-8 sm:p-12 bg-white border border-stone-200 text-center space-y-4">
             <div className="w-14 h-14 rounded-2xl bg-stone-100 border border-stone-200 text-stone-800 flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-7 h-7" />
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-xl font-bold font-display text-stone-950">All Caught Up!</h3>
+              <h3 className="text-xl font-bold font-display text-stone-950">
+                {feesOnly ? 'No Creator Fees Yet' : 'All Caught Up!'}
+              </h3>
               <p className="text-xs text-stone-500 max-w-md mx-auto leading-relaxed">
-                You have no pending payments. When anyone sends funds to{' '}
-                <span className="font-mono font-bold text-stone-900">@{user.handle}</span>, they will automatically appear here ready to claim with your passkey.
+                {feesOnly
+                  ? 'Launchpad creator fees paid to your X handle will appear here, ready to claim with your passkey.'
+                  : 'You have no pending payments. When anyone sends funds to'}
+                {!feesOnly && (
+                  <>
+                    {' '}
+                    <span className="font-mono font-bold text-stone-900">@{user.handle}</span>, they will
+                    automatically appear here ready to claim with your passkey.
+                  </>
+                )}
               </p>
             </div>
 

@@ -170,11 +170,23 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
   const numAmount = parseFloat(p.amount) || 0;
   const fee = p.fee != null && p.fee !== '' ? String(p.fee) : '0';
   const price = tokenUsdPrice(token);
+  // Launchpad creator fees are reported with origin 'launchpad:<name>' and a
+  // namespaced sender handle ('launchpad:nearly'). Present them as a fee from
+  // the launchpad rather than a peer send.
+  const origin = typeof p.origin === 'string' ? p.origin : undefined;
+  const isCreatorFee = !!origin && origin.startsWith('launchpad:');
+  const creatorLaunchpad = isCreatorFee ? origin!.slice('launchpad:'.length) : undefined;
   return {
     id: p.id,
     claimCode: p.id,
-    senderHandle: p.sender_x_handle || '',
-    senderName: p.sender_x_handle ? `@${p.sender_x_handle}` : undefined,
+    senderHandle: isCreatorFee ? '' : p.sender_x_handle || '',
+    senderName: isCreatorFee
+      ? creatorLaunchpad
+        ? `${creatorLaunchpad} creator fees`
+        : 'Creator fees'
+      : p.sender_x_handle
+      ? `@${p.sender_x_handle}`
+      : undefined,
     recipientHandle: p.recipient_handle || '',
     token,
     amount: p.amount,
@@ -182,6 +194,9 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
     fee,
     feeUsd: price === null ? null : (parseFloat(fee) || 0) * price,
     feeRecipient: p.fee_recipient || 'escrow.uprail.near',
+    origin,
+    isCreatorFee,
+    creatorLaunchpad,
     inviteCode: p.invite_code || undefined,
     memo: p.memo || '',
     status: mapBackendStatus(p.status),

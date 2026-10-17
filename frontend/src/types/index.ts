@@ -62,6 +62,12 @@ export interface PaymentIntent {
   claimTxHash?: string;
   claimLink: string;
   isDirect?: boolean;
+  /** Backend origin marker; 'launchpad:<name>' for a routed creator fee. */
+  origin?: string;
+  /** True when this receivable is a launchpad creator fee, not a peer send. */
+  isCreatorFee?: boolean;
+  /** Launchpad name parsed from `origin`, for display. */
+  creatorLaunchpad?: string;
   createdAt: string;
   expiresAt: string;
   claimedAt?: string;
