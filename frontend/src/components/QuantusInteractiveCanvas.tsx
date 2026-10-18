@@ -6,6 +6,33 @@ import { FIGURE_SPRITE_PNG } from './figureSpriteBase64';
 const LOW_W = 48;
 const LOW_H = 80;
 
+/**
+ * The Quantus mascot is a green pixel sprite. In dark mode we retint it to the
+ * burnt-orange hero palette (and warm its glow + floor shadow) so the obsidian
+ * theme reads as one coherent accent instead of a stray green figure.
+ */
+const GREEN_PALETTE = { glow: '#39ff14', floor: 'rgba(6, 46, 12, 0.09)' };
+const ORANGE_PALETTE = { glow: '#E05326', floor: 'rgba(46, 18, 12, 0.10)' };
+// burnt-800 → burnt-500 → burnt-300, a ramp used to remap sprite luminance.
+const ORANGE_RAMP: [number, number, number][] = [
+  [126, 41, 16],
+  [224, 83, 38],
+  [255, 175, 148],
+];
+
+function rampColor(luminance: number): [number, number, number] {
+  const l = Math.max(0, Math.min(1, luminance));
+  const upper = l >= 0.5;
+  const t = upper ? (l - 0.5) / 0.5 : l / 0.5;
+  const a = upper ? ORANGE_RAMP[1] : ORANGE_RAMP[0];
+  const b = upper ? ORANGE_RAMP[2] : ORANGE_RAMP[1];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ];
+}
+
 interface QuantusInteractiveCanvasProps {
   fullScreenRoam?: boolean;
 }
@@ -30,14 +57,49 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
     if (!offCtx) return;
 
     let spriteReady = false;
-    const spriteImg = new Image();
-    spriteImg.onload = () => {
+    let isDark =
+      typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+
+    const tintSpriteOrange = () => {
+      const frame = offCtx.getImageData(0, 0, LOW_W, LOW_H);
+      const px = frame.data;
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] < 16) continue;
+        const lum = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) / 255;
+        const [r, g, b] = rampColor(lum);
+        px[i] = r;
+        px[i + 1] = g;
+        px[i + 2] = b;
+      }
+      offCtx.putImageData(frame, 0, 0);
+    };
+
+    const paintSprite = () => {
       offCtx.clearRect(0, 0, LOW_W, LOW_H);
       offCtx.imageSmoothingEnabled = false;
       offCtx.drawImage(spriteImg, 0, 0, LOW_W, LOW_H);
+      if (isDark) tintSpriteOrange();
       spriteReady = true;
     };
+
+    const spriteImg = new Image();
+    spriteImg.onload = paintSprite;
     spriteImg.src = FIGURE_SPRITE_PNG;
+
+    // Follow the theme toggle so the mascot flips green ↔ orange live.
+    const themeObserver = new MutationObserver(() => {
+      const nowDark = document.documentElement.classList.contains('dark');
+      if (nowDark !== isDark) {
+        isDark = nowDark;
+        if (spriteReady) paintSprite();
+      }
+    });
+    if (typeof document !== 'undefined') {
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    }
 
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
@@ -198,6 +260,7 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
 
     const tick = () => {
       time += 0.03;
+      const palette = isDark ? ORANGE_PALETTE : GREEN_PALETTE;
 
       // Periodic autonomous wander
       entity.wanderTimer += 1;
@@ -302,7 +365,7 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
 
         // Soft floor shadow
         ctx.save();
-        ctx.fillStyle = 'rgba(6, 46, 12, 0.09)';
+        ctx.fillStyle = palette.floor;
         ctx.beginPath();
         ctx.ellipse(entity.x, entity.y + dh / 2 - 8, dw * 0.34, 10, 0, 0, Math.PI * 2);
         ctx.fill();
@@ -312,7 +375,7 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         ctx.globalAlpha = 0.28;
-        ctx.shadowColor = '#39ff14';
+        ctx.shadowColor = palette.glow;
         ctx.shadowBlur = 22;
 
         if (entity.facingLeft) {
@@ -348,6 +411,7 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('scroll', handleScroll);
+      themeObserver.disconnect();
       cancelAnimationFrame(animId);
     };
   }, []);

@@ -18,6 +18,12 @@ import {
   RefreshCw,
   Zap,
   Hand,
+  Sparkles,
+  Repeat,
+  ShoppingCart,
+  LineChart,
+  CreditCard,
+  Wallet,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
@@ -41,6 +47,71 @@ function policyLine(k: AgentKey): string {
   return parts.join(' · ');
 }
 
+/**
+ * Ready-made policies so a user picks a shape instead of authoring a policy from
+ * scratch. Selecting one prefills the form; every field stays editable.
+ */
+interface AgentPreset {
+  id: string;
+  label: string;
+  blurb: string;
+  icon: React.ComponentType<{ className?: string }>;
+  values: {
+    name: string;
+    mode: AgentMode;
+    asset: string;
+    perTxLimit: string;
+    dailyLimit: string;
+    allowlist: string;
+    expiresInDays: string;
+  };
+}
+
+const PRESETS: AgentPreset[] = [
+  {
+    id: 'research',
+    label: 'Research assistant',
+    blurb: 'Pays for APIs, asks before every spend',
+    icon: Bot,
+    values: { name: 'Research assistant', mode: 'always_ask', asset: '', perTxLimit: '25', dailyLimit: '100', allowlist: '', expiresInDays: '' },
+  },
+  {
+    id: 'dca',
+    label: 'DCA bot',
+    blurb: 'Buys on a schedule, capped per day',
+    icon: Repeat,
+    values: { name: 'DCA bot', mode: 'autonomous', asset: 'USDC', perTxLimit: '50', dailyLimit: '200', allowlist: '', expiresInDays: '' },
+  },
+  {
+    id: 'shopping',
+    label: 'Shopping agent',
+    blurb: 'Small purchases, human-approved',
+    icon: ShoppingCart,
+    values: { name: 'Shopping agent', mode: 'always_ask', asset: 'USDC', perTxLimit: '20', dailyLimit: '100', allowlist: '', expiresInDays: '' },
+  },
+  {
+    id: 'trading',
+    label: 'Trading agent',
+    blurb: 'Autonomous within tight limits',
+    icon: LineChart,
+    values: { name: 'Trading agent', mode: 'autonomous', asset: 'USDC', perTxLimit: '100', dailyLimit: '500', allowlist: '', expiresInDays: '' },
+  },
+  {
+    id: 'subscriptions',
+    label: 'Subscription payer',
+    blurb: 'Fixed recurring payments, approved merchants',
+    icon: CreditCard,
+    values: { name: 'Subscription payer', mode: 'autonomous', asset: 'USDC', perTxLimit: '15', dailyLimit: '15', allowlist: '', expiresInDays: '' },
+  },
+  {
+    id: 'api',
+    label: 'API payer (x402)',
+    blurb: 'Pays per-request for premium APIs',
+    icon: Wallet,
+    values: { name: 'API payer', mode: 'autonomous', asset: '', perTxLimit: '5', dailyLimit: '50', allowlist: '', expiresInDays: '' },
+  },
+];
+
 export const AgentsPage: React.FC = () => {
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   const [keys, setKeys] = useState<AgentKey[]>([]);
@@ -59,7 +130,30 @@ export const AgentsPage: React.FC = () => {
   const [dailyLimit, setDailyLimit] = useState('');
   const [allowlist, setAllowlist] = useState('');
   const [expiresInDays, setExpiresInDays] = useState('');
+  const [activePreset, setActivePreset] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  const applyPreset = (p: AgentPreset) => {
+    setActivePreset(p.id);
+    setName(p.values.name);
+    setMode(p.values.mode);
+    setAsset(p.values.asset);
+    setPerTxLimit(p.values.perTxLimit);
+    setDailyLimit(p.values.dailyLimit);
+    setAllowlist(p.values.allowlist);
+    setExpiresInDays(p.values.expiresInDays);
+  };
+
+  const resetForm = () => {
+    setActivePreset(null);
+    setName('');
+    setMode('always_ask');
+    setAsset('');
+    setPerTxLimit('');
+    setDailyLimit('');
+    setAllowlist('');
+    setExpiresInDays('');
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -105,13 +199,7 @@ export const AgentsPage: React.FC = () => {
       });
       setCreated(res);
       setShowCreate(false);
-      setName('');
-      setAsset('');
-      setPerTxLimit('');
-      setDailyLimit('');
-      setAllowlist('');
-      setExpiresInDays('');
-      setMode('always_ask');
+      resetForm();
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Failed to create agent key');
@@ -183,12 +271,51 @@ export const AgentsPage: React.FC = () => {
       {/* Create form */}
       {showCreate && (
         <div className="p-5 rounded-3xl bg-stone-50 border border-stone-200 space-y-4">
+          {/* Preset picker — pick a ready-made policy, then tweak if needed */}
+          <div className="space-y-2.5">
+            <div className="flex items-center space-x-1.5 text-stone-900">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="text-[11px] font-mono uppercase tracking-wider font-bold">Start from a preset</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {PRESETS.map((p) => {
+                const active = activePreset === p.id;
+                const Icon = p.icon;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyPreset(p)}
+                    className={`text-left p-3 rounded-2xl border transition-colors cursor-pointer ${
+                      active
+                        ? 'border-stone-900 bg-white shadow-xs'
+                        : 'border-stone-200 bg-white hover:border-stone-400'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5">
+                      <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${active ? 'text-stone-900' : 'text-stone-500'}`} />
+                      <span className="text-xs font-bold text-stone-900 truncate">{p.label}</span>
+                    </div>
+                    <p className="mt-1 text-[10px] leading-snug text-stone-500">{p.blurb}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={resetForm}
+              className="text-[11px] font-mono text-stone-500 hover:text-stone-900 underline underline-offset-2 cursor-pointer"
+            >
+              Clear &amp; start from scratch
+            </button>
+          </div>
+
           <div className="grid sm:grid-cols-2 gap-4">
             <label className="space-y-1.5">
               <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Name</span>
               <input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => { setName(e.target.value); setActivePreset(null); }}
                 placeholder="e.g. Research assistant"
                 className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm focus:outline-none focus:border-stone-900"
               />
@@ -200,7 +327,7 @@ export const AgentsPage: React.FC = () => {
                   <button
                     key={m}
                     type="button"
-                    onClick={() => setMode(m)}
+                    onClick={() => { setMode(m); setActivePreset(null); }}
                     className={`py-2 rounded-xl text-xs font-mono font-bold border transition-colors cursor-pointer flex items-center justify-center space-x-1.5 ${
                       mode === m ? 'bg-black text-white border-black' : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-100'
                     }`}
@@ -215,7 +342,7 @@ export const AgentsPage: React.FC = () => {
               <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Asset (optional)</span>
               <input
                 value={asset}
-                onChange={(e) => setAsset(e.target.value)}
+                onChange={(e) => { setAsset(e.target.value); setActivePreset(null); }}
                 placeholder="USDC — blank = any asset"
                 className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
               />
@@ -224,7 +351,7 @@ export const AgentsPage: React.FC = () => {
               <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Expires in days (optional)</span>
               <input
                 value={expiresInDays}
-                onChange={(e) => setExpiresInDays(e.target.value.replace(/[^0-9]/g, ''))}
+                onChange={(e) => { setExpiresInDays(e.target.value.replace(/[^0-9]/g, '')); setActivePreset(null); }}
                 placeholder="blank = never"
                 className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
               />
@@ -233,7 +360,7 @@ export const AgentsPage: React.FC = () => {
               <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Per-transaction limit</span>
               <input
                 value={perTxLimit}
-                onChange={(e) => setPerTxLimit(e.target.value)}
+                onChange={(e) => { setPerTxLimit(e.target.value); setActivePreset(null); }}
                 placeholder="e.g. 25"
                 className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
               />
@@ -242,7 +369,7 @@ export const AgentsPage: React.FC = () => {
               <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Daily limit</span>
               <input
                 value={dailyLimit}
-                onChange={(e) => setDailyLimit(e.target.value)}
+                onChange={(e) => { setDailyLimit(e.target.value); setActivePreset(null); }}
                 placeholder="e.g. 100"
                 className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
               />
@@ -254,7 +381,7 @@ export const AgentsPage: React.FC = () => {
             </span>
             <input
               value={allowlist}
-              onChange={(e) => setAllowlist(e.target.value)}
+              onChange={(e) => { setAllowlist(e.target.value); setActivePreset(null); }}
               placeholder="@alice, @bob — blank = any recipient"
               className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
             />
