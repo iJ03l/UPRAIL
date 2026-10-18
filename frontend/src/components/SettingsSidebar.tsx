@@ -24,6 +24,7 @@ import {
 import { useXAuth } from '../hooks/useXAuth';
 import { useTheme } from './ThemeProvider';
 import { api, clearAppStorage } from '../lib/api';
+import { useToast } from './Toast';
 import { MyInviteResponse } from '../types';
 
 interface SettingsSidebarProps {
@@ -37,6 +38,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 }) => {
   const { user, logout } = useXAuth();
   const { mode, setMode } = useTheme();
+  const { toast } = useToast();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
@@ -187,6 +189,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                             onClick={() => {
                               navigator.clipboard.writeText(inviteData.inviteCode);
                               setCopiedInvite(true);
+                              toast('Invite code copied');
                               setTimeout(() => setCopiedInvite(false), 2000);
                             }}
                             className="p-1.5 rounded-lg bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono transition-colors cursor-pointer"
@@ -199,6 +202,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                             onClick={() => {
                               navigator.clipboard.writeText(inviteData.inviteLink);
                               setCopiedLink(true);
+                              toast('Invite link copied');
                               setTimeout(() => setCopiedLink(false), 2000);
                             }}
                             className="p-1.5 rounded-lg bg-black hover:bg-stone-800 text-white text-xs font-mono transition-colors cursor-pointer"
@@ -303,6 +307,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                           onClick={() => {
                             navigator.clipboard.writeText(exportedKey.privateKey);
                             setCopiedKey(true);
+                            toast('Private key copied', 'info');
                             setTimeout(() => setCopiedKey(false), 2000);
                           }}
                           className="flex-1 py-2 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"

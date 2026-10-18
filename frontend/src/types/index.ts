@@ -205,6 +205,8 @@ export interface AgentKey {
   lastUsedAt: number | null;
   revokedAt: number | null;
   createdAt: number;
+  /** Spend recorded against this key for the current UTC day (0 when none). */
+  spentToday?: number;
 }
 
 /** The create response — `key` is the plaintext secret, shown exactly once. */

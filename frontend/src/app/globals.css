@@ -554,3 +554,31 @@
   );
   pointer-events: none;
 }
+
+/*
+ * Accessibility baseline.
+ *
+ * 1. Keyboard-only focus ring in the brand accent. Scoped to interactive
+ *    elements (not inputs, which own their own focus border) and to
+ *    :focus-visible so pointer users never see it.
+ * 2. Honour the OS "reduce motion" preference: collapse every animation and
+ *    transition so the app stays usable without vestibular triggers.
+ */
+a:focus-visible,
+button:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:not([tabindex='-1']):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

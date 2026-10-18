@@ -23,6 +23,7 @@ import { ChainLogo } from '../components/ChainLogo';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { BackBar } from '../components/BackBar';
 import { AssetPicker } from '../components/AssetPicker';
+import { useToast } from '../components/Toast';
 import { Token } from '../types';
 
 export interface TokenOption {
@@ -174,6 +175,7 @@ function useDepositPoll(opts: {
 
 export const ReceivePage: React.FC = () => {
   const { hasIntentAccount, nearAccount, balances, refreshBalances, refreshHistory } = useOnchainData();
+  const { toast } = useToast();
 
   const [tokens, setTokens] = useState<TokenOption[]>(TOKEN_OPTIONS);
   // Start BLANK — do not derive until token, chain, AND exact amount are selected
@@ -455,6 +457,7 @@ export const ReceivePage: React.FC = () => {
     if (!currentAddress?.address) return;
     navigator.clipboard.writeText(currentAddress.address);
     setCopiedAddress(true);
+    toast('Deposit address copied');
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
@@ -465,6 +468,7 @@ export const ReceivePage: React.FC = () => {
     if (!amtToCopy) return;
     navigator.clipboard.writeText(amtToCopy);
     setCopiedAmount(true);
+    toast('Amount copied');
     setTimeout(() => setCopiedAmount(false), 2000);
   };
 
@@ -484,6 +488,7 @@ export const ReceivePage: React.FC = () => {
     if (!addr) return;
     navigator.clipboard.writeText(addr);
     setNearCopiedAddress(true);
+    toast('NEAR account copied');
     setTimeout(() => setNearCopiedAddress(false), 2000);
   };
 
@@ -1382,6 +1387,7 @@ export const ReceivePage: React.FC = () => {
                             onClick={() => {
                               navigator.clipboard.writeText(nearAccount);
                               setNearCopiedAddress(true);
+                              toast('NEAR account copied');
                               setTimeout(() => setNearCopiedAddress(false), 2000);
                             }}
                             className="text-xs font-mono font-bold text-stone-700 hover:text-black underline"

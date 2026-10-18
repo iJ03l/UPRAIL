@@ -32,9 +32,11 @@ import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
+import { useToast } from '../components/Toast';
 
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
+  const { toast } = useToast();
   const [hasDevicePasskey, setHasDevicePasskey] = useState<boolean>(() => {
     return user?.handle ? webauthn.hasLocalPasskey(user.handle) : true;
   });
@@ -177,6 +179,7 @@ export const AppHome: React.FC = () => {
   const handleCopyTxLink = (claimLink: string, id: string) => {
     navigator.clipboard.writeText(claimLink);
     setCopiedTxId(id);
+    toast('Copied to clipboard');
     setTimeout(() => setCopiedTxId(null), 2000);
   };
 

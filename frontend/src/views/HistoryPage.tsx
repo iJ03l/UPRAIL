@@ -18,10 +18,12 @@ import { formatRecipientDisplay, formatUsd } from '../lib/api';
 import { ShareModal } from '../components/ShareModal';
 import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
+import { useToast } from '../components/Toast';
 import { PaymentIntent } from '../types';
 
 export const HistoryPage: React.FC = () => {
   const { user } = useXAuth();
+  const { toast } = useToast();
   const { history, isLoadingHistory, loadHistory } = usePayments();
   const {
     transactions,
@@ -48,6 +50,7 @@ export const HistoryPage: React.FC = () => {
   const handleCopy = (value: string, id: string) => {
     navigator.clipboard.writeText(value);
     setCopiedId(id);
+    toast('Copied to clipboard');
     setTimeout(() => setCopiedId(null), 2000);
   };
 

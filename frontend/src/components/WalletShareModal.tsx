@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { TokenIcon } from './TokenIcon';
 import { formatUsd } from '../lib/api';
+import { useToast } from './Toast';
 
 export interface WalletSendReceipt {
   shareLink: string;
@@ -41,12 +42,14 @@ export const WalletShareModal: React.FC<WalletShareModalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [showLink, setShowLink] = useState(false);
+  const { toast } = useToast();
 
   if (!isOpen || !receipt) return null;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(receipt.shareLink);
     setCopied(true);
+    toast('Share link copied');
     setTimeout(() => setCopied(false), 2000);
   };
 

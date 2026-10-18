@@ -12,6 +12,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { useToast } from './Toast';
 import { MyInviteResponse } from '../types';
 
 interface InviteModalProps {
@@ -30,6 +31,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -61,6 +63,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
     if (!inviteData?.inviteCode) return;
     navigator.clipboard.writeText(inviteData.inviteCode);
     setCopiedCode(true);
+    toast('Invite code copied');
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
@@ -71,6 +74,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
     const link = `${origin}/login?invite=${inviteData.inviteCode}`;
     navigator.clipboard.writeText(link);
     setCopiedLink(true);
+    toast('Invite link copied');
     setTimeout(() => setCopiedLink(false), 2000);
   };
 

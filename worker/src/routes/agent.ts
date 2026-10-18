@@ -16,7 +16,7 @@ import type { AppContext } from '../types';
 import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { requireAgent } from '../middleware/agentAuth';
-import { generateAgentKey, normalizeRecipient, addAgentSpend } from '../services/agentKeys';
+import { generateAgentKey, normalizeRecipient, addAgentSpend, currentUtcDay } from '../services/agentKeys';
 import { handleSendPayment } from './payments';
 import * as nearRpc from '../services/nearRpc';
 
@@ -150,7 +150,7 @@ agentRouter.get('/keys', requireAuth(), async (c) => {
     .bind(session.x_id)
     .all<any>();
 
-  const keys = (results || []).map((row) => ({
+  const keys = (results || []).map((row): any => ({
     id: row.id,
     agentId: row.agent_id,
     name: row.name,
@@ -166,6 +166,23 @@ agentRouter.get('/keys', requireAuth(), async (c) => {
     revokedAt: row.revoked_at,
     createdAt: row.created_at,
   }));
+
+  // Attach today's spend per key in one query (used by the dashboard's limit bars).
+  if (keys.length) {
+    try {
+      const { results: spendRows } = await c.env.DB.prepare(
+        'SELECT agent_key_id, spent FROM agent_spend WHERE day = ?'
+      )
+        .bind(currentUtcDay())
+        .all<{ agent_key_id: string; spent: string | null }>();
+      const spendByKey = new Map(
+        (spendRows || []).map((r) => [r.agent_key_id, parseFloat(r.spent || '0') || 0])
+      );
+      for (const k of keys) k.spentToday = spendByKey.get(k.id) ?? 0;
+    } catch (err) {
+      console.warn('[agent] spend attach failed:', err);
+    }
+  }
 
   return c.json({ keys });
 });

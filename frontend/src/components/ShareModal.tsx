@@ -13,6 +13,7 @@ import {
 import { PaymentIntent } from '../types';
 import { TokenIcon } from './TokenIcon';
 import { formatUsd } from '../lib/api';
+import { useToast } from './Toast';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -25,6 +26,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   onClose,
   payment,
 }) => {
+  const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
 
@@ -36,6 +38,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     if (payment.claimLink) {
       navigator.clipboard.writeText(payment.claimLink);
       setCopied(true);
+      toast('Claim link copied');
       setTimeout(() => setCopied(false), 2000);
     }
   };

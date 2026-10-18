@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { DomainGate } from '@/components/DomainGate';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { ToastProvider } from '@/components/Toast';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://app.uprail.world'),
@@ -103,7 +104,9 @@ export default function RootLayout({
       </head>
       <body className="bg-white text-stone-900 min-h-screen selection:bg-black selection:text-white antialiased overflow-x-hidden">
         <ThemeProvider>
-          <DomainGate>{children}</DomainGate>
+          <ToastProvider>
+            <DomainGate>{children}</DomainGate>
+          </ToastProvider>
         </ThemeProvider>
       </body>
     </html>

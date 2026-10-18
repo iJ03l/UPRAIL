@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { currentInvite, inviteFromSearch, takeInvite } from '../lib/invite';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { GlitchLogo } from '../components/GlitchLogo';
+import { useToast } from '../components/Toast';
 import {
   ArrowRight,
   CheckCircle2,
@@ -21,6 +22,7 @@ import {
 export const ParkingPage: React.FC = () => {
   const { user, isLoading, refreshSession } = useXAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
 
   const [code, setCode] = useState('');
   const [isValidating, setIsValidating] = useState(false);
@@ -100,6 +102,7 @@ export const ParkingPage: React.FC = () => {
     if (!successData?.personalInviteCode) return;
     navigator.clipboard.writeText(successData.personalInviteCode);
     setCopiedCode(true);
+    toast('Invite code copied');
     setTimeout(() => setCopiedCode(false), 2000);
   };
 

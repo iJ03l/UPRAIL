@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
+import { SkeletonList } from '../components/Skeleton';
+import { useToast } from '../components/Toast';
 import type { AgentKey, CreatedAgentKey, AgentApproval, AgentMode } from '../types';
 
 const MCP_ENDPOINT = 'https://api.uprail.world/api/mcp';
@@ -114,6 +116,7 @@ const PRESETS: AgentPreset[] = [
 
 export const AgentsPage: React.FC = () => {
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
+  const { toast } = useToast();
   const [keys, setKeys] = useState<AgentKey[]>([]);
   const [approvals, setApprovals] = useState<AgentApproval[]>([]);
   const [loading, setLoading] = useState(true);
@@ -200,6 +203,7 @@ export const AgentsPage: React.FC = () => {
       setCreated(res);
       setShowCreate(false);
       resetForm();
+      toast(`Agent “${res.name}” is ready`);
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Failed to create agent key');
@@ -215,6 +219,7 @@ export const AgentsPage: React.FC = () => {
     try {
       const assertion = await authorizeWithPasskey(`Revoke agent “${k.name}”`);
       await api.revokeAgentKey(k.id, assertion);
+      toast(`Agent “${k.name}” revoked`);
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Failed to revoke key');
@@ -230,6 +235,7 @@ export const AgentsPage: React.FC = () => {
       const label = `${decision === 'approve' ? 'Approve' : 'Deny'} ${a.payload.amount} ${a.payload.asset} to @${a.payload.recipientHandle}`;
       const assertion = await authorizeWithPasskey(label);
       await api.decideAgentApproval(a.id, decision, assertion);
+      toast(decision === 'approve' ? 'Payment approved' : 'Payment denied');
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Failed to record decision');
@@ -466,14 +472,42 @@ export const AgentsPage: React.FC = () => {
         </div>
 
         {loading ? (
-          <div className="flex items-center space-x-2 text-stone-400 text-sm font-mono py-8 justify-center">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>Loading agents…</span>
-          </div>
+          <SkeletonList rows={2} />
         ) : keys.length === 0 ? (
-          <div className="p-8 rounded-3xl bg-stone-50 border border-dashed border-stone-200 text-center space-y-2">
-            <Bot className="w-8 h-8 text-stone-300 mx-auto" />
-            <p className="text-sm text-stone-500">No agents yet. Create one to let an app pay on your behalf.</p>
+          <div className="p-8 rounded-3xl bg-stone-50 border border-dashed border-stone-200 text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center mx-auto">
+              <Bot className="w-5 h-5 text-stone-400" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-bold text-stone-900">No agents yet</p>
+              <p className="text-xs text-stone-500 max-w-sm mx-auto">
+                Start from a preset — it takes one passkey tap. An agent can then pay on your
+                behalf under a scoped, revocable policy.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              {PRESETS.slice(0, 3).map((p) => {
+                const Icon = p.icon;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => { applyPreset(p); setShowCreate(true); }}
+                    className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-xs font-bold text-stone-900 transition-colors cursor-pointer"
+                  >
+                    <Icon className="w-3.5 h-3.5 text-stone-500" />
+                    <span>{p.label}</span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => { resetForm(); setShowCreate(true); }}
+                className="px-3 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
+              >
+                Custom
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-2">
@@ -481,6 +515,11 @@ export const AgentsPage: React.FC = () => {
               const revoked = Boolean(k.revokedAt);
               const expired = k.expiresAt ? k.expiresAt < Date.now() : false;
               const dead = revoked || expired;
+              const dailyLimitNum = k.dailyLimit ? parseFloat(k.dailyLimit) || 0 : 0;
+              const spentToday = k.spentToday ?? 0;
+              const spendPct = dailyLimitNum > 0 ? Math.min(1, spentToday / dailyLimitNum) : 0;
+              const spendTone =
+                spendPct >= 1 ? 'bg-red-500' : spendPct >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500';
               return (
                 <div
                   key={k.id}
@@ -519,6 +558,23 @@ export const AgentsPage: React.FC = () => {
                       {k.lastUsedAt ? ` · Last used ${formatDate(k.lastUsedAt)}` : ' · Never used'}
                       {k.expiresAt ? ` · Expires ${formatDate(k.expiresAt)}` : ''}
                     </div>
+                    {dailyLimitNum > 0 && (
+                      <div className="mt-2 max-w-[16rem]">
+                        <div className="flex items-center justify-between text-[10px] font-mono text-stone-500">
+                          <span>Today's spend</span>
+                          <span className="tabular-nums">
+                            {spentToday.toLocaleString()} / {dailyLimitNum.toLocaleString()}
+                            {k.asset ? ` ${k.asset}` : ''}
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 rounded-full bg-stone-100 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${spendTone} transition-[width] duration-300`}
+                            style={{ width: `${spendPct * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                   {!dead && (
                     <button
@@ -574,6 +630,7 @@ export const AgentsPage: React.FC = () => {
 };
 
 const CopyRow: React.FC<{ value: string }> = ({ value }) => {
+  const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-stone-900 border border-stone-800">
@@ -582,6 +639,7 @@ const CopyRow: React.FC<{ value: string }> = ({ value }) => {
         onClick={() => {
           navigator.clipboard.writeText(value);
           setCopied(true);
+          toast('Copied to clipboard');
           setTimeout(() => setCopied(false), 1500);
         }}
         className="p-1.5 rounded-lg text-stone-400 hover:text-white transition-colors cursor-pointer flex-shrink-0"
@@ -594,6 +652,7 @@ const CopyRow: React.FC<{ value: string }> = ({ value }) => {
 };
 
 const CreatedKeyModal: React.FC<{ created: CreatedAgentKey; onClose: () => void }> = ({ created, onClose }) => {
+  const { toast } = useToast();
   const [copied, setCopied] = useState(false);
   const [ack, setAck] = useState(false);
   return (
@@ -615,6 +674,7 @@ const CreatedKeyModal: React.FC<{ created: CreatedAgentKey; onClose: () => void 
               navigator.clipboard.writeText(created.key);
               setCopied(true);
               setAck(true);
+              toast('Agent key copied');
               setTimeout(() => setCopied(false), 1500);
             }}
             className="flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
