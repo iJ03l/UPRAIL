@@ -20,6 +20,11 @@
   --line-strong: #d6d3d1;
   --accent: #e05326;
   --accent-fg: #ffffff;
+  --ok: #059669;
+  --ok-fg: #065f46;
+  --ok-bg: #ecfdf5;
+  --ok-bg-strong: #d1fae5;
+  --ok-line: #a7f3d0;
   color-scheme: light;
 }
 
@@ -35,6 +40,11 @@
   --line-strong: #43464b;
   --accent: #e05326;
   --accent-fg: #ffffff;
+  --ok: #34d399;
+  --ok-fg: #6ee7b7;
+  --ok-bg: rgba(16, 185, 129, 0.10);
+  --ok-bg-strong: rgba(16, 185, 129, 0.16);
+  --ok-line: rgba(16, 185, 129, 0.30);
   color-scheme: dark;
 }
 
@@ -234,6 +244,20 @@
   .dark .border-stone-200\/90 { border-color: color-mix(in srgb, var(--line) 90%, transparent); }
   .dark .divide-stone-100 > :not([hidden]) ~ :not([hidden]),
   .dark .divide-stone-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line); }
+
+  /* success (emerald) — light-mode tinted chips invert to translucent green
+     on the dark surface so success states stay green but stop glowing white. */
+  .dark .bg-emerald-50 { background-color: var(--ok-bg); }
+  .dark .bg-emerald-50\/80 { background-color: color-mix(in srgb, var(--ok-bg) 80%, transparent); }
+  .dark .bg-emerald-100 { background-color: var(--ok-bg-strong); }
+  .dark .text-emerald-400,
+  .dark .text-emerald-600 { color: var(--ok); }
+  .dark .text-emerald-700,
+  .dark .text-emerald-800,
+  .dark .text-emerald-900,
+  .dark .text-emerald-950 { color: var(--ok-fg); }
+  .dark .border-emerald-100,
+  .dark .border-emerald-200 { border-color: var(--ok-line); }
 
   /* hovers */
   .dark .hover\:bg-white:hover { background-color: var(--bg); }

@@ -11,8 +11,18 @@ const LOW_H = 80;
  * burnt-orange hero palette (and warm its glow + floor shadow) so the obsidian
  * theme reads as one coherent accent instead of a stray green figure.
  */
-const GREEN_PALETTE = { glow: '#39ff14', floor: 'rgba(6, 46, 12, 0.09)' };
-const ORANGE_PALETTE = { glow: '#E05326', floor: 'rgba(46, 18, 12, 0.10)' };
+const GREEN_PALETTE = {
+  glow: '#39ff14',
+  floor: 'rgba(6, 46, 12, 0.09)',
+  gridOrange: '224, 83, 38',
+  gridGreen: '57, 255, 20',
+};
+const ORANGE_PALETTE = {
+  glow: '#E05326',
+  floor: 'rgba(46, 18, 12, 0.10)',
+  gridOrange: '224, 83, 38',
+  gridGreen: '255, 175, 148',
+};
 // burnt-800 → burnt-500 → burnt-300, a ramp used to remap sprite luminance.
 const ORANGE_RAMP: [number, number, number][] = [
   [126, 41, 16],
@@ -334,10 +344,10 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
 
             if (gridTypes[idx] === 0) {
               // Burnt Orange flare block (#E05326)
-              ctx.fillStyle = `rgba(224, 83, 38, ${energy * 0.22})`;
+              ctx.fillStyle = `rgba(${palette.gridOrange}, ${energy * 0.22})`;
             } else {
-              // Electric Green block (#39FF14)
-              ctx.fillStyle = `rgba(57, 255, 20, ${energy * 0.26})`;
+              // Electric Green block (#39FF14); warmed in dark mode
+              ctx.fillStyle = `rgba(${palette.gridGreen}, ${energy * 0.26})`;
             }
             ctx.fillRect(bx, by, size, size);
           } else {
