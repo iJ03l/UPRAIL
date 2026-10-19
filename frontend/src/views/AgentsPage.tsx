@@ -18,6 +18,8 @@ import {
   Sparkles,
   Terminal,
   Globe,
+  Zap,
+  Compass,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
@@ -33,42 +35,65 @@ function formatDate(ms: number | null): string {
   return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+type PlatformId = 'claude' | 'openai' | 'grok' | 'metamuse' | 'cursor' | 'other';
+
 interface ChatPlatform {
-  id: 'claude' | 'chatgpt' | 'cursor' | 'other';
+  id: PlatformId;
   label: string;
   blurb: string;
   icon: React.ComponentType<{ className?: string }>;
   defaultName: string;
+  defaultTab: 'url' | 'mcp' | 'openapi';
 }
 
 const CHAT_PLATFORMS: ChatPlatform[] = [
   {
     id: 'claude',
     label: 'Claude',
-    blurb: 'Claude Desktop, Web & Mobile via MCP',
+    blurb: 'Claude Web, Mobile & Desktop',
     icon: Sparkles,
     defaultName: 'Claude',
+    defaultTab: 'url',
   },
   {
-    id: 'chatgpt',
-    label: 'ChatGPT',
-    blurb: 'ChatGPT Actions (OpenAPI) or MCP',
+    id: 'openai',
+    label: 'OpenAI / Dot',
+    blurb: 'ChatGPT, OpenAI Dot & GPT Actions',
     icon: MessageSquare,
-    defaultName: 'ChatGPT',
+    defaultName: 'OpenAI Dot',
+    defaultTab: 'openapi',
+  },
+  {
+    id: 'grok',
+    label: 'Grok Bot',
+    blurb: 'Grok on 𝕏 & xAI Grok Assistant',
+    icon: Zap,
+    defaultName: 'Grok Bot',
+    defaultTab: 'url',
+  },
+  {
+    id: 'metamuse',
+    label: 'Meta Muse',
+    blurb: 'Meta Muse & Meta AI Assistant',
+    icon: Compass,
+    defaultName: 'Meta Muse',
+    defaultTab: 'url',
   },
   {
     id: 'cursor',
     label: 'Cursor / Windsurf',
-    blurb: 'Pay & check balance from your IDE chat',
+    blurb: 'Pay & check balance from IDE chat',
     icon: Terminal,
     defaultName: 'Cursor',
+    defaultTab: 'mcp',
   },
   {
     id: 'other',
     label: 'Any Other AI Chat',
-    blurb: 'Works with any MCP or REST AI assistant',
+    blurb: 'Works with any MCP or OpenAPI chat',
     icon: Globe,
     defaultName: 'My AI Chat',
+    defaultTab: 'url',
   },
 ];
 
@@ -89,6 +114,10 @@ function buildMcpJson(apiKey: string): string {
   );
 }
 
+function buildOneClickMcpUrl(apiKey: string): string {
+  return `${MCP_ENDPOINT}?key=${apiKey}`;
+}
+
 export const AgentsPage: React.FC = () => {
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   const { toast } = useToast();
@@ -98,10 +127,10 @@ export const AgentsPage: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAgentKey | null>(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [guideTab, setGuideTab] = useState<'mcp' | 'chatgpt'>('mcp');
+  const [guideTab, setGuideTab] = useState<'url' | 'mcp' | 'openapi'>('url');
 
   // Create form state
-  const [selectedPlatform, setSelectedPlatform] = useState<ChatPlatform['id']>('claude');
+  const [selectedPlatform, setSelectedPlatform] = useState<PlatformId>('claude');
   const [name, setName] = useState('Claude');
   const [perTxLimit, setPerTxLimit] = useState('25');
   const [dailyLimit, setDailyLimit] = useState('100');
@@ -111,8 +140,7 @@ export const AgentsPage: React.FC = () => {
   const selectPlatform = (p: ChatPlatform) => {
     setSelectedPlatform(p.id);
     setName(p.defaultName);
-    if (p.id === 'chatgpt') setGuideTab('chatgpt');
-    else setGuideTab('mcp');
+    setGuideTab(p.defaultTab);
   };
 
   const refresh = useCallback(async () => {
@@ -137,7 +165,7 @@ export const AgentsPage: React.FC = () => {
     setError(null);
     const trimmedName = name.trim();
     if (!trimmedName) {
-      setError('Give your AI chat connection a name (e.g. Claude or ChatGPT).');
+      setError('Give your AI chat connection a name (e.g. Grok Bot, OpenAI Dot, Meta Muse, Claude).');
       return;
     }
     const perTxNum = parseFloat(perTxLimit);
@@ -188,6 +216,8 @@ export const AgentsPage: React.FC = () => {
     }
   };
 
+  const activePlatformObj = CHAT_PLATFORMS.find((p) => p.id === selectedPlatform) || CHAT_PLATFORMS[0];
+
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
@@ -198,8 +228,9 @@ export const AgentsPage: React.FC = () => {
             <h1 className="text-2xl font-display font-extrabold tracking-tight">AI Chat Payments</h1>
           </div>
           <p className="mt-1 text-sm text-stone-500 max-w-xl">
-            Send, receive, and check payments directly from ChatGPT, Claude, Cursor, or any AI chat.
-            Protected by strict USD spend limits and revocable in one tap.
+            Send, receive, and check payments directly from Claude, OpenAI Dot / ChatGPT, Grok Bot,
+            Meta Muse, Cursor, or any AI chat. Protected by strict USD spend limits and revocable in
+            one tap.
           </p>
         </div>
         <button
@@ -225,7 +256,7 @@ export const AgentsPage: React.FC = () => {
             <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
               1. Pick your AI chat app
             </span>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {CHAT_PLATFORMS.map((p) => {
                 const active = selectedPlatform === p.id;
                 const Icon = p.icon;
@@ -259,7 +290,7 @@ export const AgentsPage: React.FC = () => {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Claude or ChatGPT"
+                placeholder="e.g. Grok Bot, OpenAI Dot, Meta Muse, Claude"
                 className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm focus:outline-none focus:border-stone-900"
               />
             </label>
@@ -462,12 +493,30 @@ export const AgentsPage: React.FC = () => {
 
       {/* Setup & Example Prompts */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center space-x-2 text-stone-900">
             <Code2 className="w-4 h-4" />
             <h2 className="text-sm font-display font-bold uppercase tracking-wider">Easy Setup Guide</h2>
           </div>
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-stone-100 border border-stone-200">
+          <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl bg-stone-100 border border-stone-200">
+            <button
+              type="button"
+              onClick={() => setGuideTab('url')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                guideTab === 'url' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-900'
+              }`}
+            >
+              Grok / Meta Muse / Claude (1-URL)
+            </button>
+            <button
+              type="button"
+              onClick={() => setGuideTab('openapi')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                guideTab === 'openapi' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-900'
+              }`}
+            >
+              OpenAI Dot / ChatGPT Actions
+            </button>
             <button
               type="button"
               onClick={() => setGuideTab('mcp')}
@@ -475,50 +524,57 @@ export const AgentsPage: React.FC = () => {
                 guideTab === 'mcp' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-900'
               }`}
             >
-              Claude / Cursor (MCP)
-            </button>
-            <button
-              type="button"
-              onClick={() => setGuideTab('chatgpt')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-colors cursor-pointer ${
-                guideTab === 'chatgpt' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-900'
-              }`}
-            >
-              ChatGPT Actions
+              Claude Desktop / Cursor (JSON)
             </button>
           </div>
         </div>
 
         <div className="p-5 rounded-3xl bg-stone-950 text-stone-100 space-y-4">
-          {guideTab === 'mcp' ? (
+          {guideTab === 'url' && (
             <div className="space-y-3">
               <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
-                Add to Claude Desktop, Cursor, Windsurf, or any MCP Client
+                1-Click Connector URL for Grok Bot, Meta Muse, OpenAI Dot &amp; Claude Web
               </div>
-              <CopyBlock value={buildMcpJson('up_agent_YOUR_KEY_HERE')} />
+              <CopyRow value={buildOneClickMcpUrl('up_agent_YOUR_KEY_HERE')} />
               <p className="text-xs text-stone-400 leading-relaxed">
-                Or connect directly to <code className="text-stone-200">{MCP_ENDPOINT}</code> with header{' '}
-                <code className="text-stone-200">Authorization: Bearer up_agent_…</code>.
+                Paste this single URL into <strong>Grok</strong> (Tools / Remote MCP),{' '}
+                <strong>Meta Muse</strong> (Connectors / MCP URL), <strong>OpenAI Dot</strong>{' '}
+                (MCP Server URL), or <strong>Claude Web &amp; Mobile</strong> (Settings → Integrations →
+                Add MCP Server). No extra headers required.
               </p>
             </div>
-          ) : (
+          )}
+
+          {guideTab === 'openapi' && (
             <div className="space-y-3">
               <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
-                Import into ChatGPT (Custom GPT → Actions → Import from URL)
+                Import into OpenAI Dot / ChatGPT, Grok Actions, or Meta Muse Studio
               </div>
               <CopyRow value={OPENAPI_SPEC_URL} />
               <p className="text-xs text-stone-400 leading-relaxed">
-                1. In ChatGPT, open <strong>Configure → Actions → Create new action</strong>.<br />
-                2. Click <strong>Import from URL</strong> and paste the URL above.<br />
-                3. Set <strong>Authentication</strong> to <strong>API Key (Bearer)</strong> and paste your{' '}
+                1. Open <strong>Actions / Tools → Import from URL</strong> and paste the URL above.<br />
+                2. Set <strong>Authentication</strong> to <strong>API Key (Bearer)</strong> and paste your{' '}
                 <code className="text-stone-200">up_agent_…</code> key.
+              </p>
+            </div>
+          )}
+
+          {guideTab === 'mcp' && (
+            <div className="space-y-3">
+              <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
+                Add to Claude Desktop, Cursor, Windsurf, or any MCP Config File
+              </div>
+              <CopyBlock value={buildMcpJson('up_agent_YOUR_KEY_HERE')} />
+              <p className="text-xs text-stone-400 leading-relaxed">
+                Or connect to <code className="text-stone-200">{MCP_ENDPOINT}</code> with{' '}
+                <code className="text-stone-200">Authorization: Bearer up_agent_…</code>.
               </p>
             </div>
           )}
 
           <div className="pt-3 border-t border-stone-800 space-y-2">
             <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
-              What you can say in chat
+              What you can say in Grok, OpenAI Dot, Meta Muse, or Claude
             </div>
             <div className="grid sm:grid-cols-3 gap-2 text-xs font-mono text-stone-300">
               <div className="p-2.5 rounded-xl bg-stone-900 border border-stone-800">
@@ -539,7 +595,7 @@ export const AgentsPage: React.FC = () => {
       {created && (
         <CreatedKeyModal
           created={created}
-          defaultTab={selectedPlatform === 'chatgpt' ? 'chatgpt' : 'mcp'}
+          defaultTab={activePlatformObj.defaultTab}
           onClose={() => setCreated(null)}
         />
       )}
@@ -593,15 +649,16 @@ const CopyBlock: React.FC<{ value: string }> = ({ value }) => {
 
 const CreatedKeyModal: React.FC<{
   created: CreatedAgentKey;
-  defaultTab: 'mcp' | 'chatgpt';
+  defaultTab: 'url' | 'mcp' | 'openapi';
   onClose: () => void;
 }> = ({ created, defaultTab, onClose }) => {
   const { toast } = useToast();
   const [copiedKey, setCopiedKey] = useState(false);
-  const [copiedConfig, setCopiedConfig] = useState(false);
-  const [tab, setTab] = useState<'mcp' | 'chatgpt'>(defaultTab);
+  const [copiedSetup, setCopiedSetup] = useState(false);
+  const [tab, setTab] = useState<'url' | 'mcp' | 'openapi'>(defaultTab);
   const [ack, setAck] = useState(false);
 
+  const oneClickUrl = buildOneClickMcpUrl(created.key);
   const mcpJson = buildMcpJson(created.key);
 
   return (
@@ -612,7 +669,7 @@ const CreatedKeyModal: React.FC<{
           <h3 className="text-lg font-display font-extrabold">{created.name} is ready to connect</h3>
         </div>
         <p className="text-xs text-stone-600 leading-relaxed">
-          Copy your secret key or ready-made config below. For security, this key is shown{' '}
+          Copy your secret key or 1-click connection URL below. For security, this key is shown{' '}
           <strong>only once</strong>.
         </p>
 
@@ -639,11 +696,29 @@ const CreatedKeyModal: React.FC<{
         </div>
 
         <div className="space-y-2 pt-2 border-t border-stone-200">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
             <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
               2. Quick Setup
             </span>
-            <div className="flex items-center gap-1 p-0.5 rounded-lg bg-stone-100 border border-stone-200">
+            <div className="flex flex-wrap items-center gap-1 p-0.5 rounded-lg bg-stone-100 border border-stone-200">
+              <button
+                type="button"
+                onClick={() => setTab('url')}
+                className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold cursor-pointer ${
+                  tab === 'url' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500'
+                }`}
+              >
+                Grok / Meta Muse / Claude URL
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('openapi')}
+                className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold cursor-pointer ${
+                  tab === 'openapi' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500'
+                }`}
+              >
+                OpenAI Dot / ChatGPT
+              </button>
               <button
                 type="button"
                 onClick={() => setTab('mcp')}
@@ -651,21 +726,51 @@ const CreatedKeyModal: React.FC<{
                   tab === 'mcp' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500'
                 }`}
               >
-                Claude / Cursor (MCP)
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab('chatgpt')}
-                className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold cursor-pointer ${
-                  tab === 'chatgpt' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500'
-                }`}
-              >
-                ChatGPT
+                MCP JSON
               </button>
             </div>
           </div>
 
-          {tab === 'mcp' ? (
+          {tab === 'url' && (
+            <div className="space-y-2">
+              <div className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-[11px] break-all select-all">
+                {oneClickUrl}
+              </div>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(oneClickUrl);
+                  setCopiedSetup(true);
+                  setAck(true);
+                  toast('1-click MCP URL copied');
+                  setTimeout(() => setCopiedSetup(false), 1500);
+                }}
+                className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                {copiedSetup ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedSetup ? '1-Click URL Copied' : 'Copy 1-Click Connector URL'}</span>
+              </button>
+              <p className="text-[11px] text-stone-500">
+                Paste this URL directly into <strong>Grok</strong>, <strong>Meta Muse</strong>,{' '}
+                <strong>OpenAI Dot</strong>, or <strong>Claude Web/Mobile</strong> MCP Server URL.
+              </p>
+            </div>
+          )}
+
+          {tab === 'openapi' && (
+            <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2 text-xs text-stone-700">
+              <p>
+                1. In <strong>OpenAI Dot / ChatGPT</strong>, <strong>Grok</strong>, or{' '}
+                <strong>Meta Muse</strong> → <strong>Actions → Import from URL</strong>:
+              </p>
+              <CopyRow value={OPENAPI_SPEC_URL} />
+              <p>
+                2. Choose <strong>Authentication → API Key → Bearer</strong> and paste your secret key
+                above.
+              </p>
+            </div>
+          )}
+
+          {tab === 'mcp' && (
             <div className="space-y-2">
               <pre className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-[11px] overflow-x-auto leading-relaxed">
                 {mcpJson}
@@ -673,26 +778,16 @@ const CreatedKeyModal: React.FC<{
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(mcpJson);
-                  setCopiedConfig(true);
+                  setCopiedSetup(true);
                   setAck(true);
                   toast('MCP config copied');
-                  setTimeout(() => setCopiedConfig(false), 1500);
+                  setTimeout(() => setCopiedSetup(false), 1500);
                 }}
                 className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
               >
-                {copiedConfig ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedConfig ? 'MCP Config Copied' : 'Copy Ready-to-Paste MCP JSON'}</span>
+                {copiedSetup ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedSetup ? 'MCP Config Copied' : 'Copy Ready-to-Paste MCP JSON'}</span>
               </button>
-            </div>
-          ) : (
-            <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2 text-xs text-stone-700">
-              <p>
-                1. In ChatGPT Custom GPT → <strong>Actions → Import from URL</strong>:
-              </p>
-              <CopyRow value={OPENAPI_SPEC_URL} />
-              <p>
-                2. Choose <strong>Authentication → API Key → Bearer</strong> and paste the secret key above.
-              </p>
             </div>
           )}
         </div>
@@ -710,7 +805,7 @@ const CreatedKeyModal: React.FC<{
           disabled={!ack}
           className="w-full py-2.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
         >
-          {ack ? 'Done' : 'Copy your key above to continue'}
+          {ack ? 'Done' : 'Copy your key or URL above to continue'}
         </button>
       </div>
     </div>

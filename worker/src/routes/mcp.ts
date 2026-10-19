@@ -293,7 +293,9 @@ mcpRouter.post('/', requireAgent(), async (c) => {
   }
 
   switch (method) {
-    case 'initialize':
+    case 'initialize': {
+      const sessionId = c.req.header('Mcp-Session-Id') || `mcp_${c.get('agent')!.key_id}`;
+      c.header('Mcp-Session-Id', sessionId);
       return c.json(
         rpcResult(id, {
           protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
@@ -301,12 +303,22 @@ mcpRouter.post('/', requireAgent(), async (c) => {
           serverInfo: SERVER_INFO,
         })
       );
+    }
 
     case 'ping':
       return c.json(rpcResult(id, {}));
 
     case 'tools/list':
       return c.json(rpcResult(id, { tools: TOOLS }));
+
+    case 'resources/list':
+      return c.json(rpcResult(id, { resources: [] }));
+
+    case 'resources/templates/list':
+      return c.json(rpcResult(id, { resourceTemplates: [] }));
+
+    case 'prompts/list':
+      return c.json(rpcResult(id, { prompts: [] }));
 
     case 'tools/call': {
       const name = String(params?.name || '');

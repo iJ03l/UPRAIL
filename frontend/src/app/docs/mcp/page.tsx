@@ -6,22 +6,50 @@ export default function McpDocsPage() {
     <article className="space-y-8">
       <header className="space-y-3">
         <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-orange-600">
-          MCP &amp; ChatGPT Actions
+          MCP &amp; OpenAPI Actions
         </div>
         <h1 className="text-3xl font-display font-extrabold tracking-tight text-stone-950">
-          Connect Claude, ChatGPT &amp; Cursor
+          Connect Claude, OpenAI Dot, Grok Bot, Meta Muse &amp; Cursor
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          UPRAIL exposes both a Streamable HTTP <strong className="text-stone-900">MCP server</strong>{' '}
-          (for Claude, Cursor, Windsurf, and MCP clients) and an{' '}
-          <strong className="text-stone-900">OpenAPI 3.1 spec</strong> (for ChatGPT Custom GPT
-          Actions). Every tool call runs under your key&apos;s USD spend limits.
+          UPRAIL exposes a universal <strong className="text-stone-900">1-Click MCP URL</strong>, a
+          standard <strong className="text-stone-900">MCP JSON config</strong>, and an{' '}
+          <strong className="text-stone-900">OpenAPI 3.1 spec</strong> so you can connect any AI chat
+          interface in seconds. Every tool call runs under your key&apos;s USD spend limits.
         </p>
       </header>
 
       <section className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">
-          Option A — Claude, Cursor &amp; MCP clients
+          Option A — 1-Click Connector URL (Grok Bot, Meta Muse, OpenAI Dot, Claude Web/Mobile)
+        </h2>
+        <Endpoint verb="POST" path="/api/mcp?key=up_agent_…" auth="Self-authenticated URL" />
+        <p className="text-sm text-stone-600 leading-relaxed">
+          For AI chats that accept a single Remote MCP / Connector URL without a separate custom
+          header field, paste your 1-click URL directly:
+        </p>
+        <Code title="1-Click MCP Server URL">{`https://api.uprail.world/api/mcp?key=up_agent_YOUR_KEY`}</Code>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Option B — OpenAI Dot / ChatGPT, Grok &amp; Meta Muse OpenAPI Actions
+        </h2>
+        <Endpoint verb="GET" path="/api/agent/openapi.json" auth="public" />
+        <p className="text-sm text-stone-600 leading-relaxed">
+          In <strong className="text-stone-900">OpenAI Dot / ChatGPT</strong>,{' '}
+          <strong className="text-stone-900">Grok Studio</strong>, or{' '}
+          <strong className="text-stone-900">Meta Muse</strong>, open{' '}
+          <strong className="text-stone-900">Actions / Tools → Import from URL</strong>, paste{' '}
+          <code className="font-mono text-[13px]">https://api.uprail.world/api/agent/openapi.json</code>,
+          and set Authentication to <strong className="text-stone-900">API Key (Bearer)</strong> with
+          your <code className="font-mono text-[13px]">up_agent_…</code> key.
+        </p>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Option C — Claude Desktop, Cursor &amp; Windsurf (MCP JSON)
         </h2>
         <Endpoint verb="POST" path="/api/mcp" auth="Bearer agent key" />
         <Code title="MCP config JSON">{`{
@@ -34,19 +62,6 @@ export default function McpDocsPage() {
     }
   }
 }`}</Code>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">
-          Option B — ChatGPT Custom GPT Actions
-        </h2>
-        <Endpoint verb="GET" path="/api/agent/openapi.json" auth="public" />
-        <p className="text-sm text-stone-600 leading-relaxed">
-          In ChatGPT, open <strong className="text-stone-900">Configure → Actions → Import from URL</strong>,
-          paste <code className="font-mono text-[13px]">https://api.uprail.world/api/agent/openapi.json</code>,
-          and set Authentication to <strong className="text-stone-900">API Key (Bearer)</strong> with
-          your <code className="font-mono text-[13px]">up_agent_…</code> key.
-        </p>
       </section>
 
       <section className="space-y-3">

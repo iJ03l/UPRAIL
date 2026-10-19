@@ -43,14 +43,21 @@ function jsonError(
 
 export const requireAgent = (): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
-    const header = c.req.header('Authorization') || '';
-    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-    const rawKey = match?.[1]?.trim();
+    const header = (c.req.header('Authorization') || '').trim();
+    const bearerMatch = /^Bearer\s+(.+)$/i.exec(header);
+    const candidate =
+      bearerMatch?.[1]?.trim() ||
+      (looksLikeAgentKey(header) ? header : '') ||
+      (c.req.header('X-Agent-Key') || '').trim() ||
+      (c.req.header('X-API-Key') || '').trim() ||
+      (c.req.query('key') || '').trim() ||
+      (c.req.query('api_key') || '').trim();
+    const rawKey = candidate;
     if (!rawKey || !looksLikeAgentKey(rawKey)) {
       return jsonError(
         c,
         401,
-        'Agent key required. Send "Authorization: Bearer up_agent_…".',
+        'Agent key required. Send "Authorization: Bearer up_agent_…" or append "?key=up_agent_…".',
         'AGENT_KEY_REQUIRED'
       );
     }

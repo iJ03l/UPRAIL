@@ -137,9 +137,9 @@ export const LandingPage: React.FC = () => {
               Pay from any AI chat — and route creator fees to 𝕏.
             </h2>
             <p className="text-sm sm:text-base text-stone-600 max-w-2xl leading-relaxed">
-              Connect ChatGPT, Claude, or Cursor to send and receive confidential payments within
-              USD spend limits you control, or route launchpad creator fees straight to your 𝕏
-              handle. Read the{' '}
+              Connect Claude, OpenAI Dot / ChatGPT, Grok Bot, Meta Muse, or Cursor to send and
+              receive confidential payments within USD spend limits you control, or route launchpad
+              creator fees straight to your 𝕏 handle. Read the{' '}
               <a
                 href="https://docs.uprail.world"
                 target="_blank"
@@ -158,13 +158,13 @@ export const LandingPage: React.FC = () => {
                 icon: Bot,
                 tag: 'AI Chat',
                 title: 'Pay & receive in any AI chat',
-                body: 'Send confidential payments to any 𝕏 handle or generate deposit addresses straight from ChatGPT, Claude, or Cursor — protected by USD spend limits.',
+                body: 'Send confidential payments to any 𝕏 handle or generate deposit addresses straight from Claude, OpenAI Dot, Grok Bot, Meta Muse, or Cursor — protected by USD spend limits.',
               },
               {
                 icon: Network,
                 tag: 'MCP & Actions',
                 title: '1-click MCP & OpenAPI setup',
-                body: 'Drop your Passkey-issued key into Claude Desktop, Cursor, or ChatGPT Actions to check balances, pay handles, and receive across chains.',
+                body: 'Paste a single 1-click connector URL into Grok, Meta Muse, OpenAI Dot, or Claude, or drop the JSON config into Cursor.',
               },
               {
                 icon: Coins,

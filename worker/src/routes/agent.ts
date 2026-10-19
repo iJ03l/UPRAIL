@@ -441,8 +441,9 @@ agentRouter.get('/payments', requireAgent(), async (c) => {
 
 /**
  * GET /api/agent/openapi.json
- * Public OpenAPI 3.1.0 specification so ChatGPT Custom GPT Actions (or any
- * OpenAPI-based AI assistant) can import UPRAIL payment actions by URL.
+ * Public OpenAPI 3.1.0 specification so OpenAI (ChatGPT / OpenAI Dot), Grok,
+ * Meta Muse, or any OpenAPI-based AI assistant can import UPRAIL payment
+ * actions by URL.
  */
 agentRouter.get('/openapi.json', (c) => {
   const origin = new URL(c.req.url).origin;
@@ -453,7 +454,7 @@ agentRouter.get('/openapi.json', (c) => {
       title: 'UPRAIL AI Chat Payments',
       version: '1.0.0',
       description:
-        'Send, receive, and check confidential payments on UPRAIL from any AI chat interface.',
+        'Send, receive, and check confidential payments on UPRAIL from OpenAI, Claude, Grok, Meta Muse, or any AI chat interface.',
     },
     servers: [{ url: serverUrl }],
     components: {
@@ -463,9 +464,15 @@ agentRouter.get('/openapi.json', (c) => {
           scheme: 'bearer',
           description: 'Paste your UPRAIL AI Chat key (starts with up_agent_)',
         },
+        ApiKeyQuery: {
+          type: 'apiKey',
+          in: 'query',
+          name: 'key',
+          description: 'Or pass your UPRAIL AI Chat key as ?key=up_agent_…',
+        },
       },
     },
-    security: [{ BearerAuth: [] }],
+    security: [{ BearerAuth: [] }, { ApiKeyQuery: [] }],
     paths: {
       '/api/agent/pay': {
         post: {
