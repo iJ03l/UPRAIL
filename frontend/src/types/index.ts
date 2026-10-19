@@ -187,46 +187,24 @@ export interface ClaimPaymentResult {
   message: string;
 }
 
-export type AgentMode = 'always_ask' | 'autonomous';
-
-/** A scoped programmatic key an agent uses to move funds under policy. */
+/** A scoped AI chat key that lets any AI chat interface send/receive payments within USD caps. */
 export interface AgentKey {
   id: string;
   agentId: string;
   name: string;
   label: string | null;
-  mode: AgentMode;
   keyPrefix: string;
-  asset: string | null;
   perTxLimit: string | null;
   dailyLimit: string | null;
-  allowlist: string[] | null;
   expiresAt: number | null;
   lastUsedAt: number | null;
   revokedAt: number | null;
   createdAt: number;
-  /** Spend recorded against this key for the current UTC day (0 when none). */
+  /** USD spend recorded against this key for the current UTC day (0 when none). */
   spentToday?: number;
 }
 
 /** The create response — `key` is the plaintext secret, shown exactly once. */
 export interface CreatedAgentKey extends AgentKey {
   key: string;
-}
-
-export interface AgentApprovalPayload {
-  recipientHandle: string;
-  asset: string;
-  amount: number;
-  memo?: string;
-}
-
-/** An Always-Ask request waiting for an on-device passkey decision. */
-export interface AgentApproval {
-  id: string;
-  agentKeyId: string;
-  payload: AgentApprovalPayload;
-  status: string;
-  createdAt: number;
-  expiresAt: number;
 }

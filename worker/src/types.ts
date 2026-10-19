@@ -161,12 +161,8 @@ export interface AgentPrincipal {
   key_id: string;
   agent_id: string;
   x_id: string;
-  mode: 'always_ask' | 'autonomous';
-  asset: string | null;
-  per_tx_limit: number | null;
-  daily_limit: number | null;
-  /** Normalized '@handle' / wallet addresses; null = any recipient. */
-  allowlist: string[] | null;
+  per_tx_limit_usd: number | null;
+  daily_limit_usd: number | null;
 }
 
 export interface Invite {

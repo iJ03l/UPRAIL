@@ -6,54 +6,47 @@ export default function AgentsDocsPage() {
     <article className="space-y-8">
       <header className="space-y-3">
         <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-orange-600">
-          Feature 1
+          AI Chat Payments
         </div>
         <h1 className="text-3xl font-display font-extrabold tracking-tight text-stone-950">
-          Agent rail
+          Send &amp; receive from any AI chat
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Give an AI agent a scoped key so it can pay X handles on your behalf — inside limits you
-          set. A key never touches your passkey; it acts as you through the same send pipeline, and
-          every payment is bound by a spend policy you define.
+          Connect ChatGPT, Claude, Cursor, or any AI chat interface to your UPRAIL vault using a
+          Passkey-authorized key. Every key enforces live USD spend limits (max per payment and max
+          per day) with atomic reservations before any funds move.
         </p>
       </header>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Create a key</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">1. Create an AI chat key</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Creating a key is fund-affecting, so it is cookie + passkey gated. You can create keys in
-          the dashboard at{' '}
+          Create a key in one tap at{' '}
           <a
             className="text-stone-900 underline"
             href="https://app.uprail.world/app/agents"
           >
             app.uprail.world/app/agents
-          </a>{' '}
-          or directly:
+          </a>
+          . Creating or revoking a key requires your device Passkey.
         </p>
         <Endpoint verb="POST" path="/api/agent/keys" auth="cookie + passkey" />
         <Code title="Request">{`{
-  "name": "treasury-bot",
-  "mode": "always_ask",
-  "asset": "USDC",
+  "name": "Claude",
   "perTxLimit": 25,
-  "dailyLimit": 200,
-  "allowlist": ["@alice", "@bob"],
-  "expiresInDays": 30
+  "dailyLimit": 100,
+  "expiresInDays": 90
 }`}</Code>
         <p className="text-sm text-stone-600 leading-relaxed">
-          The response contains the plaintext key <strong className="text-stone-900">once</strong>.
-          Store it securely — only a hash is kept server-side.
+          The response returns the plaintext key <strong className="text-stone-900">once</strong>.
+          Only a SHA-256 hash is stored server-side.
         </p>
         <Code title="Response 201">{`{
   "id": "…",
   "agentId": "…",
-  "name": "treasury-bot",
-  "mode": "always_ask",
-  "asset": "USDC",
+  "name": "Claude",
   "perTxLimit": "25",
-  "dailyLimit": "200",
-  "allowlist": ["alice", "bob"],
+  "dailyLimit": "100",
   "expiresAt": 1760000000000,
   "keyPrefix": "up_agent_3f9c",
   "key": "up_agent_…"   // shown once
@@ -61,85 +54,78 @@ export default function AgentsDocsPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Policy fields</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Spend limits (USD)</h2>
         <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="mode" type="'always_ask' | 'autonomous'">
-            <strong className="text-stone-900">always_ask</strong> queues every payment for your
-            on-device approval. <strong className="text-stone-900">autonomous</strong> executes
-            immediately when within policy and denies anything outside it.
+          <Field name="perTxLimit" type="number (USD)">
+            Maximum USD value allowed for a single payment (default <code className="font-mono">$25</code>).
           </Field>
-          <Field name="asset" type="string | null">
-            Pin the key to a single asset (e.g. <code className="font-mono">USDC</code>). Null means
-            any asset.
-          </Field>
-          <Field name="perTxLimit" type="number | null">Maximum amount for a single payment.</Field>
-          <Field name="dailyLimit" type="number | null">Rolling 24-hour spend ceiling.</Field>
-          <Field name="allowlist" type="string[] | null">
-            Restrict payments to a set of X handles.
+          <Field name="dailyLimit" type="number (USD)">
+            Maximum cumulative USD value allowed per UTC day (default <code className="font-mono">$100</code>).
           </Field>
           <Field name="expiresInDays" type="number | null">
-            Key expiry, up to 365 days. Expired keys are rejected.
+            Optional key expiration in days (up to 365 days).
           </Field>
         </div>
+        <Callout>
+          <strong className="text-stone-900">Live USD pricing.</strong> Spend caps are evaluated in
+          USD using live on-chain token prices so token unit differences can never bypass your limits.
+        </Callout>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Pay with the key</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">2. Send a payment</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Programmatic calls authenticate with the key as a Bearer token:
+          Authenticate with your key in the <code className="font-mono">Authorization</code> header.
+          UPRAIL automatically quotes and settles the payment in a single request:
         </p>
         <Code title="Header">{`Authorization: Bearer up_agent_…`}</Code>
         <Endpoint verb="POST" path="/api/agent/pay" auth="Bearer agent key" />
         <Code title="Request">{`{
   "recipientHandle": "@alice",
   "asset": "USDC",
-  "amount": "12.50",
-  "memo": "api credits"
+  "amount": 10,
+  "memo": "coffee"
 }`}</Code>
-
-        <h3 className="text-base font-display font-bold text-stone-950 pt-2">
-          Always-Ask flow
-        </h3>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          In <code className="font-mono text-[13px]">always_ask</code> mode the first call queues an
-          approval and returns <code className="font-mono text-[13px]">202</code>:
-        </p>
-        <Code title="Response 202">{`{
-  "status": "PENDING_APPROVAL",
-  "approvalId": "8f2c…",
-  "code": "AGENT_APPROVAL_REQUIRED"
-}`}</Code>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Approve it on device (dashboard → Agents), then retry the exact same request with the
-          approval id. Approvals are single-use and expire after 24 hours.
-        </p>
-        <Code title="Retry header">{`X-Agent-Approval: 8f2c…`}</Code>
-        <Callout>
-          An approval is bound to one intent. If the retried <code className="font-mono">recipientHandle</code>,{' '}
-          <code className="font-mono">asset</code>, or <code className="font-mono">amount</code>{' '}
-          differ, the intent does not match and a new approval is queued.
-        </Callout>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Read endpoints</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          3. Receive payments &amp; deposit addresses
+        </h2>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Retrieve your UPRAIL <code className="font-mono">@handle</code>, view pending incoming
+          payments, or generate a single-use deposit address on any supported chain (
+          <code className="font-mono">near</code>, <code className="font-mono">base</code>,{' '}
+          <code className="font-mono">ethereum</code>, <code className="font-mono">arbitrum</code>,{' '}
+          <code className="font-mono">solana</code>, <code className="font-mono">bitcoin</code>):
+        </p>
+        <Endpoint
+          verb="GET"
+          path="/api/agent/receive?chain=base&token=USDC&amount=50"
+          auth="Bearer agent key"
+        />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          4. Check balance &amp; activity
+        </h2>
         <Endpoint verb="GET" path="/api/agent/balance?asset=USDC" auth="Bearer agent key" />
         <Endpoint verb="GET" path="/api/agent/payments" auth="Bearer agent key" />
-        <Endpoint verb="GET" path="/api/agent/keys" auth="cookie" />
-        <Endpoint verb="POST" path="/api/agent/keys/:id/revoke" auth="cookie + passkey" />
+        <Endpoint verb="GET" path="/api/agent/openapi.json" auth="public (ChatGPT Actions)" />
       </section>
 
       <section className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">Errors</h2>
         <div className="rounded-2xl border border-stone-200 px-4 py-1">
           <Field name="401" type="AGENT_KEY_REQUIRED">
-            Missing or malformed Bearer token. Keys look like <code className="font-mono">up_agent_…</code>.
+            Missing or malformed Bearer token (<code className="font-mono">up_agent_…</code>).
           </Field>
           <Field name="401" type="AGENT_KEY_INVALID">No key with that value exists.</Field>
-          <Field name="403" type="AGENT_KEY_REVOKED">The key was revoked.</Field>
-          <Field name="403" type="AGENT_KEY_EXPIRED">The key passed its expiry.</Field>
+          <Field name="403" type="AGENT_KEY_REVOKED">The key was revoked by the owner.</Field>
+          <Field name="403" type="AGENT_KEY_EXPIRED">The key passed its expiration date.</Field>
           <Field name="403" type="AGENT_POLICY_DENIED">
-            Autonomous payment outside the key&apos;s asset, per-tx, daily, or allowlist policy.
+            Payment exceeds the key&apos;s per-payment or daily USD spend cap.
           </Field>
         </div>
       </section>

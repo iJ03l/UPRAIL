@@ -50,42 +50,12 @@ export function looksLikeAgentKey(value: string): boolean {
   return typeof value === 'string' && value.startsWith(KEY_PREFIX);
 }
 
-/**
- * Parses a stored allowlist (JSON array) into normalized entries. Accepts
- * '@Handle' or a wallet address; handles are lowercased and stripped of '@'.
- * Returns null when the raw value is absent or not a usable array, meaning
- * "no recipient restriction".
- */
-export function parseAllowlist(raw: string | null | undefined): string[] | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    const out = parsed
-      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-      .map(normalizeRecipient);
-    return out.length > 0 ? out : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Normalizes a recipient for allowlist comparison: '@Foo' → 'foo', addresses kept as-is. */
-export function normalizeRecipient(value: string): string {
-  const trimmed = (value || '').trim();
-  // A NEAR account / 0x address / base58 address is not an X handle.
-  if (/^[a-zA-Z0-9_.-]+\.(near|testnet)$/i.test(trimmed) || /^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
-    return trimmed.toLowerCase();
-  }
-  return trimmed.replace(/^@+/, '').toLowerCase();
-}
-
 /** UTC calendar day as YYYY-MM-DD, the bucket for daily spend. */
 export function currentUtcDay(at: number = Date.now()): string {
   return new Date(at).toISOString().slice(0, 10);
 }
 
-/** Spend recorded for a key in the current UTC day (0 when none). */
+/** USD spend recorded for a key in the current UTC day (0 when none). */
 export async function getAgentSpendToday(env: Env, keyId: string): Promise<number> {
   if (!env.DB) return 0;
   try {
@@ -102,20 +72,46 @@ export async function getAgentSpendToday(env: Env, keyId: string): Promise<numbe
 }
 
 /**
- * Adds `amount` to a key's spend for the current UTC day. Best-effort: a failed
- * write is logged, never thrown — the money has already moved successfully.
+ * Atomically reserves `usd` against a key's daily cap BEFORE any funds move.
+ * The conditional upsert only applies when the new total stays within the cap,
+ * so two concurrent requests can never both slip under it. Returns false when
+ * the reservation would exceed the cap (or the DB is unavailable — fail closed).
  */
-export async function addAgentSpend(env: Env, keyId: string, amount: number): Promise<void> {
-  if (!env.DB || !(amount > 0)) return;
-  const day = currentUtcDay();
+export async function reserveAgentSpend(
+  env: Env,
+  keyId: string,
+  usd: number,
+  dailyLimitUsd: number
+): Promise<boolean> {
+  if (!env.DB || !(usd > 0) || usd > dailyLimitUsd + 1e-9) return false;
+  try {
+    const res = await env.DB.prepare(
+      `INSERT INTO agent_spend (agent_key_id, day, spent) VALUES (?, ?, ?)
+       ON CONFLICT(agent_key_id, day) DO UPDATE
+         SET spent = CAST(CAST(agent_spend.spent AS REAL) + ? AS TEXT)
+         WHERE CAST(agent_spend.spent AS REAL) + ? <= ?`
+    )
+      .bind(keyId, currentUtcDay(), String(usd), usd, usd, dailyLimitUsd + 1e-9)
+      .run();
+    return (res.meta?.changes ?? 0) > 0;
+  } catch (err) {
+    console.error('[agentKeys] spend reservation failed:', err);
+    return false;
+  }
+}
+
+/** Returns a reservation when the payment did not go through. Best-effort. */
+export async function releaseAgentSpend(env: Env, keyId: string, usd: number): Promise<void> {
+  if (!env.DB || !(usd > 0)) return;
   try {
     await env.DB.prepare(
-      `INSERT INTO agent_spend (agent_key_id, day, spent) VALUES (?, ?, ?)
-       ON CONFLICT(agent_key_id, day) DO UPDATE SET spent = CAST(CAST(agent_spend.spent AS REAL) + ? AS TEXT)`
+      `UPDATE agent_spend
+          SET spent = CAST(MAX(0, CAST(spent AS REAL) - ?) AS TEXT)
+        WHERE agent_key_id = ? AND day = ?`
     )
-      .bind(keyId, day, String(amount), amount)
+      .bind(usd, keyId, currentUtcDay())
       .run();
   } catch (err) {
-    console.warn('[agentKeys] spend write failed:', err);
+    console.warn('[agentKeys] spend release failed:', err);
   }
 }

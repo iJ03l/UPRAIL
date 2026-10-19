@@ -5,9 +5,8 @@ import { Link, useLocation } from '@/lib/router';
 
 const LINKS: { to: string; label: string }[] = [
   { to: '/docs', label: 'Overview' },
-  { to: '/docs/agents', label: 'Agent rail' },
+  { to: '/docs/agents', label: 'AI Chat payments' },
   { to: '/docs/mcp', label: 'MCP server' },
-  { to: '/docs/x402', label: 'x402 / MPP' },
   { to: '/docs/fees', label: 'Creator fees' },
 ];
 

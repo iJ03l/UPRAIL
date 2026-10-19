@@ -11,161 +11,117 @@ import {
   Copy,
   Check,
   X,
-  Ban,
-  Clock,
   Code2,
   AlertTriangle,
   RefreshCw,
-  Zap,
-  Hand,
+  MessageSquare,
   Sparkles,
-  Repeat,
-  ShoppingCart,
-  LineChart,
-  CreditCard,
-  Wallet,
+  Terminal,
+  Globe,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { SkeletonList } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
-import type { AgentKey, CreatedAgentKey, AgentApproval, AgentMode } from '../types';
+import type { AgentKey, CreatedAgentKey } from '../types';
 
 const MCP_ENDPOINT = 'https://api.uprail.world/api/mcp';
-const X402_ENDPOINT = 'https://api.uprail.world/api/x402/challenge';
+const OPENAPI_SPEC_URL = 'https://api.uprail.world/api/agent/openapi.json';
 
 function formatDate(ms: number | null): string {
   if (!ms) return '—';
   return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function policyLine(k: AgentKey): string {
-  const parts: string[] = [];
-  parts.push(k.asset ? `Only ${k.asset}` : 'Any asset');
-  if (k.perTxLimit) parts.push(`≤ ${k.perTxLimit}/tx`);
-  if (k.dailyLimit) parts.push(`≤ ${k.dailyLimit}/day`);
-  if (k.allowlist?.length) parts.push(`${k.allowlist.length} allowed recipient${k.allowlist.length > 1 ? 's' : ''}`);
-  else parts.push('Any recipient');
-  return parts.join(' · ');
-}
-
-/**
- * Ready-made policies so a user picks a shape instead of authoring a policy from
- * scratch. Selecting one prefills the form; every field stays editable.
- */
-interface AgentPreset {
-  id: string;
+interface ChatPlatform {
+  id: 'claude' | 'chatgpt' | 'cursor' | 'other';
   label: string;
   blurb: string;
   icon: React.ComponentType<{ className?: string }>;
-  values: {
-    name: string;
-    mode: AgentMode;
-    asset: string;
-    perTxLimit: string;
-    dailyLimit: string;
-    allowlist: string;
-    expiresInDays: string;
-  };
+  defaultName: string;
 }
 
-const PRESETS: AgentPreset[] = [
+const CHAT_PLATFORMS: ChatPlatform[] = [
   {
-    id: 'research',
-    label: 'Research assistant',
-    blurb: 'Pays for APIs, asks before every spend',
-    icon: Bot,
-    values: { name: 'Research assistant', mode: 'always_ask', asset: '', perTxLimit: '25', dailyLimit: '100', allowlist: '', expiresInDays: '' },
+    id: 'claude',
+    label: 'Claude',
+    blurb: 'Claude Desktop, Web & Mobile via MCP',
+    icon: Sparkles,
+    defaultName: 'Claude',
   },
   {
-    id: 'dca',
-    label: 'DCA bot',
-    blurb: 'Buys on a schedule, capped per day',
-    icon: Repeat,
-    values: { name: 'DCA bot', mode: 'autonomous', asset: 'USDC', perTxLimit: '50', dailyLimit: '200', allowlist: '', expiresInDays: '' },
+    id: 'chatgpt',
+    label: 'ChatGPT',
+    blurb: 'ChatGPT Actions (OpenAPI) or MCP',
+    icon: MessageSquare,
+    defaultName: 'ChatGPT',
   },
   {
-    id: 'shopping',
-    label: 'Shopping agent',
-    blurb: 'Small purchases, human-approved',
-    icon: ShoppingCart,
-    values: { name: 'Shopping agent', mode: 'always_ask', asset: 'USDC', perTxLimit: '20', dailyLimit: '100', allowlist: '', expiresInDays: '' },
+    id: 'cursor',
+    label: 'Cursor / Windsurf',
+    blurb: 'Pay & check balance from your IDE chat',
+    icon: Terminal,
+    defaultName: 'Cursor',
   },
   {
-    id: 'trading',
-    label: 'Trading agent',
-    blurb: 'Autonomous within tight limits',
-    icon: LineChart,
-    values: { name: 'Trading agent', mode: 'autonomous', asset: 'USDC', perTxLimit: '100', dailyLimit: '500', allowlist: '', expiresInDays: '' },
-  },
-  {
-    id: 'subscriptions',
-    label: 'Subscription payer',
-    blurb: 'Fixed recurring payments, approved merchants',
-    icon: CreditCard,
-    values: { name: 'Subscription payer', mode: 'autonomous', asset: 'USDC', perTxLimit: '15', dailyLimit: '15', allowlist: '', expiresInDays: '' },
-  },
-  {
-    id: 'api',
-    label: 'API payer (x402)',
-    blurb: 'Pays per-request for premium APIs',
-    icon: Wallet,
-    values: { name: 'API payer', mode: 'autonomous', asset: '', perTxLimit: '5', dailyLimit: '50', allowlist: '', expiresInDays: '' },
+    id: 'other',
+    label: 'Any Other AI Chat',
+    blurb: 'Works with any MCP or REST AI assistant',
+    icon: Globe,
+    defaultName: 'My AI Chat',
   },
 ];
+
+function buildMcpJson(apiKey: string): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        uprail: {
+          url: MCP_ENDPOINT,
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+        },
+      },
+    },
+    null,
+    2
+  );
+}
 
 export const AgentsPage: React.FC = () => {
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   const { toast } = useToast();
   const [keys, setKeys] = useState<AgentKey[]>([]);
-  const [approvals, setApprovals] = useState<AgentApproval[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAgentKey | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [guideTab, setGuideTab] = useState<'mcp' | 'chatgpt'>('mcp');
 
   // Create form state
-  const [name, setName] = useState('');
-  const [mode, setMode] = useState<AgentMode>('always_ask');
-  const [asset, setAsset] = useState('');
-  const [perTxLimit, setPerTxLimit] = useState('');
-  const [dailyLimit, setDailyLimit] = useState('');
-  const [allowlist, setAllowlist] = useState('');
-  const [expiresInDays, setExpiresInDays] = useState('');
-  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [selectedPlatform, setSelectedPlatform] = useState<ChatPlatform['id']>('claude');
+  const [name, setName] = useState('Claude');
+  const [perTxLimit, setPerTxLimit] = useState('25');
+  const [dailyLimit, setDailyLimit] = useState('100');
+  const [expiresInDays, setExpiresInDays] = useState('90');
   const [creating, setCreating] = useState(false);
 
-  const applyPreset = (p: AgentPreset) => {
-    setActivePreset(p.id);
-    setName(p.values.name);
-    setMode(p.values.mode);
-    setAsset(p.values.asset);
-    setPerTxLimit(p.values.perTxLimit);
-    setDailyLimit(p.values.dailyLimit);
-    setAllowlist(p.values.allowlist);
-    setExpiresInDays(p.values.expiresInDays);
-  };
-
-  const resetForm = () => {
-    setActivePreset(null);
-    setName('');
-    setMode('always_ask');
-    setAsset('');
-    setPerTxLimit('');
-    setDailyLimit('');
-    setAllowlist('');
-    setExpiresInDays('');
+  const selectPlatform = (p: ChatPlatform) => {
+    setSelectedPlatform(p.id);
+    setName(p.defaultName);
+    if (p.id === 'chatgpt') setGuideTab('chatgpt');
+    else setGuideTab('mcp');
   };
 
   const refresh = useCallback(async () => {
     try {
-      const [k, a] = await Promise.all([api.getAgentKeys(), api.getAgentApprovals()]);
+      const k = await api.getAgentKeys();
       setKeys(k);
-      setApprovals(a);
       setError(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to load agents');
+      setError(err.message || 'Failed to load AI chat keys');
     } finally {
       setLoading(false);
     }
@@ -179,66 +135,54 @@ export const AgentsPage: React.FC = () => {
 
   const handleCreate = async () => {
     setError(null);
-    if (!name.trim()) {
-      setError('Give your agent a name.');
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError('Give your AI chat connection a name (e.g. Claude or ChatGPT).');
       return;
     }
+    const perTxNum = parseFloat(perTxLimit);
+    const dailyNum = parseFloat(dailyLimit);
+    if (!Number.isFinite(perTxNum) || perTxNum <= 0 || !Number.isFinite(dailyNum) || dailyNum <= 0) {
+      setError('Enter positive USD limits for both per-payment and daily spend.');
+      return;
+    }
+    if (perTxNum > dailyNum) {
+      setError('Max per payment cannot exceed your daily spend limit.');
+      return;
+    }
+
     setCreating(true);
     try {
-      const assertion = await authorizeWithPasskey(`Create agent “${name.trim()}”`);
-      const allow = allowlist
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const assertion = await authorizeWithPasskey(`Connect AI chat “${trimmedName}”`);
       const res = await api.createAgentKey({
-        name: name.trim(),
-        mode,
-        asset: asset.trim() || null,
-        perTxLimit: perTxLimit.trim() || null,
-        dailyLimit: dailyLimit.trim() || null,
-        allowlist: allow.length ? allow : null,
+        name: trimmedName,
+        perTxLimit: String(perTxNum),
+        dailyLimit: String(dailyNum),
         expiresInDays: expiresInDays ? Number(expiresInDays) : null,
         passkeyAssertion: assertion,
       });
       setCreated(res);
       setShowCreate(false);
-      resetForm();
-      toast(`Agent “${res.name}” is ready`);
+      toast(`Key created for ${res.name}`);
       await refresh();
     } catch (err: any) {
-      setError(err.message || 'Failed to create agent key');
+      setError(err.message || 'Failed to create AI chat key');
     } finally {
       setCreating(false);
     }
   };
 
   const handleRevoke = async (k: AgentKey) => {
-    if (!window.confirm(`Revoke “${k.name}”? Any agent using this key stops working immediately.`)) return;
+    if (!window.confirm(`Revoke “${k.name}”? Any AI chat using this key loses access immediately.`)) return;
     setBusyId(k.id);
     setError(null);
     try {
-      const assertion = await authorizeWithPasskey(`Revoke agent “${k.name}”`);
+      const assertion = await authorizeWithPasskey(`Revoke AI chat key “${k.name}”`);
       await api.revokeAgentKey(k.id, assertion);
-      toast(`Agent “${k.name}” revoked`);
+      toast(`“${k.name}” revoked`);
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Failed to revoke key');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleDecision = async (a: AgentApproval, decision: 'approve' | 'deny') => {
-    setBusyId(a.id);
-    setError(null);
-    try {
-      const label = `${decision === 'approve' ? 'Approve' : 'Deny'} ${a.payload.amount} ${a.payload.asset} to @${a.payload.recipientHandle}`;
-      const assertion = await authorizeWithPasskey(label);
-      await api.decideAgentApproval(a.id, decision, assertion);
-      toast(decision === 'approve' ? 'Payment approved' : 'Payment denied');
-      await refresh();
-    } catch (err: any) {
-      setError(err.message || 'Failed to record decision');
     } finally {
       setBusyId(null);
     }
@@ -251,11 +195,11 @@ export const AgentsPage: React.FC = () => {
         <div>
           <div className="flex items-center space-x-2 text-stone-900">
             <Bot className="w-5 h-5" />
-            <h1 className="text-2xl font-display font-extrabold tracking-tight">Agents</h1>
+            <h1 className="text-2xl font-display font-extrabold tracking-tight">AI Chat Payments</h1>
           </div>
           <p className="mt-1 text-sm text-stone-500 max-w-xl">
-            Authorize AI agents and apps to move funds from your vault under a scoped, revocable
-            policy. Every payment settles through the same confidential rail as a human send.
+            Send, receive, and check payments directly from ChatGPT, Claude, Cursor, or any AI chat.
+            Protected by strict USD spend limits and revocable in one tap.
           </p>
         </div>
         <button
@@ -263,7 +207,7 @@ export const AgentsPage: React.FC = () => {
           className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer flex-shrink-0"
         >
           {showCreate ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-          <span>{showCreate ? 'Cancel' : 'New Agent'}</span>
+          <span>{showCreate ? 'Cancel' : 'Connect AI Chat'}</span>
         </button>
       </div>
 
@@ -276,22 +220,20 @@ export const AgentsPage: React.FC = () => {
 
       {/* Create form */}
       {showCreate && (
-        <div className="p-5 rounded-3xl bg-stone-50 border border-stone-200 space-y-4">
-          {/* Preset picker — pick a ready-made policy, then tweak if needed */}
+        <div className="p-5 rounded-3xl bg-stone-50 border border-stone-200 space-y-5">
           <div className="space-y-2.5">
-            <div className="flex items-center space-x-1.5 text-stone-900">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-mono uppercase tracking-wider font-bold">Start from a preset</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {PRESETS.map((p) => {
-                const active = activePreset === p.id;
+            <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+              1. Pick your AI chat app
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {CHAT_PLATFORMS.map((p) => {
+                const active = selectedPlatform === p.id;
                 const Icon = p.icon;
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => applyPreset(p)}
+                    onClick={() => selectPlatform(p)}
                     className={`text-left p-3 rounded-2xl border transition-colors cursor-pointer ${
                       active
                         ? 'border-stone-900 bg-white shadow-xs'
@@ -307,150 +249,80 @@ export const AgentsPage: React.FC = () => {
                 );
               })}
             </div>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="text-[11px] font-mono text-stone-500 hover:text-stone-900 underline underline-offset-2 cursor-pointer"
-            >
-              Clear &amp; start from scratch
-            </button>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-4">
             <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Name</span>
+              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+                Name
+              </span>
               <input
                 value={name}
-                onChange={(e) => { setName(e.target.value); setActivePreset(null); }}
-                placeholder="e.g. Research assistant"
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Claude or ChatGPT"
                 className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm focus:outline-none focus:border-stone-900"
               />
             </label>
             <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Mode</span>
-              <div className="grid grid-cols-2 gap-2">
-                {(['always_ask', 'autonomous'] as AgentMode[]).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => { setMode(m); setActivePreset(null); }}
-                    className={`py-2 rounded-xl text-xs font-mono font-bold border transition-colors cursor-pointer flex items-center justify-center space-x-1.5 ${
-                      mode === m ? 'bg-black text-white border-black' : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-100'
-                    }`}
-                  >
-                    {m === 'always_ask' ? <Hand className="w-3.5 h-3.5" /> : <Zap className="w-3.5 h-3.5" />}
-                    <span>{m === 'always_ask' ? 'Always Ask' : 'Autonomous'}</span>
-                  </button>
-                ))}
+              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+                Key expires in days (optional)
+              </span>
+              <input
+                value={expiresInDays}
+                onChange={(e) => setExpiresInDays(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder="90 (blank = never)"
+                className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+                Max per payment ($ USD)
+              </span>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-mono text-stone-400">$</span>
+                <input
+                  value={perTxLimit}
+                  onChange={(e) => setPerTxLimit(e.target.value.replace(/[^0-9.]/g, ''))}
+                  placeholder="25"
+                  className="w-full pl-7 pr-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
+                />
               </div>
             </label>
             <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Asset (optional)</span>
-              <input
-                value={asset}
-                onChange={(e) => { setAsset(e.target.value); setActivePreset(null); }}
-                placeholder="USDC — blank = any asset"
-                className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Expires in days (optional)</span>
-              <input
-                value={expiresInDays}
-                onChange={(e) => { setExpiresInDays(e.target.value.replace(/[^0-9]/g, '')); setActivePreset(null); }}
-                placeholder="blank = never"
-                className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Per-transaction limit</span>
-              <input
-                value={perTxLimit}
-                onChange={(e) => { setPerTxLimit(e.target.value); setActivePreset(null); }}
-                placeholder="e.g. 25"
-                className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">Daily limit</span>
-              <input
-                value={dailyLimit}
-                onChange={(e) => { setDailyLimit(e.target.value); setActivePreset(null); }}
-                placeholder="e.g. 100"
-                className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-              />
+              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+                Daily spend limit ($ USD)
+              </span>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-mono text-stone-400">$</span>
+                <input
+                  value={dailyLimit}
+                  onChange={(e) => setDailyLimit(e.target.value.replace(/[^0-9.]/g, ''))}
+                  placeholder="100"
+                  className="w-full pl-7 pr-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
+                />
+              </div>
             </label>
           </div>
-          <label className="space-y-1.5 block">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-              Allowed recipients (optional)
-            </span>
-            <input
-              value={allowlist}
-              onChange={(e) => { setAllowlist(e.target.value); setActivePreset(null); }}
-              placeholder="@alice, @bob — blank = any recipient"
-              className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-            />
-          </label>
-          <div className="flex items-center justify-between pt-1">
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
             <p className="text-[11px] text-stone-500 max-w-md">
-              {mode === 'always_ask'
-                ? 'Every payment waits for your on-device passkey approval.'
-                : 'Payments within the limits above execute automatically; anything outside is denied.'}
+              Payments inside your USD limits execute immediately from chat; any attempt above{' '}
+              <span className="font-mono font-bold text-stone-700">${perTxLimit || '25'}/tx</span> or{' '}
+              <span className="font-mono font-bold text-stone-700">${dailyLimit || '100'}/day</span> is
+              automatically blocked.
             </p>
             <button
               onClick={handleCreate}
               disabled={creating || isAuthorizing}
-              className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+              className="flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
             >
-              {creating || isAuthorizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-              <span>Create with Passkey</span>
+              {creating || isAuthorizing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <KeyRound className="w-4 h-4" />
+              )}
+              <span>Create Key with Passkey</span>
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Pending approvals */}
-      {approvals.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center space-x-2 text-stone-900">
-            <Clock className="w-4 h-4" />
-            <h2 className="text-sm font-display font-bold uppercase tracking-wider">Pending Approvals</h2>
-            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-              {approvals.length}
-            </span>
-          </div>
-          <div className="space-y-2">
-            {approvals.map((a) => (
-              <div key={a.id} className="p-4 rounded-2xl bg-white border border-stone-200 flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-sm font-mono font-bold text-stone-950 truncate">
-                    {a.payload.amount} {a.payload.asset} → @{a.payload.recipientHandle}
-                  </div>
-                  <div className="text-[11px] text-stone-500 font-mono truncate">
-                    {a.payload.memo ? `“${a.payload.memo}” · ` : ''}expires {formatDate(a.expiresAt)}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => handleDecision(a, 'deny')}
-                    disabled={busyId === a.id || isAuthorizing}
-                    className="p-2 rounded-xl border border-stone-200 text-stone-500 hover:text-red-600 hover:border-red-200 transition-colors cursor-pointer disabled:opacity-50"
-                    title="Deny"
-                  >
-                    <Ban className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDecision(a, 'approve')}
-                    disabled={busyId === a.id || isAuthorizing}
-                    className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    {busyId === a.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                    <span>Approve</span>
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}
@@ -460,7 +332,7 @@ export const AgentsPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 text-stone-900">
             <KeyRound className="w-4 h-4" />
-            <h2 className="text-sm font-display font-bold uppercase tracking-wider">Agent Keys</h2>
+            <h2 className="text-sm font-display font-bold uppercase tracking-wider">Connected AI Chats</h2>
           </div>
           <button
             onClick={refresh}
@@ -479,34 +351,29 @@ export const AgentsPage: React.FC = () => {
               <Bot className="w-5 h-5 text-stone-400" />
             </div>
             <div className="space-y-1">
-              <p className="text-sm font-bold text-stone-900">No agents yet</p>
+              <p className="text-sm font-bold text-stone-900">No AI chats connected yet</p>
               <p className="text-xs text-stone-500 max-w-sm mx-auto">
-                Start from a preset — it takes one passkey tap. An agent can then pay on your
-                behalf under a scoped, revocable policy.
+                Pick your AI chat below to generate a Passkey-authorized key with built-in USD spend limits.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-              {PRESETS.slice(0, 3).map((p) => {
+              {CHAT_PLATFORMS.map((p) => {
                 const Icon = p.icon;
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => { applyPreset(p); setShowCreate(true); }}
+                    onClick={() => {
+                      selectPlatform(p);
+                      setShowCreate(true);
+                    }}
                     className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-xs font-bold text-stone-900 transition-colors cursor-pointer"
                   >
                     <Icon className="w-3.5 h-3.5 text-stone-500" />
-                    <span>{p.label}</span>
+                    <span>Connect {p.label}</span>
                   </button>
                 );
               })}
-              <button
-                type="button"
-                onClick={() => { resetForm(); setShowCreate(true); }}
-                className="px-3 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                Custom
-              </button>
             </div>
           </div>
         ) : (
@@ -516,6 +383,7 @@ export const AgentsPage: React.FC = () => {
               const expired = k.expiresAt ? k.expiresAt < Date.now() : false;
               const dead = revoked || expired;
               const dailyLimitNum = k.dailyLimit ? parseFloat(k.dailyLimit) || 0 : 0;
+              const perTxLimitNum = k.perTxLimit ? parseFloat(k.perTxLimit) || 0 : 0;
               const spentToday = k.spentToday ?? 0;
               const spendPct = dailyLimitNum > 0 ? Math.min(1, spentToday / dailyLimitNum) : 0;
               const spendTone =
@@ -530,15 +398,11 @@ export const AgentsPage: React.FC = () => {
                   <div className="min-w-0">
                     <div className="flex items-center space-x-2">
                       <span className="text-sm font-bold text-stone-950 truncate">{k.name}</span>
-                      <span
-                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                          k.mode === 'autonomous'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}
-                      >
-                        {k.mode === 'autonomous' ? 'AUTONOMOUS' : 'ALWAYS ASK'}
-                      </span>
+                      {!dead && (
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          ACTIVE
+                        </span>
+                      )}
                       {revoked && (
                         <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-200 text-stone-600">
                           REVOKED
@@ -551,7 +415,7 @@ export const AgentsPage: React.FC = () => {
                       )}
                     </div>
                     <div className="mt-1 text-[11px] text-stone-500 font-mono truncate">
-                      {k.keyPrefix}… · {policyLine(k)}
+                      {k.keyPrefix}… · Max ${perTxLimitNum || 25}/payment · Max ${dailyLimitNum || 100}/day
                     </div>
                     <div className="mt-0.5 text-[10px] text-stone-400 font-mono">
                       Created {formatDate(k.createdAt)}
@@ -561,10 +425,9 @@ export const AgentsPage: React.FC = () => {
                     {dailyLimitNum > 0 && (
                       <div className="mt-2 max-w-[16rem]">
                         <div className="flex items-center justify-between text-[10px] font-mono text-stone-500">
-                          <span>Today's spend</span>
+                          <span>Today&apos;s spend (USD)</span>
                           <span className="tabular-nums">
-                            {spentToday.toLocaleString()} / {dailyLimitNum.toLocaleString()}
-                            {k.asset ? ` ${k.asset}` : ''}
+                            ${spentToday.toFixed(2)} / ${dailyLimitNum.toFixed(2)}
                           </span>
                         </div>
                         <div className="mt-1 h-1.5 rounded-full bg-stone-100 overflow-hidden">
@@ -582,7 +445,11 @@ export const AgentsPage: React.FC = () => {
                       disabled={busyId === k.id || isAuthorizing}
                       className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-stone-200 text-stone-500 hover:text-red-600 hover:border-red-200 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
                     >
-                      {busyId === k.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                      {busyId === k.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
                       <span>Revoke</span>
                     </button>
                   )}
@@ -593,38 +460,89 @@ export const AgentsPage: React.FC = () => {
         )}
       </div>
 
-      {/* Integration docs */}
+      {/* Setup & Example Prompts */}
       <div className="space-y-3">
-        <div className="flex items-center space-x-2 text-stone-900">
-          <Code2 className="w-4 h-4" />
-          <h2 className="text-sm font-display font-bold uppercase tracking-wider">Connect an Agent</h2>
-        </div>
-        <div className="p-5 rounded-3xl bg-stone-950 text-stone-100 space-y-4">
-          <div className="space-y-2">
-            <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">MCP endpoint (Streamable HTTP)</div>
-            <CopyRow value={MCP_ENDPOINT} />
-            <p className="text-xs text-stone-400 leading-relaxed">
-              Point any MCP client at this URL with{' '}
-              <code className="text-stone-200">Authorization: Bearer up_agent_…</code>. Tools:{' '}
-              <code className="text-stone-200">pay_handle</code>,{' '}
-              <code className="text-stone-200">get_balance</code>,{' '}
-              <code className="text-stone-200">resolve_handle</code>,{' '}
-              <code className="text-stone-200">create_payment_request</code>.
-            </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-stone-900">
+            <Code2 className="w-4 h-4" />
+            <h2 className="text-sm font-display font-bold uppercase tracking-wider">Easy Setup Guide</h2>
           </div>
-          <div className="space-y-2 pt-3 border-t border-stone-800">
-            <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">Charge for your API (x402 / MPP)</div>
-            <CopyRow value={`POST ${X402_ENDPOINT}`} />
-            <p className="text-xs text-stone-400 leading-relaxed">
-              Mint a 402 payment challenge for any merchant handle, then verify and settle it once the
-              payer deposits on any supported chain.
-            </p>
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-stone-100 border border-stone-200">
+            <button
+              type="button"
+              onClick={() => setGuideTab('mcp')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                guideTab === 'mcp' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-900'
+              }`}
+            >
+              Claude / Cursor (MCP)
+            </button>
+            <button
+              type="button"
+              onClick={() => setGuideTab('chatgpt')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                guideTab === 'chatgpt' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500 hover:text-stone-900'
+              }`}
+            >
+              ChatGPT Actions
+            </button>
+          </div>
+        </div>
+
+        <div className="p-5 rounded-3xl bg-stone-950 text-stone-100 space-y-4">
+          {guideTab === 'mcp' ? (
+            <div className="space-y-3">
+              <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
+                Add to Claude Desktop, Cursor, Windsurf, or any MCP Client
+              </div>
+              <CopyBlock value={buildMcpJson('up_agent_YOUR_KEY_HERE')} />
+              <p className="text-xs text-stone-400 leading-relaxed">
+                Or connect directly to <code className="text-stone-200">{MCP_ENDPOINT}</code> with header{' '}
+                <code className="text-stone-200">Authorization: Bearer up_agent_…</code>.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
+                Import into ChatGPT (Custom GPT → Actions → Import from URL)
+              </div>
+              <CopyRow value={OPENAPI_SPEC_URL} />
+              <p className="text-xs text-stone-400 leading-relaxed">
+                1. In ChatGPT, open <strong>Configure → Actions → Create new action</strong>.<br />
+                2. Click <strong>Import from URL</strong> and paste the URL above.<br />
+                3. Set <strong>Authentication</strong> to <strong>API Key (Bearer)</strong> and paste your{' '}
+                <code className="text-stone-200">up_agent_…</code> key.
+              </p>
+            </div>
+          )}
+
+          <div className="pt-3 border-t border-stone-800 space-y-2">
+            <div className="text-[11px] uppercase tracking-wider text-stone-400 font-bold">
+              What you can say in chat
+            </div>
+            <div className="grid sm:grid-cols-3 gap-2 text-xs font-mono text-stone-300">
+              <div className="p-2.5 rounded-xl bg-stone-900 border border-stone-800">
+                &ldquo;Send 10 USDC to @alice for coffee&rdquo;
+              </div>
+              <div className="p-2.5 rounded-xl bg-stone-900 border border-stone-800">
+                &ldquo;Give me a Base USDC address to receive $50&rdquo;
+              </div>
+              <div className="p-2.5 rounded-xl bg-stone-900 border border-stone-800">
+                &ldquo;Check my UPRAIL balance and recent payments&rdquo;
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Created key modal */}
-      {created && <CreatedKeyModal created={created} onClose={() => setCreated(null)} />}
+      {created && (
+        <CreatedKeyModal
+          created={created}
+          defaultTab={selectedPlatform === 'chatgpt' ? 'chatgpt' : 'mcp'}
+          onClose={() => setCreated(null)}
+        />
+      )}
     </div>
   );
 };
@@ -651,49 +569,149 @@ const CopyRow: React.FC<{ value: string }> = ({ value }) => {
   );
 };
 
-const CreatedKeyModal: React.FC<{ created: CreatedAgentKey; onClose: () => void }> = ({ created, onClose }) => {
+const CopyBlock: React.FC<{ value: string }> = ({ value }) => {
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative rounded-xl bg-stone-900 border border-stone-800 p-3">
+      <pre className="text-[11px] font-mono text-stone-200 overflow-x-auto leading-relaxed pr-8">{value}</pre>
+      <button
+        onClick={() => {
+          navigator.clipboard.writeText(value);
+          setCopied(true);
+          toast('Copied config to clipboard');
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        className="absolute top-2.5 right-2.5 p-1.5 rounded-lg text-stone-400 hover:text-white bg-stone-800/80 transition-colors cursor-pointer"
+        title="Copy JSON"
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+};
+
+const CreatedKeyModal: React.FC<{
+  created: CreatedAgentKey;
+  defaultTab: 'mcp' | 'chatgpt';
+  onClose: () => void;
+}> = ({ created, defaultTab, onClose }) => {
+  const { toast } = useToast();
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedConfig, setCopiedConfig] = useState(false);
+  const [tab, setTab] = useState<'mcp' | 'chatgpt'>(defaultTab);
   const [ack, setAck] = useState(false);
+
+  const mcpJson = buildMcpJson(created.key);
+
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
-      <div className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl space-y-4">
+      <div className="relative w-full max-w-lg rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center space-x-2 text-stone-900">
-          <ShieldCheck className="w-5 h-5" />
-          <h3 className="text-lg font-display font-extrabold">Agent key created</h3>
+          <ShieldCheck className="w-5 h-5 text-emerald-600" />
+          <h3 className="text-lg font-display font-extrabold">{created.name} is ready to connect</h3>
         </div>
         <p className="text-xs text-stone-600 leading-relaxed">
-          Copy <strong>@{created.name}</strong>'s key now. It is shown once and cannot be recovered.
+          Copy your secret key or ready-made config below. For security, this key is shown{' '}
+          <strong>only once</strong>.
         </p>
-        <div className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-xs break-all select-all">
-          {created.key}
-        </div>
-        <div className="flex items-center gap-2">
+
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+            1. Your Secret AI Chat Key
+          </span>
+          <div className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-xs break-all select-all">
+            {created.key}
+          </div>
           <button
             onClick={() => {
               navigator.clipboard.writeText(created.key);
-              setCopied(true);
+              setCopiedKey(true);
               setAck(true);
-              toast('Agent key copied');
-              setTimeout(() => setCopied(false), 1500);
+              toast('Secret key copied');
+              setTimeout(() => setCopiedKey(false), 1500);
             }}
-            className="flex-1 flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
+            className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
           >
-            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? 'Copied' : 'Copy key'}</span>
-          </button>
-          <button
-            onClick={onClose}
-            disabled={!ack}
-            className="flex-1 py-2.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
-          >
-            Done
+            {copiedKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedKey ? 'Key Copied' : 'Copy Secret Key'}</span>
           </button>
         </div>
+
+        <div className="space-y-2 pt-2 border-t border-stone-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+              2. Quick Setup
+            </span>
+            <div className="flex items-center gap-1 p-0.5 rounded-lg bg-stone-100 border border-stone-200">
+              <button
+                type="button"
+                onClick={() => setTab('mcp')}
+                className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold cursor-pointer ${
+                  tab === 'mcp' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500'
+                }`}
+              >
+                Claude / Cursor (MCP)
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('chatgpt')}
+                className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold cursor-pointer ${
+                  tab === 'chatgpt' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-500'
+                }`}
+              >
+                ChatGPT
+              </button>
+            </div>
+          </div>
+
+          {tab === 'mcp' ? (
+            <div className="space-y-2">
+              <pre className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-[11px] overflow-x-auto leading-relaxed">
+                {mcpJson}
+              </pre>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(mcpJson);
+                  setCopiedConfig(true);
+                  setAck(true);
+                  toast('MCP config copied');
+                  setTimeout(() => setCopiedConfig(false), 1500);
+                }}
+                className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                {copiedConfig ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedConfig ? 'MCP Config Copied' : 'Copy Ready-to-Paste MCP JSON'}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2 text-xs text-stone-700">
+              <p>
+                1. In ChatGPT Custom GPT → <strong>Actions → Import from URL</strong>:
+              </p>
+              <CopyRow value={OPENAPI_SPEC_URL} />
+              <p>
+                2. Choose <strong>Authentication → API Key → Bearer</strong> and paste the secret key above.
+              </p>
+            </div>
+          )}
+        </div>
+
         <div className="flex items-start space-x-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
           <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-          <span>This key can move funds within the policy you set. Store it somewhere safe.</span>
+          <span>
+            Capped at <strong>${created.perTxLimit}/payment</strong> and{' '}
+            <strong>${created.dailyLimit}/day</strong>. You can revoke this key anytime.
+          </span>
         </div>
+
+        <button
+          onClick={onClose}
+          disabled={!ack}
+          className="w-full py-2.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
+        >
+          {ack ? 'Done' : 'Copy your key above to continue'}
+        </button>
       </div>
     </div>
   );

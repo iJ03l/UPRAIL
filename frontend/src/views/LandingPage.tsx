@@ -155,15 +155,15 @@ export const LandingPage: React.FC = () => {
             {[
               {
                 icon: Bot,
-                tag: 'Agent rail',
-                title: 'Pay by agent, safely',
-                body: 'Scoped keys let an AI agent pay any 𝕏 handle within limits and an allowlist you set. Always-Ask approvals, or fully autonomous.',
+                tag: 'AI Chat',
+                title: 'Pay & receive in any AI chat',
+                body: 'Send confidential payments to any 𝕏 handle or generate deposit addresses straight from ChatGPT, Claude, or Cursor — protected by USD spend limits.',
               },
               {
                 icon: Network,
-                tag: 'Agent rail',
-                title: 'x402 & MCP, built in',
-                body: 'Charge for any resource with a standards-shaped HTTP 402 settled over NEAR Intents — and plug UPRAIL into any MCP client.',
+                tag: 'MCP & Actions',
+                title: '1-click MCP & OpenAPI setup',
+                body: 'Drop your Passkey-issued key into Claude Desktop, Cursor, or ChatGPT Actions to check balances, pay handles, and receive across chains.',
               },
               {
                 icon: Coins,

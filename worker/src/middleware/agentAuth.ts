@@ -1,14 +1,10 @@
 /**
  * Agent credential middleware for UP (UPRAIL.app).
  *
- * Replaces the session+passkey pair for programmatic callers. A valid agent key
- * resolves to its owning user's session (so the exact same send pipeline runs)
- * and to a spend policy that is enforced before any funds move:
- *
- *  - mode 'always_ask': every payment queues a PENDING approval. The agent
- *    retries with `X-Agent-Approval: <id>` once the user approves on device.
- *  - mode 'autonomous': payments execute immediately when within policy, and
- *    are denied (403) when outside it.
+ * Authenticates AI chat connections (Claude, ChatGPT, Cursor, etc.) using a
+ * Passkey-issued Bearer key (`up_agent_...`). Resolves the owning user's
+ * session and enforces USD spend limits (per-payment + daily) with atomic D1
+ * reservations before any funds move.
  */
 
 import { Context, MiddlewareHandler } from 'hono';
@@ -16,25 +12,24 @@ import type { AgentPrincipal, AppContext, Session } from '../types';
 import {
   hashAgentKey,
   looksLikeAgentKey,
-  parseAllowlist,
   getAgentSpendToday,
+  reserveAgentSpend,
+  releaseAgentSpend,
 } from '../services/agentKeys';
-import { evaluateAgentPolicy } from '../services/agentPolicy';
+import { agentUsdValue, evaluateAgentPolicy } from '../services/agentPolicy';
 import { SESSION_TTL_SECONDS } from './session';
 
-const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_PER_TX_USD = 25;
+const DEFAULT_DAILY_USD = 100;
 
 interface AgentKeyRow {
   id: string;
   agent_id: string;
   x_id: string;
-  asset: string | null;
   per_tx_limit: string | null;
   daily_limit: string | null;
-  allowlist: string | null;
   expires_at: number | null;
   revoked_at: number | null;
-  mode: string;
 }
 
 function jsonError(
@@ -52,7 +47,12 @@ export const requireAgent = (): MiddlewareHandler<AppContext> => {
     const match = /^Bearer\s+(.+)$/i.exec(header.trim());
     const rawKey = match?.[1]?.trim();
     if (!rawKey || !looksLikeAgentKey(rawKey)) {
-      return jsonError(c, 401, 'Agent key required. Send "Authorization: Bearer up_agent_…".', 'AGENT_KEY_REQUIRED');
+      return jsonError(
+        c,
+        401,
+        'Agent key required. Send "Authorization: Bearer up_agent_…".',
+        'AGENT_KEY_REQUIRED'
+      );
     }
 
     if (!c.env.DB) {
@@ -63,10 +63,9 @@ export const requireAgent = (): MiddlewareHandler<AppContext> => {
     let row: AgentKeyRow | null = null;
     try {
       row = await c.env.DB.prepare(
-        `SELECT k.id, k.agent_id, k.x_id, k.asset, k.per_tx_limit, k.daily_limit,
-                k.allowlist, k.expires_at, k.revoked_at, a.mode
+        `SELECT k.id, k.agent_id, k.x_id, k.per_tx_limit, k.daily_limit,
+                k.expires_at, k.revoked_at
            FROM agent_keys k
-           JOIN agents a ON a.id = k.agent_id
           WHERE k.key_hash = ?`
       )
         .bind(keyHash)
@@ -82,7 +81,6 @@ export const requireAgent = (): MiddlewareHandler<AppContext> => {
       return jsonError(c, 403, 'This agent key has expired.', 'AGENT_KEY_EXPIRED');
     }
 
-    // Resolve the owning identity so we can act as that user.
     const identity = await c.env.DB.prepare(
       'SELECT x_handle, x_name, near_account, is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
     )
@@ -113,20 +111,19 @@ export const requireAgent = (): MiddlewareHandler<AppContext> => {
     };
     c.set('session', session);
 
-    const mode: AgentPrincipal['mode'] = row.mode === 'autonomous' ? 'autonomous' : 'always_ask';
+    const perTx = row.per_tx_limit == null ? DEFAULT_PER_TX_USD : parseFloat(row.per_tx_limit);
+    const daily = row.daily_limit == null ? DEFAULT_DAILY_USD : parseFloat(row.daily_limit);
+
     const principal: AgentPrincipal = {
       key_id: row.id,
       agent_id: row.agent_id,
       x_id: row.x_id,
-      mode,
-      asset: row.asset,
-      per_tx_limit: row.per_tx_limit == null ? null : parseFloat(row.per_tx_limit),
-      daily_limit: row.daily_limit == null ? null : parseFloat(row.daily_limit),
-      allowlist: parseAllowlist(row.allowlist),
+      per_tx_limit_usd: Number.isFinite(perTx) && perTx > 0 ? perTx : DEFAULT_PER_TX_USD,
+      daily_limit_usd: Number.isFinite(daily) && daily > 0 ? daily : DEFAULT_DAILY_USD,
     };
     c.set('agent', principal);
 
-    // Fire-and-forget last-used stamp (never blocks or fails the request).
+    // Fire-and-forget last-used stamp.
     c.executionCtx?.waitUntil?.(
       c.env.DB.prepare('UPDATE agent_keys SET last_used_at = ? WHERE id = ?')
         .bind(now, row.id)
@@ -134,33 +131,16 @@ export const requireAgent = (): MiddlewareHandler<AppContext> => {
         .catch((err: unknown) => console.warn('[agentAuth] last_used update failed:', err))
     );
 
-    // Parse+cache the body for calls that carry a payment intent. GET endpoints
-    // (balance, history) have no body and skip policy gating entirely.
     const method = c.req.method.toUpperCase();
     const contentType = c.req.header('Content-Type') || '';
-    let body: any = null;
     if (method !== 'GET' && method !== 'HEAD' && contentType.includes('application/json')) {
       try {
-        body = await c.req.json();
+        const body = await c.req.json();
         c.set('parsedBody' as any, body);
       } catch {
-        body = null;
+        // leave parsedBody unset
       }
     }
-
-    const isPaymentIntent =
-      body && typeof body.recipientHandle === 'string' && body.amount !== undefined;
-    if (!isPaymentIntent) {
-      return await next();
-    }
-
-    const blocked = await handleAgentPaymentIntent(c, principal, {
-      recipientHandle: String(body.recipientHandle),
-      asset: String(body.asset || ''),
-      amount: parseFloat(String(body.amount)) || 0,
-      memo: typeof body.memo === 'string' ? body.memo : undefined,
-    });
-    if (blocked) return blocked;
 
     return await next();
   };
@@ -173,108 +153,60 @@ export interface AgentIntent {
   memo?: string;
 }
 
+export type AgentSendAuthorization =
+  | { allowed: true; reservedUsd: number; release: () => Promise<void> }
+  | { allowed: false; response: Response };
+
 /**
- * Applies an agent's spend policy to a payment intent. Returns a Response when
- * the intent must be blocked (a queued Always-Ask approval, or a policy denial),
- * or null when the caller may proceed.
- *
- * Shared by the Bearer middleware and the MCP `pay_handle` tool so a payment is
- * gated identically no matter which surface submitted it.
+ * Enforces the key's USD spend policy and atomically reserves the USD amount
+ * against today's budget before any funds move. Shared by REST `/api/agent/pay`
+ * and MCP `send_payment` / `pay_handle`.
  */
-export async function handleAgentPaymentIntent(
+export async function authorizeAgentSend(
   c: Context<AppContext>,
   principal: AgentPrincipal,
   intent: AgentIntent
-): Promise<Response | null> {
-  const now = Date.now();
+): Promise<AgentSendAuthorization> {
+  const usd = await agentUsdValue(c.env, intent.asset, intent.amount);
+  const verdict = evaluateAgentPolicy(principal, {
+    recipientHandle: intent.recipientHandle,
+    usd,
+  });
 
-  if (principal.mode === 'always_ask') {
-    const approvalId = (c.req.header('X-Agent-Approval') || '').trim();
-    if (approvalId) {
-      const approval = await c.env.DB.prepare(
-        `SELECT id, payload FROM agent_approvals
-          WHERE id = ? AND x_id = ? AND agent_key_id = ? AND status = 'APPROVED' AND expires_at > ?`
-      )
-        .bind(approvalId, principal.x_id, principal.key_id, now)
-        .first<{ id: string; payload: string }>();
-
-      if (approval && approvalMatches(approval.payload, intent)) {
-        await c.env.DB.prepare(
-          "UPDATE agent_approvals SET status = 'CONSUMED', decided_at = ? WHERE id = ? AND status = 'APPROVED'"
-        )
-          .bind(now, approvalId)
-          .run();
-        return null;
-      }
-    }
-
-    // No matching approval: queue one for the user to decide on device.
-    const id = crypto.randomUUID();
-    try {
-      await c.env.DB.prepare(
-        `INSERT INTO agent_approvals (id, x_id, agent_key_id, payload, status, created_at, expires_at)
-         VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
-      )
-        .bind(
-          id,
-          principal.x_id,
-          principal.key_id,
-          JSON.stringify({
-            recipientHandle: intent.recipientHandle,
-            asset: intent.asset,
-            amount: intent.amount,
-            memo: intent.memo,
-          }),
-          now,
-          now + APPROVAL_TTL_MS
-        )
-        .run();
-    } catch (err) {
-      console.error('[agentAuth] could not queue approval:', err);
-      return jsonError(c, 403, 'Could not queue an approval for this payment.', 'AGENT_APPROVAL_FAILED');
-    }
-
-    return c.json(
-      {
-        status: 'PENDING_APPROVAL',
-        approvalId: id,
-        code: 'AGENT_APPROVAL_REQUIRED',
-        detail: 'This agent is in Always-Ask mode. Approve on device, then retry with the X-Agent-Approval header.',
-      },
-      202
-    );
+  if (!verdict.allowed || usd === null || principal.daily_limit_usd === null) {
+    return {
+      allowed: false,
+      response: c.json(
+        {
+          error: verdict.detail || 'Payment denied by agent spend limit.',
+          code: 'AGENT_POLICY_DENIED',
+          reason: verdict.reason,
+        },
+        403
+      ),
+    };
   }
 
-  // Autonomous: enforce the hard policy now.
-  const spentToday = await getAgentSpendToday(c.env, principal.key_id);
-  const verdict = evaluateAgentPolicy(principal, intent, spentToday);
-  if (!verdict.allowed) {
-    return c.json(
-      {
-        error: verdict.detail || 'Payment denied by agent policy.',
-        code: 'AGENT_POLICY_DENIED',
-        reason: verdict.reason,
-      },
-      403
-    );
+  const reserved = await reserveAgentSpend(c.env, principal.key_id, usd, principal.daily_limit_usd);
+  if (!reserved) {
+    const spentToday = await getAgentSpendToday(c.env, principal.key_id);
+    const remaining = Math.max(0, principal.daily_limit_usd - spentToday);
+    return {
+      allowed: false,
+      response: c.json(
+        {
+          error: `This payment (~$${usd.toFixed(2)}) exceeds your remaining daily limit ($${remaining.toFixed(2)} left of $${principal.daily_limit_usd}).`,
+          code: 'AGENT_POLICY_DENIED',
+          reason: 'daily_limit',
+        },
+        403
+      ),
+    };
   }
 
-  return null;
-}
-
-/** True when a stored approval's payload matches the retried intent exactly. */
-function approvalMatches(
-  payloadJson: string,
-  intent: { recipientHandle: string; asset: string; amount: number }
-): boolean {
-  try {
-    const p = JSON.parse(payloadJson);
-    return (
-      String(p.recipientHandle) === intent.recipientHandle &&
-      String(p.asset) === intent.asset &&
-      Math.abs((parseFloat(p.amount) || 0) - intent.amount) < 1e-9
-    );
-  } catch {
-    return false;
-  }
+  return {
+    allowed: true,
+    reservedUsd: usd,
+    release: () => releaseAgentSpend(c.env, principal.key_id, usd),
+  };
 }

@@ -11,8 +11,6 @@ import {
   WithdrawalReceipt,
   AgentKey,
   CreatedAgentKey,
-  AgentApproval,
-  AgentMode,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
 import type { WithdrawChain } from './withdrawChains';
@@ -1285,27 +1283,24 @@ export const api = {
     return await exportRes.json();
   },
 
-  // ── Agent payment rail ─────────────────────────────────────────────────────
+  // ── AI Chat payment rail ───────────────────────────────────────────────────
 
   async getAgentKeys(): Promise<AgentKey[]> {
     const url = API_BASE ? `${API_BASE}/api/agent/keys` : '/api/agent/keys';
     const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to load agent keys');
+      throw new Error(err.error || 'Failed to load AI chat keys');
     }
     const data = await res.json();
     return (data.keys || []) as AgentKey[];
   },
 
-  /** Creates an agent key. Passkey-gated — it can move funds. */
+  /** Creates a scoped AI chat key with USD spend caps. Passkey-gated. */
   async createAgentKey(params: {
     name: string;
-    mode: AgentMode;
-    asset?: string | null;
-    perTxLimit?: string | null;
-    dailyLimit?: string | null;
-    allowlist?: string[] | null;
+    perTxLimit: string;
+    dailyLimit: string;
     expiresInDays?: number | null;
     passkeyAssertion: unknown;
   }): Promise<CreatedAgentKey> {
@@ -1318,7 +1313,7 @@ export const api = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to create agent key');
+      throw new Error(err.error || 'Failed to create AI chat key');
     }
     return await res.json();
   },
@@ -1335,36 +1330,7 @@ export const api = {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to revoke agent key');
-    }
-  },
-
-  async getAgentApprovals(): Promise<AgentApproval[]> {
-    const url = API_BASE ? `${API_BASE}/api/agent/approvals` : '/api/agent/approvals';
-    const res = await fetch(url, { credentials: 'include' });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to load approvals');
-    }
-    const data = await res.json();
-    return (data.approvals || []) as AgentApproval[];
-  },
-
-  async decideAgentApproval(
-    id: string,
-    decision: 'approve' | 'deny',
-    passkeyAssertion: unknown
-  ): Promise<void> {
-    const base = API_BASE ? `${API_BASE}/api/agent/approvals` : '/api/agent/approvals';
-    const res = await fetch(`${base}/${encodeURIComponent(id)}/${decision}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ passkeyAssertion }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to record decision');
+      throw new Error(err.error || 'Failed to revoke key');
     }
   },
 };

@@ -3,18 +3,21 @@
  *
  * Implemented as a JSON-RPC 2.0 server over Streamable HTTP: a single POST
  * endpoint that accepts `initialize`, `tools/list`, and `tools/call`. Requests
- * authenticate with the same Bearer agent key as the rest of the agent rail, so
- * every tool acts with the owner's identity and spend policy.
+ * authenticate with the same Bearer AI chat key (`up_live_...`) as `/api/agent/*`,
+ * enforcing the owner's USD spend caps on every payment.
  *
- * Tools: resolve_handle, get_balance, pay_handle, create_payment_request.
+ * Tools:
+ *  - pay_handle       — Send a confidential payment to any X @handle
+ *  - receive_payment  — Get your @handle, pending incoming payments, or a fresh deposit address
+ *  - get_balance      — Check your available UPRAIL balance
+ *  - list_payments    — View recent sent and received payments
+ *  - resolve_handle   — Check if an X @handle has activated UPRAIL
  */
 
 import { Context, Hono } from 'hono';
 import type { AppContext } from '../types';
-import { requireAgent, handleAgentPaymentIntent } from '../middleware/agentAuth';
-import { handleSendPayment } from './payments';
-import { addAgentSpend } from '../services/agentKeys';
-import { mintChallenge } from '../services/x402Challenge';
+import { requireAgent } from '../middleware/agentAuth';
+import { executeAgentPay } from './agent';
 import * as nearRpc from '../services/nearRpc';
 
 export const mcpRouter = new Hono<AppContext>();
@@ -31,48 +34,85 @@ interface JsonRpcRequest {
 
 const TOOLS = [
   {
-    name: 'resolve_handle',
-    description: 'Resolve an X handle to a UPRAIL identity and its NEAR account.',
-    inputSchema: {
-      type: 'object',
-      properties: { handle: { type: 'string', description: 'X handle, with or without @' } },
-      required: ['handle'],
-    },
-  },
-  {
-    name: 'get_balance',
-    description: "Read the owner's available UPRAIL balance for an asset.",
-    inputSchema: {
-      type: 'object',
-      properties: { asset: { type: 'string', description: 'Asset symbol, e.g. NEAR or USDC' } },
-    },
-  },
-  {
     name: 'pay_handle',
-    description: 'Send a confidential payment to an X handle. Subject to the agent spend policy.',
+    description:
+      'Send a confidential payment to an X (Twitter) @handle on UPRAIL. Subject to the key’s per-payment and daily USD spend caps.',
     inputSchema: {
       type: 'object',
       properties: {
-        recipientHandle: { type: 'string' },
-        asset: { type: 'string' },
-        amount: { type: ['string', 'number'], description: 'Human-readable amount' },
-        memo: { type: 'string' },
+        recipientHandle: {
+          type: 'string',
+          description: 'Recipient X handle, e.g. @alice or alice',
+        },
+        asset: {
+          type: 'string',
+          description: 'Asset symbol, e.g. USDC, USDT, NEAR',
+        },
+        amount: {
+          type: ['string', 'number'],
+          description: 'Human-readable token amount to send',
+        },
+        memo: {
+          type: 'string',
+          description: 'Optional note attached to the payment',
+        },
       },
       required: ['recipientHandle', 'asset', 'amount'],
     },
   },
   {
-    name: 'create_payment_request',
-    description: 'Create an x402 payment request (402 challenge) payable by any chain.',
+    name: 'receive_payment',
+    description:
+      'Get your UPRAIL @handle for receiving payments, check pending incoming payments, or generate a single-use deposit address to receive crypto from any external blockchain.',
     inputSchema: {
       type: 'object',
       properties: {
-        asset: { type: 'string' },
-        amount: { type: ['string', 'number'] },
-        description: { type: 'string' },
-        resource: { type: 'string' },
+        chain: {
+          type: 'string',
+          description:
+            'Optional blockchain to generate a deposit address for (near, base, ethereum, arbitrum, solana, bitcoin)',
+        },
+        token: {
+          type: 'string',
+          description: 'Optional token symbol for the deposit (e.g. USDC, USDT, NEAR, SOL, ETH)',
+        },
+        amount: {
+          type: ['string', 'number'],
+          description: 'Optional expected deposit amount',
+        },
       },
-      required: ['asset', 'amount'],
+    },
+  },
+  {
+    name: 'get_balance',
+    description: "Read the owner's available UPRAIL balance for a token (defaults to USDC/NEAR).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        asset: {
+          type: 'string',
+          description: 'Asset symbol, e.g. USDC, USDT, or NEAR (defaults to NEAR)',
+        },
+      },
+    },
+  },
+  {
+    name: 'list_payments',
+    description: "List the owner's recent sent and received payments on UPRAIL.",
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'resolve_handle',
+    description: 'Check whether an X @handle is registered on UPRAIL and resolve its account.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string', description: 'X handle, with or without @' },
+      },
+      required: ['handle'],
     },
   },
 ];
@@ -94,7 +134,6 @@ function toolText(value: unknown, isError = false) {
 }
 
 async function callTool(c: Context<AppContext>, name: string, args: any): Promise<unknown> {
-  const agent = c.get('agent')!;
   const session = c.get('session')!;
 
   switch (name) {
@@ -118,84 +157,119 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
     }
 
     case 'get_balance': {
-      const asset = String(args?.asset || 'NEAR');
+      const asset = String(args?.asset || 'NEAR').trim();
       const available = await nearRpc.getUserAvailableBalance(c.env, session, asset);
-      return toolText({ asset, available });
+      return toolText({
+        handle: `@${session.x_handle}`,
+        asset,
+        available,
+      });
     }
 
     case 'pay_handle': {
-      const recipientHandle = String(args?.recipientHandle || '').trim();
-      const asset = String(args?.asset || '').trim();
-      const amount = parseFloat(String(args?.amount));
-      if (!recipientHandle || !asset || !Number.isFinite(amount) || amount <= 0) {
-        return toolText({ error: 'recipientHandle, asset, and a positive amount are required.' }, true);
-      }
-
-      const blocked = await handleAgentPaymentIntent(c, agent, {
-        recipientHandle,
-        asset,
-        amount,
-        memo: typeof args?.memo === 'string' ? args.memo : undefined,
-      });
-      if (blocked) {
-        const data = await blocked.json().catch(() => ({}));
-        return toolText(data, blocked.status >= 400);
-      }
-
-      // A send needs a signed quote (depositAddress + quoteSignature); obtain
-      // one from the public quote endpoint exactly as the web client does, so a
-      // tool caller never has to know the two-step protocol.
-      const quoteUrl = new URL('/api/quote', c.req.url);
-      const quoteRes = await fetch(quoteUrl.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipientHandle, asset, amount }),
-      });
-      if (!quoteRes.ok) {
-        const err = (await quoteRes.json().catch(() => ({}))) as { error?: string; code?: string };
-        return toolText({ error: err.error || 'Failed to quote payment', code: err.code }, true);
-      }
-      const quote = (await quoteRes.json()) as { quoteSignature?: string; depositAddress?: string };
-
-      // Run the exact human send pipeline with the tool arguments as the body.
-      c.set('parsedBody' as any, {
-        recipientHandle,
-        asset,
-        amount,
+      const response = await executeAgentPay(c, {
+        recipientHandle: args?.recipientHandle,
+        asset: args?.asset,
+        amount: args?.amount,
         memo: args?.memo,
-        quoteSignature: quote.quoteSignature,
-        depositAddress: quote.depositAddress,
       });
-      const response = await handleSendPayment(c);
       const payload = await response.json().catch(() => ({}));
-      if (response.status === 201) {
-        c.executionCtx?.waitUntil?.(addAgentSpend(c.env, agent.key_id, amount));
-        return toolText(payload);
-      }
-      return toolText(payload, true);
+      return toolText(payload, response.status !== 201);
     }
 
-    case 'create_payment_request': {
-      const asset = String(args?.asset || '').trim();
-      const amount = String(args?.amount ?? '').trim();
-      if (!asset || !(parseFloat(amount) > 0)) {
-        return toolText({ error: 'asset and a positive amount are required.' }, true);
+    case 'receive_payment': {
+      const chain = String(args?.chain || '').trim().toLowerCase();
+      const token = String(args?.token || '').trim().toUpperCase() || undefined;
+      const amount =
+        args?.amount !== undefined && args?.amount !== null && String(args.amount).trim() !== ''
+          ? String(args.amount).trim()
+          : undefined;
+
+      const nearAccount =
+        session.near_account || (await nearRpc.resolveUserNearAccount(c.env, session));
+      let depositAddress: string | null = null;
+      if (chain) {
+        const deposit = await nearRpc.getDepositAddress(
+          c.env,
+          nearAccount,
+          chain,
+          true,
+          token,
+          amount
+        );
+        if (!deposit?.address) {
+          return toolText(
+            {
+              error: `Could not generate a deposit address for chain "${chain}"${token ? ` (${token})` : ''}.`,
+              code: 'NO_DEPOSIT_ADDRESS',
+            },
+            true
+          );
+        }
+        depositAddress = deposit.address;
       }
-      const { requirement, challenge } = await mintChallenge(c.env, {
-        recipientHandle: session.x_handle,
-        asset,
-        amount,
-        description: args?.description ? String(args.description) : undefined,
-        resourceUrl: args?.resource ? String(args.resource) : undefined,
-      });
+
+      let pendingPayments: any[] = [];
+      if (c.env.DB) {
+        try {
+          const { results } = await c.env.DB.prepare(
+            `SELECT id, sender_x_handle, asset, amount, memo, status, created_at, expires_at
+               FROM payments
+              WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?))
+                AND status = 'ESCROWED'
+              ORDER BY created_at DESC
+              LIMIT 25`
+          )
+            .bind(session.x_id, session.x_handle)
+            .all<any>();
+          pendingPayments = results || [];
+        } catch {}
+      }
+
       return toolText({
-        requirement,
-        reference: challenge.id,
-        rail: challenge.rail,
-        payTo: challenge.payTo,
-        expiresAt: challenge.expiresAt,
-        recipientHandle: session.x_handle,
+        handle: `@${session.x_handle}`,
+        nearAccount,
+        ...(chain
+          ? {
+              chain,
+              token: token || null,
+              amount: amount || null,
+              depositAddress,
+            }
+          : {}),
+        pendingPayments,
+        instructions: chain
+          ? `Send ${amount ? `${amount} ` : ''}${token || 'tokens'} on ${chain} to ${depositAddress}. Funds credit straight to @${session.x_handle}'s confidential UPRAIL vault.`
+          : `Anyone on UPRAIL can pay @${session.x_handle} directly by X handle, or pass chain (near, base, ethereum, arbitrum, solana, bitcoin) and token (e.g. USDC) to generate a cross-chain deposit address.`,
       });
+    }
+
+    case 'list_payments': {
+      const { results } = await c.env.DB.prepare(
+        `SELECT id, sender_x_id, sender_x_handle, recipient_handle, asset, amount, memo, status, created_at, expires_at
+           FROM payments
+          WHERE sender_x_id = ?
+             OR recipient_x_id = ?
+             OR LOWER(recipient_handle) = LOWER(?)
+          ORDER BY created_at DESC
+          LIMIT 25`
+      )
+        .bind(session.x_id, session.x_id, session.x_handle)
+        .all<any>();
+
+      const payments = (results || []).map((row) => ({
+        id: row.id,
+        direction: row.sender_x_id === session.x_id ? 'sent' : 'received',
+        senderHandle: row.sender_x_handle ? `@${row.sender_x_handle}` : null,
+        recipientHandle: `@${String(row.recipient_handle || '').replace(/^@/, '')}`,
+        asset: row.asset,
+        amount: row.amount,
+        memo: row.memo || null,
+        status: row.status,
+        created_at: row.created_at,
+        expires_at: row.expires_at,
+      }));
+      return toolText({ payments });
     }
 
     default:
@@ -215,9 +289,6 @@ mcpRouter.post('/', requireAgent(), async (c) => {
 
   // Notifications carry no id and expect no response body.
   if (id === undefined || id === null) {
-    if (method === 'notifications/initialized' || method === 'initialized') {
-      return c.body(null, 202);
-    }
     return c.body(null, 202);
   }
 
@@ -258,4 +329,6 @@ mcpRouter.post('/', requireAgent(), async (c) => {
 });
 
 /** Minimal GET probe so clients can confirm the endpoint exists. */
-mcpRouter.get('/', (c) => c.json({ name: SERVER_INFO.name, version: SERVER_INFO.version, protocol: 'mcp' }));
+mcpRouter.get('/', (c) =>
+  c.json({ name: SERVER_INFO.name, version: SERVER_INFO.version, protocol: 'mcp' })
+);

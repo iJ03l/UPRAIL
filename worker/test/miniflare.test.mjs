@@ -377,53 +377,18 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.code, 'AGENT_KEY_REQUIRED');
   });
 
-  it('POST /api/x402/challenge validates its input', async () => {
-    const res = await mf.dispatchFetch('http://localhost/api/x402/challenge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ asset: 'USDC' }),
-    });
-    assert.equal(res.status, 400);
-    const body = await res.json();
-    assert.equal(body.code, 'MISSING_RECIPIENT');
-  });
-
-  it('x402 mints a local-escrow challenge when settlement is unreachable', async () => {
-    const res = await mf.dispatchFetch('http://localhost/api/x402/challenge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientHandle: 'uprail', asset: 'USDC', amount: '0.01' }),
-    });
-    assert.equal(res.status, 201);
-    const body = await res.json();
-    assert.equal(body.rail, 'local');
-    assert.equal(body.depositAddress, 'escrow.uprail.near');
-    assert.match(body.reference, /^x402_/);
-    assert.equal(body.requirement.accepts[0].amount, '10000');
-    assert.equal(body.requirement.accepts[0].payTo, 'escrow.uprail.near');
-  });
-
-  it('x402 verify accepts a flat credential and reports missing tx hash', async () => {
-    const challenge = await mf.dispatchFetch('http://localhost/api/x402/challenge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipientHandle: 'uprail', asset: 'USDC', amount: '0.01' }),
-    });
-    const { reference } = await challenge.json();
-
-    const res = await mf.dispatchFetch('http://localhost/api/x402/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reference }),
-    });
+  it('GET /api/agent/openapi.json serves OpenAPI 3.1.0 spec for AI chat actions', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/agent/openapi.json');
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.isValid, false);
-    assert.equal(body.reason, 'missing_tx_hash');
-    assert.equal(body.rail, 'local');
+    assert.equal(body.openapi, '3.1.0');
+    assert.ok(body.paths['/api/agent/pay']);
+    assert.ok(body.paths['/api/agent/receive']);
+    assert.ok(body.paths['/api/agent/balance']);
+    assert.ok(body.paths['/api/agent/payments']);
   });
 
-  it('agent authentication resolves a seeded key and lists MCP tools', async () => {
+  it('agent authentication resolves a seeded key, lists MCP tools, and enforces USD spend caps', async () => {
     const db = await mf.getD1Database('DB');
     const now = Date.now();
     const rawKey = 'up_agent_' + 'a'.repeat(48);
@@ -444,10 +409,10 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       .run();
     await db
       .prepare(
-        `INSERT INTO agent_keys (id, agent_id, x_id, label, key_hash, key_prefix, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO agent_keys (id, agent_id, x_id, label, key_hash, key_prefix, per_tx_limit, daily_limit, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .bind('key_mcp_1', 'agent_mcp_1', 'xid_mcp_1', 'MCP Agent', keyHash, 'up_agent_aaaaaa', now)
+      .bind('key_mcp_1', 'agent_mcp_1', 'xid_mcp_1', 'MCP Agent', keyHash, 'up_agent_aaaaaa', '25', '100', now)
       .run();
 
     const listed = await mf.dispatchFetch('http://localhost/api/mcp', {
@@ -458,7 +423,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(listed.status, 200);
     const listedBody = await listed.json();
     const names = listedBody.result.tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ['create_payment_request', 'get_balance', 'pay_handle', 'resolve_handle']);
+    assert.deepEqual(names, ['get_balance', 'list_payments', 'pay_handle', 'receive_payment', 'resolve_handle']);
 
     const resolved = await mf.dispatchFetch('http://localhost/api/mcp', {
       method: 'POST',
@@ -476,6 +441,26 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const payload = JSON.parse(resolvedBody.result.content[0].text);
     assert.equal(payload.exists, true);
     assert.equal(payload.nearAccount, 'mcp_tester.near');
+
+    // Receive endpoint returns the user's @handle and nearAccount
+    const receiveRes = await mf.dispatchFetch('http://localhost/api/agent/receive', {
+      headers: { Authorization: `Bearer ${rawKey}` },
+    });
+    assert.equal(receiveRes.status, 200);
+    const receiveBody = await receiveRes.json();
+    assert.equal(receiveBody.handle, '@mcp_tester');
+    assert.equal(receiveBody.nearAccount, 'mcp_tester.near');
+
+    // Sending above per-tx limit ($25) in USDC ($1/token) is rejected by policy
+    const overLimit = await mf.dispatchFetch('http://localhost/api/agent/pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` },
+      body: JSON.stringify({ recipientHandle: '@alice', asset: 'USDC', amount: 50 }),
+    });
+    assert.equal(overLimit.status, 403);
+    const overLimitBody = await overLimit.json();
+    assert.equal(overLimitBody.code, 'AGENT_POLICY_DENIED');
+    assert.equal(overLimitBody.reason, 'per_tx_limit');
   });
 });
 

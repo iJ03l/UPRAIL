@@ -24,7 +24,6 @@ import { healthRouter } from './routes/health';
 import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
-import { x402Router } from './routes/x402';
 import { mcpRouter } from './routes/mcp';
 import { feesRouter } from './routes/fees';
 import { issueTxChallenge } from './middleware/passkeyAuth';
@@ -157,11 +156,8 @@ apiRouter.route('/', paymentsRouter);
 apiRouter.route('/invites', invitesRouter);
 apiRouter.route('/claim', claimRouter);
 
-// Agent payment rail (scoped Bearer keys + Always-Ask approvals)
+// AI chat payment rail (scoped Bearer keys + USD spend caps)
 apiRouter.route('/agent', agentRouter);
-
-// x402 / MPP facilitator (402 challenge, verify, settle) — public
-apiRouter.route('/x402', x402Router);
 
 // MCP server (JSON-RPC over Streamable HTTP) — Bearer agent key
 apiRouter.route('/mcp', mcpRouter);
