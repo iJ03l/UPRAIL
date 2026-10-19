@@ -30,6 +30,7 @@ import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import * as nearRpc from './services/nearRpc';
 import { refundEscrowedPayment } from './services/refunds';
+import { syncAllLaunchpadFees } from './services/launchpadFees';
 
 // Export Durable Object classes for runtime
 export { EscrowDO } from './durable-objects/escrow';
@@ -590,6 +591,17 @@ export default {
       }
     } catch (e) {
       console.warn('[cron] interrupted-refund recovery failed:', e);
+    }
+
+    // 5. Auto-discover and route incoming launchpad creator fees on escrow.uprail.near
+    //    via NEAR_RPC_URL (zero-API / no-txHash launchpad fee routing).
+    try {
+      const feeSync = await syncAllLaunchpadFees(env, { maxTokens: 15 });
+      if (feeSync.routed > 0) {
+        console.log(`[cron] auto-routed ${feeSync.routed} launchpad creator fee(s) across ${feeSync.checked} token(s)`);
+      }
+    } catch (e) {
+      console.warn('[cron] launchpad fee auto-sync failed:', e);
     }
   },
 };

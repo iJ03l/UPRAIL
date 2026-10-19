@@ -33,6 +33,9 @@ import {
   minFeeUsd,
   protocolFeePercent,
   resolveLaunchpadToken,
+  trackLaunchpadToken,
+  syncTokenLaunchpadFees,
+  syncAllLaunchpadFees,
 } from '../services/launchpadFees';
 
 export const feesRouter = new Hono<AppContext>();
@@ -156,28 +159,46 @@ feesRouter.post('/webhook', async (c) => {
 
   switch (event.event) {
     case 'token.launched': {
+      const launchHandle = normalizeHandle(event.handle ?? event.creatorHandle);
       const reg = await registerEscrowForToken(c.env, partner, contractId);
+      await trackLaunchpadToken(c.env, {
+        contractId,
+        handle: launchHandle,
+        launchpad: partner.name,
+      });
       await recordEvent(
         c.env,
         partner,
         eventId,
         'token.launched',
         contractId,
-        null,
+        launchHandle,
         null,
         reg.registered ? 'registered' : 'failed',
         reg.reason || null
       );
       return c.json(
-        { received: true, eventId, escrowRegistered: reg.registered, reason: reg.reason },
+        {
+          received: true,
+          eventId,
+          escrowRegistered: reg.registered,
+          address: escrowHoldingAccount(c.env),
+          autoSync: true,
+          reason: reg.reason,
+        },
         202
       );
     }
 
     case 'fee.pending': {
-      const handle = normalizeHandle(event.handle);
+      const handle = normalizeHandle(event.handle ?? event.creatorHandle);
       if (!handle) return jsonError(c, 400, 'A valid X handle is required.', 'INVALID_HANDLE');
       const reg = await registerEscrowForToken(c.env, partner, contractId);
+      await trackLaunchpadToken(c.env, {
+        contractId,
+        handle,
+        launchpad: partner.name,
+      });
       await recordEvent(
         c.env,
         partner,
@@ -200,13 +221,14 @@ feesRouter.post('/webhook', async (c) => {
           ready: true,
           address: escrowHoldingAccount(c.env),
           mode: known ? 'direct' : 'escrow',
+          autoSync: true,
         },
         202
       );
     }
 
     case 'fee.paid': {
-      const handle = normalizeHandle(event.handle);
+      const handle = normalizeHandle(event.handle ?? event.creatorHandle);
       if (!handle) return jsonError(c, 400, 'A valid X handle is required.', 'INVALID_HANDLE');
       const txHash = typeof event.txHash === 'string' ? event.txHash.trim() : '';
       if (!txHash) return jsonError(c, 400, 'txHash is required.', 'INVALID_TX_HASH');
@@ -276,6 +298,11 @@ feesRouter.post('/resolve', async (c) => {
   if (!reg.registered) {
     return jsonError(c, 422, reg.reason || 'Could not prepare escrow for this token.', 'REGISTRATION_FAILED');
   }
+  await trackLaunchpadToken(c.env, {
+    contractId,
+    handle,
+    launchpad: partner.name,
+  });
   const known = await handleIsKnown(c.env, handle);
   return c.json({
     handle,
@@ -283,6 +310,7 @@ feesRouter.post('/resolve', async (c) => {
     address: escrowHoldingAccount(c.env),
     mode: known ? 'direct' : 'escrow',
     registered: true,
+    autoSync: true,
     feePercent: protocolFeePercent(c.env),
     minFeeUsd: minFeeUsd(c.env),
   });
@@ -292,11 +320,14 @@ feesRouter.post('/resolve', async (c) => {
  * POST /api/fees/prepare
  * Zero-integration path (no partner key): a token that points its creator fees
  * at escrow can be prepared by anyone. Registers escrow on the token so the
- * launchpad's push is accepted, and reports where to send. Bounded by a global
- * daily registration cap.
+ * launchpad's push is accepted, tracks the token + handle for automatic
+ * on-chain RPC fee detection, and immediately routes any balance already sitting
+ * in `escrow.uprail.near`.
  */
 feesRouter.post('/prepare', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { token?: unknown } | null;
+  const body = (await c.req.json().catch(() => null)) as
+    | { token?: unknown; handle?: unknown; launchpad?: unknown }
+    | null;
   const contractId = contractFromToken(body?.token);
   if (!contractId) return jsonError(c, 400, 'A valid NEP-141 token contract is required.', 'INVALID_TOKEN');
 
@@ -304,22 +335,55 @@ feesRouter.post('/prepare', async (c) => {
   if (!reg.registered) {
     return jsonError(c, 422, reg.reason || 'Could not prepare escrow for this token.', 'REGISTRATION_FAILED');
   }
+
+  let handle = normalizeHandle(body?.handle);
+  if (!handle) {
+    const tokenMeta = await resolveLaunchpadToken(c.env, contractId, true);
+    handle = deriveHandleFromDescription(tokenMeta?.description);
+  }
+  const launchpad = typeof body?.launchpad === 'string' && body.launchpad.trim()
+    ? body.launchpad.trim().toLowerCase()
+    : undefined;
+
+  await trackLaunchpadToken(c.env, { contractId, handle, launchpad });
+
+  let syncedFee: Record<string, unknown> | undefined;
+  if (handle) {
+    try {
+      const syncRes = await syncTokenLaunchpadFees(c.env, contractId, { handle, launchpad });
+      if (syncRes.synced) {
+        syncedFee = {
+          id: syncRes.id,
+          amount: syncRes.amount,
+          fee: syncRes.fee,
+          routing: syncRes.routing,
+          status: syncRes.status,
+        };
+      }
+    } catch {}
+  }
+
   return c.json({
     token: contractId,
+    handle: handle || undefined,
     address: escrowHoldingAccount(c.env),
     registered: true,
+    autoSync: true,
     feePercent: protocolFeePercent(c.env),
     minFeeUsd: minFeeUsd(c.env),
-    note: 'Point this token\'s creator fees here (100%, permanent) and name the recipient in its description as: Fees to @handle via UPRAIL',
+    ...(syncedFee ? { routed: syncedFee } : {}),
+    note: handle
+      ? `Escrow is registered and automatic RPC fee routing is active for @${handle}. Any ${contractId} sent to ${escrowHoldingAccount(c.env)} is routed automatically.`
+      : 'Point this token\'s creator fees here (100%, permanent) and name the recipient in its description as: Fees to @handle via UPRAIL (or pass `handle`).',
   });
 });
 
 /**
  * POST /api/fees/route
- * Zero-integration path (no partner key): report an inbound creator fee by tx
- * hash. The recipient handle is read from the token's description unless one is
- * supplied. Crediting is gated on the on-chain transfer to escrow, so this
- * endpoint cannot be used to mint balance.
+ * Zero-integration path (no partner key): report or sync an inbound creator fee.
+ * - If `txHash` is supplied: verifies that exact transaction on-chain.
+ * - If `txHash` is omitted: reads `escrow.uprail.near`'s live balance on the
+ *   token via `NEAR_RPC_URL` and routes any uncredited surplus automatically.
  */
 feesRouter.post('/route', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
@@ -328,14 +392,37 @@ feesRouter.post('/route', async (c) => {
   const contractId = contractFromToken(body?.token);
   if (!contractId) return jsonError(c, 400, 'A valid NEP-141 token contract is required.', 'INVALID_TOKEN');
   const txHash = typeof body?.txHash === 'string' ? body.txHash.trim() : '';
-  if (!txHash) return jsonError(c, 400, 'txHash is required.', 'INVALID_TX_HASH');
 
   let handle = normalizeHandle(body?.handle);
   if (!handle) {
-    // Zero-integration: derive the recipient from the token's own description.
-    const token = await resolveLaunchpadToken(c.env, contractId);
+    const token = await resolveLaunchpadToken(c.env, contractId, true);
     handle = deriveHandleFromDescription(token?.description);
   }
+
+  if (!txHash) {
+    const syncRes = await syncTokenLaunchpadFees(c.env, contractId, {
+      handle,
+      memo: typeof body?.memo === 'string' ? body.memo : undefined,
+    });
+    if (!syncRes.ok) {
+      return jsonError(c, 422, syncRes.error || 'Could not sync fees for this token.', 'FEE_NOT_ROUTED');
+    }
+    return c.json(
+      {
+        id: syncRes.id || null,
+        handle: syncRes.handle || handle,
+        asset: syncRes.asset,
+        amount: syncRes.amount || '0',
+        fee: syncRes.fee,
+        routing: syncRes.routing,
+        status: syncRes.status,
+        synced: syncRes.synced,
+        deferred: syncRes.deferred || false,
+      },
+      syncRes.synced ? 201 : 200
+    );
+  }
+
   if (!handle) {
     return jsonError(
       c,
@@ -368,6 +455,48 @@ feesRouter.post('/route', async (c) => {
     },
     201
   );
+});
+
+/**
+ * POST /api/fees/sync
+ * On-demand RPC scan for incoming launchpad creator fees on `escrow.uprail.near`.
+ * Accepts optional `{ token, handle }`; when omitted, scans all tracked / held
+ * launchpad tokens (prioritizing the logged-in user's handle if authenticated).
+ */
+feesRouter.post('/sync', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as
+    | { token?: unknown; handle?: unknown }
+    | null;
+  const session = c.get('session');
+  const handle = normalizeHandle(body?.handle) || normalizeHandle(session?.x_handle);
+  const contractId = contractFromToken(body?.token);
+
+  if (contractId) {
+    const res = await syncTokenLaunchpadFees(c.env, contractId, { handle });
+    if (!res.ok) {
+      return jsonError(c, 422, res.error || 'Could not sync token fees.', 'SYNC_FAILED');
+    }
+    return c.json({
+      ok: true,
+      synced: res.synced,
+      token: contractId,
+      handle: res.handle,
+      id: res.id,
+      asset: res.asset,
+      amount: res.amount,
+      fee: res.fee,
+      routing: res.routing,
+      status: res.status,
+    });
+  }
+
+  const summary = await syncAllLaunchpadFees(c.env, { handle: handle || undefined });
+  return c.json({
+    ok: true,
+    checked: summary.checked,
+    routed: summary.routed,
+    results: summary.results,
+  });
 });
 
 /**
@@ -415,3 +544,4 @@ feesRouter.post('/ingest', async (c) => {
     201
   );
 });
+

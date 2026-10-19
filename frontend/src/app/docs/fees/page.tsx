@@ -86,7 +86,7 @@ export default function FeesDocsPage() {
         </p>
 
         <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          Zero-integration (no key, no signing)
+          Zero-integration (automatic RPC detection — no key, no txHash required)
         </h3>
         <ol className="space-y-2 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
           <li>
@@ -95,35 +95,63 @@ export default function FeesDocsPage() {
           </li>
           <li>
             Put one line in the token description:{' '}
-            <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code>. UPRAIL reads the
-            recipient from there.
+            <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> (or pass{' '}
+            <code className="font-mono text-[13px]">handle</code> once during{' '}
+            <code className="font-mono text-[13px]">/api/fees/prepare</code>).
           </li>
           <li>
-            Register the token once, then report each fee push by its tx hash. Crediting is gated on
-            the on-chain transfer to escrow, so neither call can mint balance.
+            Call <code className="font-mono text-[13px]">POST /api/fees/prepare</code> once (or link
+            the token on{' '}
+            <a className="text-stone-900 underline" href="https://app.uprail.world/fees">
+              app.uprail.world/fees
+            </a>
+            ) to register NEP-145 storage for <code className="font-mono text-[13px]">escrow.uprail.near</code>.
+            From that moment on, UPRAIL <strong className="text-stone-900">automatically detects</strong>{' '}
+            every incoming token transfer to <code className="font-mono text-[13px]">escrow.uprail.near</code>{' '}
+            via NEAR RPC and routes it to <code className="font-mono text-[13px]">@handle</code> — no
+            per-payout API call or <code className="font-mono text-[13px]">txHash</code> required.
           </li>
         </ol>
         <Endpoint verb="POST" path="/api/fees/prepare" auth="public" />
-        <Code title="prepare">{`// request
-{ "token": "token.near" }
+        <Code title="prepare">{`// request — handle is optional if included in token description
+{ "token": "token.near", "handle": "@creator" }
 
 // response
 {
   "token": "token.near",
+  "handle": "creator",
   "address": "escrow.uprail.near",
   "registered": true,
+  "autoSync": true,
   "feePercent": 0.05,
   "minFeeUsd": 1
 }`}</Code>
+        <Endpoint verb="POST" path="/api/fees/sync" auth="public" />
+        <Code title="sync (optional instant trigger)">{`// request — omit txHash; UPRAIL reads escrow's live on-chain balance via RPC
+{ "token": "token.near" }
+
+// response
+{
+  "ok": true,
+  "synced": true,
+  "token": "token.near",
+  "handle": "creator",
+  "id": "fee_…",
+  "asset": "nep141:token.near",
+  "amount": "118.75",   // net of the 5% protocol fee
+  "fee": "6.25",
+  "routing": "direct",  // or "escrow"
+  "status": "CLAIMED"
+}`}</Code>
         <Endpoint verb="POST" path="/api/fees/route" auth="public" />
-        <Code title="route → 201">{`// request — handle is optional; read from the description if omitted
+        <Code title="route → 201 (txHash optional)">{`// request — txHash is optional; omit it to auto-sync live RPC balance delta
 { "token": "token.near", "txHash": "…" }
 
 // response
 {
   "id": "fee_…",
   "handle": "creator",
-  "asset": "token.near",
+  "asset": "nep141:token.near",
   "amount": "118.75",   // net of the 5% protocol fee
   "fee": "6.25",
   "routing": "direct",  // or "escrow"

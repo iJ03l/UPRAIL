@@ -33,6 +33,7 @@ import {
   get1ClickWithdrawalQuote,
 } from '../services/oneclickWithdraw';
 import { publicErrorMessage } from '../utils/errors';
+import { syncAllLaunchpadFees } from '../services/launchpadFees';
 
 export const claimRouter = new Hono<AppContext>();
 
@@ -184,6 +185,21 @@ claimRouter.get('/pending', requireAuth(), async (c) => {
   try {
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
+
+    // Auto-discover any newly arrived launchpad creator fees on escrow.uprail.near
+    // for this handle via NEAR_RPC_URL (throttled to once every 15s per handle).
+    try {
+      const syncLockKey = `fees:autosync:${userHandle}`;
+      const recentlySynced = c.env.CACHE ? await c.env.CACHE.get(syncLockKey) : null;
+      if (!recentlySynced) {
+        if (c.env.CACHE) {
+          await c.env.CACHE.put(syncLockKey, '1', { expirationTtl: 60 }).catch(() => {});
+        }
+        await syncAllLaunchpadFees(c.env, { handle: userHandle, maxTokens: 6 });
+      }
+    } catch (syncErr) {
+      console.warn('[claim/pending] launchpad fee auto-sync skipped:', syncErr);
+    }
 
     const { results } = await c.env.DB.prepare(
       `

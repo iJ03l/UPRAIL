@@ -307,10 +307,27 @@ export async function resolveRheaToken(
     const hit =
       list.find((e) => e.contractId.toLowerCase() === contract) ||
       list.find((e) => e.symbol.toLowerCase() === raw);
-    return hit ? rheaToOnchainToken(hit) : null;
+    if (hit) return rheaToOnchainToken(hit);
   } catch {
-    return null;
+    // fall through to live RPC ft_metadata
   }
+  if (contract.endsWith('.near') && /^[a-z0-9][a-z0-9._-]{1,63}$/.test(contract)) {
+    try {
+      const meta = await getFtContractMetadata(env, contract);
+      if (meta && meta.symbol) {
+        return rheaToOnchainToken({
+          contractId: meta.contractId,
+          symbol: meta.symbol,
+          name: meta.name || meta.symbol,
+          decimals: meta.decimals,
+          icon: '',
+        });
+      }
+    } catch {
+      // ignore non-FT contracts
+    }
+  }
+  return null;
 }
 
 /**
@@ -3467,7 +3484,7 @@ async function getPlainNearBalance(rpcUrl: string, accountId: string): Promise<b
  * funded deposit as INSUFFICIENT_PLAIN_BALANCE and routes the caller down the
  * wrong rail (or refuses a withdrawal it should complete).
  */
-async function getPlainFtBalanceStrict(
+export async function getPlainFtBalanceStrict(
   rpcUrl: string,
   contractId: string,
   accountId: string
@@ -4120,6 +4137,33 @@ export async function getPlainBalances(
     const held = await fetchAccountFtBalancesStrict(nearAccount);
 
     if (held) {
+      const unknownHeld = held
+        .filter((h) => {
+          const cl = h.contractId.toLowerCase();
+          return (
+            cl !== 'wrap.near' &&
+            cl.endsWith('.near') &&
+            !rheaByContract.has(cl) &&
+            !regByContract.has(cl)
+          );
+        })
+        .slice(0, 4);
+      if (unknownHeld.length > 0) {
+        const metas = await Promise.all(
+          unknownHeld.map((h) => getFtContractMetadata(env, h.contractId))
+        );
+        for (const m of metas) {
+          if (m && m.symbol) {
+            rheaByContract.set(m.contractId.toLowerCase(), {
+              contractId: m.contractId,
+              symbol: m.symbol,
+              name: m.name || m.symbol,
+              decimals: m.decimals,
+              icon: '',
+            });
+          }
+        }
+      }
       for (const h of held) pushHeld(h.contractId, h.balance);
 
       // Index lag guard: verify a handful of high-value registry assets that
@@ -4392,22 +4436,52 @@ export interface FtContractMetadata {
  * Rhea registries do not (yet) list. Returns null when the contract does not
  * answer, so callers can reject an unknown or non-FT contract.
  */
+const ftMetaMemCache = new Map<string, { at: number; meta: FtContractMetadata | null }>();
+const FT_META_MEM_TTL_MS = 10 * 60 * 1000;
+const FT_META_KV_TTL_S = 6 * 3600;
+
 export async function getFtContractMetadata(
   env: Env,
   contractId: string
 ): Promise<FtContractMetadata | null> {
+  const cl = (contractId || '').trim().toLowerCase();
+  if (!cl) return null;
+
+  const memo = ftMetaMemCache.get(cl);
+  if (memo && Date.now() - memo.at < FT_META_MEM_TTL_MS) return memo.meta;
+
+  const kvKey = `ft_meta:v1:${cl}`;
+  if (env.CACHE) {
+    try {
+      const cached = await env.CACHE.get(kvKey, 'json');
+      if (cached && typeof cached === 'object' && 'symbol' in (cached as any)) {
+        const meta = cached as FtContractMetadata;
+        ftMetaMemCache.set(cl, { at: Date.now(), meta });
+        return meta;
+      }
+    } catch {}
+  }
+
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   try {
-    const meta = await viewFunction(rpcUrl, contractId, 'ft_metadata', {});
-    if (!meta || typeof meta !== 'object') return null;
+    const meta = await viewFunction(rpcUrl, cl, 'ft_metadata', {});
+    if (!meta || typeof meta !== 'object') {
+      ftMetaMemCache.set(cl, { at: Date.now(), meta: null });
+      return null;
+    }
     const decimals = Number(meta.decimals);
-    return {
-      contractId,
+    const out: FtContractMetadata = {
+      contractId: cl,
       symbol: typeof meta.symbol === 'string' ? meta.symbol : '',
       name: typeof meta.name === 'string' ? meta.name : '',
       decimals: Number.isFinite(decimals) ? decimals : 18,
       description: typeof meta.description === 'string' ? meta.description : undefined,
     };
+    ftMetaMemCache.set(cl, { at: Date.now(), meta: out });
+    if (env.CACHE) {
+      await env.CACHE.put(kvKey, JSON.stringify(out), { expirationTtl: FT_META_KV_TTL_S }).catch(() => {});
+    }
+    return out;
   } catch {
     return null;
   }

@@ -8,6 +8,9 @@ import {
   deriveHandleFromDescription,
   protocolFeePercent,
   minFeeUsd,
+  isSharedPoolContract,
+  inferLaunchpadFromContract,
+  getAccountedEscrowAtomic,
 } from '../dist/launchpadFees.bundle.mjs';
 import {
   generatePartnerKey,
@@ -124,6 +127,64 @@ describe('creator-fee dust threshold', () => {
   });
 });
 
+describe('automatic RPC balance-delta helpers', () => {
+  it('excludes shared pooled contracts from single-creator delta routing', () => {
+    assert.equal(isSharedPoolContract('wrap.near'), true);
+    assert.equal(isSharedPoolContract('usdt.tether-token.near'), true);
+    assert.equal(isSharedPoolContract('sol.omft.near'), true);
+    assert.equal(isSharedPoolContract('uptober.nearlytrade.near'), false);
+    assert.equal(isSharedPoolContract('hoot.launchpad.justhoot.near'), false);
+  });
+
+  it('infers launchpad name from token contract', () => {
+    assert.equal(inferLaunchpadFromContract('uptober.nearlytrade.near'), 'nearly');
+    assert.equal(inferLaunchpadFromContract('owl.launchpad.justhoot.near'), 'justhoot');
+    assert.equal(inferLaunchpadFromContract('cat.meme-cooking.near'), 'meme-cooking');
+    assert.equal(inferLaunchpadFromContract('custom.token.near'), 'direct');
+  });
+
+  it('computes accounted escrow atomic units across ESCROWED and CLAIMED rows', async () => {
+    const rows = [
+      // Escrowed 100 gross -> 95 net + 5 fee (all 100 still in escrow)
+      {
+        amount: '95',
+        fee: '5',
+        fee_recipient: 'escrow.uprail.near',
+        status: 'ESCROWED',
+        claim_tx_hash: null,
+        origin: 'launchpad:nearly',
+      },
+      // Claimed 200 gross with real onchain tx -> 190 net left escrow, 10 fee stayed in escrow
+      {
+        amount: '190',
+        fee: '10',
+        fee_recipient: 'escrow.uprail.near',
+        status: 'CLAIMED',
+        claim_tx_hash: '8fG7kL9pQ2rT4vW6xY8zA1bC3dE5fG7hJ9kL2mN4pQ6r',
+        origin: 'launchpad:nearly',
+      },
+    ];
+    const mockEnv = {
+      ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            all: async () => ({ results: rows }),
+          }),
+        }),
+      },
+    };
+    const accounted = await getAccountedEscrowAtomic(
+      mockEnv,
+      'uptober.nearlytrade.near',
+      'nep141:uptober.nearlytrade.near',
+      6
+    );
+    // 95 + 5 + 10 = 110 tokens = 110_000_000 atomic units
+    assert.equal(accounted, 110000000n);
+  });
+});
+
 describe('partner key generation', () => {
   it('mints self-identifying keys and hashes deterministically', async () => {
     const key = await generatePartnerKey();
@@ -167,3 +228,4 @@ describe('webhook signature verification', () => {
     assert.equal(await verifyWebhookSignature('', 't=1,v1=x', body), false);
   });
 });
+
