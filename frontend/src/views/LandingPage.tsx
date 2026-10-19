@@ -1,62 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Link } from '../lib/router';
-import { ArrowRight, ExternalLink, Moon, Sun, Bot, Coins, CheckCircle2, Shield, Sparkles, Fingerprint } from 'lucide-react';
+import { ArrowRight, ExternalLink, Moon, Sun } from 'lucide-react';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { TextReveal } from '../components/TextReveal';
 import { MoneyFlowSchematic } from '../components/MoneyFlowSchematic';
 import { InteractiveRailSimulator } from '../components/InteractiveRailSimulator';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { useTheme } from '../components/ThemeProvider';
-
-const AI_CHAT_DEMOS = [
-  {
-    id: 'claude',
-    name: 'Claude',
-    prompt: 'Send 50 USDC to @vitalik',
-    action: 'uprail_send_to_x',
-    amount: '50 USDC',
-    recipient: '@vitalik',
-    cap: '$50 / $250 daily cap',
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI Dot',
-    prompt: 'Pay @mert 120 USDC for design',
-    action: 'POST /agent/send',
-    amount: '120 USDC',
-    recipient: '@mert',
-    cap: '$120 / $250 daily cap',
-  },
-  {
-    id: 'grok',
-    name: 'Grok Bot',
-    prompt: 'Tip @elonmusk 25 NEAR',
-    action: 'uprail_send_to_x',
-    amount: '25 NEAR',
-    recipient: '@elonmusk',
-    cap: '$112 / $250 daily cap',
-  },
-  {
-    id: 'muse',
-    name: 'Meta Muse',
-    prompt: 'Generate a 100 USDC deposit link',
-    action: 'uprail_receive',
-    amount: '100 USDC',
-    recipient: 'Deposit Intent',
-    cap: '14 chains supported',
-  },
-  {
-    id: 'cursor',
-    name: 'Cursor',
-    prompt: 'Send 15 USDC bounty to @balajis',
-    action: 'mcp:uprail',
-    amount: '15 USDC',
-    recipient: '@balajis',
-    cap: '$15 / $250 daily cap',
-  },
-];
 
 const getAppSubdomainUrl = () => {
   if (typeof window !== 'undefined') {
@@ -70,12 +21,9 @@ const getAppSubdomainUrl = () => {
 
 export const LandingPage: React.FC = () => {
   const [quickSendHandle, setQuickSendHandle] = useState('');
-  const [activeAiIdx, setActiveAiIdx] = useState(0);
-  const [activeLaunchpad, setActiveLaunchpad] = useState<'Nearly' | 'JustHoot'>('Nearly');
   const { resolved, setMode } = useTheme();
   const isDark = resolved === 'dark';
   const appSubdomainUrl = getAppSubdomainUrl();
-  const activeAi = AI_CHAT_DEMOS[activeAiIdx];
 
   const handleQuickLaunch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,114 +125,62 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* 
-          5. AI Chat Payments & Creator Fees — Visual Interactive Bento
+          5. AI Chat & Creator Fees — Stark Architectural Split
         */}
-        <section id="coming-soon" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24 space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-stone-200 pb-4">
-            <div>
-              <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block mb-1">
-                // AI Chat &amp; Creator Fees
-              </span>
-              <h2 className="text-2xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950">
-                Pay from AI. Earn on 𝕏.
-              </h2>
-            </div>
-            <a
-              href="https://docs.uprail.world"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-mono font-bold uppercase tracking-wider text-stone-600 hover:text-black transition-colors"
-            >
-              <span>1-Min Setup Docs</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          </div>
+        <section id="coming-soon" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24 space-y-5">
+          <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
+            // AI Chat &amp; Creator Fees
+          </span>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* LEFT PANEL: Interactive AI Chat Terminal */}
-            <div className="rounded-3xl bg-stone-950 text-white p-6 sm:p-7 flex flex-col justify-between space-y-6 border border-stone-800 shadow-lg relative overflow-hidden">
-              {/* Top Header + Interactive AI Selector Pills */}
-              <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* 01: AI Chat Payments */}
+            <div className="rounded-3xl bg-stone-950 text-white p-7 sm:p-9 flex flex-col justify-between space-y-8 border border-stone-900">
+              <div className="space-y-5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-[#E05326] animate-pulse" />
-                    <span className="text-[10px] font-mono uppercase tracking-widest text-stone-400 font-bold">
-                      AI Chat Payments · 1-Click MCP
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-stone-900 text-stone-300 border border-stone-800">
-                    USD Spend Caps
+                  <span className="text-[11px] font-mono uppercase tracking-widest text-stone-400 font-bold">
+                    01 / AI Chat
+                  </span>
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-stone-900 text-[#E05326] border border-stone-800 font-bold">
+                    1-Click MCP
                   </span>
                 </div>
 
-                {/* Clickable AI Platform Switcher */}
-                <div className="flex flex-wrap gap-1.5">
-                  {AI_CHAT_DEMOS.map((client, idx) => (
-                    <button
-                      key={client.id}
-                      type="button"
-                      onClick={() => setActiveAiIdx(idx)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer ${
-                        activeAiIdx === idx
-                          ? 'bg-[#E05326] text-white shadow-sm'
-                          : 'bg-stone-900 text-stone-400 hover:text-white border border-stone-800'
-                      }`}
+                <div className="space-y-2">
+                  <h3 className="text-3xl sm:text-4xl font-display font-extrabold tracking-tight text-white leading-[1.05]">
+                    Pay from any AI.
+                  </h3>
+                  <p className="text-sm text-stone-400 leading-relaxed">
+                    Send and receive private transfers in chat. Capped in USD.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {['Claude', 'OpenAI Dot', 'Grok Bot', 'Meta Muse', 'Cursor'].map((name) => (
+                    <span
+                      key={name}
+                      className="px-2.5 py-1 rounded-lg bg-stone-900 border border-stone-800 text-[11px] font-mono text-stone-300"
                     >
-                      {client.name}
-                    </button>
+                      {name}
+                    </span>
                   ))}
                 </div>
               </div>
 
-              {/* Simulated Chat Exchange (Visual, Minimal Text) */}
-              <div className="rounded-2xl bg-stone-900/90 border border-stone-800 p-4 space-y-3.5">
-                {/* User Prompt Bubble */}
-                <div className="flex justify-end">
-                  <div className="px-3.5 py-2 rounded-2xl rounded-tr-xs bg-white text-stone-950 text-xs sm:text-sm font-medium shadow-xs">
-                    “{activeAi.prompt}”
-                  </div>
-                </div>
-
-                {/* AI Response Receipt */}
-                <div className="flex items-start gap-2.5">
-                  <div className="w-7 h-7 rounded-xl bg-[#E05326]/15 border border-[#E05326]/40 text-[#E05326] flex items-center justify-center shrink-0 mt-0.5">
-                    <Bot className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 rounded-2xl rounded-tl-xs bg-stone-950 border border-stone-800 p-3 space-y-2">
-                    <div className="flex items-center justify-between text-[10px] font-mono text-stone-400">
-                      <span className="text-[#E05326] font-bold">{activeAi.action}</span>
-                      <span className="text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Settled
-                      </span>
-                    </div>
-                    <div className="flex items-baseline justify-between">
-                      <span className="font-display font-extrabold text-base sm:text-lg text-white">
-                        {activeAi.amount}
-                      </span>
-                      <span className="font-mono text-xs text-stone-300">
-                        → {activeAi.recipient}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between pt-1.5 border-t border-stone-800/80 text-[10px] font-mono text-stone-500">
-                      <span className="flex items-center gap-1">
-                        <Shield className="w-3 h-3 text-stone-400" /> NEAR Intents Shielded
-                      </span>
-                      <span>{activeAi.cap}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom CTA */}
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-xs font-mono text-stone-400">
-                  Paste 1 URL. Zero key custody.
-                </span>
+              <div className="flex items-center justify-between pt-4 border-t border-stone-800/80">
+                <a
+                  href="https://docs.uprail.world/docs/agents"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-mono text-stone-400 hover:text-white transition-colors inline-flex items-center gap-1"
+                >
+                  <span>Docs</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
                 <a
                   href={`${appSubdomainUrl}/agents`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-4 py-2 rounded-xl bg-white text-stone-950 hover:bg-stone-200 font-display font-extrabold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-all"
+                  className="px-5 py-2.5 rounded-xl bg-white text-stone-950 hover:bg-stone-200 font-display font-extrabold text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all"
                 >
                   <span>Connect AI</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -292,98 +188,54 @@ export const LandingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* RIGHT PANEL: Visual Creator Fees Pipeline */}
-            <div className="rounded-3xl bg-stone-50 text-stone-950 p-6 sm:p-7 flex flex-col justify-between space-y-6 border border-stone-200 relative overflow-hidden">
-              {/* Top Header + Launchpad Switcher */}
-              <div className="space-y-4">
+            {/* 02: Creator Fees */}
+            <div className="rounded-3xl bg-stone-100/80 text-stone-950 p-7 sm:p-9 flex flex-col justify-between space-y-8 border border-stone-200">
+              <div className="space-y-5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                    <span className="text-[10px] font-mono uppercase tracking-widest text-stone-500 font-bold">
-                      Launchpad Creator Fees · Auto RPC
+                  <span className="text-[11px] font-mono uppercase tracking-widest text-stone-500 font-bold">
+                    02 / Creator Fees
+                  </span>
+                  <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-white text-stone-900 border border-stone-200 font-bold">
+                    Auto RPC
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <h3 className="text-3xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950 leading-[1.05]">
+                    Route token fees to 𝕏.
+                  </h3>
+                  <p className="text-sm text-stone-600 leading-relaxed">
+                    Launch on any pad. Point fees to UPRAIL. Claim by touch.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {['Nearly', 'JustHoot', 'escrow.uprail.near'].map((tag) => (
+                    <span
+                      key={tag}
+                      className="px-2.5 py-1 rounded-lg bg-white border border-stone-200 text-[11px] font-mono text-stone-700"
+                    >
+                      {tag}
                     </span>
-                  </div>
-                  <div className="flex gap-1 bg-stone-200/70 p-0.5 rounded-xl">
-                    {(['Nearly', 'JustHoot'] as const).map((lp) => (
-                      <button
-                        key={lp}
-                        type="button"
-                        onClick={() => setActiveLaunchpad(lp)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer ${
-                          activeLaunchpad === lp
-                            ? 'bg-stone-950 text-white shadow-2xs'
-                            : 'text-stone-600 hover:text-stone-950'
-                        }`}
-                      >
-                        {lp}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Visual Step 1: Tag Badge */}
-                <div className="rounded-2xl bg-white border border-stone-200 p-3.5 flex items-center justify-between shadow-2xs">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-                    Token Description
-                  </span>
-                  <code className="text-xs font-mono font-bold text-stone-900 bg-stone-100 px-2.5 py-1 rounded-lg border border-stone-200">
-                    Fees to <span className="text-[#E05326]">@yourhandle</span> via UPRAIL
-                  </code>
+                  ))}
                 </div>
               </div>
 
-              {/* Visual Step 2: 3-Node Pipeline Graphic */}
-              <div className="rounded-2xl bg-white border border-stone-200 p-4 space-y-4 shadow-2xs">
-                <div className="grid grid-cols-3 items-center gap-2 text-center">
-                  {/* Node 1: Launchpad */}
-                  <div className="rounded-xl bg-stone-50 border border-stone-200 p-3 space-y-1">
-                    <Coins className="w-4 h-4 mx-auto text-stone-700" />
-                    <div className="font-display font-extrabold text-xs text-stone-950">
-                      {activeLaunchpad}
-                    </div>
-                    <div className="text-[9px] font-mono text-stone-400">100% Fees</div>
-                  </div>
-
-                  {/* Node 2: UPRAIL Escrow */}
-                  <div className="relative rounded-xl bg-stone-950 text-white p-3 space-y-1 shadow-xs">
-                    <Sparkles className="w-4 h-4 mx-auto text-[#E05326]" />
-                    <div className="font-mono font-bold text-[10px] truncate">
-                      escrow.uprail
-                    </div>
-                    <div className="text-[9px] font-mono text-emerald-400">NEAR RPC Sync</div>
-                  </div>
-
-                  {/* Node 3: X Handle */}
-                  <div className="rounded-xl bg-stone-50 border border-stone-200 p-3 space-y-1">
-                    <Fingerprint className="w-4 h-4 mx-auto text-[#E05326]" />
-                    <div className="font-display font-extrabold text-xs text-stone-950">
-                      @yourhandle
-                    </div>
-                    <div className="text-[9px] font-mono text-stone-500">Passkey Claim</div>
-                  </div>
-                </div>
-
-                {/* Live Payout Bar */}
-                <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-50/80 border border-emerald-200/80">
-                  <span className="text-[11px] font-mono font-bold text-emerald-900">
-                    Auto-detected on NEAR
-                  </span>
-                  <span className="font-display font-extrabold text-xs text-emerald-700">
-                    +42.8 NEAR Claimable
-                  </span>
-                </div>
-              </div>
-
-              {/* Bottom CTA */}
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-xs font-mono text-stone-500">
-                  Zero webhooks. Zero API keys.
-                </span>
+              <div className="flex items-center justify-between pt-4 border-t border-stone-200">
+                <a
+                  href="https://docs.uprail.world/docs/fees"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-mono text-stone-500 hover:text-stone-950 transition-colors inline-flex items-center gap-1"
+                >
+                  <span>Docs</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
                 <a
                   href={`${appSubdomainUrl}/fees`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-4 py-2 rounded-xl bg-stone-950 text-white hover:bg-stone-800 font-display font-extrabold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-all"
+                  className="px-5 py-2.5 rounded-xl bg-stone-950 text-white hover:bg-stone-800 font-display font-extrabold text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all"
                 >
                   <span>Claim Fees</span>
                   <ArrowRight className="w-3.5 h-3.5" />
