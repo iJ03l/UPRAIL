@@ -123,6 +123,8 @@ app.use('*', async (c, next) => {
       url.pathname.startsWith('/claim/') ||
       url.pathname === '/fees' ||
       url.pathname.startsWith('/fees/') ||
+      url.pathname === '/agents' ||
+      url.pathname.startsWith('/agents/') ||
       url.pathname === '/receipt' ||
       url.pathname.startsWith('/receipt/') ||
       url.pathname === '/history' ||

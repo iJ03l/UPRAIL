@@ -126,28 +126,29 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* 
-          5. Coming Soon: new developer surfaces
+          5. AI Chat Payments & Creator Fees
         */}
         <section id="coming-soon" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24 space-y-6">
           <div className="space-y-3">
             <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
-              // Coming soon
+              // AI Chat &amp; Creator Fees
             </span>
             <h2 className="text-2xl sm:text-4xl md:text-5xl font-display font-extrabold tracking-tight text-stone-950 max-w-3xl">
-              UPRAIL is opening up to agents and creators.
+              Pay from any AI chat — and route creator fees to 𝕏.
             </h2>
             <p className="text-sm sm:text-base text-stone-600 max-w-2xl leading-relaxed">
-              The same confidential rail, now programmable. These surfaces are in preview — read
-              the{' '}
+              Connect ChatGPT, Claude, or Cursor to send and receive confidential payments within
+              USD spend limits you control, or route launchpad creator fees straight to your 𝕏
+              handle. Read the{' '}
               <a
                 href="https://docs.uprail.world"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-bold text-stone-900 underline underline-offset-2"
               >
-                developer docs
+                docs
               </a>{' '}
-              while they ship.
+              for 1-minute setup.
             </p>
           </div>
 
@@ -180,8 +181,8 @@ export const LandingPage: React.FC = () => {
                   <div className="w-10 h-10 rounded-2xl bg-stone-950 text-white flex items-center justify-center">
                     <f.icon className="w-5 h-5" />
                   </div>
-                  <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">
-                    Coming soon
+                  <span className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Live
                   </span>
                 </div>
                 <div className="space-y-1">
