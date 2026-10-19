@@ -373,7 +373,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                 Need Help?
               </span>
               <a
-                href="https://t.me/uptoberonnear"
+                href="https://t.me/uprailworld"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group w-full py-3 px-3 rounded-2xl bg-stone-50 hover:bg-stone-100 border border-stone-200 transition-colors flex items-center justify-between gap-2"
@@ -387,7 +387,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                       Get help on Telegram
                     </span>
                     <span className="block text-[10px] text-stone-500 font-mono truncate">
-                      @uptoberonnear
+                      @uprailworld
                     </span>
                   </span>
                 </span>

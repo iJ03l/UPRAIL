@@ -66,8 +66,8 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
             <a href="https://app.uprail.world" className="hover:text-stone-700">
               app.uprail.world
             </a>
-            <a href="https://x.com/Uptoberonnear" className="hover:text-stone-700">
-              @Uptoberonnear
+            <a href="https://x.com/uprailworld" className="hover:text-stone-700">
+              @uprailworld
             </a>
           </div>
         </div>

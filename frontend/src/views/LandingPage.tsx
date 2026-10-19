@@ -354,7 +354,7 @@ export const LandingPage: React.FC = () => {
             </a>{' '}
             · for{' '}
             <a
-              href="https://x.com/Uptoberonnear"
+              href="https://x.com/uprailworld"
               target="_blank"
               rel="noopener noreferrer"
               className="font-bold text-stone-700 hover:text-black transition-colors"
