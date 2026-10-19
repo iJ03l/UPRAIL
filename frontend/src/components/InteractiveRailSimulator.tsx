@@ -233,7 +233,7 @@ export const InteractiveRailSimulator: React.FC = () => {
           </div>
 
           {/* Right Column: Visual Beam Pipeline & Outcome */}
-          <div className="lg:col-span-7 flex flex-col justify-between bg-white rounded-3xl border border-stone-200 p-6 sm:p-8 relative overflow-hidden shadow-xs">
+          <div className="lg:col-span-7 flex flex-col justify-between bg-white rounded-3xl border border-stone-200 p-4 sm:p-6 md:p-8 relative overflow-hidden shadow-xs">
             {/* Laser Track Visualization */}
             <div className="space-y-2">
               <div className="flex justify-between text-[9px] sm:text-xs font-mono text-stone-500">
@@ -331,7 +331,7 @@ export const InteractiveRailSimulator: React.FC = () => {
                 href="https://app.uprail.world"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-black text-white text-xs font-display font-bold hover:bg-[#E05326] transition-colors shadow-xs"
+                className="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2.5 sm:py-2 rounded-xl bg-black text-white text-xs font-display font-bold hover:bg-[#E05326] transition-colors shadow-xs"
               >
                 <span>Execute on app.uprail.world</span>
                 <ArrowRight className="w-3.5 h-3.5" />

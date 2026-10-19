@@ -578,31 +578,31 @@ export const ReceivePage: React.FC = () => {
 
       {/* Mode Tabs */}
       <div className="flex justify-center mb-6">
-        <div className="inline-flex p-1.5 rounded-2xl bg-stone-100 border border-stone-200 gap-1.5 shadow-xs">
+        <div className="w-full sm:w-auto flex p-1.5 rounded-2xl bg-stone-100 border border-stone-200 gap-1.5 shadow-xs">
           <button
             type="button"
             onClick={() => setActiveTab('crosschain')}
-            className={`px-4 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`flex-1 sm:flex-initial justify-center px-3 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center space-x-1.5 sm:space-x-2 ${
               activeTab === 'crosschain'
                 ? 'bg-black text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
             }`}
           >
-            <Zap className="w-3.5 h-3.5" />
-            <span>Cross-Chain Assets</span>
+            <Zap className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="truncate">Cross-Chain Assets</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('defuse')}
-            className={`px-4 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`flex-1 sm:flex-initial justify-center px-3 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center space-x-1.5 sm:space-x-2 ${
               activeTab === 'defuse'
                 ? 'bg-black text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
             }`}
           >
-            <Shield className="w-3.5 h-3.5" />
-            <span>NEAR Native &amp; Memes</span>
+            <Shield className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="truncate">NEAR Native &amp; Memes</span>
           </button>
         </div>
       </div>
@@ -612,13 +612,13 @@ export const ReceivePage: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
         {/* ── MAIN AREA (Left 7 Columns) ── */}
         <div className="lg:col-span-7 space-y-6">
-          <div className="rounded-3xl p-6 sm:p-8 bg-white border border-stone-200 shadow-sm space-y-6 relative">
+          <div className="rounded-3xl p-4 sm:p-6 md:p-8 bg-white border border-stone-200 shadow-sm space-y-6 relative">
 
         {/* ── STEP 1: ASSET DROPDOWN ── */}
         <div className="space-y-2" ref={tokenDropdownRef}>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-1">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
-              <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">1</span>
+              <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold flex-shrink-0">1</span>
               <span>Select Asset to Receive</span>
             </label>
             <span className="text-[11px] font-mono text-stone-400">
@@ -750,9 +750,9 @@ export const ReceivePage: React.FC = () => {
 
         {/* ── STEP 2: BLOCKCHAIN DROPDOWN ── */}
         <div className="space-y-2 pt-2 border-t border-stone-100" ref={chainDropdownRef}>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-1">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
-              <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">2</span>
+              <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold flex-shrink-0">2</span>
               <span>Select Source Blockchain</span>
             </label>
             <span className="text-[11px] font-mono text-stone-400">
@@ -893,9 +893,9 @@ export const ReceivePage: React.FC = () => {
 
         {/* ── STEP 3: EXACT DEPOSIT AMOUNT ── */}
         <div className="space-y-3 pt-2 border-t border-stone-100">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-1">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
-              <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">3</span>
+              <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold flex-shrink-0">3</span>
               <span>Enter Exact Deposit Amount</span>
             </label>
             <span className="text-[11px] font-mono text-amber-700 font-semibold flex items-center space-x-1">
@@ -986,14 +986,14 @@ export const ReceivePage: React.FC = () => {
               <span>Confidential Ephemeral Ingress</span>
             </div>
             <p>
-              Your gateway address is ephemeral and generated exclusively for receiving <strong className="text-stone-900">{selectedToken || 'assets'}</strong> on <strong className="text-stone-900">{activeChainDef?.name || selectedChain || 'your selected network'}</strong>. Funds are settled via NEAR Intents directly into your confidential passkey vault (<span className="font-mono text-stone-900 font-semibold">{nearAccount || 'u_...uprail.near'}</span>).
+              Your gateway address is ephemeral and generated exclusively for receiving <strong className="text-stone-900">{selectedToken || 'assets'}</strong> on <strong className="text-stone-900">{activeChainDef?.name || selectedChain || 'your selected network'}</strong>. Funds are settled via NEAR Intents directly into your confidential passkey vault (<span className="font-mono text-stone-900 font-semibold break-all">{nearAccount || 'u_...uprail.near'}</span>).
             </p>
           </div>
         </div>
 
         {/* ── SIDE SECTION: ONE ADDRESS & GENERATED QR CODE (Right 5 Columns) ── */}
         <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-6">
-          <div className="rounded-3xl p-6 bg-white border border-stone-200 shadow-sm flex flex-col items-center space-y-4">
+          <div className="rounded-3xl p-4 sm:p-6 bg-white border border-stone-200 shadow-sm flex flex-col items-center space-y-4">
             {selectedToken && selectedChain && depositAddressValue ? (
               <>
                 {/* Active Pair Header */}

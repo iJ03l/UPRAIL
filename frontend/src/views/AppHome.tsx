@@ -328,18 +328,18 @@ export const AppHome: React.FC = () => {
         <div className="lg:col-span-7 space-y-6">
 
           {/* Balance Hero Card — live from onchain intent account */}
-          <div className="rounded-3xl p-7 sm:p-9 md:p-10 bg-white border border-stone-200 shadow-xs space-y-6 relative">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5">
-                <Shield className="w-3.5 h-3.5 text-stone-900" />
-                <span>Intent Account Vault</span>
+          <div className="rounded-3xl p-5 sm:p-8 md:p-10 bg-white border border-stone-200 shadow-xs space-y-5 sm:space-y-6 relative">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5 min-w-0">
+                <Shield className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+                <span className="truncate">Intent Account Vault</span>
                 {nearAccount && (
-                  <span className="ml-1 text-stone-400 font-normal normal-case truncate max-w-[120px]">
+                  <span className="hidden sm:inline ml-1 text-stone-400 font-normal normal-case truncate max-w-[140px]">
                     · {nearAccount}
                   </span>
                 )}
               </span>
-              <div className="flex items-center space-x-1">
+              <div className="flex items-center space-x-1 flex-shrink-0">
                 <button
                   type="button"
                   onClick={handleManualRefresh}
@@ -368,7 +368,7 @@ export const AppHome: React.FC = () => {
                   <Skeleton className="h-3 w-64" />
                 </div>
               ) : (
-                <div className="text-4xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums">
+                <div className="text-3xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums break-all">
                   <RollingNumber
                     value={hideBalance ? null : totalBalanceUsd}
                     format={formatUsdCompact}
@@ -385,8 +385,8 @@ export const AppHome: React.FC = () => {
                   live price
                 </div>
               )}
-              <div className="flex items-center space-x-2 text-xs font-mono text-stone-500">
-                <span className={`w-1.5 h-1.5 rounded-full ${hasIntentAccount ? 'bg-stone-900' : 'bg-amber-500 animate-pulse'}`} />
+              <div className="flex items-center space-x-2 text-[11px] sm:text-xs font-mono text-stone-500">
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${hasIntentAccount ? 'bg-stone-900' : 'bg-amber-500 animate-pulse'}`} />
                 {hasIntentAccount ? (
                   <span>Live · Confidential Intents · Passkey Protected</span>
                 ) : user?.hasPasskey === true ? (
@@ -453,23 +453,23 @@ export const AppHome: React.FC = () => {
           {pendingPayments.length > 0 && (
             <Link
               to="/app/claim"
-              className="p-4 rounded-3xl bg-stone-900 text-white border border-stone-800 shadow-md flex items-center justify-between hover:bg-black transition-all group cursor-pointer animate-fade-in"
+              className="p-4 rounded-3xl bg-stone-900 text-white border border-stone-800 shadow-md flex items-center justify-between gap-3 hover:bg-black transition-all group cursor-pointer animate-fade-in"
             >
-              <div className="flex items-center space-x-3.5">
-                <div className="w-10 h-10 rounded-2xl bg-white text-stone-900 flex items-center justify-center font-bold">
+              <div className="flex items-center space-x-3 sm:space-x-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-white text-stone-900 flex items-center justify-center font-bold flex-shrink-0">
                   <Fingerprint className="w-5 h-5" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <div className="text-xs font-bold font-display flex items-center space-x-2">
-                    <span>{pendingPayments.length} incoming payment{pendingPayments.length > 1 ? 's' : ''} ready to claim</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="truncate">{pendingPayments.length} incoming payment{pendingPayments.length > 1 ? 's' : ''} ready to claim</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
                   </div>
-                  <div className="text-[11px] text-stone-300 font-mono mt-0.5">
-                    ≈ {formatUsd(sumUsd(pendingPayments.map((p) => p.amountUsd)))} USD · Tap to claim with your device Passkey
+                  <div className="text-[11px] text-stone-300 font-mono mt-0.5 truncate">
+                    ≈ {formatUsd(sumUsd(pendingPayments.map((p) => p.amountUsd)))} USD · Tap to claim with Passkey
                   </div>
                 </div>
               </div>
-              <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-1 transition-all" />
+              <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-1 transition-all flex-shrink-0" />
             </Link>
           )}
 
@@ -610,25 +610,25 @@ export const AppHome: React.FC = () => {
                   return (
                     <div
                       key={tx.id}
-                      className="py-3 flex items-center justify-between hover:bg-stone-50/70 rounded-xl px-2 transition-colors group"
+                      className="py-3 flex items-center justify-between gap-2 hover:bg-stone-50/70 rounded-xl px-2 transition-colors group"
                     >
-                      <div className="flex items-center space-x-2.5">
+                      <div className="flex items-center space-x-2.5 min-w-0">
                         <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${tx.isSent ? 'bg-stone-100 text-stone-800' : 'bg-emerald-50 text-emerald-800'}`}>
                           {tx.isSent ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-700" />}
                         </div>
-                        <div>
-                          <div className="text-xs font-bold text-stone-900 font-mono truncate max-w-[120px] sm:max-w-[160px]">
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-stone-900 font-mono truncate">
                             {tx.title}
                           </div>
-                          <div className="text-[10px] text-stone-400 font-mono truncate max-w-[120px] sm:max-w-[160px]">
+                          <div className="text-[10px] text-stone-400 font-mono truncate">
                             {tx.subtitle}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1.5 sm:space-x-2 flex-shrink-0">
                         <div className="text-right">
-                          <div className="text-xs font-mono font-bold text-stone-900">
+                          <div className="text-xs font-mono font-bold text-stone-900 whitespace-nowrap">
                             {tx.amount} {tx.symbol}
                           </div>
                           <span className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${

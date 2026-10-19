@@ -24,6 +24,8 @@ export interface GlitchLogoProps {
   iconDuration?: number;
   /** Enable hover and touch interactive glitch triggers (default: true) */
   interactive?: boolean;
+  /** Hide wordmark (and badge) below sm breakpoint so mobile headers only show the icon */
+  hideWordmarkOnMobile?: boolean;
 }
 
 export const GlitchLogo: React.FC<GlitchLogoProps> = ({
@@ -37,6 +39,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   fullDuration,
   iconDuration,
   interactive = true,
+  hideWordmarkOnMobile = false,
 }) => {
   const [isGlitching, setIsGlitching] = useState<boolean>(false);
   const glitchTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -86,28 +89,48 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   // Dimensional scale classes - locked container widths guarantee 0 layout shift
   const dimensions = {
     sm: {
-      container: mode === 'icon-only' ? 'w-6 h-6' : 'w-[102px] h-6',
+      container:
+        mode === 'icon-only'
+          ? 'w-6 h-6'
+          : hideWordmarkOnMobile
+            ? 'w-6 sm:w-[102px] h-6'
+            : 'w-[102px] h-6',
       icon: 'h-6 w-6',
       wordmark: 'h-4.5 max-w-[70px]',
       gap: 'space-x-1.5',
       badge: 'text-[9px] px-1 py-0.2',
     },
     md: {
-      container: mode === 'icon-only' ? 'w-7 sm:w-8 h-7 sm:h-8' : 'w-[124px] sm:w-[145px] h-7 sm:h-8',
+      container:
+        mode === 'icon-only'
+          ? 'w-7 sm:w-8 h-7 sm:h-8'
+          : hideWordmarkOnMobile
+            ? 'w-7 sm:w-[145px] h-7 sm:h-8'
+            : 'w-[124px] sm:w-[145px] h-7 sm:h-8',
       icon: 'h-7 w-7 sm:h-8 sm:w-8',
       wordmark: 'h-5.5 sm:h-6.5 max-w-[88px] sm:max-w-[105px]',
       gap: 'space-x-2 sm:space-x-2.5',
       badge: 'text-[10px] px-1.5 py-0.5',
     },
     lg: {
-      container: mode === 'icon-only' ? 'w-9 sm:w-10 h-9 sm:h-10' : 'w-[155px] sm:w-[180px] h-9 sm:h-10',
+      container:
+        mode === 'icon-only'
+          ? 'w-9 sm:w-10 h-9 sm:h-10'
+          : hideWordmarkOnMobile
+            ? 'w-9 sm:w-[180px] h-9 sm:h-10'
+            : 'w-[155px] sm:w-[180px] h-9 sm:h-10',
       icon: 'h-9 w-9 sm:h-10 sm:w-10',
       wordmark: 'h-7.5 sm:h-8.5 max-w-[115px] sm:max-w-[135px]',
       gap: 'space-x-2.5 sm:space-x-3',
       badge: 'text-xs px-2 py-0.5',
     },
     xl: {
-      container: mode === 'icon-only' ? 'w-11 sm:w-12 h-11 sm:h-12' : 'w-[190px] sm:w-[220px] h-11 sm:h-12',
+      container:
+        mode === 'icon-only'
+          ? 'w-11 sm:w-12 h-11 sm:h-12'
+          : hideWordmarkOnMobile
+            ? 'w-11 sm:w-[220px] h-11 sm:h-12'
+            : 'w-[190px] sm:w-[220px] h-11 sm:h-12',
       icon: 'h-11 w-11 sm:h-12 sm:w-12',
       wordmark: 'h-9.5 sm:h-10.5 max-w-[140px] sm:max-w-[165px]',
       gap: 'space-x-3 sm:space-x-3.5',
@@ -121,6 +144,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
       : '/brand/uprail-wordmark.png';
 
   const showWordmark = mode !== 'icon-only';
+  const wordmarkVisibilityClass = hideWordmarkOnMobile ? 'hidden sm:flex' : 'flex';
 
   const innerContent = (
     <div
@@ -154,7 +178,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
         {/* Wordmark ("uprail ™") - Always stable in box, zero layout shift */}
         {showWordmark && (
           <div
-            className={`flex items-center flex-shrink-0 transition-opacity duration-200 ${
+            className={`${wordmarkVisibilityClass} items-center flex-shrink-0 transition-opacity duration-200 ${
               isGlitching ? 'opacity-90' : 'opacity-100'
             }`}
           >
@@ -169,7 +193,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
 
         {/* Optional Badge (e.g. "APP") */}
         {badge && showWordmark && (
-          <div className="flex items-center flex-shrink-0">
+          <div className={`${wordmarkVisibilityClass} items-center flex-shrink-0`}>
             <span
               className={`font-mono font-bold bg-stone-100 text-stone-800 border border-stone-200 rounded-md uppercase tracking-wider flex-shrink-0 ${dimensions.badge}`}
             >
@@ -200,7 +224,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
               />
             </div>
             {showWordmark && (
-              <div className="flex items-center flex-shrink-0">
+              <div className={`${wordmarkVisibilityClass} items-center flex-shrink-0`}>
                 <img
                   src={wordmarkSrc}
                   alt=""
@@ -226,7 +250,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
               />
             </div>
             {showWordmark && (
-              <div className="flex items-center flex-shrink-0">
+              <div className={`${wordmarkVisibilityClass} items-center flex-shrink-0`}>
                 <img
                   src={wordmarkSrc}
                   alt=""

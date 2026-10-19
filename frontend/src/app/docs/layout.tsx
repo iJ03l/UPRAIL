@@ -16,9 +16,14 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <a href="/docs" className="flex items-center space-x-2">
             <img
+              src="/brand/uprail-icon.png"
+              alt="UPRAIL"
+              className="h-6 w-6 object-contain sm:hidden"
+            />
+            <img
               src="/brand/uprail-wordmark.png"
               alt="uprail"
-              className="h-5 w-auto object-contain"
+              className="hidden sm:block h-5 w-auto object-contain"
             />
             <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-stone-900 text-white">
               Docs

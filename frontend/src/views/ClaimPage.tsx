@@ -402,7 +402,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
             </div>
           </div>
 
-          <div className="flex items-center space-x-3.5 p-3.5 rounded-2xl bg-white border border-stone-200">
+          <div className="flex flex-wrap items-center gap-3 p-3.5 rounded-2xl bg-white border border-stone-200">
             <TokenIcon
               symbol={linkedPayment.token.symbol}
               iconUrl={linkedPayment.token.iconUrl}
@@ -416,7 +416,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                 ≈ {formatUsd(linkedPayment.amountUsd)} USD
               </div>
             </div>
-            <span className="ml-auto text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
+            <span className="sm:ml-auto text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
               Delivered to your vault
             </span>
           </div>
@@ -554,18 +554,18 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
             {visiblePayments.map((p) => (
               <div
                 key={p.id}
-                className="rounded-3xl p-5 sm:p-6 bg-white border border-stone-200 shadow-xs hover:border-stone-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                className="rounded-3xl p-4 sm:p-6 bg-white border border-stone-200 shadow-xs hover:border-stone-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 {/* Left: Token Icon + Sender + Memo */}
-                <div className="flex items-start sm:items-center space-x-3.5">
+                <div className="flex items-start sm:items-center space-x-3.5 min-w-0">
                   <TokenIcon
                     symbol={p.token.symbol}
                     iconUrl={p.token.iconUrl}
                     size="xl"
-                    className="w-12 h-12 rounded-2xl"
+                    className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex-shrink-0"
                   />
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-2">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                       <span className="text-base font-extrabold text-stone-950 font-display">
                         {p.amount} {p.token.symbol}
                       </span>
@@ -582,7 +582,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                       </span>
                     </div>
 
-                    <div className="text-xs font-mono text-stone-600 flex items-center space-x-1.5">
+                    <div className="text-xs font-mono text-stone-600 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
                       {p.isCreatorFee ? (
                         <>
                           <span>From:</span>
@@ -601,7 +601,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                     </div>
 
                     {p.memo && (
-                      <p className="text-xs text-stone-500 font-mono italic">
+                      <p className="text-xs text-stone-500 font-mono italic break-words">
                         "{p.memo}"
                       </p>
                     )}

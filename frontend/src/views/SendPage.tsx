@@ -222,7 +222,7 @@ export const SendPage: React.FC = () => {
       )}
 
       {/* Primary Payment Card */}
-      <div className="rounded-3xl p-6 sm:p-8 shadow-sm bg-white border border-stone-200 relative space-y-6">
+      <div className="rounded-3xl p-4 sm:p-6 md:p-8 shadow-sm bg-white border border-stone-200 relative space-y-5 sm:space-y-6">
 
         {/* Destination Mode Selector (𝕏 Handle vs Wallet Address via Intents) */}
         <div className="flex p-1 rounded-2xl bg-stone-100 border border-stone-200 text-xs font-mono font-bold">
@@ -378,10 +378,10 @@ export const SendPage: React.FC = () => {
 
           {/* Quote & Execution Telemetry */}
           {quote && parseFloat(amount) > 0 && (
-            <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 space-y-2 text-xs font-mono">
-              <div className="flex items-center justify-between text-stone-500">
+            <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3.5 sm:p-4 space-y-2 text-xs font-mono">
+              <div className="flex items-center justify-between gap-2 text-stone-500">
                 <span>Recipient Receives</span>
-                <span className="text-stone-900 font-bold">
+                <span className="text-stone-900 font-bold text-right">
                   {/* Wallet withdrawals take no fee — the destination gets the
                       full amount. The quote's net figure is for handle sends. */}
                   {sendMode === 'handle' ? quote.recipientAmount : quote.amount} {quote.token.symbol} (
@@ -392,27 +392,29 @@ export const SendPage: React.FC = () => {
                   carve one out of the amount. Rendering it in wallet mode
                   understated what the destination would receive. */}
               {sendMode === 'handle' && (
-                <div className="flex items-center justify-between text-stone-500">
-                  <span>Platform Fee ({feePercentLabel}, deducted from amount)</span>
-                  <span className="text-stone-900 font-bold">
+                <div className="flex items-center justify-between gap-2 text-stone-500">
+                  <span>Platform Fee ({feePercentLabel})</span>
+                  <span className="text-stone-900 font-bold text-right">
                     {quote.protocolFee} {quote.token.symbol} ({formatUsd(quote.protocolFeeUsd)})
                   </span>
                 </div>
               )}
-              <div className="flex items-center justify-between text-stone-500">
+              <div className="flex items-center justify-between gap-2 text-stone-500">
                 <span>{sendMode === 'handle' ? 'Settlement Rail' : 'Withdrawal Rail'}</span>
-                <span className="text-stone-900 flex items-center font-bold">
-                  <Zap className="w-3 h-3 text-stone-900 mr-1" />
-                  {quote.rail === 'native'
-                    ? 'NEAR Native Transfer'
-                    : sendMode === 'handle'
-                      ? 'NEAR Intent'
-                      : 'NEAR Intent Withdrawal'}
+                <span className="text-stone-900 flex items-center font-bold text-right">
+                  <Zap className="w-3 h-3 text-stone-900 mr-1 flex-shrink-0" />
+                  <span>
+                    {quote.rail === 'native'
+                      ? 'NEAR Native Transfer'
+                      : sendMode === 'handle'
+                        ? 'NEAR Intent'
+                        : 'NEAR Intent Withdrawal'}
+                  </span>
                 </span>
               </div>
-              <div className="pt-2 border-t border-stone-200 flex items-center justify-between font-bold text-stone-900 text-sm">
+              <div className="pt-2 border-t border-stone-200 flex items-center justify-between gap-2 font-bold text-stone-900 text-sm">
                 <span>Total to Send</span>
-                <span className="text-stone-950 font-bold">
+                <span className="text-stone-950 font-bold text-right">
                   {quote.totalAmount} {quote.token.symbol} ({formatUsd(quote.totalUsd)})
                 </span>
               </div>
@@ -423,7 +425,7 @@ export const SendPage: React.FC = () => {
           <button
             type="submit"
             disabled={!isFormValid}
-            className={`w-full py-4 px-6 rounded-2xl font-display font-extrabold text-sm uppercase tracking-wider flex items-center justify-center space-x-2 transition-all duration-200 shadow-xs ${
+            className={`w-full py-4 px-4 sm:px-6 rounded-2xl font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center space-x-2 transition-all duration-200 shadow-xs ${
               isFormValid
                 ? 'bg-black hover:bg-stone-800 text-white cursor-pointer hover:scale-[1.01] active:scale-[0.99]'
                 : 'bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed'
@@ -431,13 +433,13 @@ export const SendPage: React.FC = () => {
           >
             {isSubmitting ? (
               <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
                 <span>Authorizing with Passkey...</span>
               </>
             ) : (
               <>
-                <Fingerprint className="w-4 h-4" />
-                <span>
+                <Fingerprint className="w-4 h-4 flex-shrink-0" />
+                <span className="truncate">
                   {sendMode === 'handle'
                     ? recipient
                       ? `Authorize & Send to @${recipient.replace(/^@/, '')}`

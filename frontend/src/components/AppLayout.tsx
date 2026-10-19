@@ -29,9 +29,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         Mobile & Desktop optimized
       */}
       <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-stone-100">
-        <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Left: Brand with Cinematic Glitch */}
-          <GlitchLogo href="/app" size="md" className="flex-shrink-0" />
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+          {/* Left: Brand with Cinematic Glitch — icon-only on mobile, full wordmark on sm+ */}
+          <GlitchLogo href="/app" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
 
           {/* Center: Subtle Protocol Status (Desktop) */}
           <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-stone-50 border border-stone-200 text-[10px] font-mono text-stone-600 flex-shrink-0">
@@ -40,7 +40,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           </div>
 
           {/* Right: User Pill / Sign In + Invites + Settings */}
-          <div className="flex items-center space-x-2 flex-shrink-0">
+          <div className="flex items-center space-x-1.5 sm:space-x-2 flex-shrink-0 min-w-0">
             {user ? (
               <>
                 {/* AI Chat Payments Link */}
@@ -79,7 +79,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
                   />
-                  <span className="text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors max-w-[80px] sm:max-w-[130px] truncate">
+                  <span className="text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors max-w-[90px] sm:max-w-[130px] truncate">
                     @{user.handle}
                   </span>
                 </button>
@@ -97,7 +97,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       </header>
 
       {/* Main Content Area */}
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-10 py-8 sm:py-12 md:py-14 flex-1">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-10 py-6 sm:py-12 md:py-14 flex-1">
         {children}
       </main>
 

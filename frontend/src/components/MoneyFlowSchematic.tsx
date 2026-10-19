@@ -99,23 +99,23 @@ export const MoneyFlowSchematic: React.FC = () => {
         {/* ============================================================ */}
         {/* TRIANGLE 1: NORMAL BLOCKCHAINS (PUBLIC LEAK) */}
         {/* ============================================================ */}
-        <div className="rounded-3xl border border-stone-200 bg-white p-5 sm:p-6 space-y-3">
+        <div className="rounded-3xl border border-stone-200 bg-white p-4 sm:p-6 space-y-3 overflow-hidden">
           {/* Header Tag */}
-          <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-100 gap-2">
             <span className="font-display font-bold text-sm text-stone-950">
               Normal Blockchains
             </span>
-            <span className="text-[10px] font-mono font-bold text-stone-800 bg-stone-100 border border-stone-300 px-2 py-0.5 rounded-full flex items-center space-x-1">
+            <span className="text-[10px] font-mono font-bold text-stone-800 bg-stone-100 border border-stone-300 px-2 py-0.5 rounded-full flex items-center space-x-1 flex-shrink-0">
               <AlertTriangle className="w-3 h-3" />
               <span>PUBLIC LEAK</span>
             </span>
           </div>
 
           {/* SVG Triangle with Dotted Lines & Icons at Points */}
-          <div className="relative w-full aspect-[4/3] flex items-center justify-center">
+          <div className="relative w-full aspect-[4/3] flex items-center justify-center overflow-hidden">
             <svg
               viewBox="0 0 400 350"
-              className="w-full h-full select-none overflow-visible"
+              className="w-full h-full select-none"
               preserveAspectRatio="xMidYMid meet"
             >
               {/* Dotted Triangle Perimeter */}
@@ -294,23 +294,23 @@ export const MoneyFlowSchematic: React.FC = () => {
         {/* ============================================================ */}
         {/* TRIANGLE 2: UPRAIL (CONFIDENTIAL SETTLEMENT) */}
         {/* ============================================================ */}
-        <div className="rounded-3xl border-2 border-stone-950 bg-white p-5 sm:p-6 space-y-3">
+        <div className="rounded-3xl border-2 border-stone-950 bg-white p-4 sm:p-6 space-y-3 overflow-hidden">
           {/* Header Tag */}
-          <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+          <div className="flex items-center justify-between pb-3 border-b border-stone-100 gap-2">
             <span className="font-display font-bold text-sm text-stone-950">
               UPRAIL Rails
             </span>
-            <span className="text-[10px] font-mono font-bold text-white bg-stone-950 px-2 py-0.5 rounded-full flex items-center space-x-1">
+            <span className="text-[10px] font-mono font-bold text-white bg-stone-950 px-2 py-0.5 rounded-full flex items-center space-x-1 flex-shrink-0">
               <CheckCircle2 className="w-3 h-3 text-white" />
               <span>CONFIDENTIAL</span>
             </span>
           </div>
 
           {/* SVG Triangle with Dotted Lines & Icons at Points */}
-          <div className="relative w-full aspect-[4/3] flex items-center justify-center">
+          <div className="relative w-full aspect-[4/3] flex items-center justify-center overflow-hidden">
             <svg
               viewBox="0 0 400 350"
-              className="w-full h-full select-none overflow-visible"
+              className="w-full h-full select-none"
               preserveAspectRatio="xMidYMid meet"
             >
               {/* Dotted Triangle Perimeter */}

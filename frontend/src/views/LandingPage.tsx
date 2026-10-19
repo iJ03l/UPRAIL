@@ -44,8 +44,8 @@ export const LandingPage: React.FC = () => {
       {/* Clean Header */}
       <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-white/80 backdrop-blur-md">
         <div className="w-full px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between">
-          {/* Brand with Cinematic Glitch */}
-          <GlitchLogo href="/" size="md" className="flex-shrink-0" />
+          {/* Brand with Cinematic Glitch — icon-only on mobile, full wordmark on sm+ */}
+          <GlitchLogo href="/" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
 
           {/* Launch App Button - Strictly opens app.uprail.world in new tab */}
           <a
@@ -65,19 +65,19 @@ export const LandingPage: React.FC = () => {
         {/* 
           1. Hero Section: Full width end to end, text size halved, vertical space maintained
         */}
-        <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-6 sm:space-y-8 text-left py-12 sm:py-16 md:py-20 lg:py-24 min-h-[44vh] sm:min-h-[50vh] flex flex-col justify-center">
+        <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-5 sm:space-y-8 text-left py-8 sm:py-16 md:py-20 lg:py-24 min-h-[38vh] sm:min-h-[50vh] flex flex-col justify-center">
           <h1 className="w-full text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.08] sm:leading-[1.0] text-stone-950">
-            Send money
-            <br />
-            to anyone on{' '}
+            Your{' '}
             <span className="underline decoration-black decoration-2 sm:decoration-4 underline-offset-4 sm:underline-offset-6 inline-block">
               𝕏
-            </span>
-            <span className="text-black">.</span>
+            </span>{' '}
+            handle
+            <br />
+            is now a private bank<span className="text-black">.</span>
           </h1>
 
-          <p className="text-base sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
-            Confidential by design. Claimed by touch.
+          <p className="text-sm sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
+            From the web, any AI chat, or launchpad fees. Private by default.
           </p>
 
           <div className="pt-2 sm:pt-4 flex items-center gap-3">
@@ -102,7 +102,7 @@ export const LandingPage: React.FC = () => {
           </span>
           <div className="w-full">
             <TextReveal
-              className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.08] sm:leading-[0.98]"
+              className="text-2xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.12] sm:leading-[0.98]"
               accentWords={['leak', 'near', 'intents', 'confidential', 'uprail']}
             >
               Public blockchains leak your wealth. NEAR Intents made confidential transfers possible. UPRAIL streams private value to 𝕏 handles.
@@ -132,11 +132,11 @@ export const LandingPage: React.FC = () => {
             // AI Chat &amp; Creator Fees
           </span>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
             {/* 01: AI Chat Payments */}
-            <div className="rounded-3xl bg-stone-950 text-white p-7 sm:p-9 flex flex-col justify-between space-y-8 border border-stone-900">
-              <div className="space-y-5">
-                <div className="flex items-center justify-between">
+            <div className="rounded-3xl bg-stone-950 text-white p-6 sm:p-9 flex flex-col justify-between space-y-6 sm:space-y-8 border border-stone-900">
+              <div className="space-y-4 sm:space-y-5">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-mono uppercase tracking-widest text-stone-400 font-bold">
                     01 / AI Chat
                   </span>
@@ -146,10 +146,10 @@ export const LandingPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <h3 className="text-3xl sm:text-4xl font-display font-extrabold tracking-tight text-white leading-[1.05]">
+                  <h3 className="text-2xl sm:text-4xl font-display font-extrabold tracking-tight text-white leading-[1.08]">
                     Pay from any AI.
                   </h3>
-                  <p className="text-sm text-stone-400 leading-relaxed">
+                  <p className="text-xs sm:text-sm text-stone-400 leading-relaxed">
                     Send and receive private transfers in chat. Capped in USD.
                   </p>
                 </div>
@@ -166,7 +166,7 @@ export const LandingPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-4 border-t border-stone-800/80">
+              <div className="flex items-center justify-between pt-4 border-t border-stone-800/80 gap-3">
                 <a
                   href="https://docs.uprail.world/docs/agents"
                   target="_blank"
@@ -189,9 +189,9 @@ export const LandingPage: React.FC = () => {
             </div>
 
             {/* 02: Creator Fees */}
-            <div className="rounded-3xl bg-stone-100/80 text-stone-950 p-7 sm:p-9 flex flex-col justify-between space-y-8 border border-stone-200">
-              <div className="space-y-5">
-                <div className="flex items-center justify-between">
+            <div className="rounded-3xl bg-stone-100/80 text-stone-950 p-6 sm:p-9 flex flex-col justify-between space-y-6 sm:space-y-8 border border-stone-200">
+              <div className="space-y-4 sm:space-y-5">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-mono uppercase tracking-widest text-stone-500 font-bold">
                     02 / Creator Fees
                   </span>
@@ -201,10 +201,10 @@ export const LandingPage: React.FC = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <h3 className="text-3xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950 leading-[1.05]">
+                  <h3 className="text-2xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950 leading-[1.08]">
                     Route token fees to 𝕏.
                   </h3>
-                  <p className="text-sm text-stone-600 leading-relaxed">
+                  <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
                     Launch on any pad. Point fees to UPRAIL. Claim by touch.
                   </p>
                 </div>
@@ -221,7 +221,7 @@ export const LandingPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-4 border-t border-stone-200">
+              <div className="flex items-center justify-between pt-4 border-t border-stone-200 gap-3">
                 <a
                   href="https://docs.uprail.world/docs/fees"
                   target="_blank"
@@ -300,7 +300,7 @@ export const LandingPage: React.FC = () => {
             <span>NEAR Intents</span>
           </div>
 
-          <div className="flex items-center space-x-4">
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
             <button
               type="button"
               onClick={() => setMode(isDark ? 'light' : 'dark')}

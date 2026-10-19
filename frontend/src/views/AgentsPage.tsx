@@ -221,13 +221,13 @@ export const AgentsPage: React.FC = () => {
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
         <div>
           <div className="flex items-center space-x-2 text-stone-900">
             <Bot className="w-5 h-5" />
-            <h1 className="text-2xl font-display font-extrabold tracking-tight">AI Chat Payments</h1>
+            <h1 className="text-xl sm:text-2xl font-display font-extrabold tracking-tight">AI Chat Payments</h1>
           </div>
-          <p className="mt-1 text-sm text-stone-500 max-w-xl">
+          <p className="mt-1 text-xs sm:text-sm text-stone-500 max-w-xl">
             Send, receive, and check payments directly from Claude, OpenAI Dot / ChatGPT, Grok Bot,
             Meta Muse, Cursor, or any AI chat. Protected by strict USD spend limits and revocable in
             one tap.
@@ -235,7 +235,7 @@ export const AgentsPage: React.FC = () => {
         </div>
         <button
           onClick={() => setShowCreate((v) => !v)}
-          className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer flex-shrink-0"
+          className="self-start sm:self-auto flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer flex-shrink-0"
         >
           {showCreate ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
           <span>{showCreate ? 'Cancel' : 'Connect AI Chat'}</span>
@@ -422,7 +422,7 @@ export const AgentsPage: React.FC = () => {
               return (
                 <div
                   key={k.id}
-                  className={`p-4 rounded-2xl border flex items-center justify-between gap-4 ${
+                  className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 ${
                     dead ? 'bg-stone-50 border-stone-200 opacity-60' : 'bg-white border-stone-200'
                   }`}
                 >
