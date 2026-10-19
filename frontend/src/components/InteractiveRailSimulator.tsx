@@ -15,8 +15,8 @@ import { Link } from '../lib/router';
 
 const PRESET_HANDLES = [
   { handle: 'satoshi', name: 'Satoshi', icon: '⚡' },
-  { handle: 'vitalik', name: 'Vitalik', icon: '🔮' },
-  { handle: 'jack', name: 'jack', icon: '🐦' },
+  { handle: 'illia', name: 'Illia', icon: '🔮' },
+  { handle: 'mert', name: 'mert', icon: '🐦' },
 ];
 
 const PRESET_AMOUNTS = ['100', '500', '1,000', '5,000'];
@@ -28,7 +28,7 @@ const PRESET_TOKENS = [
 ];
 
 export const InteractiveRailSimulator: React.FC = () => {
-  const [handle, setHandle] = useState('vitalik');
+  const [handle, setHandle] = useState('illia');
   const [selectedToken, setSelectedToken] = useState(PRESET_TOKENS[0]);
   const [amount, setAmount] = useState('500');
   const [isFiring, setIsFiring] = useState(false);
@@ -79,7 +79,7 @@ export const InteractiveRailSimulator: React.FC = () => {
     }, 35);
   };
 
-  const cleanHandle = handle.replace(/^@/, '').trim() || 'vitalik';
+  const cleanHandle = handle.replace(/^@/, '').trim() || 'illia';
 
   return (
     <div className="relative w-full border-y border-stone-200/90 bg-surface-subtle py-14 sm:py-20 md:py-24 overflow-hidden">

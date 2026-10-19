@@ -234,14 +234,14 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        recipientHandle: '@vitalik',
+        recipientHandle: '@illia',
         asset: 'nep141:wrap.near',
         amount: '1.5',
       }),
     });
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.recipientHandle, '@vitalik');
+    assert.equal(body.recipientHandle, '@illia');
     assert.equal(body.asset, 'nep141:wrap.near');
     assert.equal(body.amount, '1.5');
     assert.equal(body.protocolFee, '0.075', 'Must calculate the 5% send fee (1.5 * 0.05 = 0.075)');
@@ -260,7 +260,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        recipientHandle: '@vitalik',
+        recipientHandle: '@illia',
       }),
     });
     assert.equal(res.status, 400);
