@@ -13,6 +13,7 @@ import {
   X,
   Code2,
   AlertTriangle,
+  Construction,
   RefreshCw,
   MessageSquare,
   Sparkles,
@@ -257,6 +258,14 @@ export const AgentsPage: React.FC = () => {
           {showCreate ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
           <span>{showCreate ? 'Cancel' : 'Connect AI Chat'}</span>
         </button>
+      </div>
+
+      <div className="flex items-start space-x-2.5 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+        <Construction className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <span>
+          <span className="font-bold">Under construction.</span> AI chat payments are not fully
+          functional yet and may change or fail while we finish the integration.
+        </span>
       </div>
 
       {error && (
