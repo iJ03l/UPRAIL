@@ -85,7 +85,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         {passkeySuccess && (
           <div className="mb-4 p-3 rounded-xl bg-stone-100 border border-stone-300 text-stone-900 text-xs flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-            <span>Passkey verified! Unlocking confidential account...</span>
+            <span>Device confirmed! Unlocking your UPRAIL account...</span>
           </div>
         )}
 
@@ -103,18 +103,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-2">
-                  <h3 className="font-display font-bold text-stone-950 text-base">Passkey Biometrics</h3>
+                  <h3 className="font-display font-bold text-stone-950 text-base">Face ID / fingerprint</h3>
                   <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-stone-200 text-stone-900">
                     RECOMMENDED
                   </span>
                 </div>
                 <p className="text-xs text-stone-500 mt-0.5 leading-relaxed">
-                  Your device passkey. Zero seed phrases. Instant private wallet.
+                  Use Face ID, fingerprint, or your PIN. No password or crypto wallet needed.
                 </p>
               </div>
             </div>
             <div className="mt-3 pt-2.5 border-t border-stone-200 flex items-center justify-between text-xs text-stone-900 font-mono font-bold">
-              <span>{isPasskeyLoading ? 'Prompting device biometrics...' : 'Sign in with passkey'}</span>
+              <span>{isPasskeyLoading ? 'Waiting for your device...' : 'Sign in with Face ID or fingerprint'}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </button>

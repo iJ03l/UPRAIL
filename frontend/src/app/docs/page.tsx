@@ -68,7 +68,7 @@ export default function DocsOverviewPage() {
         <p className="text-sm text-stone-600 leading-relaxed">
           Every surface uses the same confidential settlement primitive: resolve an X handle, and
           either deliver directly to its NEAR Intents vault (if already activated) or escrow the
-          funds until the recipient claims with a passkey.
+          funds until the recipient receives it with a passkey.
         </p>
         <Callout>
           <strong className="text-stone-900">Base URL.</strong> All API calls use{' '}

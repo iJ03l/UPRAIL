@@ -299,6 +299,29 @@ export function formatUsd(value: number | null | undefined): string {
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/**
+ * Formats a token amount for display. Normal amounts get exactly two decimal
+ * places ("12.3437283" -> "12.34"); sub-cent amounts keep up to eight so a
+ * real balance never collapses to "0". Never use this for on-chain math.
+ */
+export function formatTokenAmount(raw: string | number | null | undefined): string {
+  if (raw === null || raw === undefined) return '0';
+  const str = typeof raw === 'string' ? raw.trim() : String(raw);
+  if (!str) return '0';
+  const num = Number(str);
+  if (!isFinite(num)) return str;
+  if (num === 0) return '0.00';
+  const abs = Math.abs(num);
+  if (abs >= 0.01) {
+    return num.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  const formatted = stripTrailingZeros(num.toFixed(8));
+  return formatted === '0' ? '<0.00000001' : formatted;
+}
+
 /** Picks the compact magnitude suffix for a number's absolute value. */
 function compactMagnitude(abs: number): { scaled: number; suffix: string } {
   if (abs >= 1e12) return { scaled: abs / 1e12, suffix: 'T' };
@@ -329,7 +352,7 @@ export function formatCompactAmount(raw: string | number | null | undefined): st
   const num = parseFloat(str);
   if (!isFinite(num)) return str || '0';
   const abs = Math.abs(num);
-  if (abs < 1000) return str;
+  if (abs < 1000) return formatTokenAmount(str);
   const { scaled, suffix } = compactMagnitude(abs);
   return `${num < 0 ? '-' : ''}${compactFixed(scaled)}${suffix}`;
 }

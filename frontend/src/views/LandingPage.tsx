@@ -205,7 +205,7 @@ export const LandingPage: React.FC = () => {
                     Route token fees to 𝕏.
                   </h3>
                   <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
-                    Launch on any pad. Point fees to UPRAIL. Claim by touch.
+                    Launch on any pad. Point fees to UPRAIL. Get paid by touch.
                   </p>
                 </div>
 
@@ -237,7 +237,7 @@ export const LandingPage: React.FC = () => {
                   rel="noopener noreferrer"
                   className="px-5 py-2.5 rounded-xl bg-stone-950 text-white hover:bg-stone-800 font-display font-extrabold text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all"
                 >
-                  <span>Claim Fees</span>
+                  <span>Collect fees</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </a>
               </div>

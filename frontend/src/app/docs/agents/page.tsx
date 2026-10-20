@@ -28,7 +28,7 @@ export default function AgentsDocsPage() {
           >
             app.uprail.world/app/agents
           </a>
-          . Creating or revoking a key requires your device Passkey.
+          . Creating or revoking a key requires Face ID, fingerprint, or your PIN (a passkey).
         </p>
         <Endpoint verb="POST" path="/api/agent/keys" auth="cookie + passkey" />
         <Code title="Request">{`{

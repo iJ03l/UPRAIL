@@ -67,7 +67,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       setExportedKey(res);
       setShowKey(true);
     } catch (err: any) {
-      setExportError(err.message || 'Passkey verification failed');
+      setExportError(err.message || 'Device confirmation failed');
     } finally {
       setIsExporting(false);
     }
@@ -149,7 +149,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                         @{user.handle}
                       </div>
                       <div className="text-[10px] text-stone-500 font-mono">
-                        Vault Authorized
+                        Device verified
                       </div>
                     </div>
                   </div>
@@ -228,7 +228,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                         <div className="p-2.5 rounded-xl bg-white border border-stone-200 text-[11px] text-stone-700 flex items-center space-x-2">
                           <ShieldCheck className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
                           <span>
-                            Claimed by <strong className="font-mono text-stone-950">@{inviteData.claimedBy.handle}</strong> ({new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()})
+                            Used by <strong className="font-mono text-stone-950">@{inviteData.claimedBy.handle}</strong> ({new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()})
                           </span>
                         </div>
                       ) : (
@@ -245,7 +245,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   )}
 
                   <div className="text-[10px] text-stone-500 font-sans border-t border-stone-200 pt-2 leading-relaxed">
-                    Need more invites? Sending confidential money automatically preloads an invite code into the recipient's claim link!
+                    Need more invites? Sending money automatically adds an invite code to the recipient's payment link.
                   </div>
                 </div>
               </div>
@@ -260,7 +260,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   </span>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-1">
                     <KeyRound className="w-2.5 h-2.5" />
-                    Passkey Protected
+                    Protected by your device
                   </span>
                 </div>
 
@@ -268,7 +268,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   {!exportedKey ? (
                     <div className="space-y-2">
                       <p className="text-[11px] text-stone-600 leading-relaxed">
-                        Export the Full Access NEAR private key for your vault (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Authorized with your biometric passkey.
+                        Export the Full Access NEAR private key for your vault (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Confirmed with Face ID, fingerprint, or your PIN.
                       </p>
                       {exportError && (
                         <p className="text-[11px] font-mono text-red-600 bg-red-50 p-2 rounded-xl border border-red-200">
@@ -284,7 +284,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                         {isExporting ? (
                           <>
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Authenticating Passkey...</span>
+                            <span>Waiting for your device...</span>
                           </>
                         ) : (
                           <>
@@ -297,7 +297,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   ) : (
                     <div className="space-y-2.5 animate-fade-in">
                       <div className="flex items-center justify-between text-[11px] text-stone-500 font-mono">
-                        <span>Vault Account:</span>
+                        <span>Account:</span>
                         <span className="font-bold text-stone-900 truncate max-w-[170px]">
                           {exportedKey.nearAccount}
                         </span>
@@ -346,7 +346,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                       </div>
 
                       <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-[10px] font-mono text-amber-900 leading-tight">
-                        ⚠️ <strong>Never share this key.</strong> Grants full custody to withdraw funds from your onchain NEAR vault in any wallet.
+                        ⚠️ <strong>Never share this key.</strong> Grants full custody to withdraw money from your UPRAIL account in any wallet.
                       </div>
                     </div>
                   )}
@@ -446,7 +446,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                 className="w-full py-2.5 px-3 rounded-xl border border-stone-200 hover:border-stone-400 text-stone-600 hover:text-stone-900 text-xs font-mono transition-colors flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Reset Local Vault Cache</span>
+                <span>Reset local cache</span>
               </button>
             </div>
           </div>
@@ -501,13 +501,13 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         onCancel={() => setShowExportConfirm(false)}
         onConfirm={() => void performExportKey()}
         tone="danger"
-        title="Export vault private key"
-        description="This key gives full control of your vault. Anyone who has it can move every asset without a passkey."
+        title="Export account key"
+        description="This key gives full control of your UPRAIL account. Anyone who has it can move every asset without device confirmation."
         confirmLabel="Export key"
         warning="Never share this key or paste it into a website. Store it offline and delete it from your clipboard after use."
         details={[
           { label: 'Vault', value: user?.nearAccount || 'u_…' },
-          { label: 'Protection', value: 'Passkey required after this step', mono: false },
+          { label: 'Protection', value: 'Device confirmation required after this step', mono: false },
         ]}
       />
 
@@ -516,10 +516,10 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         onCancel={() => setShowResetConfirm(false)}
         onConfirm={performClearCache}
         tone="danger"
-        title="Reset local vault cache"
+        title="Reset local cache"
         description="This clears locally stored app state and cached payment data on this device, then reloads the page."
         confirmLabel="Reset cache"
-        warning="Your on-chain vault and payments are not affected. You may need to re-authorize with your passkey."
+        warning="Your on-chain balance and payments are not affected. You may need to confirm with your device again."
       />
     </>
   );

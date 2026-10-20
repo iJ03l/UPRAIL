@@ -47,8 +47,27 @@ export async function resolveShareTicker(
   return ticker;
 }
 
-/** "12.5 USDC" — degrades gracefully when amount or ticker is missing. */
+/** Token amounts in shared cards/links get two decimals; sub-cent stays visible. */
+function formatShareAmount(amount: string): string {
+  const num = Number(amount);
+  if (!isFinite(num)) return amount;
+  if (num === 0) return '0.00';
+  const abs = Math.abs(num);
+  if (abs >= 0.01) {
+    return num.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  const formatted = num
+    .toFixed(8)
+    .replace(/0+$/, '')
+    .replace(/\.$/, '');
+  return formatted === '0' ? '<0.00000001' : formatted;
+}
+
+/** "12.34 USDC" — degrades gracefully when amount or ticker is missing. */
 export function plainAmount(amount: string, ticker: string): string {
-  if (amount && ticker) return `${amount} ${ticker}`;
+  if (amount && ticker) return `${formatShareAmount(amount)} ${ticker}`;
   return ticker || amount || '';
 }

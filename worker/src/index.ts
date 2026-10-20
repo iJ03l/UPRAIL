@@ -207,7 +207,7 @@ const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
  * images per URL for a long time, so the version query gives them a new cache
  * key without changing the payment id.
  */
-const OG_CARD_VERSION = '2';
+const OG_CARD_VERSION = '3';
 
 // Wallet-send receipt deep links: /receipt/<withdrawalId> and
 // /app/receipt/<withdrawalId>, rewritten onto the static receipt page.
@@ -373,7 +373,7 @@ app.notFound(async (c) => {
           ? `${amountLabel} is waiting for you`
           : 'You have crypto waiting on UPRAIL';
         const description =
-          'Claim it by linking your X account and passkey — no wallet, no seed phrase.';
+          'Open to receive it. Sign in with X, then confirm with Face ID or fingerprint. No crypto wallet needed.';
 
         return renderShareCardHtml({
           title,
@@ -490,7 +490,7 @@ app.notFound(async (c) => {
           : 'You are invited to UPRAIL';
         return renderShareCardHtml({
           title,
-          description: 'Claim by linking your X account and passkey — no wallet, no seed phrase.',
+          description: 'Open to receive it. Sign in with X, then confirm with Face ID or fingerprint.',
           imageUrl: `${url.origin}/og/invite/${inviteCode}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });
@@ -499,7 +499,7 @@ app.notFound(async (c) => {
       return renderShareCardHtml({
         title: 'UPRAIL — The Confidential Value Railway for X',
         description:
-          'Send confidential payments to any X handle on NEAR Intents. Claim instantly with a passkey — no wallet, no seed phrase.',
+          'Send money to any X handle — privately. Recipients receive it with a tap, no crypto wallet needed.',
         imageUrl: 'https://app.uprail.world/og/og-landing.png',
         url: url.href,
       });

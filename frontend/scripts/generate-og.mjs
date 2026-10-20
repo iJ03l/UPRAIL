@@ -15,33 +15,33 @@ const wordB64 = readFileSync(join(root, 'public/brand/uprail-wordmark.png')).toS
 const CARDS = {
   'og-landing': {
     eyebrow: 'CONFIDENTIAL PAYMENTS ON X',
-    title: ['Send crypto to any', 'X handle \u2014 privately'],
-    sub: ['No wallet addresses. No mempools.', 'They claim it in one tap with a passkey.'],
+    title: ['Send money to any', 'X handle \u2014 privately'],
+    sub: ['No wallet addresses. No mempools.', 'They receive it in one tap with Face ID or fingerprint.'],
   },
   'og-app': {
-    eyebrow: 'YOUR VAULT',
-    title: ['Your confidential', 'balance'],
+    eyebrow: 'YOUR ACCOUNT',
+    title: ['Your private', 'balance'],
     sub: ['Hold, send, and receive privately', '\u2014 all inside one simple app.'],
   },
   'og-send': {
     eyebrow: 'SEND',
-    title: ['Send crypto to', 'anyone on X'],
-    sub: ['Confidential by default.', 'They claim it with a passkey.'],
+    title: ['Send money to', 'anyone on X'],
+    sub: ['Private by default.', 'They receive it with a tap.'],
   },
   'og-receive': {
     eyebrow: 'RECEIVE',
     title: ['Get paid from', 'any chain'],
-    sub: ['One address. USDC, NEAR and more', 'settle privately in your vault.'],
+    sub: ['One address. USDC, NEAR and more', 'settle into your UPRAIL account.'],
   },
   'og-claim': {
-    eyebrow: 'CONFIDENTIAL PAYMENT',
-    title: ['Open the link to', 'claim your payment'],
-    sub: ['Claim it with a passkey.', 'No wallet. No seed phrase.'],
+    eyebrow: 'PAYMENT WAITING',
+    title: ['Open the link to', 'receive your payment'],
+    sub: ['Confirm with Face ID or fingerprint.', 'No crypto wallet needed.'],
   },
   'og-refer': {
     eyebrow: 'INVITE',
     title: ['Invite a friend', 'to UPRAIL'],
-    sub: ['Confidential payments', 'for everyone on X.'],
+    sub: ['Private payments', 'for everyone on X.'],
   },
 };
 

@@ -11,7 +11,7 @@ import {
   Send,
 } from 'lucide-react';
 import { TokenIcon } from './TokenIcon';
-import { formatUsd } from '../lib/api';
+import { formatTokenAmount, formatUsd } from '../lib/api';
 import { useToast } from './Toast';
 
 export interface WalletSendReceipt {
@@ -55,7 +55,7 @@ export const WalletShareModal: React.FC<WalletShareModalProps> = ({
 
   const shortDest = shortenAddress(receipt.destinationAddress);
   const tweetText = encodeURIComponent(
-    `I just sent ${receipt.amount} ${receipt.symbol} to ${shortDest} on UP! ${receipt.shareLink}`
+    `I just sent ${formatTokenAmount(receipt.amount)} ${receipt.symbol} to ${shortDest} on UP! ${receipt.shareLink}`
   );
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
   const explorerUrl = receipt.txHash ? `https://nearblocks.io/txns/${receipt.txHash}` : null;
@@ -94,7 +94,7 @@ export const WalletShareModal: React.FC<WalletShareModalProps> = ({
             <TokenIcon symbol={receipt.symbol} iconUrl={receipt.iconUrl} size="lg" />
             <div>
               <span className="text-sm font-extrabold text-stone-950 font-mono">
-                {receipt.amount} {receipt.symbol}
+                {formatTokenAmount(receipt.amount)} {receipt.symbol}
               </span>
               {typeof receipt.amountUsd === 'number' && (
                 <span className="text-xs text-stone-500 block font-mono">

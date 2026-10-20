@@ -36,7 +36,7 @@ export default function FeesDocsPage() {
           <li>
             That&apos;s it. Every creator fee the launchpad pays is credited to{' '}
             <code className="font-mono text-[13px]">@yourhandle</code> on UPRAIL (net of the 5%
-            protocol fee), claimable with your passkey at{' '}
+            protocol fee), ready to collect with your passkey at{' '}
             <a className="text-stone-900 underline" href="https://app.uprail.world/fees">
               app.uprail.world/fees
             </a>
@@ -63,7 +63,7 @@ export default function FeesDocsPage() {
           </Field>
           <Field name="unregistered handle" type="escrow">
             The handle hasn&apos;t signed up yet, so the fee is escrowed under that handle. It is
-            claimed the moment they link their X account and passkey.
+            received the moment they link their X account and passkey.
           </Field>
         </div>
         <Callout tone="warn">
@@ -276,8 +276,8 @@ X-UPRAIL-Signature: t=<unix-seconds>,v1=<hex hmac_sha256(secret, "<t>.<raw body>
         <Callout tone="warn">
           <strong className="text-stone-900">Dust guard.</strong> A fee whose USD value is known and
           below <code className="font-mono text-[13px]">minFeeUsd</code> is held rather than settled
-          immediately, so escrow gas is never spent settling dust. It stays claimable and is credited
-          on the next claim.
+          immediately, so escrow gas is never spent settling dust. It stays available and is credited
+          the next time you collect.
         </Callout>
       </section>
 

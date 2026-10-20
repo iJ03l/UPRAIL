@@ -74,12 +74,12 @@ ogRouter.get('/claim/:file', (c) => {
     const ticker = await resolveShareTicker(c.env, asset);
     const amountLabel = plainAmount(amount, ticker);
     return renderOgCard({
-      eyebrow: 'CONFIDENTIAL PAYMENT',
+      eyebrow: 'PAYMENT WAITING',
       headline: amountLabel || 'A payment',
       subline: sender ? `from @${sender}` : 'sent via UPRAIL',
       detail: recipient
-        ? `For @${recipient}. Claim with a passkey — no wallet, no seed phrase.`
-        : 'Claim with a passkey — no wallet, no seed phrase.',
+        ? `For @${recipient}. Confirm with Face ID or fingerprint.`
+        : 'Confirm with Face ID or fingerprint.',
     });
   });
 });
@@ -118,7 +118,7 @@ ogRouter.get('/invite/:file', (c) => {
       eyebrow: 'INVITE',
       headline: amountLabel || (creator ? `@${creator} invited you` : 'You are invited'),
       subline: amountLabel && creator ? `from @${creator}` : 'to UPRAIL',
-      detail: 'Join with a passkey — no wallet, no seed phrase.',
+      detail: 'Open to receive it — no crypto wallet needed.',
     });
   });
 });

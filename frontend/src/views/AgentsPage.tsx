@@ -378,7 +378,7 @@ export const AgentsPage: React.FC = () => {
               ) : (
                 <KeyRound className="w-4 h-4" />
               )}
-              <span>Create Key with Passkey</span>
+              <span>Create key with Face ID</span>
             </button>
           </div>
         </div>
@@ -623,7 +623,7 @@ export const AgentsPage: React.FC = () => {
         onConfirm={() => void performCreate()}
         tone="financial"
         title="Create AI chat key"
-        description="This key lets an AI chat move funds from your vault within the limits below."
+        description="This key lets an AI chat move money from your UPRAIL account within the limits below."
         confirmLabel="Create key"
         warning="Anyone with this key can spend up to these limits until you revoke it. The key is shown only once."
         details={[

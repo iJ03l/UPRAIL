@@ -17,7 +17,7 @@ import { ShareModal } from '../components/ShareModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareModal';
 import { usePayments } from '../hooks/usePayments';
-import { PROTOCOL_FEE_RATE, formatUsd, api } from '../lib/api';
+import { PROTOCOL_FEE_RATE, formatTokenAmount, formatUsd, api } from '../lib/api';
 import { addressFamily, familyLabel, WithdrawChain } from '../lib/withdrawChains';
 import { PaymentIntent } from '../types';
 
@@ -182,11 +182,11 @@ export const SendPage: React.FC = () => {
       setShowShareModal(true);
       if (payment.isDirect || payment.status === 'claimed') {
         setSuccessToast(
-          `Successfully sent ${payment.amount} ${payment.token.symbol} directly to @${payment.recipientHandle}'s vault!`
+          `Successfully sent ${formatTokenAmount(payment.amount)} ${payment.token.symbol} directly to @${payment.recipientHandle}'s UPRAIL account!`
         );
       } else {
         setSuccessToast(
-          `Successfully escrowed ${payment.amount} ${payment.token.symbol} for @${payment.recipientHandle}!`
+          `Payment sent to @${payment.recipientHandle} — ${formatTokenAmount(payment.amount)} ${payment.token.symbol} waiting.`
         );
       }
       setRecipient('');
@@ -198,10 +198,10 @@ export const SendPage: React.FC = () => {
     }
   };
 
-  const confirmAmountLabel = `${amount || '0'} ${selectedToken.symbol}`;
+  const confirmAmountLabel = `${formatTokenAmount(amount || '0')} ${selectedToken.symbol}`;
   const confirmReceiveLabel =
     sendMode === 'handle'
-      ? `${quote?.recipientAmount ?? amount} ${quote?.token.symbol ?? selectedToken.symbol}`
+      ? `${quote ? formatTokenAmount(quote.recipientAmount) : amount} ${quote?.token.symbol ?? selectedToken.symbol}`
       : `${quote?.amount ?? amount} ${quote?.token.symbol ?? selectedToken.symbol}`;
   const confirmDestination =
     sendMode === 'handle'
@@ -404,7 +404,7 @@ export const SendPage: React.FC = () => {
                 <span className="text-stone-900 font-bold text-right">
                   {/* Wallet withdrawals take no fee — the destination gets the
                       full amount. The quote's net figure is for handle sends. */}
-                  {sendMode === 'handle' ? quote.recipientAmount : quote.amount} {quote.token.symbol} (
+                  {formatTokenAmount(sendMode === 'handle' ? quote.recipientAmount : quote.amount)} {quote.token.symbol} (
                   {formatUsd(sendMode === 'handle' ? quote.recipientAmountUsd : quote.amountUsd)})
                 </span>
               </div>
@@ -441,7 +441,7 @@ export const SendPage: React.FC = () => {
             </div>
           )}
 
-          {/* Send CTA Button — Authorized by Device Passkey */}
+          {/* Send CTA Button — confirmed on the user's device */}
           <button
             type="submit"
             disabled={!isFormValid}
@@ -454,7 +454,7 @@ export const SendPage: React.FC = () => {
             {isSubmitting ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                <span>Authorizing with Passkey...</span>
+                <span>Waiting for your device...</span>
               </>
             ) : (
               <>
@@ -462,12 +462,10 @@ export const SendPage: React.FC = () => {
                 <span className="truncate">
                   {sendMode === 'handle'
                     ? recipient
-                      ? `Authorize & Send to @${recipient.replace(/^@/, '')}`
+                      ? `Review & send to @${recipient.replace(/^@/, '')}`
                       : 'Enter Handle to Send'
                     : walletAddress
-                      ? quote?.rail === 'native'
-                        ? `Authorize & Send to Wallet`
-                        : `Authorize & Route via Intents`
+                      ? 'Review & send'
                       : 'Enter Wallet Address'}
                 </span>
                 <ArrowRight className="w-4 h-4 ml-1" />
@@ -485,13 +483,13 @@ export const SendPage: React.FC = () => {
         title={sendMode === 'handle' ? 'Confirm payment' : 'Confirm withdrawal'}
         description={
           sendMode === 'handle'
-            ? 'Review the payment before authorizing it with your device passkey.'
-            : 'This moves funds out of your UPRAIL vault to an external address.'
+            ? 'Review the payment, then confirm with Face ID or fingerprint.'
+            : 'This moves money out of your UPRAIL account to an external address.'
         }
-        confirmLabel={sendMode === 'handle' ? 'Authorize & send' : 'Authorize & withdraw'}
+        confirmLabel={sendMode === 'handle' ? 'Confirm & send' : 'Withdraw'}
         warning={
           sendMode === 'handle'
-            ? 'The recipient will be able to claim these funds immediately. If they have not joined UPRAIL yet, you will get a claim link to share.'
+            ? 'The recipient can receive it right away. If they are not on UPRAIL yet, share this payment link with them.'
             : 'Withdrawals are irreversible. Confirm the destination address and network before continuing.'
         }
         details={[

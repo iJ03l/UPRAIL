@@ -21,9 +21,19 @@ import { XAuthBanner } from '../components/XAuthBanner';
 import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 import { TokenIcon } from '../components/TokenIcon';
 import { BackBar } from '../components/BackBar';
-import { formatUsd, sumUsd, api } from '../lib/api';
-import { PaymentIntent } from '../types';
+import { formatTokenAmount, formatUsd, sumUsd, api } from '../lib/api';
+import { PaymentIntent, PaymentStatus } from '../types';
 import { currentInvite, inviteFromSearch } from '../lib/invite';
+
+const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
+  pending: 'Waiting',
+  escrowed: 'Waiting',
+  ready: 'Ready',
+  claimed: 'Received',
+  expired: 'Expired',
+  refunded: 'Refunded',
+  cancelled: 'Cancelled',
+};
 
 // ── Launchpad Creator Fee Setup & Auto-Sync Card ────────────────────────────
 const CreatorFeeSetupCard: React.FC<{
@@ -59,7 +69,7 @@ const CreatorFeeSetupCard: React.FC<{
       const res = await api.prepareCreatorFeeToken({ token: clean, handle });
       await onSynced();
       const routedNote = res.routed?.amount
-        ? ` · Routed ${res.routed.amount} (${res.routed.routing})`
+        ? ` · Routed ${formatTokenAmount(res.routed.amount)} (${res.routed.routing})`
         : '';
       setStatusMsg({
         tone: 'ok',
@@ -190,9 +200,9 @@ const WithdrawCard: React.FC<{
       <div className="flex items-center space-x-2.5">
         <ArrowUpRight className="w-5 h-5 text-stone-900" />
         <div>
-          <div className="text-xs font-bold text-stone-950 font-display">Withdraw from Vault</div>
+          <div className="text-xs font-bold text-stone-950 font-display">Withdraw money</div>
           <div className="text-[11px] text-stone-500 font-mono">
-            Passkey-authorized · settle via POST /api/claim/withdraw
+            Secured by your device
           </div>
         </div>
       </div>
@@ -205,7 +215,7 @@ const WithdrawCard: React.FC<{
         >
           {balances.map((b, i) => (
             <option key={`${b.token.id}-${i}`} value={i}>
-              {b.token.symbol} · {b.amount}
+              {b.token.symbol} · {formatTokenAmount(b.amount)}
             </option>
           ))}
         </select>
@@ -229,7 +239,7 @@ const WithdrawCard: React.FC<{
         className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs disabled:opacity-60"
       >
         <Fingerprint className="w-4 h-4" />
-        <span>Withdraw {active ? `${active.token.symbol}` : ''} with Passkey</span>
+        <span>Withdraw {active ? `${active.token.symbol}` : ''}</span>
       </button>
     </div>
 
@@ -239,12 +249,12 @@ const WithdrawCard: React.FC<{
       onConfirm={() => void handleWithdraw()}
       tone="financial"
       title="Confirm withdrawal"
-      description="This moves funds out of your UPRAIL vault to an external address."
-      confirmLabel="Authorize & withdraw"
+      description="This moves money out of your UPRAIL account to an external address."
+      confirmLabel="Withdraw"
       warning="Withdrawals are irreversible. Double-check the destination address before continuing."
       details={[
         { label: 'Asset', value: active?.token.symbol || '—', emphasis: true },
-        { label: 'Amount', value: active?.amount || '—', emphasis: true },
+        { label: 'Amount', value: active?.amount ? formatTokenAmount(active.amount) : '—', emphasis: true },
         { label: 'Destination', value: destination.trim() || '—' },
       ]}
     />
@@ -445,14 +455,14 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
             />
             <div>
               <div className="text-base font-extrabold font-display text-stone-950">
-                {linkedPayment.amount} {linkedPayment.token.symbol}
+                {formatTokenAmount(linkedPayment.amount)} {linkedPayment.token.symbol}
               </div>
               <div className="text-xs text-stone-500 font-mono">
                 ≈ {formatUsd(linkedPayment.amountUsd)} USD
               </div>
             </div>
             <span className="sm:ml-auto text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
-              Delivered to your vault
+              In your UPRAIL account
             </span>
           </div>
 
@@ -471,7 +481,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
               to="/app/claim"
               className="py-2.5 px-4 rounded-xl border border-stone-200 hover:border-black text-stone-700 hover:text-black font-display font-bold text-xs uppercase tracking-wider bg-white transition-colors cursor-pointer"
             >
-              Claim Other Payments
+              See Other Payments
             </Link>
           </div>
         </div>
@@ -499,9 +509,9 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                 <CheckCircle2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-lg font-bold font-display">Payment Claimed!</h3>
+                <h3 className="text-lg font-bold font-display">Money received</h3>
                 <p className="text-xs text-stone-300 font-mono">
-                  {claimResult?.message || 'Settled into your confidential NEAR vault'}
+                  {claimResult?.message || 'It\'s in your UPRAIL account.'}
                 </p>
               </div>
             </div>
@@ -514,7 +524,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
           </div>
 
           <div className="flex flex-wrap gap-2 pt-2 border-t border-stone-800 text-xs font-mono">
-            <span className="text-emerald-400 font-bold">100% Shielded & Settled</span>
+            <span className="text-emerald-400 font-bold">Received and secured</span>
             {claimResult?.shieldedTxHash && (
               <span className="text-stone-400 ml-auto truncate max-w-[200px]">
                 Tx: {claimResult.shieldedTxHash}
@@ -579,7 +589,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                 className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs disabled:opacity-60"
               >
                 <Fingerprint className="w-4 h-4" />
-                <span>Claim All with Passkey</span>
+                <span>Receive all</span>
               </button>
             </div>
           )}
@@ -602,7 +612,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                   <div className="space-y-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                       <span className="text-base font-extrabold text-stone-950 font-display">
-                        {p.amount} {p.token.symbol}
+                        {formatTokenAmount(p.amount)} {p.token.symbol}
                       </span>
                       <span className="text-xs text-stone-500 font-mono">
                         ≈ {formatUsd(p.amountUsd)} USD
@@ -613,7 +623,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                         </span>
                       )}
                       <span className="text-[9px] font-mono uppercase font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-200">
-                        {p.status}
+                        {PAYMENT_STATUS_LABEL[p.status]}
                       </span>
                     </div>
 
@@ -652,7 +662,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                     className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 shadow-xs transition-all cursor-pointer disabled:opacity-60"
                   >
                     <Fingerprint className="w-4 h-4" />
-                    <span>Claim with Passkey</span>
+                    <span>Receive payment</span>
                     <ArrowRight className="w-3.5 h-3.5 ml-0.5" />
                   </button>
                 </div>
@@ -667,8 +677,8 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
         (!user ? (
         !isAuthLoading && (
           <XAuthBanner
-            title="Sign In with 𝕏 to Discover Incoming Claims"
-            description="Payments sent to your 𝕏 handle are held in confidential escrow waiting for you. Sign in with 𝕏 to auto-discover all incoming payments and claim them directly into your passkey vault."
+            title="Sign In with 𝕏 to See Your Payments"
+            description="When someone sends you money on UPRAIL, it waits here until you receive it. Sign in with 𝕏 to see it."
             actionText="Sign In with 𝕏"
           />
         )
@@ -686,13 +696,13 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
               </h3>
               <p className="text-xs text-stone-500 max-w-md mx-auto leading-relaxed">
                 {feesOnly
-                  ? 'Launchpad creator fees paid to your X handle will appear here, ready to claim with your passkey.'
+                  ? 'Launchpad creator fees paid to your X handle will appear here, ready to collect.'
                   : 'You have no pending payments. When anyone sends funds to'}
                 {!feesOnly && (
                   <>
                     {' '}
                     <span className="font-mono font-bold text-stone-900">@{user.handle}</span>, they will
-                    automatically appear here ready to claim with your passkey.
+                    automatically appear here, ready to receive.
                   </>
                 )}
               </p>
@@ -709,7 +719,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                 to="/app/receive"
                 className="py-2.5 px-4 rounded-xl border border-stone-200 hover:border-black text-stone-700 hover:text-black font-display font-bold text-xs uppercase tracking-wider bg-stone-50 transition-colors cursor-pointer"
               >
-                Receive via Gateway
+                Receive money
               </Link>
             </div>
           </div>
@@ -721,10 +731,10 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
         onCancel={() => setPendingClaim(null)}
         onConfirm={handleConfirmClaimStart}
         tone="financial"
-        title={pendingClaim?.all ? 'Claim all payments' : 'Claim payment'}
-        description="Claiming moves the funds into your UPRAIL vault. You will authorize with your device passkey on the next step."
-        confirmLabel="Continue to passkey"
-        warning="Only claim payments you are expecting. Once claimed, the funds are in your vault and can be withdrawn at any time."
+        title={pendingClaim?.all ? 'Receive all payments' : 'Receive payment'}
+        description="This adds the money to your UPRAIL account. You will confirm with Face ID or fingerprint next."
+        confirmLabel="Continue"
+        warning="Only receive payments you are expecting. Once received, the money is in your UPRAIL account and can be withdrawn at any time."
         details={[
           ...(pendingClaim?.all
             ? [
@@ -743,7 +753,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                 {
                   label: 'Amount',
                   value: previewPayment
-                    ? `${previewPayment.amount} ${previewPayment.token.symbol}`
+                    ? `${formatTokenAmount(previewPayment.amount)} ${previewPayment.token.symbol}`
                     : '—',
                   emphasis: true,
                 },

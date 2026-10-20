@@ -60,12 +60,21 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
         {/* Heading */}
         <div className="text-center space-y-1.5 mb-6">
           <h3 className="text-xl font-extrabold text-stone-950 font-display">
-            {hasExistingPasskey ? 'Verify Device Passkey' : 'One-Touch Passkey'}
+            {hasExistingPasskey ? "Confirm it's you" : 'Set up quick sign-in'}
           </h3>
           <p className="text-xs text-stone-600 leading-relaxed">
-            Claim private payment for{' '}
-            <span className="text-stone-900 font-bold font-mono">@{handle}</span> directly on
-            this device.
+            {hasExistingPasskey ? (
+              <>
+                Use Face ID, fingerprint, or your PIN to receive this payment for{' '}
+                <span className="text-stone-900 font-bold font-mono">@{handle}</span>.
+              </>
+            ) : (
+              <>
+                This device will save a passkey so you can receive money for{' '}
+                <span className="text-stone-900 font-bold font-mono">@{handle}</span> and sign in
+                without a password.
+              </>
+            )}
           </p>
         </div>
 
@@ -76,9 +85,9 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
               <Smartphone className="w-3.5 h-3.5" />
             </div>
             <div>
-              <p className="font-bold text-stone-900">No seed phrases or passwords</p>
+              <p className="font-bold text-stone-900">No password to remember</p>
               <p className="text-stone-500 text-[11px]">
-                Secured by your device passkey.
+                Your device saves the secure sign-in for you.
               </p>
             </div>
           </div>
@@ -88,9 +97,9 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
               <KeyRound className="w-3.5 h-3.5" />
             </div>
             <div>
-              <p className="font-bold text-stone-900">Hardware Isolated</p>
+              <p className="font-bold text-stone-900">Stays on your device</p>
               <p className="text-stone-500 text-[11px]">
-                Keys never leave your phone or laptop's secure chip.
+                Your Face ID, fingerprint, or PIN is never shared with UPRAIL.
               </p>
             </div>
           </div>
@@ -124,18 +133,18 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
           {isClaiming ? (
             <>
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span>Prompting Biometrics...</span>
+              <span>Waiting for your device…</span>
             </>
           ) : (
             <>
               <Fingerprint className="w-4 h-4" />
-              <span>{hasExistingPasskey ? 'Authenticate with passkey' : 'Create & Claim with Passkey'}</span>
+              <span>{hasExistingPasskey ? 'Confirm & receive' : 'Set up & receive'}</span>
             </>
           )}
         </button>
 
-        <p className="text-center text-[10px] text-stone-400 mt-3 font-mono">
-          WebAuthn P-256 standard • Cloudflare Enclave Protected
+        <p className="text-center text-[10px] text-stone-400 mt-3 font-sans leading-relaxed">
+          Your device handles the security. UPRAIL never sees your Face ID or fingerprint.
         </p>
       </div>
     </div>

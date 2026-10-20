@@ -11,7 +11,7 @@ import {
 
 /**
  * Warns the user when the page is running inside an app's embedded webview
- * (X, Telegram, Instagram…), where passkeys are unavailable, and offers a
+ * (X, Telegram, Instagram…), where quick sign-in is unavailable, and offers a
  * one-tap escape into the real browser. Renders nothing in a normal browser.
  */
 export const InAppBrowserNotice: React.FC<{ className?: string }> = ({ className }) => {
@@ -33,10 +33,10 @@ export const InAppBrowserNotice: React.FC<{ className?: string }> = ({ className
     >
       <ExternalLink className="w-4 h-4 text-amber-700 flex-shrink-0" />
       <div className="flex-1 space-y-1">
-        <div className="font-bold text-amber-900">Passkeys don&apos;t work in-app</div>
+        <div className="font-bold text-amber-900">Quick sign-in doesn&apos;t work in-app</div>
         <div className="text-amber-800 leading-relaxed">
-          You&apos;re in {inAppBrowserLabel(info)}. To use your passkey, open this page in your
-          phone&apos;s browser first.
+          You&apos;re in {inAppBrowserLabel(info)}. To use Face ID or your fingerprint, open this
+          page in your phone&apos;s browser first.
         </div>
       </div>
       <button

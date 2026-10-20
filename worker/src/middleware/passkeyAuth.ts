@@ -62,7 +62,7 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     if (!assertion) {
       return c.json<ErrorResponse>(
         {
-          error: 'Passkey authorization required. All fund movements must be authorized with your device passkey.',
+          error: 'Confirm with Face ID or fingerprint to continue.',
           code: 'PASSKEY_REQUIRED',
         },
         403

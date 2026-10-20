@@ -14,12 +14,13 @@ import {
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
-import { formatRecipientDisplay, formatUsd } from '../lib/api';
+import { formatRecipientDisplay, formatTokenAmount, formatUsd } from '../lib/api';
 import { ShareModal } from '../components/ShareModal';
 import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { PaymentIntent } from '../types';
+import { historyStatusLabel } from '../lib/statusLabels';
 
 export const HistoryPage: React.FC = () => {
   const { user } = useXAuth();
@@ -236,9 +237,9 @@ export const HistoryPage: React.FC = () => {
             { id: 'all', label: 'All' },
             { id: 'deposits', label: 'Deposits' },
             { id: 'withdrawals', label: 'Withdrawals' },
-            { id: 'ready', label: 'Ready to Claim' },
-            { id: 'claimed', label: 'Claimed' },
-            { id: 'pending', label: 'Open Intents' },
+            { id: 'ready', label: 'Waiting' },
+            { id: 'claimed', label: 'Received' },
+            { id: 'pending', label: 'Pending' },
             { id: 'expired', label: 'Expired' },
             { id: 'refunded', label: 'Refunded' },
             { id: 'cancelled', label: 'Cancelled' },
@@ -312,7 +313,7 @@ export const HistoryPage: React.FC = () => {
                           tx.isSent ? 'text-red-600' : 'text-emerald-600'
                         }`}
                       >
-                        {tx.isSent ? '-' : '+'}{tx.amount} {tx.symbol}
+                        {tx.isSent ? '-' : '+'}{formatTokenAmount(tx.amount)} {tx.symbol}
                       </div>
                       <div className="flex items-center space-x-1.5 justify-end">
                         {tx.amountUsd !== null && (
@@ -327,7 +328,7 @@ export const HistoryPage: React.FC = () => {
                               : 'text-stone-600 bg-stone-100 border-stone-200'
                           }`}
                         >
-                          {tx.status}
+                          {historyStatusLabel(tx.status)}
                         </span>
                       </div>
                     </div>
@@ -338,7 +339,7 @@ export const HistoryPage: React.FC = () => {
                         <button
                           onClick={() => handleCopy(tx.copyValue!, tx.id)}
                           className="p-1.5 rounded-lg text-stone-400 hover:text-black hover:bg-stone-200 transition-colors cursor-pointer"
-                          title={tx.payment ? 'Copy claim link' : 'Copy transaction hash'}
+                          title={tx.payment ? 'Copy payment link' : 'Copy transaction hash'}
                         >
                           {copiedId === tx.id ? (
                             <Check className="w-3.5 h-3.5 text-stone-900" />

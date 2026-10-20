@@ -22,6 +22,7 @@ import { useOnchainData, balanceUsd } from '../hooks/useOnchainData';
 import {
   api,
   formatCompactAmount,
+  formatTokenAmount,
   formatRecipientDisplay,
   formatUsd,
   formatUsdCompact,
@@ -33,6 +34,7 @@ import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
+import { historyStatusLabel } from '../lib/statusLabels';
 
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
@@ -211,12 +213,12 @@ export const AppHome: React.FC = () => {
         isSent,
         title: isSent ? formatRecipientDisplay(p.recipientHandle) : `@${p.senderHandle}`,
         subtitle: p.memo || new Date(p.createdAt).toLocaleDateString(),
-        amount: `${isSent ? '-' : '+'}${p.amount}`,
+        amount: `${isSent ? '-' : '+'}${formatTokenAmount(p.amount)}`,
         symbol: p.token.symbol,
         status: p.status,
         timestamp: new Date(p.createdAt).getTime(),
         copyValue: p.status === 'claimed' ? undefined : (p.claimLink || undefined),
-        copyTitle: 'Copy claim link',
+        copyTitle: 'Copy payment link',
       });
     }
 
@@ -293,8 +295,8 @@ export const AppHome: React.FC = () => {
               <Fingerprint className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0 text-left">
-              <div className="font-display font-bold text-sm tracking-tight">Enable a passkey on this device</div>
-              <div className="text-xs text-stone-300 font-sans mt-0.5">Save a passkey to this device for instant biometric sign-in &amp; payments</div>
+              <div className="font-display font-bold text-sm tracking-tight">Add quick sign-in to this device</div>
+              <div className="text-xs text-stone-300 font-sans mt-0.5">Use Face ID, fingerprint, or your PIN for sign-in and payments</div>
             </div>
           </div>
           <button
@@ -303,7 +305,7 @@ export const AppHome: React.FC = () => {
             disabled={isEnablingBiometrics}
             className="px-4 py-2.5 rounded-xl bg-white text-black font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-100 active:scale-[0.98] transition-all cursor-pointer flex-shrink-0 self-start sm:self-auto shadow-xs"
           >
-            {isEnablingBiometrics ? 'Activating...' : 'Enable passkey'}
+            {isEnablingBiometrics ? 'Activating...' : 'Set up quick sign-in'}
           </button>
         </div>
       )}
@@ -311,7 +313,7 @@ export const AppHome: React.FC = () => {
       {biometricsSuccess && (
         <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono flex items-center space-x-2 animate-fade-in mb-6">
           <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          <span>Passkey enabled on this device! Biometric sign-in active.</span>
+          <span>Quick sign-in enabled on this device!</span>
         </div>
       )}
 
@@ -332,7 +334,7 @@ export const AppHome: React.FC = () => {
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5 min-w-0">
                 <Shield className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
-                <span className="truncate">Intent Account Vault</span>
+                <span className="truncate">UPRAIL Account</span>
                 {nearAccount && (
                   <span className="hidden sm:inline ml-1 text-stone-400 font-normal normal-case truncate max-w-[140px]">
                     · {nearAccount}
@@ -388,10 +390,10 @@ export const AppHome: React.FC = () => {
               <div className="flex items-center space-x-2 text-[11px] sm:text-xs font-mono text-stone-500">
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${hasIntentAccount ? 'bg-stone-900' : 'bg-amber-500 animate-pulse'}`} />
                 {hasIntentAccount ? (
-                  <span>Live · Confidential Intents · Passkey Protected</span>
+                  <span>Live · Private · Protected by your device</span>
                 ) : user?.hasPasskey === true ? (
                   <span className="flex items-center gap-2">
-                    <span>Setting up your confidential vault…</span>
+                    <span>Setting up your UPRAIL account…</span>
                     <button
                       type="button"
                       onClick={() => void refreshBalances()}
@@ -402,7 +404,7 @@ export const AppHome: React.FC = () => {
                     </button>
                   </span>
                 ) : (
-                  <span>No intent account yet — register a passkey to create yours</span>
+                  <span>No account yet — set up quick sign-in to create yours</span>
                 )}
               </div>
               {!hasIntentAccount && user?.hasPasskey === true && accountError && !isLoadingBalances ? (
@@ -461,11 +463,11 @@ export const AppHome: React.FC = () => {
                 </div>
                 <div className="min-w-0">
                   <div className="text-xs font-bold font-display flex items-center space-x-2">
-                    <span className="truncate">{pendingPayments.length} incoming payment{pendingPayments.length > 1 ? 's' : ''} ready to claim</span>
+                    <span className="truncate">{pendingPayments.length} payment{pendingPayments.length > 1 ? 's' : ''} waiting</span>
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
                   </div>
                   <div className="text-[11px] text-stone-300 font-mono mt-0.5 truncate">
-                    ≈ {formatUsd(sumUsd(pendingPayments.map((p) => p.amountUsd)))} USD · Tap to claim with Passkey
+                    ≈ {formatUsd(sumUsd(pendingPayments.map((p) => p.amountUsd)))} USD · Tap to receive
                   </div>
                 </div>
               </div>
@@ -486,7 +488,7 @@ export const AppHome: React.FC = () => {
                 <div className="min-w-0">
                   <div className="text-xs font-bold font-display text-stone-950 truncate">
                     {unseenReceipts.length === 1
-                      ? `You received ${unseenReceipts[0].amount} ${unseenReceipts[0].token.symbol} from @${unseenReceipts[0].senderHandle || 'someone'}`
+                      ? `You received ${formatTokenAmount(unseenReceipts[0].amount)} ${unseenReceipts[0].token.symbol} from @${unseenReceipts[0].senderHandle || 'someone'}`
                       : `You received ${unseenReceipts.length} payments`}
                   </div>
                   <div className="text-[11px] text-stone-600 font-mono truncate">
@@ -549,10 +551,10 @@ export const AppHome: React.FC = () => {
                 <Fingerprint className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
               <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
-                Claim
+                Receive
               </span>
               <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
-                {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Passkey'}
+                {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Quick sign-in'}
               </span>
             </Link>
           </div>
@@ -636,7 +638,7 @@ export const AppHome: React.FC = () => {
                               ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
                               : 'text-stone-600 bg-stone-100 border-stone-200'
                           }`}>
-                            {tx.status}
+                            {historyStatusLabel(tx.status)}
                           </span>
                         </div>
                         {tx.copyValue && (

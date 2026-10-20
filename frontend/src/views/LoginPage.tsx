@@ -186,7 +186,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       const result = await webauthn.registerPasskey(user.handle);
       if (result.success) {
         setIsSuccess(true);
-        setSuccessStepMessage('Device Passkey created! Confidential vault secured.');
+        setSuccessStepMessage('You\'re all set. This device can now sign you in.');
 
         if (typeof window !== 'undefined') {
           localStorage.setItem('uprail_has_signed_up', 'true');
@@ -250,7 +250,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       const result = await webauthn.loginWithPasskey(targetHandle);
       if (result.success) {
         setIsSuccess(true);
-        setSuccessStepMessage('Passkey verified! Welcome back.');
+        setSuccessStepMessage('You\'re signed in. Welcome back.');
 
         if (typeof window !== 'undefined' && result.user?.handle) {
           localStorage.setItem('uprail_has_signed_up', 'true');
@@ -276,7 +276,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       const described = describePasskeyError(err);
       setError(
         err?.name === 'NotAllowedError' || err?.name === 'InvalidStateError'
-          ? `${described} Sign in with 𝕏 to add a passkey here.`
+          ? `${described} Sign in with 𝕏 to set up quick sign-in here.`
           : described
       );
       setLoginMethod('x');
@@ -317,7 +317,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 {isPasskeyHero ? (
                   <>
                     <Fingerprint className="w-3.5 h-3.5" />
-                    <span>Passkey sign in</span>
+                    <span>Quick sign-in</span>
                   </>
                 ) : isStep1 ? (
                   <span>Step 1 of 2</span>
@@ -331,10 +331,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
               </h1>
               <p className="text-sm text-muted leading-relaxed max-w-sm mx-auto">
                 {isPasskeyHero
-                  ? 'Use your passkey to sign in.'
+                  ? 'Use Face ID, fingerprint, or your PIN to sign in.'
                   : isStep1
-                  ? 'Use your 𝕏 account to get a payment handle. No wallet, no seed phrase.'
-                  : 'Add a passkey so you can sign in here without 𝕏 next time.'}
+                  ? 'Use your 𝕏 account to get a payment handle. No crypto wallet or password to remember.'
+                  : 'Set up quick sign-in so you can use this device without 𝕏 next time.'}
               </p>
             </div>
           </header>
@@ -413,7 +413,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                         <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
                           <Fingerprint className="w-4 h-4" />
                         </span>
-                        <span className="flex-1 text-center pr-2">Sign in with passkey</span>
+                        <span className="flex-1 text-center pr-2">Sign in with Face ID or fingerprint</span>
                         <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                       </>
                     )}
@@ -464,7 +464,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                       className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer"
                     >
                       <Fingerprint className="w-3.5 h-3.5" />
-                      <span>{hasSignedUp ? 'Sign in with your passkey' : 'Already have a passkey?'}</span>
+                      <span>{hasSignedUp ? 'Sign in with Face ID or fingerprint' : 'Already set up on this device?'}</span>
                     </button>
                   </div>
                 </>
@@ -515,7 +515,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   <span className="text-sm">One-time setup</span>
                 </div>
                 <p className="text-xs leading-relaxed text-amber-800/90">
-                  Your device creates a secure passkey for this account. There is no password or seed phrase to remember.
+                  This device saves a passkey — a secure sign-in built into your phone or laptop. Use Face ID, fingerprint, or your PIN. No password to remember.
                 </p>
               </div>
 
@@ -524,10 +524,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 <div className="flex items-start gap-2.5 rounded-2xl bg-red-50 border border-red-200 px-4 py-3.5 text-xs text-red-700">
                   <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
                   <span className="leading-relaxed">
-                    This device can&apos;t store a passkey on-device. Set a screen lock (PIN, pattern,
-                    fingerprint, or face) in your device settings, and make sure Google Password
-                    Manager is your passkey provider — then tap <strong>Create passkey</strong>. You can
-                    also use a security key or another device.
+                    This device can&apos;t save a passkey. Set a screen lock (PIN, pattern, fingerprint,
+                    or face) in your device settings, and make sure Google Password Manager is your
+                    passkey provider — then tap <strong>Set up quick sign-in</strong>. You can also use a
+                    security key or another device.
                   </span>
                 </div>
               )}
@@ -549,7 +549,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
                       <Fingerprint className="w-4 h-4" />
                     </span>
-                    <span className="flex-1 text-center pr-2">Create passkey</span>
+                    <span className="flex-1 text-center pr-2">Set up quick sign-in</span>
                     <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                   </>
                 )}
@@ -631,12 +631,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       <ConfirmDialog
         isOpen={showDisconnectConfirm}
         title="Disconnect this 𝕏 account?"
-        description="This signs out of UPRAIL on this device and clears the local passkey records. Your vault and funds stay onchain."
+        description="This signs out of UPRAIL on this device and clears the local sign-in records. Your account and money stay onchain."
         details={[
           { label: 'Account', value: user ? `@${user.handle}` : '—', mono: true },
           { label: 'This device', value: 'Passkey records will be cleared', mono: false },
         ]}
-        warning="You will need your 𝕏 account and passkey to sign back in. Only do this if you are switching accounts or this device is stuck."
+        warning="You will need your 𝕏 account and device sign-in to sign back in. Only do this if you are switching accounts or this device is stuck."
         confirmLabel="Disconnect & clear"
         tone="danger"
         isLoading={isDisconnecting}

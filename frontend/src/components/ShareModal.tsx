@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { PaymentIntent } from '../types';
 import { TokenIcon } from './TokenIcon';
-import { formatUsd } from '../lib/api';
+import { formatTokenAmount, formatUsd } from '../lib/api';
 import { useToast } from './Toast';
 
 interface ShareModalProps {
@@ -38,15 +38,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     if (payment.claimLink) {
       navigator.clipboard.writeText(payment.claimLink);
       setCopied(true);
-      toast('Claim link copied');
+      toast('Payment link copied');
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
   const tweetText = encodeURIComponent(
     isDirect
-      ? `Hey @${payment.recipientHandle}, I just sent you ${payment.amount} ${payment.token.symbol} directly on UP! ${payment.claimLink}`
-      : `Hey @${payment.recipientHandle}, I sent you ${payment.amount} ${payment.token.symbol} on UP! Claim it instantly with your device passkey: ${payment.claimLink}`
+      ? `Hey @${payment.recipientHandle}, I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL — it's already in your account. Open the link to see it: ${payment.claimLink}`
+      : `Hey @${payment.recipientHandle}, I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL. Open the link to receive it — sign in with X, then confirm with Face ID or fingerprint. No crypto wallet needed: ${payment.claimLink}`
   );
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
 
@@ -84,11 +84,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               </>
             ) : (
               <>
-                Share the claim link with{' '}
+                Share the payment link with{' '}
                 <span className="text-stone-900 font-bold font-mono">
                   @{payment.recipientHandle}
                 </span>{' '}
-                to collect their funds.
+                so they can receive it.
               </>
             )}
           </p>
@@ -104,7 +104,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             />
             <div>
               <span className="text-sm font-extrabold text-stone-950 font-mono">
-                {payment.amount} {payment.token.symbol}
+                {formatTokenAmount(payment.amount)} {payment.token.symbol}
               </span>
               <span className="text-xs text-stone-500 block font-mono">
                 ≈ {formatUsd(payment.amountUsd)} USD
@@ -112,14 +112,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </div>
           </div>
           <span className="text-xs px-2.5 py-1 rounded-full bg-stone-100 text-stone-900 border border-stone-200 font-bold">
-            {isDirect ? 'Direct Vault Transfer' : 'Private Escrow'}
+            {isDirect ? 'Direct Transfer' : 'Payment Waiting'}
           </span>
         </div>
 
         {/* Claim / receipt link */}
         <div className="space-y-1.5 mb-4">
           <label className="text-[11px] font-bold uppercase tracking-wider text-stone-600">
-            {isDirect ? 'Payment Link (receipt)' : 'Secure Claim Link'}
+            {isDirect ? 'Payment Link (receipt)' : 'Payment Link'}
           </label>
           <div className="flex items-center space-x-2">
             <input
@@ -160,8 +160,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           <div className="mb-4 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
             <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
             <span>
-              @{payment.recipientHandle} is already on UP — funds are in their vault.
-              The link opens a receipt so they know it arrived.
+              @{payment.recipientHandle} is already on UPRAIL — the money is in their
+              account. The link opens a receipt so they know it arrived.
             </span>
           </div>
         )}
@@ -196,7 +196,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         {showQr && (
           <div className="p-4 rounded-2xl bg-white border border-stone-200 flex flex-col mb-4 animate-fade-in">
             <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1.5">
-              {isDirect ? 'Receipt Link' : 'Claim Link'}
+              {isDirect ? 'Receipt Link' : 'Payment Link'}
             </span>
             <p className="text-[11px] font-mono text-stone-700 break-all bg-stone-50 border border-stone-200 rounded-lg p-2 select-all">
               {payment.claimLink}
@@ -211,7 +211,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         <div className="flex items-start space-x-2 p-3 rounded-2xl bg-stone-50 border border-stone-200 text-[11px] text-stone-700">
           <Shield className="w-4 h-4 text-stone-900 flex-shrink-0 mt-0.5" />
           <p>
-            <strong>Zero risk:</strong> Even if this link is shared publicly, only the device passkey belonging to <span className="font-bold text-stone-900 font-mono">@{payment.recipientHandle}</span> can unlock the funds.
+            <strong>Only they can open it.</strong> Even if this link is shared publicly, only{' '}
+            <span className="font-bold text-stone-900 font-mono">@{payment.recipientHandle}</span>{' '}
+            can confirm the payment. The link alone can't move the money.
           </p>
         </div>
 

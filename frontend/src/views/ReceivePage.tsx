@@ -984,7 +984,7 @@ export const ReceivePage: React.FC = () => {
               <span>Exact-Amount Intent Routing</span>
             </div>
             <p className="text-amber-800">
-              The deposit address is locked to this <strong>exact amount</strong> and routes directly to your confidential passkey vault. Always transfer the exact amount specified from your external wallet.
+              The deposit address is locked to this <strong>exact amount</strong> and goes directly into your UPRAIL account. Always transfer the exact amount specified from your external wallet.
             </p>
           </div>
         </div>
@@ -1005,10 +1005,10 @@ export const ReceivePage: React.FC = () => {
           <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-600 space-y-1.5 leading-relaxed font-sans">
             <div className="flex items-center space-x-1.5 font-bold text-stone-900 font-mono">
               <Shield className="w-3.5 h-3.5 text-stone-900" />
-              <span>Confidential Ephemeral Ingress</span>
+              <span>One-time deposit address</span>
             </div>
             <p>
-              Your gateway address is ephemeral and generated exclusively for receiving <strong className="text-stone-900">{selectedToken || 'assets'}</strong> on <strong className="text-stone-900">{activeChainDef?.name || selectedChain || 'your selected network'}</strong>. Funds are settled via NEAR Intents directly into your confidential passkey vault (<span className="font-mono text-stone-900 font-semibold break-all">{nearAccount || 'u_...uprail.near'}</span>).
+              This address is generated only for receiving <strong className="text-stone-900">{selectedToken || 'assets'}</strong> on <strong className="text-stone-900">{activeChainDef?.name || selectedChain || 'your selected network'}</strong>. The money is settled directly into your UPRAIL account (<span className="font-mono text-stone-900 font-semibold break-all">{nearAccount || 'u_...uprail.near'}</span>).
             </p>
           </div>
         </div>
@@ -1074,7 +1074,7 @@ export const ReceivePage: React.FC = () => {
                       <span>Deposit Received &amp; Shielded!</span>
                     </div>
                     <p className="text-[11px] text-emerald-800 leading-relaxed font-sans">
-                      Your funds have arrived and been credited to your confidential passkey vault.
+                      Your money has arrived and been added to your UPRAIL account.
                     </p>
                     {depositStatus?.depositedAmountFormatted && (
                       <div className="p-2.5 bg-white/80 rounded-xl border border-emerald-200 flex items-center justify-between font-mono text-[11px]">
@@ -1108,7 +1108,7 @@ export const ReceivePage: React.FC = () => {
                       <span>Deposit Detected Onchain! Routing via Intents...</span>
                     </div>
                     <p className="text-[11px] text-blue-800 leading-relaxed font-sans">
-                      Received <strong className="font-bold">{depositStatus?.depositedAmountFormatted} {selectedToken}</strong> on {activeChainDef?.name || selectedChain}. Solver network executing vault settlement.
+                      Received <strong className="font-bold">{depositStatus?.depositedAmountFormatted} {selectedToken}</strong> on {activeChainDef?.name || selectedChain}. Settling into your UPRAIL account.
                     </p>
                     {depositStatus?.txHashes && depositStatus.txHashes.length > 0 && (
                       <div className="text-[10px] font-mono text-blue-700 truncate flex items-center space-x-1">
@@ -1191,7 +1191,7 @@ export const ReceivePage: React.FC = () => {
             ) : isDeriving ? (
               <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
                 <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
-                <span>Deriving confidential gateway &amp; QR for {depositAmount || 'exact'} {selectedToken}...</span>
+                <span>Creating your deposit address &amp; QR for {depositAmount || 'exact'} {selectedToken}...</span>
               </div>
             ) : (
               <div className="py-12 px-4 flex flex-col items-center justify-center space-y-3 text-center">
@@ -1214,7 +1214,7 @@ export const ReceivePage: React.FC = () => {
                 </div>
                 <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 text-[10px] font-mono text-stone-500">
                   <Zap className="w-3 h-3 text-stone-500" />
-                  <span>Hardware Passkey Vault Ingress</span>
+                  <span>Protected by your device</span>
                 </div>
               </div>
             )}
@@ -1259,7 +1259,7 @@ export const ReceivePage: React.FC = () => {
 
             {/* One-line note */}
             <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-600 font-sans leading-relaxed">
-              Send <strong className="text-stone-900 font-semibold">{nearAsset.symbol}</strong> from any wallet or exchange to your vault address — it settles into your passkey-shielded vault automatically.
+              Send <strong className="text-stone-900 font-semibold">{nearAsset.symbol}</strong> from any wallet or exchange to this address — it goes into your UPRAIL account automatically.
             </div>
           </div>
 
@@ -1354,7 +1354,7 @@ export const ReceivePage: React.FC = () => {
                         <span>Deposit Received &amp; Shielded!</span>
                       </div>
                       <p className="text-[11px] text-emerald-800 leading-relaxed font-sans">
-                        Your {nearAsset.symbol} has arrived and been credited to your passkey vault.
+                        Your {nearAsset.symbol} has arrived and been added to your UPRAIL account.
                       </p>
                       <div className="flex items-center space-x-2 pt-1">
                         <Link
@@ -1387,7 +1387,7 @@ export const ReceivePage: React.FC = () => {
                         <span className="text-stone-400 block text-[11px] font-mono mt-0.5">
                           {nearIsOneTime
                             ? 'Single-use ephemeral ingress • 100% onchain shielded'
-                            : 'Reusable vault ingress • detected on FT balance arrival'}
+                            : 'Reusable address • detected when the money arrives'}
                         </span>
                       </div>
                     </div>
@@ -1447,13 +1447,13 @@ export const ReceivePage: React.FC = () => {
                         onClick={() => setShowDirectVault(!showDirectVault)}
                         className="text-[11px] font-mono text-stone-500 hover:text-stone-900 flex items-center justify-between w-full cursor-pointer py-1"
                       >
-                        <span>Direct Vault Address (Advanced)</span>
+                        <span>Direct UPRAIL address (Advanced)</span>
                         <span>{showDirectVault ? '−' : '+'}</span>
                       </button>
                       {showDirectVault && (
                         <div className="mt-2 p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-2 animate-fade-in">
                           <span className="text-[10px] text-stone-400 font-mono block">
-                            Direct onchain subaccount (reusable, unshielded sender memo)
+                            Reusable address — use it for future deposits
                           </span>
                           <div className="font-mono text-xs text-stone-900 break-all select-all">
                             {nearAccount}
@@ -1479,7 +1479,7 @@ export const ReceivePage: React.FC = () => {
               ) : !hasIntentAccount ? (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
                   <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
-                  <span>Setting up your confidential vault…</span>
+                  <span>Setting up your UPRAIL account…</span>
                   <span className="text-stone-400 max-w-[240px] leading-relaxed">
                     Receive addresses appear once setup finishes — usually a few seconds after your first sign-in.
                   </span>
@@ -1513,7 +1513,7 @@ export const ReceivePage: React.FC = () => {
               ) : (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
                   <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
-                  <span>Loading your vault account...</span>
+                  <span>Loading your UPRAIL account...</span>
                 </div>
               )}
             </div>

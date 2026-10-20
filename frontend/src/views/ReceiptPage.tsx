@@ -10,7 +10,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Link } from '../lib/router';
-import { api } from '../lib/api';
+import { api, formatTokenAmount } from '../lib/api';
 import { GlitchLogo } from '../components/GlitchLogo';
 import type { WithdrawalReceipt } from '../types';
 
@@ -123,7 +123,7 @@ export const ReceiptPage: React.FC<ReceiptPageProps> = ({ id }) => {
                 {statusBadge.label === 'Failed' ? 'Withdrawal Failed' : 'Payment Sent'}
               </h3>
               <div className="text-3xl font-display font-extrabold text-stone-950 tracking-tight font-mono">
-                {receipt.amount} {receipt.asset}
+                {formatTokenAmount(receipt.amount)} {receipt.asset}
               </div>
             </div>
 

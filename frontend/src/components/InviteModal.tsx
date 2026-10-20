@@ -146,7 +146,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                 ) : (
                   <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-200 text-stone-700 text-[10px] font-mono font-bold">
                     <UserCheck className="w-2.5 h-2.5" />
-                    <span>Claimed</span>
+                    <span>Used</span>
                   </span>
                 )}
               </div>
@@ -185,7 +185,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                 <div className="p-3 rounded-xl bg-white border border-stone-200 text-xs text-stone-700 flex items-center space-x-2">
                   <ShieldCheck className="w-4 h-4 text-stone-900 flex-shrink-0" />
                   <div>
-                    Claimed by <span className="font-mono font-bold text-stone-900">@{inviteData.claimedBy.handle}</span> on {new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()}
+                    Used by <span className="font-mono font-bold text-stone-900">@{inviteData.claimedBy.handle}</span> on {new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()}
                   </div>
                 </div>
               ) : (

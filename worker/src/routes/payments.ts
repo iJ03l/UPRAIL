@@ -213,7 +213,7 @@ paymentsRouter.post('/resolve', async (c) => {
     return c.json<ResolveResponse>({
       handle: `@${clean}`,
       resolved: false,
-      message: 'Resolution confirmed on recipient claim via passkey',
+      message: 'Payment will be delivered to the recipient',
     });
   } catch (err: any) {
     return c.json<ErrorResponse>(

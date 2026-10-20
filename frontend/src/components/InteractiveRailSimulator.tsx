@@ -237,9 +237,9 @@ export const InteractiveRailSimulator: React.FC = () => {
             {/* Laser Track Visualization */}
             <div className="space-y-2">
               <div className="flex justify-between text-[9px] sm:text-xs font-mono text-stone-500">
-                <span>ORIGIN VAULT</span>
+                <span>ORIGIN ACCOUNT</span>
                 <span className="text-[#E05326] font-bold">ENCLAVE TRANSMISSION</span>
-                <span>RECIPIENT PASSKEY</span>
+                <span>RECIPIENT DEVICE</span>
               </div>
               <div className="h-3 w-full bg-stone-100 border border-stone-200/80 rounded-full overflow-hidden relative shadow-inner">
                 <div
@@ -286,7 +286,7 @@ export const InteractiveRailSimulator: React.FC = () => {
                 <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white border border-inherit flex items-center justify-center mx-auto mb-2">
                   <Fingerprint className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-700" />
                 </div>
-                <div className="text-[11px] sm:text-xs font-bold text-stone-900 leading-tight">Passkey Vault</div>
+                <div className="text-[11px] sm:text-xs font-bold text-stone-900 leading-tight">UPRAIL Account</div>
                 <div className="text-[9px] sm:text-[10px] mt-0.5 font-mono truncate">@{cleanHandle}</div>
               </div>
             </div>
@@ -311,13 +311,13 @@ export const InteractiveRailSimulator: React.FC = () => {
               <div className="p-4 rounded-2xl bg-[#E05326]/5 border-2 border-[#E05326] space-y-1.5 shadow-xs">
                 <div className="flex items-center space-x-1.5 text-[11px] font-mono uppercase text-[#E05326] font-bold">
                   <CheckCircle2 className="w-3.5 h-3.5 text-[#E05326]" />
-                  <span>Recipient Shielded Vault</span>
+                  <span>Recipient Account</span>
                 </div>
                 <div className="text-xs font-mono text-stone-900 bg-white p-2.5 rounded-xl border border-[#E05326]/20 font-medium">
                   <span className="text-stone-500">HOLDING:</span> +{amount} {selectedToken.symbol}<br />
                   <span className="text-stone-500">OWNER:</span> @{cleanHandle}<br />
-                  <span className="text-stone-500">UNLOCKED BY:</span> Passkey<br />
-                  <span className="text-emerald-700 font-bold">READY TO CLAIM</span>
+                  <span className="text-stone-500">CONFIRM WITH:</span> Face ID<br />
+                  <span className="text-emerald-700 font-bold">READY TO RECEIVE</span>
                 </div>
               </div>
             </div>
