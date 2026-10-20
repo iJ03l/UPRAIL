@@ -1969,8 +1969,12 @@ async function getCachedDepositAddress(
 
     if (row && row.address) {
       const cfg = CHAIN_DEPOSIT_CONFIGS[chainKey] || CHAIN_DEPOSIT_CONFIGS[row.chain];
+      // The stored key is token-specific (`near_shitzu`), while `chain` must be
+      // the network (`near`). Dynamic tokens have no curated config to read it
+      // from, so take the prefix of the key.
+      const chainFromKey = chainKey.split('_')[0] || row.chain;
       return {
-        chain: cfg?.chain || row.chain,
+        chain: cfg?.chain || chainFromKey,
         chainName: cfg?.chainName || row.chain_name || row.chain,
         address: row.address,
         memo: row.memo || undefined,
@@ -2319,6 +2323,13 @@ export async function getDepositAddress(
   if (!bypassCache) {
     const cached = await getCachedDepositAddress(env.DB, nearAccount, cfg.key);
     if (cached) {
+      // The D1 key is token-specific, so the address belongs to this cfg even
+      // when the config is a dynamic (non-curated) token. Re-attach the
+      // requested token metadata so callers never see an untyped address.
+      cached.token = cfg.token;
+      cached.minAmount = cfg.amount;
+      cached.minAmountFormatted = cached.minAmountFormatted || cfg.minAmountFormatted;
+      cached.minAmountUsd = cached.minAmountUsd || cfg.minAmountUsd;
       // Re-verify NEP-145 registration on reuse — the original registration tx
       // may have failed, and an unregistered receiver breaks wallet sends.
       await ensureNearFtDepositRegistered(env, cfg, cached.address);
@@ -2341,8 +2352,8 @@ export async function getDepositAddress(
   if (env.DB) {
     try {
       const stale = await env.DB
-        .prepare('SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses WHERE account_id = ? AND (chain = ? OR chain = ?)')
-        .bind(nearAccount, cfg.key, cfg.chain)
+        .prepare('SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses WHERE account_id = ? AND chain = ?')
+        .bind(nearAccount, cfg.key)
         .first<any>();
       if (stale?.address) {
         return {
@@ -2352,6 +2363,7 @@ export async function getDepositAddress(
           memo: stale.memo || undefined,
           expiresAt: stale.expires_at || undefined,
           token: cfg.token,
+          minAmount: cfg.amount,
           minAmountFormatted: cfg.minAmountFormatted,
           minAmountUsd: cfg.minAmountUsd,
           isOneTime: true,

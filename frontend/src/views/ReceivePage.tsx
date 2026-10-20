@@ -198,6 +198,7 @@ export const ReceivePage: React.FC = () => {
   const [registryTokens, setRegistryTokens] = useState<Token[]>([]);
   const [nearCopiedAddress, setNearCopiedAddress] = useState<boolean>(false);
   const [nearDepositAddress, setNearDepositAddress] = useState<DepositAddress | null>(null);
+  const [nearDepositError, setNearDepositError] = useState<string | null>(null);
   const [isNearDeriving, setIsNearDeriving] = useState<boolean>(false);
   const [nearDepositStatus, setNearDepositStatus] = useState<DepositStatusResponse | null>(null);
   const [nearSettledSuccess, setNearSettledSuccess] = useState<boolean>(false);
@@ -406,6 +407,7 @@ export const ReceivePage: React.FC = () => {
     async (refresh = false) => {
       if (!hasIntentAccount || !nearAsset?.symbol) return;
       setIsNearDeriving(true);
+      setNearDepositError(null);
       try {
         // Pin the contract: tickers are not unique on NEAR, so resolving by
         // symbol alone can derive an address for the wrong UPTOBER.
@@ -416,9 +418,22 @@ export const ReceivePage: React.FC = () => {
           undefined,
           nearAsset.nearContractId
         );
+        if (!data?.address) {
+          setNearDepositAddress(null);
+          setNearDepositError(
+            `No ${nearAsset.symbol} deposit route is available right now. No address is shown until one is generated.`
+          );
+          return;
+        }
         setNearDepositAddress(data);
       } catch (err) {
         console.warn('Failed to load NEAR deposit address:', err);
+        // Never leave the previous token's address on screen under the new
+        // token's name — that is how funds get sent to the wrong asset.
+        setNearDepositAddress(null);
+        setNearDepositError(
+          `Could not create a ${nearAsset.symbol} deposit address. No address is shown until one is generated.`
+        );
       } finally {
         setIsNearDeriving(false);
       }
@@ -478,6 +493,10 @@ export const ReceivePage: React.FC = () => {
 
   // ── Tab 2: NEAR native receive ─────────────────────────────────────────────
   const handleSelectNearToken = (token: Token) => {
+    // Drop the old address immediately so it can never be shown (or copied)
+    // while the new token's address is being derived, or if derivation fails.
+    setNearDepositAddress(null);
+    setNearDepositError(null);
     setNearAsset(token);
     setNearSettledSuccess(false);
     setNearDepositStatus(null);
@@ -1258,10 +1277,37 @@ export const ReceivePage: React.FC = () => {
                 </span>
               </div>
 
+              {/* Wrong-asset guardrail: the quote only settles the selected token. */}
+              <div className="w-full p-3 rounded-2xl bg-amber-50 border border-amber-200 text-left space-y-1">
+                <div className="flex items-center space-x-1.5 text-[11px] font-bold text-amber-900">
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Send only {nearAsset.symbol} on NEAR to this address</span>
+                </div>
+                <p className="text-[11px] text-amber-800 font-sans leading-relaxed">
+                  This address is generated for {nearAsset.symbol}
+                  {nearAsset.nearContractId ? (
+                    <span className="font-mono text-[10px] break-all"> ({nearAsset.nearContractId})</span>
+                  ) : null}
+                  . A different token or network sent here is not credited and may be unrecoverable.
+                </p>
+              </div>
+
               {isNearDeriving ? (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
                   <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
                   <span>Deriving shielded deposit address for {nearAsset.symbol}...</span>
+                </div>
+              ) : nearDepositError ? (
+                <div className="w-full py-10 flex flex-col items-center justify-center space-y-3 text-center px-2">
+                  <AlertTriangle className="w-8 h-8 text-amber-600" />
+                  <p className="text-xs text-stone-600 font-sans leading-relaxed">{nearDepositError}</p>
+                  <button
+                    type="button"
+                    onClick={() => loadNearAddress(true)}
+                    className="px-3 py-1.5 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors cursor-pointer"
+                  >
+                    Try again
+                  </button>
                 </div>
               ) : nearDepositAddressValue ? (
                 <>

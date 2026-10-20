@@ -16,6 +16,7 @@ import { currentInvite, sanitizeReturnPath, withInvite } from '../lib/invite';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { LegalModal, LegalTab } from '../components/LegalModal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 
@@ -30,6 +31,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   const [isXLoading, setIsXLoading] = useState(false);
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
   const [successStepMessage, setSuccessStepMessage] = useState('');
@@ -496,7 +498,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 </div>
                 <button
                   type="button"
-                  onClick={handleDisconnect}
+                  onClick={() => setShowDisconnectConfirm(true)}
                   disabled={isInteracting || isDisconnecting}
                   title="Disconnect this 𝕏 account and clear this device"
                   className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-stone-600 hover:text-red-600 bg-surface px-2.5 py-1 rounded-md border border-line hover:border-red-200 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
@@ -625,6 +627,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           </button>
         </footer>
       </main>
+
+      <ConfirmDialog
+        isOpen={showDisconnectConfirm}
+        title="Disconnect this 𝕏 account?"
+        description="This signs out of UPRAIL on this device and clears the local passkey records. Your vault and funds stay onchain."
+        details={[
+          { label: 'Account', value: user ? `@${user.handle}` : '—', mono: true },
+          { label: 'This device', value: 'Passkey records will be cleared', mono: false },
+        ]}
+        warning="You will need your 𝕏 account and passkey to sign back in. Only do this if you are switching accounts or this device is stuck."
+        confirmLabel="Disconnect & clear"
+        tone="danger"
+        isLoading={isDisconnecting}
+        onConfirm={() => {
+          setShowDisconnectConfirm(false);
+          void handleDisconnect();
+        }}
+        onCancel={() => setShowDisconnectConfirm(false)}
+      />
 
       {/* Modal for Privacy Policy and Terms & Conditions */}
       <LegalModal
