@@ -6,7 +6,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 0.1
+    // Full sampling: volume is low (~5k requests/day), so complete logs cost
+    // little and a sampled-out 5xx would be exactly the one we need.
+    "head_sampling_rate": 1.0
   },
   // ---------------------------------------------------------------------------
   // NON-SECRET configuration only.

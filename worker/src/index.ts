@@ -32,6 +32,7 @@ import { publicErrorMessage } from './utils/errors';
 import { plainAmount, resolveShareTicker } from './services/share';
 import { refundEscrowedPayment } from './services/refunds';
 import { syncAllLaunchpadFees } from './services/launchpadFees';
+import { pruneExpiredAuthChallenges } from './services/maintenance';
 
 // Export Durable Object classes for runtime
 export { EscrowDO } from './durable-objects/escrow';
@@ -616,6 +617,17 @@ export default {
       }
     } catch (e) {
       console.warn('[cron] launchpad fee auto-sync failed:', e);
+    }
+
+    // 6. Prune expired WebAuthn/OAuth challenges. They are single-use and
+    //    rejected once expired, so a day of rows is enough for debugging.
+    try {
+      const pruned = await pruneExpiredAuthChallenges(env, now);
+      if (pruned > 0) {
+        console.log(`[cron] pruned ${pruned} expired auth challenge(s)`);
+      }
+    } catch (e) {
+      console.warn('[cron] auth challenge prune failed:', e);
     }
   },
 };
