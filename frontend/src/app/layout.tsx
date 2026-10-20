@@ -76,18 +76,10 @@ export default function RootLayout({
         <link rel="icon" type="image/png" href="/brand/uprail-favicon.png" />
         <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
 
-        {/* Primary Meta Tags for Social Previews */}
-        <meta property="og:title" content="UPRAIL — The Confidential Value Railway for X" />
-        <meta property="og:description" content="Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion." />
-        <meta property="og:image" content="https://app.uprail.world/og/og-landing.png" />
-        <meta property="og:image:width" content="1200" />
-        <meta property="og:image:height" content="630" />
-        <meta property="og:type" content="website" />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:site" content="@uprailworld" />
-        <meta name="twitter:title" content="UPRAIL — The Confidential Value Railway for X" />
-        <meta name="twitter:description" content="Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion." />
-        <meta name="twitter:image" content="https://app.uprail.world/og/og-landing.png" />
+        {/* Social preview tags come from the `metadata` export above so per-route
+            layouts (claim, send, receive, docs) can override them. Hardcoding
+            them here emitted a second, conflicting set on every page and made
+            crawlers pick the generic landing card. */}
 
         {/* Rare Bespoke Fonts: Clash Display, Cabinet Grotesk, Syne & JetBrains Mono */}
         <link rel="preconnect" href="https://api.fontshare.com" crossOrigin="anonymous" />

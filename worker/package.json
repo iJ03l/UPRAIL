@@ -9,12 +9,13 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
-    "test": "esbuild src/index.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/worker.js && esbuild src/services/nearRpc.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/nearRpc.bundle.mjs && esbuild src/services/launchpadKeys.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/launchpadKeys.bundle.mjs && esbuild src/services/launchpadFees.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/launchpadFees.bundle.mjs && node --test test/miniflare.test.mjs test/assets-match.test.mjs test/account-exists.test.mjs test/intents-support.test.mjs test/key-on-intents.test.mjs test/launchpad-fees.test.mjs"
+    "test": "node scripts/bundle-worker-test.mjs && esbuild src/services/nearRpc.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/nearRpc.bundle.mjs && esbuild src/services/launchpadKeys.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/launchpadKeys.bundle.mjs && esbuild src/services/launchpadFees.ts --bundle --format=esm --platform=neutral --conditions=worker --main-fields=module,main --external:node:* --external:cloudflare:workers --outfile=dist/launchpadFees.bundle.mjs && node --test test/miniflare.test.mjs test/assets-match.test.mjs test/account-exists.test.mjs test/intents-support.test.mjs test/key-on-intents.test.mjs test/launchpad-fees.test.mjs"
   },
   "dependencies": {
     "@noble/curves": "^2.4.0",
     "@simplewebauthn/server": "^13.0.0",
-    "hono": "^4.7.0"
+    "hono": "^4.7.0",
+    "workers-og": "^0.0.27"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241004.0",

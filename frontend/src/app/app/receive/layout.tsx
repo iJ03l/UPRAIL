@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
+    site: '@uprailworld',
+    creator: '@uprailworld',
     title: 'UPRAIL — Receive from Any Chain',
     description: 'Receive confidential payments from any chain. Get your unified receive address for NEAR, Ethereum, Solana, and more.',
     images: ['https://app.uprail.world/og/og-receive.png'],

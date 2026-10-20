@@ -34,8 +34,8 @@ const CARDS = {
     sub: ['One address. USDC, NEAR and more', 'settle privately in your vault.'],
   },
   'og-claim': {
-    eyebrow: 'CRYPTO IS WAITING',
-    title: ['Crypto is waiting', 'for you'],
+    eyebrow: 'CONFIDENTIAL PAYMENT',
+    title: ['Open the link to', 'claim your payment'],
     sub: ['Claim it with a passkey.', 'No wallet. No seed phrase.'],
   },
   'og-refer': {

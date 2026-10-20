@@ -12,6 +12,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     mf = new Miniflare({
       modules: true,
       scriptPath: 'dist/worker.js',
+      modulesRules: [{ type: 'CompiledWasm', include: ['**/*.wasm'] }],
       compatibilityDate: '2026-10-08',
       compatibilityFlags: ['nodejs_compat'],
       d1Databases: { DB: 'uprail-db' },
@@ -461,6 +462,34 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const overLimitBody = await overLimit.json();
     assert.equal(overLimitBody.code, 'AGENT_POLICY_DENIED');
     assert.equal(overLimitBody.reason, 'per_tx_limit');
+  });
+
+  it('renders a per-payment OG image instead of the generic static card', async () => {
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    const paymentId = 'pay_og_card_1';
+    await db
+      .prepare(
+        `INSERT INTO payments
+           (id, sender_x_handle, recipient_handle, asset, amount, status,
+            created_at, expires_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(paymentId, 'alice', 'bob', 'USDC', '12.5', 'ESCROWED', now, now + 86400000, now)
+      .run();
+
+    const res = await mf.dispatchFetch(`http://localhost/og/claim/${paymentId}.png`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'image/png');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.deepEqual(
+      [...bytes.slice(0, 8)],
+      [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    );
+    assert.ok(bytes.length > 1000, 'expected a rendered PNG, not an empty body');
+
+    const missing = await mf.dispatchFetch('http://localhost/og/claim/not-a-png');
+    assert.equal(missing.status, 404);
   });
 });
 

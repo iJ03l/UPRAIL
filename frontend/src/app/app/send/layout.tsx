@@ -17,6 +17,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
+    site: '@uprailworld',
+    creator: '@uprailworld',
     title: 'UPRAIL — Send Confidentially',
     description: 'Send confidential payments to any X handle on NEAR Confidential Intents or to any external wallet.',
     images: ['https://app.uprail.world/og/og-send.png'],

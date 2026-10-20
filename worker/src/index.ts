@@ -26,9 +26,10 @@ import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
 import { mcpRouter } from './routes/mcp';
 import { feesRouter } from './routes/fees';
+import { ogRouter } from './routes/og';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
-import * as nearRpc from './services/nearRpc';
+import { plainAmount, resolveShareTicker } from './services/share';
 import { refundEscrowedPayment } from './services/refunds';
 import { syncAllLaunchpadFees } from './services/launchpadFees';
 
@@ -180,6 +181,9 @@ apiRouter.post('/auth-challenge', requireAuth(), issueTxChallenge);
 
 app.route('/api', apiRouter);
 
+// Dynamic social cards for share links (claim / invite / receipt).
+app.route('/og', ogRouter);
+
 // Global Error Handler
 app.onError((err, c) => {
   console.error('[Unhandled Error]:', err);
@@ -201,26 +205,60 @@ const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
 // /app/receipt/<withdrawalId>, rewritten onto the static receipt page.
 const RECEIPT_DEEP_LINK = /^\/(?:app\/)?receipt\/([A-Za-z0-9_-]{1,64})\/?$/;
 
-function isBotRequest(userAgent: string | null | undefined): boolean {
-  if (!userAgent) return false;
+const BOT_UA_MARKERS = [
+  'twitterbot',
+  'facebookexternalhit',
+  'facebot',
+  'meta-externalagent',
+  'telegrambot',
+  'whatsapp',
+  'discordbot',
+  'slackbot',
+  'linkedinbot',
+  'vkshare',
+  'bingpreview',
+  'embedly',
+  'quora link preview',
+  'redditbot',
+  'applebot',
+  'skypeuripreview',
+  'pinterestbot',
+  'snapchat',
+  'iframely',
+  'mattermost',
+  'nuzzel',
+  'outbrain',
+  'flipboard',
+  'tumblr',
+  'xing',
+  'google-pagerenderer',
+  'ia_archiver',
+  'yandexbot',
+  'baiduspider',
+  'sogou',
+  'exabot',
+  'petalbot',
+  'duckduckbot',
+  'msnbot',
+  'ahrefsbot',
+  'semrushbot',
+  'mj12bot',
+  'seznambot',
+];
+
+/**
+ * Link-preview crawlers get the generated share card; real browsers get the
+ * SPA. A missing UA is treated as a crawler because every browser sends one.
+ * `?card=1` forces the card for manual testing.
+ */
+function isBotRequest(
+  userAgent: string | null | undefined,
+  forceCard = false
+): boolean {
+  if (forceCard) return true;
+  if (!userAgent) return true;
   const ua = userAgent.toLowerCase();
-  return (
-    ua.includes('twitterbot') ||
-    ua.includes('facebookexternalhit') ||
-    ua.includes('facebot') ||
-    ua.includes('telegrambot') ||
-    ua.includes('whatsapp') ||
-    ua.includes('discordbot') ||
-    ua.includes('slackbot') ||
-    ua.includes('linkedinbot') ||
-    ua.includes('vkshare') ||
-    ua.includes('bingpreview') ||
-    ua.includes('embedly') ||
-    ua.includes('quora link preview') ||
-    ua.includes('redditbot') ||
-    ua.includes('applebot') ||
-    ua.includes('skypeuripreview')
-  );
+  return BOT_UA_MARKERS.some((marker) => ua.includes(marker));
 }
 
 function escapeHtml(str: string): string {
@@ -253,13 +291,15 @@ function renderShareCardHtml(opts: {
   <meta property="og:image" content="${escapeHtml(opts.imageUrl)}" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:alt" content="${escapeHtml(opts.title)}" />
   <meta property="og:url" content="${escapeHtml(opts.url)}" />
   <meta property="og:type" content="website" />
 
   <!-- Twitter Card (summary_large_image for full bleed cards on X) -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:site" content="@uprail_app" />
-  <meta name="twitter:creator" content="@uprail_app" />
+  <meta name="twitter:site" content="@uprailworld" />
+  <meta name="twitter:creator" content="@uprailworld" />
   <meta name="twitter:title" content="${escapeHtml(opts.title)}" />
   <meta name="twitter:description" content="${escapeHtml(opts.description)}" />
   <meta name="twitter:image" content="${escapeHtml(opts.imageUrl)}" />
@@ -289,45 +329,12 @@ function renderShareCardHtml(opts: {
 const STATIC_ASSET_RE =
   /\.(png|jpe?g|gif|webp|avif|svg|ico|css|js|mjs|map|woff2?|ttf|otf|eot|mp4|webm|pdf|txt|xml|json|webmanifest)$/i;
 
-/** Resolves a stored asset id to a plain-English ticker (never `nep141:…`). */
-async function resolveShareTicker(env: AppContext['Bindings'], asset: string): Promise<string> {
-  if (!asset) return '';
-  let ticker = '';
-  try {
-    const tokens = await nearRpc.getSupportedTokens(env);
-    ticker = nearRpc.resolveTokenForAsset(asset, tokens)?.symbol || '';
-  } catch {}
-  // Launchpad tokens (e.g. `uptober.nearlytrade.near`) live outside the curated
-  // registry head, so the lookup above misses them and the title used to fall
-  // back to the literal `'crypto'`. Resolve them from the full Rhea list.
-  if (!ticker) {
-    try {
-      ticker = (await nearRpc.resolveRheaToken(env, asset))?.symbol || '';
-    } catch {}
-  }
-  if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset.toUpperCase();
-  // Last resort: derive the ticker from the NEP-141 contract label
-  // ("nep141:uptober.nearlytrade.near" -> "UPTOBER"). A hex contract address is
-  // 64 chars and fails the length guard, so it is never shown as a ticker.
-  if (!ticker && asset.startsWith('nep141:')) {
-    const label = (asset.slice(7).split('.')[0] || '').trim();
-    if (/^[a-z0-9_-]{1,14}$/i.test(label)) ticker = label.toUpperCase();
-  }
-  return ticker;
-}
-
-/** "12.5 USDC" — degrades gracefully when amount or ticker is missing. */
-function plainAmount(amount: string, ticker: string): string {
-  if (amount && ticker) return `${amount} ${ticker}`;
-  return ticker || amount || '';
-}
-
 // 404 / Asset Fallback Handler
 app.notFound(async (c) => {
   if (c.env.ASSETS) {
     const url = new URL(c.req.url);
     const userAgent = c.req.header('user-agent');
-    const isBot = isBotRequest(userAgent);
+    const isBot = isBotRequest(userAgent, url.searchParams.get('card') === '1');
     const claimMatch = url.pathname.match(CLAIM_DEEP_LINK);
 
     if (claimMatch) {
@@ -363,7 +370,7 @@ app.notFound(async (c) => {
         return renderShareCardHtml({
           title,
           description,
-          imageUrl: 'https://app.uprail.world/og/og-claim.png',
+          imageUrl: `${url.origin}/og/claim/${paymentId}.png`,
           url: url.href,
         });
       }
@@ -408,7 +415,7 @@ app.notFound(async (c) => {
           title: amountLabel ? `Payment of ${amountLabel} sent` : 'Payment sent on UPRAIL',
           description:
             'Settled confidentially across chains on UPRAIL — no wallet, no seed phrase.',
-          imageUrl: 'https://app.uprail.world/og/og-send.png',
+          imageUrl: `${url.origin}/og/receipt/${withdrawalId}.png`,
           url: url.href,
         });
       }
@@ -476,7 +483,7 @@ app.notFound(async (c) => {
         return renderShareCardHtml({
           title,
           description: 'Claim by linking your X account and passkey — no wallet, no seed phrase.',
-          imageUrl: 'https://app.uprail.world/og/og-refer.png',
+          imageUrl: `${url.origin}/og/invite/${inviteCode}.png`,
           url: url.href,
         });
       }
