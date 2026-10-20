@@ -60,12 +60,12 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
         {/* Heading */}
         <div className="text-center space-y-1.5 mb-6">
           <h3 className="text-xl font-extrabold text-stone-950 font-display">
-            {hasExistingPasskey ? "Confirm it's you" : 'Set up quick sign-in'}
+            {hasExistingPasskey ? 'Confirm with your passkey' : 'Set up your passkey'}
           </h3>
           <p className="text-xs text-stone-600 leading-relaxed">
             {hasExistingPasskey ? (
               <>
-                Use Face ID, fingerprint, or your PIN to receive this payment for{' '}
+                Use your passkey (Face ID, fingerprint, or your PIN) to receive this payment for{' '}
                 <span className="text-stone-900 font-bold font-mono">@{handle}</span>.
               </>
             ) : (
@@ -87,7 +87,7 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
             <div>
               <p className="font-bold text-stone-900">No password to remember</p>
               <p className="text-stone-500 text-[11px]">
-                Your device saves the secure sign-in for you.
+                Your device saves your passkey for you.
               </p>
             </div>
           </div>
@@ -99,7 +99,7 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
             <div>
               <p className="font-bold text-stone-900">Stays on your device</p>
               <p className="text-stone-500 text-[11px]">
-                Your Face ID, fingerprint, or PIN is never shared with UPRAIL.
+                Your passkey uses Face ID, fingerprint, or your PIN. UPRAIL never sees it.
               </p>
             </div>
           </div>
@@ -133,18 +133,18 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
           {isClaiming ? (
             <>
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span>Waiting for your device…</span>
+              <span>Waiting for your passkey…</span>
             </>
           ) : (
             <>
               <Fingerprint className="w-4 h-4" />
-              <span>{hasExistingPasskey ? 'Confirm & receive' : 'Set up & receive'}</span>
+              <span>{hasExistingPasskey ? 'Confirm with passkey & receive' : 'Set up passkey & receive'}</span>
             </>
           )}
         </button>
 
         <p className="text-center text-[10px] text-stone-400 mt-3 font-sans leading-relaxed">
-          Your device handles the security. UPRAIL never sees your Face ID or fingerprint.
+          Your passkey stays on this device. UPRAIL never sees your Face ID or fingerprint.
         </p>
       </div>
     </div>

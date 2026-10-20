@@ -202,7 +202,7 @@ const WithdrawCard: React.FC<{
         <div>
           <div className="text-xs font-bold text-stone-950 font-display">Withdraw money</div>
           <div className="text-[11px] text-stone-500 font-mono">
-            Secured by your device
+            Secured by your passkey
           </div>
         </div>
       </div>
@@ -732,7 +732,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
         onConfirm={handleConfirmClaimStart}
         tone="financial"
         title={pendingClaim?.all ? 'Receive all payments' : 'Receive payment'}
-        description="This adds the money to your UPRAIL account. You will confirm with Face ID or fingerprint next."
+        description="This adds the money to your UPRAIL account. You will confirm with your passkey (Face ID or fingerprint) next."
         confirmLabel="Continue"
         warning="Only receive payments you are expecting. Once received, the money is in your UPRAIL account and can be withdrawn at any time."
         details={[

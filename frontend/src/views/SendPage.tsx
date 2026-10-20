@@ -454,7 +454,7 @@ export const SendPage: React.FC = () => {
             {isSubmitting ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                <span>Waiting for your device...</span>
+                <span>Waiting for your passkey...</span>
               </>
             ) : (
               <>
@@ -483,7 +483,7 @@ export const SendPage: React.FC = () => {
         title={sendMode === 'handle' ? 'Confirm payment' : 'Confirm withdrawal'}
         description={
           sendMode === 'handle'
-            ? 'Review the payment, then confirm with Face ID or fingerprint.'
+            ? 'Review the payment, then confirm with your passkey (Face ID or fingerprint).'
             : 'This moves money out of your UPRAIL account to an external address.'
         }
         confirmLabel={sendMode === 'handle' ? 'Confirm & send' : 'Withdraw'}

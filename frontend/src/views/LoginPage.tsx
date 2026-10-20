@@ -276,7 +276,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       const described = describePasskeyError(err);
       setError(
         err?.name === 'NotAllowedError' || err?.name === 'InvalidStateError'
-          ? `${described} Sign in with 𝕏 to set up quick sign-in here.`
+          ? `${described} Sign in with 𝕏 to set up a passkey here.`
           : described
       );
       setLoginMethod('x');
@@ -317,7 +317,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 {isPasskeyHero ? (
                   <>
                     <Fingerprint className="w-3.5 h-3.5" />
-                    <span>Quick sign-in</span>
+                    <span>Passkey sign-in</span>
                   </>
                 ) : isStep1 ? (
                   <span>Step 1 of 2</span>
@@ -331,10 +331,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
               </h1>
               <p className="text-sm text-muted leading-relaxed max-w-sm mx-auto">
                 {isPasskeyHero
-                  ? 'Use Face ID, fingerprint, or your PIN to sign in.'
+                  ? 'Use your passkey — Face ID, fingerprint, or your PIN — to sign in.'
                   : isStep1
                   ? 'Use your 𝕏 account to get a payment handle. No crypto wallet or password to remember.'
-                  : 'Set up quick sign-in so you can use this device without 𝕏 next time.'}
+                  : 'Set up a passkey so you can use this device without 𝕏 next time.'}
               </p>
             </div>
           </header>
@@ -413,7 +413,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                         <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
                           <Fingerprint className="w-4 h-4" />
                         </span>
-                        <span className="flex-1 text-center pr-2">Sign in with Face ID or fingerprint</span>
+                        <span className="flex-1 text-center pr-2">Sign in with passkey</span>
                         <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                       </>
                     )}
@@ -464,7 +464,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                       className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer"
                     >
                       <Fingerprint className="w-3.5 h-3.5" />
-                      <span>{hasSignedUp ? 'Sign in with Face ID or fingerprint' : 'Already set up on this device?'}</span>
+                      <span>{hasSignedUp ? 'Sign in with passkey' : 'Already set up on this device?'}</span>
                     </button>
                   </div>
                 </>
@@ -526,7 +526,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   <span className="leading-relaxed">
                     This device can&apos;t save a passkey. Set a screen lock (PIN, pattern, fingerprint,
                     or face) in your device settings, and make sure Google Password Manager is your
-                    passkey provider — then tap <strong>Set up quick sign-in</strong>. You can also use a
+                    passkey provider — then tap <strong>Set up passkey</strong>. You can also use a
                     security key or another device.
                   </span>
                 </div>
@@ -549,7 +549,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
                       <Fingerprint className="w-4 h-4" />
                     </span>
-                    <span className="flex-1 text-center pr-2">Set up quick sign-in</span>
+                    <span className="flex-1 text-center pr-2">Set up passkey</span>
                     <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                   </>
                 )}

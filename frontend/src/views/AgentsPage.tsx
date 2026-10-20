@@ -378,7 +378,7 @@ export const AgentsPage: React.FC = () => {
               ) : (
                 <KeyRound className="w-4 h-4" />
               )}
-              <span>Create key with Face ID</span>
+              <span>Create key with passkey</span>
             </button>
           </div>
         </div>

@@ -295,8 +295,8 @@ export const AppHome: React.FC = () => {
               <Fingerprint className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0 text-left">
-              <div className="font-display font-bold text-sm tracking-tight">Add quick sign-in to this device</div>
-              <div className="text-xs text-stone-300 font-sans mt-0.5">Use Face ID, fingerprint, or your PIN for sign-in and payments</div>
+              <div className="font-display font-bold text-sm tracking-tight">Add a passkey to this device</div>
+              <div className="text-xs text-stone-300 font-sans mt-0.5">Use your passkey (Face ID, fingerprint, or PIN) for sign-in and payments</div>
             </div>
           </div>
           <button
@@ -305,7 +305,7 @@ export const AppHome: React.FC = () => {
             disabled={isEnablingBiometrics}
             className="px-4 py-2.5 rounded-xl bg-white text-black font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-100 active:scale-[0.98] transition-all cursor-pointer flex-shrink-0 self-start sm:self-auto shadow-xs"
           >
-            {isEnablingBiometrics ? 'Activating...' : 'Set up quick sign-in'}
+            {isEnablingBiometrics ? 'Activating...' : 'Set up passkey'}
           </button>
         </div>
       )}
@@ -313,7 +313,7 @@ export const AppHome: React.FC = () => {
       {biometricsSuccess && (
         <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono flex items-center space-x-2 animate-fade-in mb-6">
           <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          <span>Quick sign-in enabled on this device!</span>
+          <span>Passkey enabled on this device!</span>
         </div>
       )}
 
@@ -390,7 +390,7 @@ export const AppHome: React.FC = () => {
               <div className="flex items-center space-x-2 text-[11px] sm:text-xs font-mono text-stone-500">
                 <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${hasIntentAccount ? 'bg-stone-900' : 'bg-amber-500 animate-pulse'}`} />
                 {hasIntentAccount ? (
-                  <span>Live · Private · Protected by your device</span>
+                  <span>Live · Private · Protected by your passkey</span>
                 ) : user?.hasPasskey === true ? (
                   <span className="flex items-center gap-2">
                     <span>Setting up your UPRAIL account…</span>
@@ -404,7 +404,7 @@ export const AppHome: React.FC = () => {
                     </button>
                   </span>
                 ) : (
-                  <span>No account yet — set up quick sign-in to create yours</span>
+                  <span>No account yet — set up a passkey to create yours</span>
                 )}
               </div>
               {!hasIntentAccount && user?.hasPasskey === true && accountError && !isLoadingBalances ? (
@@ -554,7 +554,7 @@ export const AppHome: React.FC = () => {
                 Receive
               </span>
               <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
-                {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Quick sign-in'}
+                {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Passkey'}
               </span>
             </Link>
           </div>

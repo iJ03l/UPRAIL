@@ -103,7 +103,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-2">
-                  <h3 className="font-display font-bold text-stone-950 text-base">Face ID / fingerprint</h3>
+                  <h3 className="font-display font-bold text-stone-950 text-base">Sign in with your passkey</h3>
                   <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-stone-200 text-stone-900">
                     RECOMMENDED
                   </span>
@@ -114,7 +114,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               </div>
             </div>
             <div className="mt-3 pt-2.5 border-t border-stone-200 flex items-center justify-between text-xs text-stone-900 font-mono font-bold">
-              <span>{isPasskeyLoading ? 'Waiting for your device...' : 'Sign in with Face ID or fingerprint'}</span>
+              <span>{isPasskeyLoading ? 'Waiting for your passkey...' : 'Continue with passkey'}</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </button>

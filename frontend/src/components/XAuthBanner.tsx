@@ -57,7 +57,7 @@ export const XAuthBanner: React.FC<XAuthBannerProps> = ({
 
       <div className="flex items-center space-x-2 pt-2 border-t border-stone-800 text-[11px] font-mono text-stone-400">
         <Shield className="w-3.5 h-3.5 text-stone-400" />
-        <span>Protected by your device · No crypto wallet needed</span>
+        <span>Protected by your passkey · No crypto wallet needed</span>
       </div>
     </div>
   );

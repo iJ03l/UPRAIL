@@ -1214,7 +1214,7 @@ export const ReceivePage: React.FC = () => {
                 </div>
                 <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 text-[10px] font-mono text-stone-500">
                   <Zap className="w-3 h-3 text-stone-500" />
-                  <span>Protected by your device</span>
+                  <span>Protected by your passkey</span>
                 </div>
               </div>
             )}

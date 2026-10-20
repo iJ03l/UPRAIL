@@ -67,7 +67,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       setExportedKey(res);
       setShowKey(true);
     } catch (err: any) {
-      setExportError(err.message || 'Device confirmation failed');
+      setExportError(err.message || 'Passkey confirmation failed');
     } finally {
       setIsExporting(false);
     }
@@ -149,7 +149,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                         @{user.handle}
                       </div>
                       <div className="text-[10px] text-stone-500 font-mono">
-                        Device verified
+                        Passkey verified
                       </div>
                     </div>
                   </div>
@@ -260,7 +260,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   </span>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-1">
                     <KeyRound className="w-2.5 h-2.5" />
-                    Protected by your device
+                    Protected by your passkey
                   </span>
                 </div>
 
@@ -268,7 +268,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   {!exportedKey ? (
                     <div className="space-y-2">
                       <p className="text-[11px] text-stone-600 leading-relaxed">
-                        Export the Full Access NEAR private key for your vault (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Confirmed with Face ID, fingerprint, or your PIN.
+                        Export the Full Access NEAR private key for your vault (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Confirmed with your passkey (Face ID, fingerprint, or PIN).
                       </p>
                       {exportError && (
                         <p className="text-[11px] font-mono text-red-600 bg-red-50 p-2 rounded-xl border border-red-200">
@@ -284,7 +284,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                         {isExporting ? (
                           <>
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Waiting for your device...</span>
+                            <span>Waiting for your passkey...</span>
                           </>
                         ) : (
                           <>
@@ -502,12 +502,12 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         onConfirm={() => void performExportKey()}
         tone="danger"
         title="Export account key"
-        description="This key gives full control of your UPRAIL account. Anyone who has it can move every asset without device confirmation."
+        description="This key gives full control of your UPRAIL account. Anyone who has it can move every asset without your passkey."
         confirmLabel="Export key"
         warning="Never share this key or paste it into a website. Store it offline and delete it from your clipboard after use."
         details={[
           { label: 'Vault', value: user?.nearAccount || 'u_…' },
-          { label: 'Protection', value: 'Device confirmation required after this step', mono: false },
+          { label: 'Protection', value: 'Passkey confirmation required after this step', mono: false },
         ]}
       />
 
@@ -519,7 +519,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         title="Reset local cache"
         description="This clears locally stored app state and cached payment data on this device, then reloads the page."
         confirmLabel="Reset cache"
-        warning="Your on-chain balance and payments are not affected. You may need to confirm with your device again."
+        warning="Your on-chain balance and payments are not affected. You may need to confirm with your passkey again."
       />
     </>
   );

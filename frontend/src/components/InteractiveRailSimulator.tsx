@@ -316,7 +316,7 @@ export const InteractiveRailSimulator: React.FC = () => {
                 <div className="text-xs font-mono text-stone-900 bg-white p-2.5 rounded-xl border border-[#E05326]/20 font-medium">
                   <span className="text-stone-500">HOLDING:</span> +{amount} {selectedToken.symbol}<br />
                   <span className="text-stone-500">OWNER:</span> @{cleanHandle}<br />
-                  <span className="text-stone-500">CONFIRM WITH:</span> Face ID<br />
+                  <span className="text-stone-500">CONFIRM WITH:</span> Passkey<br />
                   <span className="text-emerald-700 font-bold">READY TO RECEIVE</span>
                 </div>
               </div>
