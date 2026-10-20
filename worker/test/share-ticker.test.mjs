@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveShareTicker } from '../dist/share.bundle.mjs';
+import { plainAmount, resolveShareTicker } from '../dist/share.bundle.mjs';
 
 const env = { NEAR_RPC_URL: 'https://near.invalid' };
 
@@ -32,5 +32,17 @@ describe('share card ticker resolution', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('share card amount formatting', () => {
+  it('rounds token amounts to two decimals', () => {
+    assert.equal(plainAmount('12.3437283', 'USDC'), '12.34 USDC');
+    assert.equal(plainAmount('94850.72118', '6BOWEN'), '94,850.72 6BOWEN');
+  });
+
+  it('keeps sub-cent amounts visible', () => {
+    assert.equal(plainAmount('0.004321', 'NEAR'), '0.004321 NEAR');
+    assert.equal(plainAmount('0', 'USDC'), '0.00 USDC');
   });
 });
