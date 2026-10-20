@@ -199,6 +199,7 @@ export const ReceivePage: React.FC = () => {
   const [nearCopiedAddress, setNearCopiedAddress] = useState<boolean>(false);
   const [nearDepositAddress, setNearDepositAddress] = useState<DepositAddress | null>(null);
   const [nearDepositError, setNearDepositError] = useState<string | null>(null);
+  const [nearAddressConfirmed, setNearAddressConfirmed] = useState<boolean>(false);
   const [isNearDeriving, setIsNearDeriving] = useState<boolean>(false);
   const [nearDepositStatus, setNearDepositStatus] = useState<DepositStatusResponse | null>(null);
   const [nearSettledSuccess, setNearSettledSuccess] = useState<boolean>(false);
@@ -497,6 +498,8 @@ export const ReceivePage: React.FC = () => {
     // while the new token's address is being derived, or if derivation fails.
     setNearDepositAddress(null);
     setNearDepositError(null);
+    // A new token needs a fresh acknowledgement before its address is shown.
+    setNearAddressConfirmed(false);
     setNearAsset(token);
     setNearSettledSuccess(false);
     setNearDepositStatus(null);
@@ -1310,6 +1313,33 @@ export const ReceivePage: React.FC = () => {
                   </button>
                 </div>
               ) : nearDepositAddressValue ? (
+                !nearAddressConfirmed ? (
+                  <div className="w-full py-6 flex flex-col items-center text-center space-y-4 animate-fade-in">
+                    <div className="w-12 h-12 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center">
+                      <TokenIcon symbol={nearAsset.symbol} size="md" />
+                    </div>
+                    <div className="space-y-1 px-2">
+                      <p className="text-sm font-display font-extrabold text-stone-950">
+                        Ready to receive {nearAsset.symbol}
+                      </p>
+                      <p className="text-[11px] text-stone-500 font-sans leading-relaxed max-w-[280px]">
+                        Your single-use address is ready. Reveal it only when you are about to send{' '}
+                        <strong className="text-stone-800 font-semibold">{nearAsset.symbol}</strong> on NEAR.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setNearAddressConfirmed(true)}
+                      className="w-full py-3 px-4 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold font-mono transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-xs"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>Show {nearAsset.symbol} address</span>
+                    </button>
+                    <p className="text-[10px] text-amber-700 font-mono">
+                      Only {nearAsset.symbol} on NEAR is credited to this address.
+                    </p>
+                  </div>
+                ) : (
                 <>
                   {/* QR of the single-use shielded ingress address */}
                   <div className="py-1">
@@ -1445,6 +1475,7 @@ export const ReceivePage: React.FC = () => {
                     </div>
                   )}
                 </>
+                )
               ) : !hasIntentAccount ? (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
                   <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
