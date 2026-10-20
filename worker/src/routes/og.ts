@@ -45,7 +45,7 @@ async function cached(c: Context<AppContext>, build: () => Promise<Response>) {
 
 ogRouter.get('/claim/:file', (c) => {
   const id = pngId(c.req.param('file'));
-  if (!id) return c.notFound();
+  if (!id) return c.text('Not found', 404);
 
   return cached(c, async () => {
     let sender = '';
@@ -86,7 +86,7 @@ ogRouter.get('/claim/:file', (c) => {
 
 ogRouter.get('/invite/:file', (c) => {
   const code = pngId(c.req.param('file'));
-  if (!code) return c.notFound();
+  if (!code) return c.text('Not found', 404);
 
   return cached(c, async () => {
     let creator = '';
@@ -125,7 +125,7 @@ ogRouter.get('/invite/:file', (c) => {
 
 ogRouter.get('/receipt/:file', (c) => {
   const id = pngId(c.req.param('file'));
-  if (!id) return c.notFound();
+  if (!id) return c.text('Not found', 404);
 
   return cached(c, async () => {
     let amount = '';
