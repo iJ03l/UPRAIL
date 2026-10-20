@@ -25,6 +25,7 @@ import { useXAuth } from '../hooks/useXAuth';
 import { useTheme } from './ThemeProvider';
 import { api, clearAppStorage } from '../lib/api';
 import { useToast } from './Toast';
+import { ConfirmDialog } from './ConfirmDialog';
 import { MyInviteResponse } from '../types';
 
 interface SettingsSidebarProps {
@@ -40,6 +41,8 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const { mode, setMode } = useTheme();
   const { toast } = useToast();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showExportConfirm, setShowExportConfirm] = useState(false);
   const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -51,7 +54,12 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const [copiedKey, setCopiedKey] = useState(false);
   const [showKey, setShowKey] = useState(false);
 
-  const handleExportKey = async () => {
+  const handleExportKey = () => {
+    setShowExportConfirm(true);
+  };
+
+  const performExportKey = async () => {
+    setShowExportConfirm(false);
     setIsExporting(true);
     setExportError(null);
     try {
@@ -74,10 +82,13 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   }, [isOpen, user]);
 
   const handleClearCache = () => {
-    if (window.confirm('Reset local application state and cached intent records?')) {
-      clearAppStorage();
-      window.location.reload();
-    }
+    setShowResetConfirm(true);
+  };
+
+  const performClearCache = () => {
+    setShowResetConfirm(false);
+    clearAppStorage();
+    window.location.reload();
   };
 
   const handleConfirmSignOut = async () => {
@@ -484,6 +495,32 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={showExportConfirm}
+        onCancel={() => setShowExportConfirm(false)}
+        onConfirm={() => void performExportKey()}
+        tone="danger"
+        title="Export vault private key"
+        description="This key gives full control of your vault. Anyone who has it can move every asset without a passkey."
+        confirmLabel="Export key"
+        warning="Never share this key or paste it into a website. Store it offline and delete it from your clipboard after use."
+        details={[
+          { label: 'Vault', value: user?.nearAccount || 'u_…' },
+          { label: 'Protection', value: 'Passkey required after this step', mono: false },
+        ]}
+      />
+
+      <ConfirmDialog
+        isOpen={showResetConfirm}
+        onCancel={() => setShowResetConfirm(false)}
+        onConfirm={performClearCache}
+        tone="danger"
+        title="Reset local vault cache"
+        description="This clears locally stored app state and cached payment data on this device, then reloads the page."
+        confirmLabel="Reset cache"
+        warning="Your on-chain vault and payments are not affected. You may need to re-authorize with your passkey."
+      />
     </>
   );
 };

@@ -14,6 +14,7 @@ import { HandleInput } from '../components/HandleInput';
 import { AmountInput } from '../components/AmountInput';
 import { BackBar } from '../components/BackBar';
 import { ShareModal } from '../components/ShareModal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareModal';
 import { usePayments } from '../hooks/usePayments';
 import { PROTOCOL_FEE_RATE, formatUsd, api } from '../lib/api';
@@ -49,6 +50,7 @@ export const SendPage: React.FC = () => {
   const [walletReceipt, setWalletReceipt] = useState<WalletSendReceipt | null>(null);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   // Recalculate quote on token or amount changes
   useEffect(() => {
@@ -114,8 +116,22 @@ export const SendPage: React.FC = () => {
     setDestinationChain(preferred?.key || '');
   }, [showChainSelector, withdrawChains, destinationChain, destinationChainTouched, detectedFamily]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const isFormValid =
+    (sendMode === 'handle' ? recipient.trim().length >= 2 : walletAddress.trim().length >= 5) &&
+    parseFloat(amount) > 0 &&
+    !chainFamilyMismatch &&
+    !isSubmitting;
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isFormValid) return;
+    clearError();
+    setSuccessToast(null);
+    setShowConfirm(true);
+  };
+
+  const submitPayment = async () => {
+    setShowConfirm(false);
     clearError();
     setSuccessToast(null);
 
@@ -182,11 +198,15 @@ export const SendPage: React.FC = () => {
     }
   };
 
-  const isFormValid =
-    (sendMode === 'handle' ? recipient.trim().length >= 2 : walletAddress.trim().length >= 5) &&
-    parseFloat(amount) > 0 &&
-    !chainFamilyMismatch &&
-    !isSubmitting;
+  const confirmAmountLabel = `${amount || '0'} ${selectedToken.symbol}`;
+  const confirmReceiveLabel =
+    sendMode === 'handle'
+      ? `${quote?.recipientAmount ?? amount} ${quote?.token.symbol ?? selectedToken.symbol}`
+      : `${quote?.amount ?? amount} ${quote?.token.symbol ?? selectedToken.symbol}`;
+  const confirmDestination =
+    sendMode === 'handle'
+      ? `@${recipient.replace(/^@/, '').trim()}`
+      : walletAddress.trim();
 
   return (
     <div className="w-full space-y-6">
@@ -456,6 +476,52 @@ export const SendPage: React.FC = () => {
           </button>
         </form>
       </div>
+
+      <ConfirmDialog
+        isOpen={showConfirm}
+        onCancel={() => setShowConfirm(false)}
+        onConfirm={() => void submitPayment()}
+        tone="financial"
+        title={sendMode === 'handle' ? 'Confirm payment' : 'Confirm withdrawal'}
+        description={
+          sendMode === 'handle'
+            ? 'Review the payment before authorizing it with your device passkey.'
+            : 'This moves funds out of your UPRAIL vault to an external address.'
+        }
+        confirmLabel={sendMode === 'handle' ? 'Authorize & send' : 'Authorize & withdraw'}
+        warning={
+          sendMode === 'handle'
+            ? 'The recipient will be able to claim these funds immediately. If they have not joined UPRAIL yet, you will get a claim link to share.'
+            : 'Withdrawals are irreversible. Confirm the destination address and network before continuing.'
+        }
+        details={[
+          { label: 'To', value: confirmDestination, mono: false, emphasis: true },
+          ...(sendMode === 'wallet' && selectedChainName
+            ? [{ label: 'Network', value: selectedChainName, mono: false }]
+            : []),
+          { label: 'Amount', value: confirmAmountLabel, emphasis: true },
+          ...(sendMode === 'handle'
+            ? [
+                {
+                  label: 'Platform fee',
+                  value: `${quote?.protocolFee ?? '0'} ${quote?.token.symbol ?? selectedToken.symbol}`,
+                },
+              ]
+            : []),
+          { label: 'Recipient receives', value: confirmReceiveLabel },
+          {
+            label: 'Rail',
+            value:
+              quote?.rail === 'native'
+                ? 'NEAR native transfer'
+                : sendMode === 'handle'
+                  ? 'NEAR intent'
+                  : 'NEAR intent withdrawal',
+            mono: false,
+          },
+          ...(memo.trim() ? [{ label: 'Note', value: memo.trim(), mono: false }] : []),
+        ]}
+      />
 
       {/* Share Modal Dialog */}
       {createdPayment && (

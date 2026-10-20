@@ -24,6 +24,7 @@ import {
 import { api } from '../lib/api';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { SkeletonList } from '../components/Skeleton';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import type { AgentKey, CreatedAgentKey } from '../types';
 
@@ -127,6 +128,8 @@ export const AgentsPage: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAgentKey | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [showCreateConfirm, setShowCreateConfirm] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<AgentKey | null>(null);
   const [guideTab, setGuideTab] = useState<'url' | 'mcp' | 'openapi'>('url');
 
   // Create form state
@@ -179,6 +182,14 @@ export const AgentsPage: React.FC = () => {
       return;
     }
 
+    setShowCreateConfirm(true);
+  };
+
+  const performCreate = async () => {
+    setShowCreateConfirm(false);
+    const trimmedName = name.trim();
+    const perTxNum = parseFloat(perTxLimit);
+    const dailyNum = parseFloat(dailyLimit);
     setCreating(true);
     try {
       const assertion = await authorizeWithPasskey(`Connect AI chat “${trimmedName}”`);
@@ -200,8 +211,14 @@ export const AgentsPage: React.FC = () => {
     }
   };
 
-  const handleRevoke = async (k: AgentKey) => {
-    if (!window.confirm(`Revoke “${k.name}”? Any AI chat using this key loses access immediately.`)) return;
+  const handleRevoke = (k: AgentKey) => {
+    setRevokeTarget(k);
+  };
+
+  const performRevoke = async () => {
+    if (!revokeTarget) return;
+    const k = revokeTarget;
+    setRevokeTarget(null);
     setBusyId(k.id);
     setError(null);
     try {
@@ -590,6 +607,43 @@ export const AgentsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={showCreateConfirm}
+        onCancel={() => setShowCreateConfirm(false)}
+        onConfirm={() => void performCreate()}
+        tone="financial"
+        title="Create AI chat key"
+        description="This key lets an AI chat move funds from your vault within the limits below."
+        confirmLabel="Create key"
+        warning="Anyone with this key can spend up to these limits until you revoke it. The key is shown only once."
+        details={[
+          { label: 'Name', value: name.trim() || '—', mono: false, emphasis: true },
+          { label: 'App', value: activePlatformObj.label, mono: false },
+          { label: 'Max per payment', value: `$${perTxLimit || '0'}` },
+          { label: 'Daily limit', value: `$${dailyLimit || '0'}` },
+          { label: 'Expires', value: expiresInDays ? `${expiresInDays} days` : 'Never', mono: false },
+        ]}
+      />
+
+      <ConfirmDialog
+        isOpen={Boolean(revokeTarget)}
+        onCancel={() => setRevokeTarget(null)}
+        onConfirm={() => void performRevoke()}
+        tone="danger"
+        title="Revoke AI chat key"
+        description={
+          revokeTarget
+            ? `Any AI chat using “${revokeTarget.name}” loses access immediately.`
+            : undefined
+        }
+        confirmLabel="Revoke key"
+        warning="This cannot be undone. You would need to create a new key and reconnect the AI chat."
+        details={[
+          { label: 'Name', value: revokeTarget?.name || '—', mono: false, emphasis: true },
+          { label: 'Key', value: `${revokeTarget?.keyPrefix || ''}…` },
+        ]}
+      />
 
       {/* Created key modal */}
       {created && (

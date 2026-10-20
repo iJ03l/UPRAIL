@@ -16,6 +16,7 @@ import {
 import { useClaimFlow } from '../hooks/useClaimFlow';
 import { useXAuth } from '../hooks/useXAuth';
 import { PasskeyPrompt } from '../components/PasskeyPrompt';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { XAuthBanner } from '../components/XAuthBanner';
 import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 import { TokenIcon } from '../components/TokenIcon';
@@ -163,10 +164,12 @@ const WithdrawCard: React.FC<{
   const [balanceIndex, setBalanceIndex] = useState(0);
   const [destination, setDestination] = useState('');
   const [result, setResult] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const active = balances.length > 0 ? balances[Math.min(balanceIndex, balances.length - 1)] : null;
 
   const handleWithdraw = async () => {
+    setShowConfirm(false);
     setResult(null);
     try {
       const res = (await onWithdraw(Math.min(balanceIndex, balances.length - 1), destination.trim())) as {
@@ -182,6 +185,7 @@ const WithdrawCard: React.FC<{
   if (balances.length === 0) return null;
 
   return (
+    <>
     <div className="rounded-3xl p-5 sm:p-6 bg-white border border-stone-200 shadow-xs space-y-4">
       <div className="flex items-center space-x-2.5">
         <ArrowUpRight className="w-5 h-5 text-stone-900" />
@@ -220,7 +224,7 @@ const WithdrawCard: React.FC<{
 
       <button
         type="button"
-        onClick={handleWithdraw}
+        onClick={() => setShowConfirm(true)}
         disabled={isClaiming || !destination.trim() || !active}
         className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs disabled:opacity-60"
       >
@@ -228,6 +232,23 @@ const WithdrawCard: React.FC<{
         <span>Withdraw {active ? `${active.token.symbol}` : ''} with Passkey</span>
       </button>
     </div>
+
+    <ConfirmDialog
+      isOpen={showConfirm}
+      onCancel={() => setShowConfirm(false)}
+      onConfirm={() => void handleWithdraw()}
+      tone="financial"
+      title="Confirm withdrawal"
+      description="This moves funds out of your UPRAIL vault to an external address."
+      confirmLabel="Authorize & withdraw"
+      warning="Withdrawals are irreversible. Double-check the destination address before continuing."
+      details={[
+        { label: 'Asset', value: active?.token.symbol || '—', emphasis: true },
+        { label: 'Amount', value: active?.amount || '—', emphasis: true },
+        { label: 'Destination', value: destination.trim() || '—' },
+      ]}
+    />
+    </>
   );
 };
 
@@ -259,6 +280,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
 
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
+  const [pendingClaim, setPendingClaim] = useState<{ id: string; all: boolean } | null>(null);
 
   // A share link may point at a payment that was already DELIVERED (an
   // already-registered recipient, or a claim that already settled). In that
@@ -309,8 +331,14 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
   } = useClaimFlow(queryPaymentCode);
 
   const handleStartClaim = (paymentId: string) => {
-    setActiveClaimId(paymentId);
+    setPendingClaim({ id: paymentId, all: paymentId === 'all' });
+  };
+
+  const handleConfirmClaimStart = () => {
+    if (!pendingClaim) return;
+    setActiveClaimId(pendingClaim.id);
     setShowPasskeyModal(true);
+    setPendingClaim(null);
   };
 
   const handleConfirmPasskeyClaim = async () => {
@@ -336,6 +364,13 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
 
   const visiblePayments = feesOnly ? pendingPayments.filter((p) => p.isCreatorFee) : pendingPayments;
   const totalPendingUsd = sumUsd(visiblePayments.map((p) => p.amountUsd));
+
+  const previewPayment =
+    pendingClaim && !pendingClaim.all
+      ? pendingPayments.find((p) => p.id === pendingClaim.id) || null
+      : null;
+  const previewCount = pendingClaim?.all ? visiblePayments.length : previewPayment ? 1 : 0;
+  const previewUsd = pendingClaim?.all ? totalPendingUsd : previewPayment?.amountUsd ?? null;
 
   return (
     <div className="w-full space-y-6">
@@ -680,6 +715,48 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
           </div>
         )
       ))}
+
+      <ConfirmDialog
+        isOpen={Boolean(pendingClaim)}
+        onCancel={() => setPendingClaim(null)}
+        onConfirm={handleConfirmClaimStart}
+        tone="financial"
+        title={pendingClaim?.all ? 'Claim all payments' : 'Claim payment'}
+        description="Claiming moves the funds into your UPRAIL vault. You will authorize with your device passkey on the next step."
+        confirmLabel="Continue to passkey"
+        warning="Only claim payments you are expecting. Once claimed, the funds are in your vault and can be withdrawn at any time."
+        details={[
+          ...(pendingClaim?.all
+            ? [
+                { label: 'Payments', value: String(previewCount), emphasis: true },
+                {
+                  label: 'Total value',
+                  value: previewUsd != null ? `≈ ${formatUsd(previewUsd)}` : '—',
+                },
+              ]
+            : [
+                {
+                  label: 'From',
+                  value: previewPayment ? `@${previewPayment.senderHandle}` : '—',
+                  mono: false,
+                },
+                {
+                  label: 'Amount',
+                  value: previewPayment
+                    ? `${previewPayment.amount} ${previewPayment.token.symbol}`
+                    : '—',
+                  emphasis: true,
+                },
+                ...(previewPayment?.amountUsd != null
+                  ? [{ label: 'Value', value: `≈ ${formatUsd(previewPayment.amountUsd)}` }]
+                  : []),
+                ...(previewPayment?.memo
+                  ? [{ label: 'Note', value: previewPayment.memo, mono: false }]
+                  : []),
+              ]),
+          { label: 'Destination', value: `@${user?.handle || 'your account'}`, mono: false },
+        ]}
+      />
 
       {/* Passkey Authentication Modal Prompt */}
       <PasskeyPrompt
