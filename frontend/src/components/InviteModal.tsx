@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   UserCheck,
 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, SHARE_CARD_VERSION } from '../lib/api';
 import { useToast } from './Toast';
 import { MyInviteResponse } from '../types';
 
@@ -71,7 +71,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
     if (!inviteData?.inviteCode) return;
     const origin =
       typeof window !== 'undefined' ? window.location.origin : 'https://app.uprail.world';
-    const link = `${origin}/login?invite=${inviteData.inviteCode}`;
+    const link = `${origin}/login?invite=${inviteData.inviteCode}&v=${SHARE_CARD_VERSION}`;
     navigator.clipboard.writeText(link);
     setCopiedLink(true);
     toast('Invite link copied');

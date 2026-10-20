@@ -201,6 +201,13 @@ app.onError((err, c) => {
 // are rewritten onto the static claim page, which reads the id from the URL.
 const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
 
+/**
+ * Bump when the generated card artwork/layout changes. Social platforms cache
+ * images per URL for a long time, so the version query gives them a new cache
+ * key without changing the payment id.
+ */
+const OG_CARD_VERSION = '2';
+
 // Wallet-send receipt deep links: /receipt/<withdrawalId> and
 // /app/receipt/<withdrawalId>, rewritten onto the static receipt page.
 const RECEIPT_DEEP_LINK = /^\/(?:app\/)?receipt\/([A-Za-z0-9_-]{1,64})\/?$/;
@@ -370,7 +377,7 @@ app.notFound(async (c) => {
         return renderShareCardHtml({
           title,
           description,
-          imageUrl: `${url.origin}/og/claim/${paymentId}.png`,
+          imageUrl: `${url.origin}/og/claim/${paymentId}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });
       }
@@ -415,7 +422,7 @@ app.notFound(async (c) => {
           title: amountLabel ? `Payment of ${amountLabel} sent` : 'Payment sent on UPRAIL',
           description:
             'Settled confidentially across chains on UPRAIL — no wallet, no seed phrase.',
-          imageUrl: `${url.origin}/og/receipt/${withdrawalId}.png`,
+          imageUrl: `${url.origin}/og/receipt/${withdrawalId}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });
       }
@@ -483,7 +490,7 @@ app.notFound(async (c) => {
         return renderShareCardHtml({
           title,
           description: 'Claim by linking your X account and passkey — no wallet, no seed phrase.',
-          imageUrl: `${url.origin}/og/invite/${inviteCode}.png`,
+          imageUrl: `${url.origin}/og/invite/${inviteCode}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });
       }

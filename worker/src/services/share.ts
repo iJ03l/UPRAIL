@@ -1,12 +1,28 @@
 import type { AppContext } from '../types';
 import * as nearRpc from './nearRpc';
 
+/**
+ * Every representation of native NEAR that can reach a stored payment. NEAR is
+ * wrapped for settlement (`nep141:wrap.near`) but must never render as
+ * "WRAP" — and `native:near` must not fall through to the generic `.near`
+ * suffix match, which could pick an unrelated NEP-141 token.
+ */
+const NATIVE_NEAR_ALIASES = new Set([
+  'near',
+  'wnear',
+  'wrap.near',
+  'native:near',
+  'nep141:near',
+  'nep141:wrap.near',
+]);
+
 /** Resolves a stored asset id to a plain-English ticker (never `nep141:…`). */
 export async function resolveShareTicker(
   env: AppContext['Bindings'],
   asset: string
 ): Promise<string> {
   if (!asset) return '';
+  if (NATIVE_NEAR_ALIASES.has(asset.trim().toLowerCase())) return 'NEAR';
   let ticker = '';
   try {
     const tokens = await nearRpc.getSupportedTokens(env);

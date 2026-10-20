@@ -478,15 +478,29 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       .bind(paymentId, 'alice', 'bob', 'USDC', '12.5', 'ESCROWED', now, now + 86400000, now)
       .run();
 
-    const res = await mf.dispatchFetch(`http://localhost/og/claim/${paymentId}.png`);
-    assert.equal(res.status, 200);
-    assert.equal(res.headers.get('content-type'), 'image/png');
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    assert.deepEqual(
-      [...bytes.slice(0, 8)],
-      [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
-    );
-    assert.ok(bytes.length > 1000, 'expected a rendered PNG, not an empty body');
+    const nativeNearId = 'pay_og_card_near';
+    await db
+      .prepare(
+        `INSERT INTO payments
+           (id, sender_x_handle, recipient_handle, asset, amount, status,
+            created_at, expires_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(nativeNearId, 'alice', 'bob', 'native:near', '1.25', 'ESCROWED', now, now + 86400000, now)
+      .run();
+
+    for (const id of [paymentId, nativeNearId]) {
+      const res = await mf.dispatchFetch(`http://localhost/og/claim/${id}.png`);
+      assert.equal(res.status, 200, id);
+      assert.equal(res.headers.get('content-type'), 'image/png', id);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      assert.deepEqual(
+        [...bytes.slice(0, 8)],
+        [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+        id
+      );
+      assert.ok(bytes.length > 1000, `${id}: expected a rendered PNG`);
+    }
 
     const missing = await mf.dispatchFetch('http://localhost/og/claim/not-a-png');
     assert.equal(missing.status, 404);

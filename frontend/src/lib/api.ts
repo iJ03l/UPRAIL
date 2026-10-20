@@ -27,9 +27,17 @@ function claimBaseUrl(): string {
   return 'https://app.uprail.world/claim';
 }
 
+/**
+ * Bump when the share-card metadata or artwork changes. Social platforms cache
+ * previews per exact URL, so a new version makes re-shares get re-crawled
+ * instead of showing the old card.
+ */
+export const SHARE_CARD_VERSION = '2';
+
 function claimUrlFor(paymentId: string, inviteCode?: string | null): string {
-  const base = `${claimBaseUrl()}/${paymentId}`;
-  return inviteCode ? `${base}?invite=${encodeURIComponent(inviteCode)}` : base;
+  const params = new URLSearchParams({ v: SHARE_CARD_VERSION });
+  if (inviteCode) params.set('invite', inviteCode);
+  return `${claimBaseUrl()}/${paymentId}?${params.toString()}`;
 }
 
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;

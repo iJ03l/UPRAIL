@@ -1397,8 +1397,9 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       asset: asset.toUpperCase(),
       amount: parsedAmount.toFixed(2),
       // Public receipt link so a wallet send is shareable too, mirroring the
-      // claim/receipt link an X-handle send produces.
-      shareLink: `${resolveOrigin(c.env)}/receipt/${withdrawalId}`,
+      // claim/receipt link an X-handle send produces. The version query busts
+      // platform preview caches when the card artwork changes.
+      shareLink: `${resolveOrigin(c.env)}/receipt/${withdrawalId}?v=2`,
       message: `Successfully withdrawn ${parsedAmount.toFixed(2)} ${asset.toUpperCase()} to ${destinationAddress}`,
     });
   } catch (err: any) {
