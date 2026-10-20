@@ -3237,11 +3237,30 @@ export async function executeIntentsRelayed(
   signedPayload: any
 ): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const fallbackRpcUrl = 'https://free.rpc.fastnear.com';
   const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
   const privKeyStr = env.ESCROW_PRIVATE_KEY;
   if (!privKeyStr) {
     return { success: false, error: 'ESCROW_PRIVATE_KEY is missing' };
   }
+
+  let activeRpcUrl = rpcUrl;
+  const readRpc = async (method: string, params: Record<string, unknown>) => {
+    try {
+      const result = await nearRpc(rpcUrl, method, params);
+      activeRpcUrl = rpcUrl;
+      return result;
+    } catch (primaryErr: any) {
+      if (rpcUrl === fallbackRpcUrl) throw primaryErr;
+      console.warn(
+        `[intents] ${method} via primary RPC failed, retrying on FastNEAR:`,
+        primaryErr?.message || primaryErr
+      );
+      const result = await nearRpc(fallbackRpcUrl, method, params);
+      activeRpcUrl = fallbackRpcUrl;
+      return result;
+    }
+  };
 
   let broadcastAttempted = false;
   try {
@@ -3250,34 +3269,44 @@ export async function executeIntentsRelayed(
     const escrowPubKey = ed25519.getPublicKey(escrowPrivKey);
     const escrowPubKeyB58 = `ed25519:${base58Encode(escrowPubKey)}`;
 
-    const statusRes = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'status', params: [] }),
-    });
-    const statusData = (await statusRes.json()) as any;
-    const latestBlockHash = base58Decode(statusData?.result?.sync_info?.latest_block_hash || '');
-
-    const keyRes = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'query',
-        params: {
-          request_type: 'view_access_key',
-          finality: 'final',
-          account_id: escrowId,
-          public_key: escrowPubKeyB58,
-        },
-      }),
-    });
-    const keyData = (await keyRes.json()) as any;
-    if (!keyData?.result?.nonce && keyData?.result?.nonce !== 0) {
-      return { success: false, error: 'Escrow key query failed' };
+    let statusData: any;
+    try {
+      statusData = await readRpc('status', {});
+    } catch (statusErr: any) {
+      console.warn('[intents] status RPC failed:', statusErr?.message || statusErr);
+      return {
+        success: false,
+        error: `NEAR RPC unavailable: ${statusErr?.message || String(statusErr)}`,
+      };
     }
-    const nonce = BigInt(keyData.result.nonce) + 1n;
+    const latestBlockHash = base58Decode(statusData?.sync_info?.latest_block_hash || '');
+    if (latestBlockHash.length === 0) {
+      return { success: false, error: 'NEAR RPC status returned no latest block hash' };
+    }
+
+    let keyData: any;
+    try {
+      keyData = await readRpc('query', {
+        request_type: 'view_access_key',
+        finality: 'final',
+        account_id: escrowId,
+        public_key: escrowPubKeyB58,
+      });
+    } catch (keyErr: any) {
+      const detail = keyErr?.message || String(keyErr);
+      console.warn(`[intents] escrow key query failed for ${escrowPubKeyB58}:`, detail);
+      return { success: false, error: `Escrow key query failed: ${detail}` };
+    }
+    if (keyData?.nonce === undefined || keyData?.nonce === null) {
+      console.warn(
+        `[intents] escrow key ${escrowPubKeyB58} is not registered on ${escrowId}`
+      );
+      return {
+        success: false,
+        error: `Escrow key query failed: ${escrowPubKeyB58} is not registered on ${escrowId}`,
+      };
+    }
+    const nonce = BigInt(keyData.nonce) + 1n;
 
     const w = new BorshWriter();
     w.writeString(escrowId);
@@ -3310,7 +3339,7 @@ export async function executeIntentsRelayed(
     const base64Tx = btoa(binary);
 
     broadcastAttempted = true;
-    const broadcastRes = await fetch(rpcUrl, {
+    const broadcastRes = await fetch(activeRpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
