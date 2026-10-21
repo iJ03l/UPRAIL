@@ -109,6 +109,10 @@ export interface Payment {
   invite_code?: string | null;
   memo?: string | null;
   status: PaymentStatus;
+  /** Human-readable reason a CANCELLED payment stopped before settlement. */
+  cancel_reason?: string | null;
+  /** Stable machine code (USER_CANCELLED, SETTLEMENT_FAILED, ESCROW_LOCK_FAILED). */
+  cancel_code?: string | null;
   deposit_address?: string | null;
   intent_hash?: string | null;
   claim_tx_hash?: string | null;

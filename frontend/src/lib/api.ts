@@ -206,6 +206,8 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
     inviteCode: p.invite_code || undefined,
     memo: p.memo || '',
     status: mapBackendStatus(p.status),
+    cancelReason: p.cancel_reason || null,
+    cancelCode: p.cancel_code || null,
     depositAddress: p.deposit_address || 'escrow.uprail.near',
     claimTxHash: p.claim_tx_hash || undefined,
     claimLink: claimUrlFor(p.id, p.invite_code),

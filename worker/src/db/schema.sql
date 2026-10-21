@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS payments (
   invite_code TEXT,
   memo TEXT,
   status TEXT NOT NULL,
+  -- Why a CANCELLED send was cancelled (user cancel, settlement failure, etc.).
+  cancel_reason TEXT,
+  cancel_code TEXT,
   deposit_address TEXT,
   intent_hash TEXT,
   claim_tx_hash TEXT,

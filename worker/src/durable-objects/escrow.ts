@@ -188,6 +188,15 @@ export class EscrowDO extends DurableObject<Env> {
     }
 
     const updated = await this.updateStatus(PaymentStatus.CANCELLED);
+    try {
+      await this.env.DB.prepare(
+        'UPDATE payments SET cancel_reason = ?, cancel_code = ?, updated_at = ? WHERE id = ?'
+      )
+        .bind('Cancelled by you before the payment was sent.', 'USER_CANCELLED', Date.now(), state.id)
+        .run();
+    } catch (err) {
+      console.warn(`[EscrowDO ${state.id}] failed to persist cancellation reason:`, err);
+    }
     await this.ctx.storage.deleteAlarm();
     return updated;
   }

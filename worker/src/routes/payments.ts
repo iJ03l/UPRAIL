@@ -646,9 +646,18 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     ): Promise<Response> => {
       try {
         await c.env.DB.prepare(
-          'UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?'
+          `UPDATE payments
+              SET status = ?, cancel_reason = ?, cancel_code = ?, updated_at = ?
+            WHERE id = ? AND status = ?`
         )
-          .bind(PaymentStatus.CANCELLED, Date.now(), paymentId, PaymentStatus.PENDING)
+          .bind(
+            PaymentStatus.CANCELLED,
+            message,
+            code,
+            Date.now(),
+            paymentId,
+            PaymentStatus.PENDING
+          )
           .run();
       } catch (cancelErr) {
         console.error(`[send] failed to mark ${paymentId} cancelled after settlement failure:`, cancelErr);

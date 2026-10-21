@@ -34,7 +34,7 @@ import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
-import { historyStatusLabel } from '../lib/statusLabels';
+import { cancellationReason, historyStatusLabel } from '../lib/statusLabels';
 
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
@@ -192,6 +192,7 @@ export const AppHome: React.FC = () => {
       isSent: boolean;
       title: string;
       subtitle: string;
+      reason?: string | null;
       amount: string;
       symbol: string;
       status: string;
@@ -213,6 +214,10 @@ export const AppHome: React.FC = () => {
         isSent,
         title: isSent ? formatRecipientDisplay(p.recipientHandle) : `@${p.senderHandle}`,
         subtitle: p.memo || new Date(p.createdAt).toLocaleDateString(),
+        reason:
+          p.status === 'cancelled'
+            ? cancellationReason(p.cancelReason, p.cancelCode)
+            : null,
         amount: `${isSent ? '-' : '+'}${formatTokenAmount(p.amount)}`,
         symbol: p.token.symbol,
         status: p.status,
@@ -625,6 +630,15 @@ export const AppHome: React.FC = () => {
                           <div className="text-[10px] text-stone-400 font-mono truncate">
                             {tx.subtitle}
                           </div>
+                          {tx.reason && (
+                            <div
+                              className="text-[10px] text-amber-700 font-mono flex items-start gap-1 leading-snug mt-0.5 max-w-[220px] sm:max-w-xs"
+                              title={tx.reason}
+                            >
+                              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                              <span className="line-clamp-2 break-words">{tx.reason}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -636,6 +650,10 @@ export const AppHome: React.FC = () => {
                           <span className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
                             tx.status === 'success' || tx.status === 'claimed'
                               ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                              : tx.status === 'failed'
+                              ? 'text-red-700 bg-red-50 border-red-200'
+                              : tx.status === 'cancelled'
+                              ? 'text-amber-700 bg-amber-50 border-amber-200'
                               : 'text-stone-600 bg-stone-100 border-stone-200'
                           }`}>
                             {historyStatusLabel(tx.status)}

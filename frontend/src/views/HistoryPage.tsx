@@ -10,6 +10,7 @@ import {
   Check,
   Share2,
   ExternalLink,
+  AlertCircle,
 } from 'lucide-react';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
@@ -20,7 +21,7 @@ import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { PaymentIntent } from '../types';
-import { historyStatusLabel } from '../lib/statusLabels';
+import { cancellationReason, historyStatusLabel } from '../lib/statusLabels';
 
 export const HistoryPage: React.FC = () => {
   const { user } = useXAuth();
@@ -62,6 +63,7 @@ export const HistoryPage: React.FC = () => {
       isSent: boolean;
       title: string;
       subtitle: string;
+      reason?: string | null;
       senderHandle?: string;
       recipientHandle?: string;
       amount: string;
@@ -88,6 +90,10 @@ export const HistoryPage: React.FC = () => {
         isSent,
         title: isSent ? `To ${formatRecipientDisplay(p.recipientHandle)}` : `From @${p.senderHandle}`,
         subtitle: p.memo || 'Confidential transfer via NEAR Intents',
+        reason:
+          p.status === 'cancelled'
+            ? cancellationReason(p.cancelReason, p.cancelCode)
+            : null,
         senderHandle: p.senderHandle,
         recipientHandle: p.recipientHandle,
         amount: p.amount,
@@ -302,6 +308,15 @@ export const HistoryPage: React.FC = () => {
                       <p className="text-[11px] text-stone-500 font-mono mt-0.5 line-clamp-1 break-all">
                         {tx.subtitle}
                       </p>
+                      {tx.reason && (
+                        <p
+                          className="text-[10px] text-amber-700 font-mono mt-1 flex items-start gap-1.5 leading-snug"
+                          title={tx.reason}
+                        >
+                          <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                          <span className="line-clamp-2 break-words">{tx.reason}</span>
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -325,6 +340,10 @@ export const HistoryPage: React.FC = () => {
                           className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
                             tx.status === 'success' || tx.status === 'claimed'
                               ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                              : tx.status === 'failed'
+                              ? 'text-red-700 bg-red-50 border-red-200'
+                              : tx.status === 'cancelled'
+                              ? 'text-amber-700 bg-amber-50 border-amber-200'
                               : 'text-stone-600 bg-stone-100 border-stone-200'
                           }`}
                         >

@@ -56,6 +56,10 @@ export interface PaymentIntent {
   inviteCode?: string;
   memo?: string;
   status: PaymentStatus;
+  /** Why a CANCELLED payment stopped before settlement (user-safe). */
+  cancelReason?: string | null;
+  /** Stable cancellation code, e.g. USER_CANCELLED or SETTLEMENT_FAILED. */
+  cancelCode?: string | null;
   depositAddress: string;
   depositTxHash?: string;
   shieldedTxHash?: string;
