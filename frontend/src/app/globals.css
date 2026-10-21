@@ -498,6 +498,70 @@
   }
 }
 
+/*
+ * Live NEAR Intents status. Two slow, offset halo rings expand from a
+ * breathing core — enough motion to read as telemetry, not a notification
+ * badge. Motion is disabled wholesale by the reduced-motion rule below.
+ */
+@keyframes intents-ring {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.55;
+  }
+  65%, 100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes intents-core-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 1;
+  }
+}
+
+.intents-status-dot {
+  position: relative;
+  display: inline-flex;
+  width: 7px;
+  height: 7px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.intents-status-core {
+  position: relative;
+  z-index: 1;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: #10b981;
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.28),
+    0 0 9px rgba(16, 185, 129, 0.5);
+  animation: intents-core-breathe 3.2s ease-in-out infinite;
+}
+
+.intents-status-ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 9999px;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.14);
+  opacity: 0;
+  animation: intents-ring 3.2s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
+}
+
+.intents-status-ring--delayed {
+  animation-delay: 1.6s;
+}
+
 @keyframes ambient-telemetry-tic {
   0%, 95%, 100% {
     transform: translate(0, 0) skewX(0);

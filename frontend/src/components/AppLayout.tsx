@@ -2,12 +2,11 @@
 
 import React, { useState } from 'react';
 import { Link } from '../lib/router';
-import { Users, Bot } from 'lucide-react';
+import { Bot } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { SettingsSidebar } from './SettingsSidebar';
 import { QuantusInteractiveCanvas } from './QuantusInteractiveCanvas';
 import { InviteGateModal } from './InviteGateModal';
-import { InviteModal } from './InviteModal';
 import { GlitchLogo } from './GlitchLogo';
 
 interface AppLayoutProps {
@@ -17,7 +16,6 @@ interface AppLayoutProps {
 export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const { user, refreshSession } = useXAuth();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-white text-stone-900 flex flex-col font-sans selection:bg-black selection:text-white relative">
@@ -29,57 +27,53 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         Mobile & Desktop optimized
       */}
       <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-stone-100">
-        <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+        <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-[72px] flex items-center justify-between gap-2 sm:gap-4">
           {/* Left: Brand with Cinematic Glitch — icon-only on mobile, full wordmark on sm+ */}
           <GlitchLogo href="/app" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
 
-          {/* Center: Subtle Protocol Status (Desktop) */}
-          <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-stone-50 border border-stone-200 text-[10px] font-mono text-stone-600 flex-shrink-0">
-            <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
-            <span>NEAR Intents Active</span>
+          {/* Center: live protocol status — compact on mobile, full label on desktop */}
+          <div
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-50/90 border border-stone-200/80 text-[10px] sm:text-[11px] font-mono text-stone-600 flex-shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+            title="NEAR Intents is live"
+          >
+            <span className="intents-status-dot" aria-hidden="true">
+              <span className="intents-status-ring" />
+              <span className="intents-status-ring intents-status-ring--delayed" />
+              <span className="intents-status-core" />
+            </span>
+            <span className="hidden sm:inline tracking-tight">NEAR Intents Active</span>
+            <span className="sm:hidden tracking-tight">Intents</span>
           </div>
 
-          {/* Right: User Pill / Sign In + Invites + Settings */}
-          <div className="flex items-center space-x-1.5 sm:space-x-2 flex-shrink-0 min-w-0">
+          {/* Right: User Pill / Sign In + AI Chat + Settings */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0 min-w-0">
             {user ? (
               <>
                 {/* AI Chat Payments Link */}
                 <Link
                   to="/app/agents"
-                  className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer text-xs font-mono font-bold text-stone-900 group flex-shrink-0"
+                  className="flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer text-xs font-mono font-bold text-stone-900 group flex-shrink-0"
                   title="Send & receive payments in ChatGPT, Claude & Cursor"
                 >
-                  <Bot className="w-3.5 h-3.5 text-stone-700 group-hover:text-black flex-shrink-0" />
-                  <span className="hidden sm:inline">AI Chat</span>
+                  <Bot className="w-4 h-4 text-stone-700 group-hover:text-black flex-shrink-0" />
+                  <span className="hidden md:inline">AI Chat</span>
                 </Link>
-
-                {/* Invite Button Badge */}
-                <button
-                  type="button"
-                  onClick={() => setIsInviteModalOpen(true)}
-                  className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer text-xs font-mono font-bold text-stone-900 group flex-shrink-0"
-                  title="View & Share your 1 Personal Invite Code"
-                >
-                  <Users className="w-3.5 h-3.5 text-stone-700 group-hover:text-black flex-shrink-0" />
-                  <span>Invite</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-stone-900 flex-shrink-0" />
-                </button>
 
                 <button
                   type="button"
                   onClick={() => setIsSettingsOpen(true)}
-                  className="flex items-center space-x-1.5 sm:space-x-2 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer group flex-shrink-0"
+                  className="flex items-center gap-2 h-9 sm:h-10 px-2 sm:px-3 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer group flex-shrink-0 min-w-0"
                   title="Account Settings"
                 >
                   <img
                     src={user.avatarUrl || `https://unavatar.io/twitter/${user.handle}`}
                     alt={user.handle}
-                    className="w-4 h-4 rounded-full border border-stone-300 flex-shrink-0"
+                    className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border border-stone-300 flex-shrink-0"
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
                   />
-                  <span className="text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors max-w-[90px] sm:max-w-[130px] truncate">
+                  <span className="text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors max-w-[84px] sm:max-w-[150px] truncate">
                     @{user.handle}
                   </span>
                 </button>
@@ -87,7 +81,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
             ) : (
               <Link
                 to="/login"
-                className="px-3.5 py-1.5 rounded-full bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors shadow-xs flex-shrink-0"
+                className="h-9 sm:h-10 px-3.5 sm:px-4 inline-flex items-center rounded-full bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors shadow-xs flex-shrink-0"
               >
                 Sign In
               </Link>
@@ -131,13 +125,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       <SettingsSidebar
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
-      />
-
-      {/* Invite Modal */}
-      <InviteModal
-        isOpen={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
-        userHandle={user?.handle}
       />
 
       {/* Invite Gatekeeper Modal for First-time unactivated users */}
