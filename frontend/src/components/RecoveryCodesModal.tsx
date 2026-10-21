@@ -9,6 +9,8 @@ export interface RecoveryCodesModalProps {
   onDone: () => void;
   title?: string;
   description?: string;
+  notice?: string;
+  doneLabel?: string;
 }
 
 export const RecoveryCodesModal: React.FC<RecoveryCodesModalProps> = ({
@@ -17,6 +19,8 @@ export const RecoveryCodesModal: React.FC<RecoveryCodesModalProps> = ({
   onDone,
   title = 'Save your recovery codes',
   description = 'Each code works once. Use one if you ever lose your passkey; it lets you register a new passkey on another device.',
+  notice = 'UPRAIL cannot recover these for you. Anyone with a code can replace your passkey, so keep them private.',
+  doneLabel = 'I saved these codes',
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -101,10 +105,7 @@ export const RecoveryCodesModal: React.FC<RecoveryCodesModalProps> = ({
 
         <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-[11px] leading-relaxed text-amber-900">
           <ShieldCheck className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-700" />
-          <span>
-            These codes are shown only once. UPRAIL cannot recover them for you. Anyone with a
-            code can replace your passkey, so keep them private.
-          </span>
+          <span>{notice}</span>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2.5">
@@ -131,7 +132,7 @@ export const RecoveryCodesModal: React.FC<RecoveryCodesModalProps> = ({
           onClick={onDone}
           className="mt-2.5 w-full py-3.5 px-4 rounded-2xl bg-black hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider transition-colors cursor-pointer"
         >
-          I saved these codes
+          {doneLabel}
         </button>
       </div>
     </div>

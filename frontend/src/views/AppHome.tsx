@@ -28,7 +28,6 @@ import {
   formatUsdCompact,
   sumUsd,
 } from '../lib/api';
-import { webauthn, describePasskeyError } from '../lib/webauthn';
 import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { RollingNumber } from '../components/RollingNumber';
@@ -39,38 +38,6 @@ import { cancellationReason, historyStatusLabel } from '../lib/statusLabels';
 export const AppHome: React.FC = () => {
   const { user } = useXAuth();
   const { toast } = useToast();
-  const [hasDevicePasskey, setHasDevicePasskey] = useState<boolean>(() => {
-    return user?.handle ? webauthn.hasLocalPasskey(user.handle) : true;
-  });
-  const [isEnablingBiometrics, setIsEnablingBiometrics] = useState<boolean>(false);
-  const [biometricsSuccess, setBiometricsSuccess] = useState<boolean>(false);
-  const [biometricsError, setBiometricsError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (user?.handle) {
-      setHasDevicePasskey(webauthn.hasLocalPasskey(user.handle));
-    }
-  }, [user?.handle]);
-
-  const handleEnableDeviceBiometrics = async () => {
-    if (!user?.handle || isEnablingBiometrics) return;
-    setIsEnablingBiometrics(true);
-    setBiometricsError(null);
-    try {
-      const res = await webauthn.registerPasskey(user.handle);
-      if (res.success) {
-        setHasDevicePasskey(true);
-        setBiometricsSuccess(true);
-        setTimeout(() => setBiometricsSuccess(false), 4000);
-      }
-    } catch (e) {
-      console.warn('Device passkey creation notice:', e);
-      setBiometricsError(describePasskeyError(e));
-    } finally {
-      setIsEnablingBiometrics(false);
-    }
-  };
-
   const {
     history,
     loadHistory,
@@ -292,43 +259,6 @@ export const AppHome: React.FC = () => {
 
   return (
     <div className="w-full">
-      {/* Missing Device Passkey Banner */}
-      {user?.handle && !hasDevicePasskey && (
-        <div className="p-4 sm:p-5 rounded-3xl bg-black text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm animate-fade-in mb-6">
-          <div className="flex items-center space-x-3.5 min-w-0">
-            <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
-              <Fingerprint className="w-5 h-5 text-white" />
-            </div>
-            <div className="min-w-0 text-left">
-              <div className="font-display font-bold text-sm tracking-tight">Add a passkey to this device</div>
-              <div className="text-xs text-stone-300 font-sans mt-0.5">Use your passkey (Face ID, fingerprint, or PIN) for sign-in and payments</div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={handleEnableDeviceBiometrics}
-            disabled={isEnablingBiometrics}
-            className="px-4 py-2.5 rounded-xl bg-white text-black font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-100 active:scale-[0.98] transition-all cursor-pointer flex-shrink-0 self-start sm:self-auto shadow-xs"
-          >
-            {isEnablingBiometrics ? 'Activating...' : 'Set up passkey'}
-          </button>
-        </div>
-      )}
-
-      {biometricsSuccess && (
-        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-mono flex items-center space-x-2 animate-fade-in mb-6">
-          <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-          <span>Passkey enabled on this device!</span>
-        </div>
-      )}
-
-      {biometricsError && (
-        <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-900 text-xs font-mono flex items-start space-x-2 animate-fade-in mb-6">
-          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-          <span>{biometricsError}</span>
-        </div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
 
         {/* ── LEFT COLUMN: Balance, Quick Actions, Receive via Intents ── */}
@@ -556,7 +486,7 @@ export const AppHome: React.FC = () => {
                 <Fingerprint className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
               <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
-                Receive
+                Payments
               </span>
               <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
                 {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Passkey'}

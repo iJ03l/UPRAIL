@@ -143,15 +143,37 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     }
 
     // Look up the user's registered passkey credential
-    let passkeyRow: { public_key: string; counter: number; credential_id?: string } | null = null;
+    let passkeyRow: { x_id?: string; public_key: string; counter: number; credential_id?: string } | null = null;
 
     if (c.env.DB) {
       try {
         passkeyRow = await c.env.DB.prepare(
-          'SELECT public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ?'
+          'SELECT x_id, public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ?'
         )
           .bind(session.x_id, assertion.id)
           .first<any>();
+      } catch {}
+    }
+
+    // A valid assertion from another account's credential must be rejected as
+    // an account mismatch, never accepted because the current user happens to
+    // have one passkey. This check runs before the alternate-encoding fallback.
+    if (!passkeyRow && c.env.DB) {
+      try {
+        const foreign = await c.env.DB.prepare(
+          'SELECT x_id FROM passkeys WHERE credential_id = ?'
+        )
+          .bind(assertion.id)
+          .first<{ x_id: string }>();
+        if (foreign && foreign.x_id !== session.x_id) {
+          return c.json<ErrorResponse>(
+            {
+              error: 'This passkey belongs to a different UPRAIL account.',
+              code: 'ACCOUNT_MISMATCH',
+            },
+            403
+          );
+        }
       } catch {}
     }
 
@@ -159,7 +181,7 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
     if (!passkeyRow && c.env.DB) {
       try {
         const rows = await c.env.DB.prepare(
-          'SELECT public_key, counter, credential_id FROM passkeys WHERE x_id = ?'
+          'SELECT x_id, public_key, counter, credential_id FROM passkeys WHERE x_id = ?'
         )
           .bind(session.x_id)
           .all<any>();
@@ -178,6 +200,16 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
         {
           error: 'Passkey credential not found. Please register a passkey for your account.',
           code: 'CREDENTIAL_NOT_FOUND',
+        },
+        403
+      );
+    }
+
+    if (passkeyRow.x_id && passkeyRow.x_id !== session.x_id) {
+      return c.json<ErrorResponse>(
+        {
+          error: 'This passkey belongs to a different UPRAIL account.',
+          code: 'ACCOUNT_MISMATCH',
         },
         403
       );

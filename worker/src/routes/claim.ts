@@ -377,6 +377,26 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       expectedRPID: allowedWebAuthnRpIds(c.env),
     });
 
+    // A credential is permanently bound to the identity that first registered
+    // it. Refuse to re-home an existing credential to another X account, even
+    // if a client submits it through a different authenticated session.
+    if (c.env.DB) {
+      const owner = await c.env.DB.prepare(
+        'SELECT x_id FROM passkeys WHERE credential_id = ?'
+      )
+        .bind(verification.credentialId)
+        .first<{ x_id: string }>();
+      if (owner && owner.x_id !== session.x_id) {
+        return c.json<ErrorResponse>(
+          {
+            error: 'This passkey is already linked to a different UPRAIL account.',
+            code: 'ACCOUNT_MISMATCH',
+          },
+          409
+        );
+      }
+    }
+
     // Resolve deterministic, authentic confidential sub-account for user
     // Fully provisions subaccount and registers authentic keys on intents.near
     const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
@@ -447,9 +467,8 @@ claimRouter.post('/register', requireAuth(), async (c) => {
 
     // New users get their recovery codes at the same moment they create the
     // first passkey. Existing users keep whatever batch they already saved.
-    let recovery: Awaited<ReturnType<typeof ensureRecoveryCodes>> = null;
     try {
-      recovery = await ensureRecoveryCodes(c.env, session.x_id);
+      await ensureRecoveryCodes(c.env, session.x_id);
     } catch (recoveryErr) {
       console.warn('Recovery-code generation skipped:', recoveryErr);
     }
@@ -470,7 +489,6 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       success: true,
       nearAccount,
       credentialId: verification.credentialId,
-      recoveryCodes: recovery?.codes || null,
     });
   } catch (err: any) {
     console.error('Passkey registration error:', err);

@@ -760,7 +760,6 @@ export const api = {
   async confirmPasskey(assertion: unknown): Promise<{
     success: boolean;
     passkeyVerified: boolean;
-    recoveryCodes?: string[] | null;
     hasRecoveryCodes?: boolean;
     recoveryCodesRemaining?: number;
   }> {
@@ -778,9 +777,29 @@ export const api = {
     return await res.json();
   },
 
-  async getRecoveryStatus(): Promise<{ hasCodes: boolean; total: number; remaining: number }> {
+  async getRecoveryStatus(): Promise<{ hasCodes: boolean; remaining: number; viewable: number }> {
     const url = API_BASE ? `${API_BASE}/auth/recovery/status` : '/auth/recovery/status';
     const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'Could not load recovery codes');
+    }
+    return await res.json();
+  },
+
+  async getRecoveryCodes(assertion: unknown): Promise<{
+    success: boolean;
+    codes: string[];
+    remaining: number;
+    legacy: number;
+  }> {
+    const url = API_BASE ? `${API_BASE}/auth/recovery/codes` : '/auth/recovery/codes';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ assertion }),
+    });
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as any;
       throw new Error(err.error || 'Could not load recovery codes');

@@ -1,8 +1,36 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { Miniflare } from 'miniflare';
+
+function signTestSession(session) {
+  const payload = JSON.stringify(session);
+  const body = Buffer.from(payload).toString('base64url');
+  const signature = createHmac('sha256', 'test_session_secret_do_not_use_in_production')
+    .update(payload)
+    .digest('base64url');
+  return `${body}.${signature}`;
+}
+
+function fakeAssertion(credentialId, challenge) {
+  const clientData = {
+    type: 'webauthn.get',
+    challenge,
+    origin: 'https://app.uprail.world',
+  };
+  return {
+    id: credentialId,
+    rawId: credentialId,
+    type: 'public-key',
+    response: {
+      clientDataJSON: Buffer.from(JSON.stringify(clientData)).toString('base64url'),
+      authenticatorData: 'AAAA',
+      signature: 'AAAA',
+      userHandle: null,
+    },
+  };
+}
 
 describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
   /** @type {Miniflare} */
@@ -55,6 +83,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0003_withdrawal_error_diagnostics.sql',
       '0004_agent_rail.sql',
       '0007_recovery_codes.sql',
+      '0008_recovery_code_ciphertext.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
@@ -207,6 +236,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     for (const [path, method] of [
       ['/auth/passkey/confirm', 'POST'],
       ['/auth/recovery/status', 'GET'],
+      ['/auth/recovery/codes', 'POST'],
       ['/auth/recovery/verify', 'POST'],
       ['/auth/recovery/regenerate', 'POST'],
     ]) {
@@ -219,6 +249,111 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       const body = await res.json();
       assert.equal(body.code, 'UNAUTHORIZED', `${method} ${path}`);
     }
+  });
+
+  it('passkey login cannot switch an active X session to another account', async () => {
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    await db
+      .prepare(
+        `INSERT INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, 1, ?, ?)`
+      )
+      .bind('xid_pk_alice', 'pk_alice', 'Alice', now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, 1, ?, ?)`
+      )
+      .bind('xid_pk_bob', 'pk_bob', 'Bob', now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO passkeys (id, x_id, credential_id, public_key, counter, transports, created_at)
+         VALUES (?, ?, ?, ?, 0, '[]', ?)`
+      )
+      .bind('passkey_bob', 'xid_pk_bob', 'credential_bob', '00', now)
+      .run();
+
+    const optionsRes = await mf.dispatchFetch('http://localhost/auth/passkey/login-options');
+    assert.equal(optionsRes.status, 200);
+    const options = await optionsRes.json();
+
+    const session = signTestSession({
+      session_id: 'session_alice',
+      x_id: 'xid_pk_alice',
+      x_handle: 'pk_alice',
+      x_name: 'Alice',
+      near_account: null,
+      passkey_verified: true,
+      passkey_verified_at: now,
+      created_at: now,
+      expires_at: now + 60 * 60 * 1000,
+    });
+
+    const res = await mf.dispatchFetch('http://localhost/auth/passkey/login-verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `uprail_session=${session}`,
+      },
+      body: JSON.stringify({ assertion: fakeAssertion('credential_bob', options.challenge) }),
+    });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.code, 'ACCOUNT_MISMATCH');
+  });
+
+  it('passkey confirmation rejects another account\'s credential', async () => {
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    await db
+      .prepare(
+        `INSERT INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, 1, ?, ?)`
+      )
+      .bind('xid_pk_carol', 'pk_carol', 'Carol', now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO passkeys (id, x_id, credential_id, public_key, counter, transports, created_at)
+         VALUES (?, ?, ?, ?, 0, '[]', ?)`
+      )
+      .bind('passkey_carol', 'xid_pk_carol', 'credential_carol', '00', now)
+      .run();
+
+    const session = signTestSession({
+      session_id: 'session_carol',
+      x_id: 'xid_pk_carol',
+      x_handle: 'pk_carol',
+      x_name: 'Carol',
+      near_account: null,
+      passkey_verified: true,
+      passkey_verified_at: now,
+      created_at: now,
+      expires_at: now + 60 * 60 * 1000,
+    });
+
+    const challengeRes = await mf.dispatchFetch('http://localhost/api/auth-challenge', {
+      headers: { Cookie: `uprail_session=${session}` },
+    });
+    assert.equal(challengeRes.status, 200);
+    const challenge = await challengeRes.json();
+
+    const res = await mf.dispatchFetch('http://localhost/auth/passkey/confirm', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `uprail_session=${session}`,
+      },
+      body: JSON.stringify({
+        assertion: fakeAssertion('credential_bob', challenge.challenge),
+      }),
+    });
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.code, 'ACCOUNT_MISMATCH');
   });
 
   it('POST /api/send requires authentication and passkey authorization', async () => {

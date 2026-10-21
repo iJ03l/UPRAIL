@@ -307,8 +307,6 @@ export interface RegisterPasskeyResponse {
   success: boolean;
   nearAccount: string;
   credentialId: string;
-  /** Plaintext one-time codes, returned only when this registration generated them. */
-  recoveryCodes?: string[] | null;
 }
 
 export interface ClaimExecuteRequest {

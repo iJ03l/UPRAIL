@@ -17,6 +17,7 @@ import {
   ensureRecoveryCodes,
   generateRecoveryCodes,
   getRecoveryStatus,
+  listRecoveryCodes,
   verifyRecoveryCode,
 } from '../services/recoveryCodes';
 import { background } from '../utils/background';
@@ -587,6 +588,21 @@ authRouter.post('/passkey/login-verify', async (c) => {
       );
     }
 
+    // A passkey sign-in must never silently switch an already-authenticated
+    // session to the credential owner. Switching accounts requires an explicit
+    // sign-out first, so one user's passkey cannot take over another user's
+    // active X session.
+    const activeSession = c.get('session');
+    if (activeSession?.x_id && activeSession.x_id !== passkeyRow.x_id) {
+      return c.json<ErrorResponse>(
+        {
+          error: 'This passkey belongs to a different UPRAIL account. Sign out before switching accounts.',
+          code: 'ACCOUNT_MISMATCH',
+        },
+        403
+      );
+    }
+
     // Same strict expectations used at registration: the configured origin/rpId
     // only (plus localhost ports in local dev). Never a hardcoded host list —
     // that would accept an assertion minted on an unrelated site sharing the
@@ -648,8 +664,9 @@ authRouter.post('/passkey/login-verify', async (c) => {
     const isActivated = userProfile.is_activated === 1 || session.is_activated;
     const personalInviteCode = userProfile.personal_invite_code || session.personal_invite_code;
 
-    // Existing users who predate recovery codes get them on their next
-    // verified sign-in. Failure here must not block login.
+    // Existing users who predate recovery codes get them backfilled on their
+    // next verified sign-in. Plaintext is never returned here: codes are only
+    // revealed by POST /auth/recovery/codes after a fresh passkey assertion.
     let recovery: Awaited<ReturnType<typeof ensureRecoveryCodes>> = null;
     try {
       recovery = await ensureRecoveryCodes(c.env, session.x_id);
@@ -659,7 +676,6 @@ authRouter.post('/passkey/login-verify', async (c) => {
 
     return c.json({
       success: true,
-      recoveryCodes: recovery?.codes || null,
       user: {
         id: session.x_id,
         handle: session.x_handle,
@@ -708,7 +724,6 @@ authRouter.post('/passkey/confirm', requireAuth(), requirePasskeyAuth(), async (
     return c.json({
       success: true,
       passkeyVerified: true,
-      recoveryCodes: recovery?.codes || null,
       hasRecoveryCodes: recovery?.hasCodes ?? true,
       recoveryCodesRemaining: recovery?.remaining ?? undefined,
     });
@@ -734,6 +749,30 @@ authRouter.get('/recovery/status', requireAuth(), async (c) => {
     console.error('Recovery status error:', err);
     return c.json<ErrorResponse>(
       { error: publicErrorMessage(err, 'Could not load recovery-code status'), code: 'RECOVERY_STATUS_FAILED' },
+      500
+    );
+  }
+});
+
+/**
+ * POST /auth/recovery/codes
+ * Reveals unused codes after a fresh passkey assertion. Codes generated
+ * before encrypted-at-rest storage are counted as legacy and cannot be shown.
+ */
+authRouter.post('/recovery/codes', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const result = await listRecoveryCodes(c.env, session.x_id);
+    return c.json({
+      success: true,
+      codes: result.codes,
+      remaining: result.remaining,
+      legacy: result.legacy,
+    });
+  } catch (err: any) {
+    console.error('Recovery-code view error:', err);
+    return c.json<ErrorResponse>(
+      { error: publicErrorMessage(err, 'Could not load recovery codes'), code: 'RECOVERY_VIEW_FAILED' },
       500
     );
   }

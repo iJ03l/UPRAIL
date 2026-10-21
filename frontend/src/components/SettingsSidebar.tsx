@@ -50,11 +50,14 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [recoveryStatus, setRecoveryStatus] = useState<{
     hasCodes: boolean;
-    total: number;
     remaining: number;
+    viewable: number;
   } | null>(null);
+  const [isViewingRecovery, setIsViewingRecovery] = useState(false);
   const [isRegeneratingRecovery, setIsRegeneratingRecovery] = useState(false);
   const [showRegenerateRecovery, setShowRegenerateRecovery] = useState(false);
+  const [recoveryModalMode, setRecoveryModalMode] = useState<'new' | 'view'>('new');
+  const [recoveryLegacyCount, setRecoveryLegacyCount] = useState(0);
   const [freshRecoveryCodes, setFreshRecoveryCodes] = useState<string[] | null>(null);
 
   // Export UPRAIL Account Key states
@@ -94,16 +97,46 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     }
   }, [isOpen, user]);
 
+  const performViewRecovery = async () => {
+    setIsViewingRecovery(true);
+    try {
+      const result = await webauthn.viewRecoveryCodes();
+      setRecoveryStatus({
+        hasCodes: result.remaining > 0,
+        remaining: result.remaining,
+        viewable: result.codes.length,
+      });
+      setRecoveryLegacyCount(result.legacy);
+      if (result.codes.length === 0) {
+        toast(
+          result.legacy > 0
+            ? 'This set was created before codes could be viewed. Replace it once to make future codes viewable.'
+            : 'No unused recovery codes left.',
+          'error'
+        );
+        return;
+      }
+      setRecoveryModalMode('view');
+      setFreshRecoveryCodes(result.codes);
+    } catch (err: any) {
+      toast(describePasskeyError(err), 'error');
+    } finally {
+      setIsViewingRecovery(false);
+    }
+  };
+
   const performRegenerateRecovery = async () => {
     setShowRegenerateRecovery(false);
     setIsRegeneratingRecovery(true);
     try {
       const result = await webauthn.regenerateRecoveryCodes();
       setFreshRecoveryCodes(result.recoveryCodes);
+      setRecoveryModalMode('new');
+      setRecoveryLegacyCount(0);
       setRecoveryStatus({
         hasCodes: true,
-        total: result.recoveryCodes.length,
         remaining: result.remaining,
+        viewable: result.recoveryCodes.length,
       });
       toast('New recovery codes generated');
     } catch (err: any) {
@@ -148,7 +181,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         {/* Slide-over Drawer Panel */}
         <div className="relative w-full max-w-sm bg-white shadow-2xl border-l border-stone-200 flex flex-col justify-between p-5 sm:p-6 z-[101] h-full overflow-y-auto animate-fade-in font-sans">
           {/* Top Content */}
-          <div className="space-y-6">
+          <div className="space-y-6 flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-stone-100">
               <div className="flex items-center space-x-2">
@@ -285,7 +318,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
             {/* Recovery Codes */}
             {user && (
-              <div className="space-y-2">
+              <div className="space-y-2 order-last">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
                     Recovery Codes
@@ -295,41 +328,80 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                     {recoveryStatus
                       ? recoveryStatus.remaining > 0
                         ? `${recoveryStatus.remaining} left`
-                        : 'Replace needed'
+                        : 'No codes left'
                       : '…'}
                   </span>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
                   <p className="text-[11px] text-stone-600 leading-relaxed">
-                    Each code works once. If you lose your passkey, use one to register a new passkey on another device.
-                    Codes are shown only once, so replace them if you no longer have the saved copy.
+                    Each code works once. View them with your passkey whenever you need them, or replace the set if you no longer have your saved copy.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowRegenerateRecovery(true)}
-                    disabled={isRegeneratingRecovery}
-                    className="w-full py-2.5 px-3 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {isRegeneratingRecovery ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Waiting for your passkey...</span>
-                      </>
-                    ) : (
-                      <>
-                        <KeyRound className="w-3.5 h-3.5" />
-                        <span>{recoveryStatus?.hasCodes ? 'Replace recovery codes' : 'Generate recovery codes'}</span>
-                      </>
-                    )}
-                  </button>
+
+                  {recoveryStatus && recoveryStatus.remaining > 0 && recoveryStatus.viewable < recoveryStatus.remaining && (
+                    <p className="text-[10px] font-mono text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-2.5 leading-relaxed">
+                      {recoveryStatus.viewable === 0
+                        ? 'This set was created before codes could be viewed. Replace it once to make future codes viewable.'
+                        : `${recoveryStatus.remaining - recoveryStatus.viewable} code(s) predate secure viewing and can't be displayed.`}
+                    </p>
+                  )}
+
+                  {recoveryStatus?.hasCodes ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void performViewRecovery()}
+                        disabled={isViewingRecovery || isRegeneratingRecovery}
+                        className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {isViewingRecovery ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Waiting for your passkey...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>View recovery codes</span>
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowRegenerateRecovery(true)}
+                        disabled={isViewingRecovery || isRegeneratingRecovery}
+                        className="w-full text-[10px] font-mono font-bold text-stone-500 hover:text-stone-900 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {isRegeneratingRecovery ? 'Waiting for your passkey...' : 'Replace recovery codes'}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowRegenerateRecovery(true)}
+                      disabled={isRegeneratingRecovery}
+                      className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {isRegeneratingRecovery ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Waiting for your passkey...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-3.5 h-3.5" />
+                          <span>Generate recovery codes</span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
             )}
 
             {/* Export Vault Key Section (Passkey Protected) */}
             {user && (
-              <div className="space-y-2">
+              <div className="space-y-2 order-last">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
                     UPRAIL Account Key
@@ -575,9 +647,24 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       <RecoveryCodesModal
         isOpen={!!freshRecoveryCodes && freshRecoveryCodes.length > 0}
         codes={freshRecoveryCodes || []}
-        onDone={() => setFreshRecoveryCodes(null)}
-        title="Your new recovery codes"
-        description="Save these now. Replacing codes immediately invalidates every old unused code."
+        onDone={() => {
+          setFreshRecoveryCodes(null);
+          setRecoveryLegacyCount(0);
+        }}
+        title={recoveryModalMode === 'view' ? 'Your recovery codes' : 'Your new recovery codes'}
+        description={
+          recoveryModalMode === 'view'
+            ? 'These are your unused recovery codes. Each one works once and can register a new passkey.'
+            : 'Save these now. Replacing codes immediately invalidates every old unused code.'
+        }
+        notice={
+          recoveryModalMode === 'view'
+            ? recoveryLegacyCount > 0
+              ? `${recoveryLegacyCount} older code(s) predate secure viewing and can't be displayed. Replace the set once to make future codes viewable.`
+              : 'Anyone with a code can replace your passkey. Keep these private.'
+            : undefined
+        }
+        doneLabel={recoveryModalMode === 'view' ? 'Close' : 'I saved these codes'}
       />
 
       <ConfirmDialog
@@ -588,7 +675,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         title="Replace recovery codes?"
         description="You will get ten new single-use codes. Every old unused code stops working immediately."
         confirmLabel="Replace codes"
-        warning="Make sure you can save the new codes before continuing. They are shown only once."
+        warning="The previous set will stop working immediately. You can view the new codes anytime with your passkey."
         details={[
           { label: 'Codes left', value: recoveryStatus ? String(recoveryStatus.remaining) : '—' },
           { label: 'Confirmation', value: 'Passkey required after this step', mono: false },

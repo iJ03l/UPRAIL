@@ -21,7 +21,6 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 import { AuthLoadingScreen } from '../components/AuthLoadingScreen';
-import { RecoveryCodesModal } from '../components/RecoveryCodesModal';
 
 interface LoginPageProps {
   initialLegalTab?: LegalTab;
@@ -39,7 +38,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [isRecoveryLoading, setIsRecoveryLoading] = useState(false);
   const [recoveryAuthorized, setRecoveryAuthorized] = useState(false);
-  const [pendingRecoveryCodes, setPendingRecoveryCodes] = useState<string[] | null>(null);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -173,7 +171,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   // If already complete, forward immediately to destination
   useEffect(() => {
-    if (isComplete && user && !pendingRecoveryCodes) {
+    if (isComplete && user) {
       if (typeof window !== 'undefined') {
         localStorage.setItem('uprail_has_signed_up', 'true');
         localStorage.setItem('uprail_last_handle', user.handle);
@@ -191,7 +189,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         navigate(target ? stripInvite(target) : '/app', { replace: true });
       }
     }
-  }, [isComplete, user, navigate, pendingRecoveryCodes]);
+  }, [isComplete, user, navigate]);
 
   // Step 1: Initiate 𝕏 OAuth login
   const handleXLogin = async () => {
@@ -230,12 +228,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           setLastName(user.name || null);
           setLastAvatar(user.avatarUrl || null);
           setLoginMethod('passkey');
-        }
-
-        // Show one-time recovery codes before leaving onboarding. Setting this
-        // first also parks the auto-redirect effect until the user confirms.
-        if (result.recoveryCodes && result.recoveryCodes.length > 0) {
-          setPendingRecoveryCodes(result.recoveryCodes);
         }
 
         // Refresh user session to pick up new passkey & near account
@@ -289,9 +281,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           setLastHandle(result.user.handle);
         }
 
-        const codes = (result as { recoveryCodes?: string[] | null }).recoveryCodes;
-        if (codes && codes.length > 0) setPendingRecoveryCodes(codes);
-
         await refreshSession();
       }
     } catch (err: any) {
@@ -312,10 +301,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     try {
       setIsConfirmLoading(true);
       setError(null);
-      const result = await webauthn.confirmSessionPasskey();
-      if (result.recoveryCodes && result.recoveryCodes.length > 0) {
-        setPendingRecoveryCodes(result.recoveryCodes);
-      }
+      await webauthn.confirmSessionPasskey(user?.handle);
       setIsSuccess(true);
       setSuccessStepMessage('Passkey confirmed. Welcome back.');
       await refreshSession();
@@ -354,7 +340,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     setRecoveryAuthorized(false);
     setShowRecovery(false);
     setRecoveryCode('');
-    setPendingRecoveryCodes(null);
     setError(null);
     setIsSuccess(false);
     await refreshSession();
@@ -891,12 +876,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           void handleDisconnect();
         }}
         onCancel={() => setShowDisconnectConfirm(false)}
-      />
-
-      <RecoveryCodesModal
-        isOpen={!!pendingRecoveryCodes && pendingRecoveryCodes.length > 0}
-        codes={pendingRecoveryCodes || []}
-        onDone={() => setPendingRecoveryCodes(null)}
       />
 
       {/* Modal for Privacy Policy and Terms & Conditions */}

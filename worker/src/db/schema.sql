@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS recovery_codes (
   id TEXT PRIMARY KEY,
   x_id TEXT NOT NULL,
   code_hash TEXT NOT NULL UNIQUE,
+  code_ciphertext TEXT,
+  code_index INTEGER,
   created_at INTEGER NOT NULL,
   used_at INTEGER,
   FOREIGN KEY(x_id) REFERENCES x_identities(x_id) ON DELETE CASCADE

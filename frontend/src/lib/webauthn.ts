@@ -174,6 +174,15 @@ export const webauthn = {
 
     // 3. Verify assertion signature on backend and receive session
     const res = await api.verifyPasskeyLogin(assertion);
+    if (res?.user?.handle) {
+      saveStoredPasskey({
+        credentialId: assertion.id,
+        handle: res.user.handle,
+        createdAt: new Date().toISOString(),
+        algorithm: 'ES256 (NIST P-256)',
+        deviceLabel: navigator.platform || 'Device Biometric Key',
+      });
+    }
     return res;
   },
 
@@ -181,10 +190,9 @@ export const webauthn = {
    * Answers the mandatory second factor after X OAuth. This proves the
    * credential belongs to the signed-in account and keeps the same session.
    */
-  async confirmSessionPasskey(): Promise<{
+  async confirmSessionPasskey(handle?: string): Promise<{
     success: boolean;
     passkeyVerified: boolean;
-    recoveryCodes?: string[] | null;
     hasRecoveryCodes?: boolean;
     recoveryCodesRemaining?: number;
   }> {
@@ -192,7 +200,17 @@ export const webauthn = {
     const options: any = { ...rawOptions, userVerification: 'preferred' };
     delete options.allowCredentials;
     const assertion = await startAuthentication(options);
-    return api.confirmPasskey(assertion);
+    const result = await api.confirmPasskey(assertion);
+    if (handle) {
+      saveStoredPasskey({
+        credentialId: assertion.id,
+        handle,
+        createdAt: new Date().toISOString(),
+        algorithm: 'ES256 (NIST P-256)',
+        deviceLabel: navigator.platform || 'Device Biometric Key',
+      });
+    }
+    return result;
   },
 
   /**
@@ -207,13 +225,23 @@ export const webauthn = {
   },
 
   /**
+   * Reveals unused recovery codes after a fresh passkey assertion.
+   */
+  async viewRecoveryCodes(): Promise<{ codes: string[]; remaining: number; legacy: number }> {
+    const rawOptions = await api.getTxAuthOptions();
+    const options: any = { ...rawOptions, userVerification: 'preferred' };
+    delete options.allowCredentials;
+    const assertion = await startAuthentication(options);
+    return api.getRecoveryCodes(assertion);
+  },
+
+  /**
    * Register a new hardware passkey (Touch ID, Face ID, Windows Hello, YubiKey)
    * using NIST P-256 (ES256) signature algorithm.
    */
   async registerPasskey(handle: string): Promise<{
     success: boolean;
     credentialId: string;
-    recoveryCodes?: string[] | null;
   }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
     const isSupported = browserSupportsWebAuthn();
@@ -281,7 +309,7 @@ export const webauthn = {
     }
 
     // Register with backend
-    const registered = await api.registerPasskeyAttestation(attResp);
+    await api.registerPasskeyAttestation(attResp);
 
     // Save passkey record locally
     const passkeyInfo: StoredPasskeyInfo = {
@@ -297,7 +325,6 @@ export const webauthn = {
     return {
       success: true,
       credentialId: attResp.id,
-      recoveryCodes: registered?.recoveryCodes || null,
     };
   },
 
