@@ -9,28 +9,37 @@ import {
   ArrowRight,
   ShieldCheck,
   Loader2,
+  KeyRound,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { webauthn, describePasskeyError, WebAuthnSupportStatus } from '../lib/webauthn';
-import { currentInvite, sanitizeReturnPath, withInvite } from '../lib/invite';
+import { clearInvite, currentInvite, sanitizeReturnPath, stripInvite, withInvite } from '../lib/invite';
 import { api } from '../lib/api';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { LegalModal, LegalTab } from '../components/LegalModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
+import { AuthLoadingScreen } from '../components/AuthLoadingScreen';
+import { RecoveryCodesModal } from '../components/RecoveryCodesModal';
 
 interface LoginPageProps {
   initialLegalTab?: LegalTab;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
-  const { user, isLoading, login: loginWithX, refreshSession } = useXAuth();
+  const { user, isLoading, isRedirecting, login: loginWithX, refreshSession } = useXAuth();
   const navigate = useNavigate();
 
   const [isXLoading, setIsXLoading] = useState(false);
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
+  const [isConfirmLoading, setIsConfirmLoading] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [isRecoveryLoading, setIsRecoveryLoading] = useState(false);
+  const [recoveryAuthorized, setRecoveryAuthorized] = useState(false);
+  const [pendingRecoveryCodes, setPendingRecoveryCodes] = useState<string[] | null>(null);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -127,14 +136,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     return webauthn.hasLocalPasskey() ? 'passkey' : 'x';
   });
 
+  // A recovery grant is stored server-side for 10 minutes. Rehydrate it so a
+  // reload during passkey replacement does not burn a second recovery code.
+  useEffect(() => {
+    if (user?.recoveryAuthorized) setRecoveryAuthorized(true);
+  }, [user?.recoveryAuthorized]);
+
   // Determine user progression stage:
   // Stage 1: Connect 𝕏 or Passkey Unlock (if !user)
   // Stage 2: Create Device Passkey (if user exists, but this specific device lacks a passkey)
   // Stage 3: Fully onboarded (has 𝕏 and passkey on this device) -> route to /parking or /app
   const hasLocalDevicePasskey = user?.handle ? webauthn.hasLocalPasskey(user.handle) : webauthn.hasLocalPasskey();
   const isStep1 = !isLoading && !user;
-  const isStep2 = !isLoading && !!user && (!user.hasPasskey || !hasLocalDevicePasskey);
-  const isComplete = !isLoading && !!user && user.hasPasskey === true && hasLocalDevicePasskey;
+  // X OAuth only proves identity. A passkey assertion (or a consumed recovery
+  // code, which grants one replacement registration) is required before the
+  // rest of the app is reachable.
+  const needsPasskeyConfirmation =
+    !isLoading && !!user && user.hasPasskey === true && user.passkeyVerified !== true && !recoveryAuthorized;
+  const needsPasskeyCreation =
+    !isLoading && !!user && (user.hasPasskey !== true || recoveryAuthorized);
+  const isComplete =
+    !isLoading &&
+    !!user &&
+    user.hasPasskey === true &&
+    user.passkeyVerified === true &&
+    !needsPasskeyCreation;
 
   // Where this session was originally headed (share links send people to
   // /claim/<id>?invite=... — dropping that sends the recipient back to square one).
@@ -147,7 +173,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   // If already complete, forward immediately to destination
   useEffect(() => {
-    if (isComplete && user) {
+    if (isComplete && user && !pendingRecoveryCodes) {
       if (typeof window !== 'undefined') {
         localStorage.setItem('uprail_has_signed_up', 'true');
         localStorage.setItem('uprail_last_handle', user.handle);
@@ -157,11 +183,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       if (user.isActivated === false) {
         navigate(withInvite('/parking'), { replace: true });
       } else {
+        // Activated accounts no longer need the preloaded invite. Strip it
+        // from the return path so a share link cannot leave the banner on
+        // /app/claim after signup.
+        clearInvite();
         const target = pendingReturnPath();
-        navigate(target || '/app', { replace: true });
+        navigate(target ? stripInvite(target) : '/app', { replace: true });
       }
     }
-  }, [isComplete, user, navigate]);
+  }, [isComplete, user, navigate, pendingRecoveryCodes]);
 
   // Step 1: Initiate 𝕏 OAuth login
   const handleXLogin = async () => {
@@ -187,6 +217,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       if (result.success) {
         setIsSuccess(true);
         setSuccessStepMessage('You\'re all set. This device can now sign you in.');
+        setRecoveryAuthorized(false);
+        setShowRecovery(false);
 
         if (typeof window !== 'undefined') {
           localStorage.setItem('uprail_has_signed_up', 'true');
@@ -200,18 +232,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           setLoginMethod('passkey');
         }
 
-        // Refresh user session to pick up new passkey & near account
-        const status = await api.getAuthStatus();
-        await refreshSession();
+        // Show one-time recovery codes before leaving onboarding. Setting this
+        // first also parks the auto-redirect effect until the user confirms.
+        if (result.recoveryCodes && result.recoveryCodes.length > 0) {
+          setPendingRecoveryCodes(result.recoveryCodes);
+        }
 
-        // Redirect after short confirmation
-        setTimeout(() => {
-          if (!status.user?.isActivated) {
-            navigate(withInvite('/parking'), { replace: true });
-          } else {
-            navigate(pendingReturnPath() || '/app', { replace: true });
-          }
-        }, 800);
+        // Refresh user session to pick up new passkey & near account
+        await refreshSession();
       }
     } catch (err: any) {
       console.error('Passkey creation error:', err);
@@ -261,15 +289,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           setLastHandle(result.user.handle);
         }
 
-        await refreshSession();
+        const codes = (result as { recoveryCodes?: string[] | null }).recoveryCodes;
+        if (codes && codes.length > 0) setPendingRecoveryCodes(codes);
 
-        setTimeout(() => {
-          if (result.user.isActivated === false) {
-            navigate(withInvite('/parking'), { replace: true });
-          } else {
-            navigate(pendingReturnPath() || '/app', { replace: true });
-          }
-        }, 500);
+        await refreshSession();
       }
     } catch (err: any) {
       console.error('Passkey login error:', err);
@@ -285,7 +308,60 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     }
   };
 
-  const isInteracting = isXLoading || isPasskeyLoading || isSuccess;
+  const handleConfirmPasskey = async () => {
+    try {
+      setIsConfirmLoading(true);
+      setError(null);
+      const result = await webauthn.confirmSessionPasskey();
+      if (result.recoveryCodes && result.recoveryCodes.length > 0) {
+        setPendingRecoveryCodes(result.recoveryCodes);
+      }
+      setIsSuccess(true);
+      setSuccessStepMessage('Passkey confirmed. Welcome back.');
+      await refreshSession();
+    } catch (err: any) {
+      console.error('Passkey confirmation error:', err);
+      setError(describePasskeyError(err));
+    } finally {
+      setIsConfirmLoading(false);
+    }
+  };
+
+  const handleRecoverySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recoveryCode.trim()) {
+      setError('Enter one of your recovery codes.');
+      return;
+    }
+    try {
+      setIsRecoveryLoading(true);
+      setError(null);
+      await api.verifyRecoveryCode(recoveryCode);
+      setRecoveryCode('');
+      setShowRecovery(false);
+      setRecoveryAuthorized(true);
+      setSuccessStepMessage('Recovery code accepted. Create a new passkey for this device.');
+      setIsSuccess(true);
+    } catch (err: any) {
+      setError(err?.message || 'That recovery code is invalid or has already been used.');
+    } finally {
+      setIsRecoveryLoading(false);
+    }
+  };
+
+  const handleUseDifferentAccount = async () => {
+    await api.logout();
+    setRecoveryAuthorized(false);
+    setShowRecovery(false);
+    setRecoveryCode('');
+    setPendingRecoveryCodes(null);
+    setError(null);
+    setIsSuccess(false);
+    await refreshSession();
+  };
+
+  const isInteracting =
+    isXLoading || isPasskeyLoading || isConfirmLoading || isRecoveryLoading || isSuccess;
 
 
 
@@ -296,6 +372,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
     </svg>
   );
+
+  // Show a real loading surface for both the session check and the OAuth
+  // hand-off. The previous code rendered the login card immediately, then
+  // yanked it away mid-transition into a blank page.
+  if (isLoading || isRedirecting) {
+    return (
+      <AuthLoadingScreen
+        message={isRedirecting ? 'Opening 𝕏' : 'Checking your session'}
+        hint={isRedirecting ? 'Continue in the 𝕏 window that just opened.' : 'This only takes a moment.'}
+      />
+    );
+  }
 
   return (
     <div className="min-h-[100dvh] w-full bg-surface-subtle text-ink flex flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-16 selection:bg-ink selection:text-surface relative overflow-hidden font-sans">
@@ -321,20 +409,50 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   </>
                 ) : isStep1 ? (
                   <span>Step 1 of 2</span>
-                ) : (
+                ) : showRecovery ? (
+                  <>
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Recovery</span>
+                  </>
+                ) : needsPasskeyConfirmation ? (
+                  <>
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Confirm sign-in</span>
+                  </>
+                ) : needsPasskeyCreation ? (
                   <span>Step 2 of 2</span>
+                ) : (
+                  <span>Signing in</span>
                 )}
               </span>
 
               <h1 className="text-2xl sm:text-[1.75rem] font-display font-extrabold text-ink tracking-tight">
-                {isPasskeyHero ? 'Welcome back' : isStep1 ? 'Sign in to UPRAIL' : 'Secure this device'}
+                {isPasskeyHero
+                  ? 'Welcome back'
+                  : isStep1
+                  ? 'Sign in to UPRAIL'
+                  : showRecovery
+                  ? 'Use a recovery code'
+                  : needsPasskeyConfirmation
+                  ? 'Confirm it\'s you'
+                  : needsPasskeyCreation
+                  ? 'Secure this device'
+                  : 'Signing you in'}
               </h1>
               <p className="text-sm text-muted leading-relaxed max-w-sm mx-auto">
                 {isPasskeyHero
                   ? 'Use your passkey — Face ID, fingerprint, or your PIN — to sign in.'
                   : isStep1
                   ? 'Use your 𝕏 account to get a payment handle. No crypto wallet or password to remember.'
-                  : 'Set up a passkey so you can use this device without 𝕏 next time.'}
+                  : showRecovery
+                  ? 'Enter one of the single-use codes you saved. It lets you replace a lost passkey.'
+                  : needsPasskeyConfirmation
+                  ? 'Your 𝕏 account is connected. Confirm this sign-in with the passkey on this device.'
+                  : needsPasskeyCreation
+                  ? recoveryAuthorized
+                    ? 'Recovery code accepted. Create a new passkey to secure this device again.'
+                    : 'Set up a passkey so you can use this device without 𝕏 next time.'
+                  : 'Your session is verified. Taking you to your account.'}
               </p>
             </div>
           </header>
@@ -473,9 +591,151 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           )}
 
           {/* ============================================================== */}
+          {/* CONFIRM: passkey is the mandatory second factor for X OAuth */}
+          {/* ============================================================== */}
+          {needsPasskeyConfirmation && (
+            <div className="space-y-5 animate-fade-in">
+              <div className="flex items-center justify-between rounded-2xl bg-surface-subtle border border-line px-4 py-3.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <img
+                    src={user.avatarUrl}
+                    alt={user.handle}
+                    className="w-8 h-8 rounded-full border border-line flex-shrink-0"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
+                  <div className="text-left min-w-0">
+                    <div className="text-sm font-bold text-ink truncate">{user.name}</div>
+                    <div className="text-xs font-mono text-muted flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                      <span className="truncate">@{user.handle}</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleUseDifferentAccount}
+                  disabled={isInteracting}
+                  className="text-[11px] font-mono text-subtle hover:text-ink underline underline-offset-4 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Switch
+                </button>
+              </div>
+
+              {showRecovery ? (
+                <form onSubmit={handleRecoverySubmit} className="space-y-3">
+                  <div className="space-y-1.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 px-4 py-3.5 text-amber-900">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-950">
+                      <KeyRound className="w-4 h-4 text-amber-700" />
+                      <span className="text-sm">Lost your passkey?</span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-amber-800/90">
+                      Enter one saved code. It works once, then you&apos;ll create a new passkey on this device.
+                    </p>
+                  </div>
+                  <input
+                    type="text"
+                    value={recoveryCode}
+                    onChange={(e) => {
+                      setRecoveryCode(e.target.value.toUpperCase());
+                      setError(null);
+                    }}
+                    placeholder="XXXX-XXXX-XXXX"
+                    autoComplete="one-time-code"
+                    spellCheck={false}
+                    className="w-full h-14 rounded-2xl border border-line bg-surface px-4 font-mono text-sm tracking-[0.18em] text-ink placeholder:text-subtle focus:outline-none focus:border-ink transition-colors"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isRecoveryLoading || !recoveryCode.trim()}
+                    className="btn-primary w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-center gap-2.5 shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isRecoveryLoading ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        <span className="font-mono text-xs uppercase tracking-wider">Checking…</span>
+                      </>
+                    ) : (
+                      <span>Use recovery code</span>
+                    )}
+                  </button>
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowRecovery(false);
+                        setRecoveryCode('');
+                        setError(null);
+                      }}
+                      className="text-xs font-mono text-muted hover:text-ink underline underline-offset-4 transition-colors cursor-pointer"
+                    >
+                      Back to passkey
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div className="space-y-1.5 rounded-2xl bg-surface-subtle border border-line px-4 py-3.5">
+                    <div className="flex items-center gap-1.5 font-bold text-ink">
+                      <ShieldCheck className="w-4 h-4" />
+                      <span className="text-sm">Second factor required</span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted">
+                      X proves who you are. Your passkey proves this sign-in is really you.
+                    </p>
+                    {!hasLocalDevicePasskey && (
+                      <p className="text-xs leading-relaxed text-amber-800">
+                        No saved passkey found in this browser. You can still try a synced passkey, or use a recovery code.
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleConfirmPasskey}
+                    disabled={isInteracting}
+                    className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none"
+                  >
+                    {isConfirmLoading ? (
+                      <div className="w-full flex items-center justify-center gap-2.5">
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        <span className="font-mono text-xs uppercase tracking-wider">Verifying…</span>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
+                          <Fingerprint className="w-4 h-4" />
+                        </span>
+                        <span className="flex-1 text-center pr-2">Confirm with passkey</span>
+                        <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+                      </>
+                    )}
+                  </button>
+
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowRecovery(true);
+                        setError(null);
+                      }}
+                      disabled={isInteracting}
+                      className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Use a recovery code</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ============================================================== */}
           {/* STEP 2: Create / Register Device Passkey */}
           {/* ============================================================== */}
-          {isStep2 && (
+          {needsPasskeyCreation && (
             <div className="space-y-5 animate-fade-in">
               {/* Identity */}
               <div className="flex items-center justify-between rounded-2xl bg-surface-subtle border border-line px-4 py-3.5">
@@ -515,7 +775,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   <span className="text-sm">One-time setup</span>
                 </div>
                 <p className="text-xs leading-relaxed text-amber-800/90">
-                  This device saves a passkey — a secure sign-in built into your phone or laptop. Use Face ID, fingerprint, or your PIN. No password to remember.
+                  {recoveryAuthorized
+                    ? 'Your recovery code was accepted. Create a new passkey now — this replaces the passkey that was lost or left on another device.'
+                    : 'This device saves a passkey — a secure sign-in built into your phone or laptop. Use Face ID, fingerprint, or your PIN. No password to remember.'}
                 </p>
               </div>
 
@@ -555,29 +817,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 )}
               </button>
 
-              {/* Skip if the account already has a passkey elsewhere */}
-              {user?.hasPasskey && (
-                <div className="text-center">
-                  <button
-                    type="button"
-                    onClick={() => navigate(pendingReturnPath() || (user.isActivated ? '/app' : withInvite('/parking')), { replace: true })}
-                    className="text-xs font-mono text-muted hover:text-ink underline underline-offset-4 transition-colors cursor-pointer"
-                  >
-                    Skip for now, continue to app &rarr;
-                  </button>
-                </div>
-              )}
-
               {/* Switch Account */}
               <div className="text-center">
                 <button
                   type="button"
-                  onClick={async () => {
-                    await api.logout();
-                    await refreshSession();
-                  }}
+                  onClick={handleUseDifferentAccount}
                   disabled={isInteracting}
-                  className="text-[11px] font-mono text-subtle hover:text-ink underline underline-offset-4 transition-colors cursor-pointer"
+                  className="text-[11px] font-mono text-subtle hover:text-ink underline underline-offset-4 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Use a different 𝕏 account
                 </button>
@@ -645,6 +891,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           void handleDisconnect();
         }}
         onCancel={() => setShowDisconnectConfirm(false)}
+      />
+
+      <RecoveryCodesModal
+        isOpen={!!pendingRecoveryCodes && pendingRecoveryCodes.length > 0}
+        codes={pendingRecoveryCodes || []}
+        onDone={() => setPendingRecoveryCodes(null)}
       />
 
       {/* Modal for Privacy Policy and Terms & Conditions */}

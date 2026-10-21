@@ -13,6 +13,7 @@ import {
   CreatedAgentKey,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
+import { pruneStoredPasskeys } from './passkeyStorage';
 import type { WithdrawChain } from './withdrawChains';
 
 /**
@@ -493,6 +494,8 @@ export const ALL_APP_STORAGE_KEYS = [
   'uprail_user', // legacy user cache key (still read back as a fallback)
   'uprail_pending_payments_cache', // useClaimFlow pending list cache
   'uprail_onchain_cache', // useOnchainData tokens/balances/history snapshot
+  'uprail_payment_history_cache', // usePayments history snapshot
+  'uprail_seen_receipts', // AppHome dismissed-receipt fingerprints
 ];
 
 /** Keys related to device hardware passkeys, kept across logout for 1-click returning login */
@@ -518,6 +521,14 @@ export function clearAppStorage(clearPasskeys: boolean = false): void {
         localStorage.removeItem(key);
       } catch {}
     }
+  } else {
+    // Signing out keeps only the last account's passkey records so a returning
+    // user still gets 1-click login without leaking the previous account.
+    let keepHandle: string | null = null;
+    try {
+      keepHandle = localStorage.getItem('uprail_last_handle');
+    } catch {}
+    pruneStoredPasskeys(keepHandle);
   }
 }
 
@@ -739,6 +750,76 @@ export const api = {
       localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data.user));
     }
     return data;
+  },
+
+  /**
+   * Completes the passkey second factor for the current X session. Unlike
+   * verifyPasskeyLogin this cannot switch accounts: the worker binds the
+   * assertion to the session's x_id.
+   */
+  async confirmPasskey(assertion: unknown): Promise<{
+    success: boolean;
+    passkeyVerified: boolean;
+    recoveryCodes?: string[] | null;
+    hasRecoveryCodes?: boolean;
+    recoveryCodesRemaining?: number;
+  }> {
+    const url = API_BASE ? `${API_BASE}/auth/passkey/confirm` : '/auth/passkey/confirm';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ assertion }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'Passkey confirmation failed');
+    }
+    return await res.json();
+  },
+
+  async getRecoveryStatus(): Promise<{ hasCodes: boolean; total: number; remaining: number }> {
+    const url = API_BASE ? `${API_BASE}/auth/recovery/status` : '/auth/recovery/status';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'Could not load recovery codes');
+    }
+    return await res.json();
+  },
+
+  async verifyRecoveryCode(code: string): Promise<{ success: boolean; remaining: number }> {
+    const url = API_BASE ? `${API_BASE}/auth/recovery/verify` : '/auth/recovery/verify';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'That recovery code is invalid or has already been used.');
+    }
+    return await res.json();
+  },
+
+  async regenerateRecoveryCodes(assertion: unknown): Promise<{
+    success: boolean;
+    recoveryCodes: string[];
+    remaining: number;
+  }> {
+    const url = API_BASE ? `${API_BASE}/auth/recovery/regenerate` : '/auth/recovery/regenerate';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ assertion }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      throw new Error(err.error || 'Could not generate recovery codes');
+    }
+    return await res.json();
   },
 
   // Token list

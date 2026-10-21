@@ -12,10 +12,10 @@ interface XAuthBannerProps {
 
 export const XAuthBanner: React.FC<XAuthBannerProps> = ({
   title = '𝕏 Authentication Required',
-  description = 'Sign in with your 𝕏 account to activate your confidential intent vault, discover incoming claims, and route payments securely.',
+  description = 'Sign in with your 𝕏 account to activate your UPRAIL account, receive payments, and route them securely.',
   actionText = 'Connect with 𝕏',
 }) => {
-  const { login, isLoading } = useXAuth();
+  const { login, isRedirecting } = useXAuth();
 
   return (
     <div className="rounded-3xl p-6 sm:p-7 bg-stone-900 text-white border border-stone-800 shadow-md space-y-4 animate-fade-in relative overflow-hidden">
@@ -38,10 +38,10 @@ export const XAuthBanner: React.FC<XAuthBannerProps> = ({
         <button
           type="button"
           onClick={() => login()}
-          disabled={isLoading}
+          disabled={isRedirecting}
           className="self-start sm:self-auto px-5 py-3 rounded-2xl bg-white hover:bg-stone-100 text-stone-950 font-display font-extrabold text-xs uppercase tracking-wider flex items-center space-x-2 shadow-xs transition-all cursor-pointer whitespace-nowrap"
         >
-          {isLoading ? (
+          {isRedirecting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin text-stone-900" />
               <span>Connecting...</span>

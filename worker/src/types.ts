@@ -67,6 +67,8 @@ export interface Env {
   INTERNAL_SERVICE_KEY?: string;
   /** Base URL of the Go settlement service, e.g. https://go.internal.example */
   SETTLEMENT_SERVICE_URL?: string;
+  /** Server-side pepper for one-time passkey recovery-code hashes. */
+  RECOVERY_PEPPER?: string;
 }
 
 /**
@@ -153,6 +155,13 @@ export interface Session {
   near_account?: string | null;
   is_activated?: boolean;
   personal_invite_code?: string | null;
+  /** True only after this session has proven possession of a passkey. */
+  passkey_verified?: boolean;
+  /** When the passkey proof happened. Used to invalidate stale sessions after recovery. */
+  passkey_verified_at?: number;
+  /** Short-lived grant to replace a lost passkey after consuming a recovery code. */
+  recovery_authorized?: boolean;
+  recovery_authorized_at?: number;
   created_at: number;
   expires_at: number;
 }
@@ -298,6 +307,8 @@ export interface RegisterPasskeyResponse {
   success: boolean;
   nearAccount: string;
   credentialId: string;
+  /** Plaintext one-time codes, returned only when this registration generated them. */
+  recoveryCodes?: string[] | null;
 }
 
 export interface ClaimExecuteRequest {

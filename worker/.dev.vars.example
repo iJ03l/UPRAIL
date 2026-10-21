@@ -31,3 +31,7 @@ ESCROW_PRIVATE_KEY=""
 
 # NEAR JSON-RPC endpoint (contains a provider API token)
 NEAR_RPC_URL=""
+
+# Pepper for one-time passkey recovery-code hashes. Must be a long random
+# string, separate from SESSION_SECRET, e.g. `openssl rand -hex 32`.
+RECOVERY_PEPPER=""

@@ -9,6 +9,8 @@ import type { AppContext } from '../types';
 export interface RateLimitOptions {
   limit?: number; // max requests per minute (default 60)
   prefix?: string; // route-specific prefix
+  /** Keep the strict limit even for authenticated sessions. */
+  strict?: boolean;
 }
 
 interface WindowRecord {
@@ -73,7 +75,8 @@ export const rateLimit = (options?: RateLimitOptions): MiddlewareHandler<AppCont
     const subject = session?.x_id
       ? `u:${session.x_id}`
       : `ip:${c.req.header('cf-connecting-ip') || 'unknown'}`;
-    const effectiveLimit = session ? Math.max(defaultLimit, 600) : defaultLimit;
+    const effectiveLimit =
+      session && !options?.strict ? Math.max(defaultLimit, 600) : defaultLimit;
 
     const now = Date.now();
     const key = `rl:${prefix}:${subject}`;

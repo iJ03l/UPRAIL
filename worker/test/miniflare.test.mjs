@@ -54,6 +54,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0002_payment_identity_and_missing_tables.sql',
       '0003_withdrawal_error_diagnostics.sql',
       '0004_agent_rail.sql',
+      '0007_recovery_codes.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
@@ -200,6 +201,24 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(res.status, 401);
     const body = await res.json();
     assert.equal(body.code, 'UNAUTHORIZED');
+  });
+
+  it('passkey confirmation and recovery endpoints require authentication', async () => {
+    for (const [path, method] of [
+      ['/auth/passkey/confirm', 'POST'],
+      ['/auth/recovery/status', 'GET'],
+      ['/auth/recovery/verify', 'POST'],
+      ['/auth/recovery/regenerate', 'POST'],
+    ]) {
+      const res = await mf.dispatchFetch(`http://localhost${path}`, {
+        method,
+        headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined,
+        body: method === 'POST' ? JSON.stringify({}) : undefined,
+      });
+      assert.equal(res.status, 401, `${method} ${path}`);
+      const body = await res.json();
+      assert.equal(body.code, 'UNAUTHORIZED', `${method} ${path}`);
+    }
   });
 
   it('POST /api/send requires authentication and passkey authorization', async () => {

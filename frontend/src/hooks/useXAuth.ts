@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { XUser } from '../types';
 import { api } from '../lib/api';
+import { rememberLastAuth } from '../lib/passkeyStorage';
 
 const USER_CACHE_KEY = 'uprail_user_cache_v1';
 
@@ -34,7 +35,8 @@ function setGlobalUser(u: XUser | null) {
 
 export function useXAuth() {
   const [user, setUser] = useState<XUser | null>(globalUser);
-  const [isLoading, setIsLoading] = useState(!globalUser);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -73,6 +75,7 @@ export function useXAuth() {
           // re-write the old user into shared state and bounce the tab back
           // to the dashboard mid-sign-out, so drop it entirely.
           if (res.stale) return null;
+          if (res.user) rememberLastAuth(res.user);
           setGlobalUser(res.user);
           return res.user;
         })
@@ -99,16 +102,18 @@ export function useXAuth() {
   }, [checkSession]);
 
   const login = async () => {
+    // OAuth leaves the page. Keep this separate from session loading so the
+    // login screen can paint a real "taking you to X" state instead of
+    // unmounting its own button the instant it is tapped.
+    setIsRedirecting(true);
+    setError(null);
     try {
-      setIsLoading(true);
-      setError(null);
       await api.loginWithX();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
       setError(msg);
+      setIsRedirecting(false);
       throw err;
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -137,6 +142,7 @@ export function useXAuth() {
     user,
     isAuthenticated: !!user,
     isLoading,
+    isRedirecting,
     error,
     login,
     logout,

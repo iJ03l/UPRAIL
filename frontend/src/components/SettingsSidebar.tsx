@@ -24,6 +24,8 @@ import {
 import { useXAuth } from '../hooks/useXAuth';
 import { useTheme } from './ThemeProvider';
 import { api, clearAppStorage } from '../lib/api';
+import { webauthn, describePasskeyError } from '../lib/webauthn';
+import { RecoveryCodesModal } from './RecoveryCodesModal';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MyInviteResponse } from '../types';
@@ -46,8 +48,16 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState<{
+    hasCodes: boolean;
+    total: number;
+    remaining: number;
+  } | null>(null);
+  const [isRegeneratingRecovery, setIsRegeneratingRecovery] = useState(false);
+  const [showRegenerateRecovery, setShowRegenerateRecovery] = useState(false);
+  const [freshRecoveryCodes, setFreshRecoveryCodes] = useState<string[] | null>(null);
 
-  // Export Vault Private Key states
+  // Export UPRAIL Account Key states
   const [exportedKey, setExportedKey] = useState<{ nearAccount: string; privateKey: string; publicKey: string } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -78,8 +88,30 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       api.getMyInvite()
         .then(setInviteData)
         .catch(() => {});
+      api.getRecoveryStatus()
+        .then(setRecoveryStatus)
+        .catch(() => setRecoveryStatus(null));
     }
   }, [isOpen, user]);
+
+  const performRegenerateRecovery = async () => {
+    setShowRegenerateRecovery(false);
+    setIsRegeneratingRecovery(true);
+    try {
+      const result = await webauthn.regenerateRecoveryCodes();
+      setFreshRecoveryCodes(result.recoveryCodes);
+      setRecoveryStatus({
+        hasCodes: true,
+        total: result.recoveryCodes.length,
+        remaining: result.remaining,
+      });
+      toast('New recovery codes generated');
+    } catch (err: any) {
+      toast(describePasskeyError(err), 'error');
+    } finally {
+      setIsRegeneratingRecovery(false);
+    }
+  };
 
   const handleClearCache = () => {
     setShowResetConfirm(true);
@@ -251,12 +283,56 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
               </div>
             )}
 
+            {/* Recovery Codes */}
+            {user && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
+                    Recovery Codes
+                  </span>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-800 border border-stone-200 flex items-center gap-1">
+                    <KeyRound className="w-2.5 h-2.5" />
+                    {recoveryStatus
+                      ? recoveryStatus.remaining > 0
+                        ? `${recoveryStatus.remaining} left`
+                        : 'Replace needed'
+                      : '…'}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                  <p className="text-[11px] text-stone-600 leading-relaxed">
+                    Each code works once. If you lose your passkey, use one to register a new passkey on another device.
+                    Codes are shown only once, so replace them if you no longer have the saved copy.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowRegenerateRecovery(true)}
+                    disabled={isRegeneratingRecovery}
+                    className="w-full py-2.5 px-3 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {isRegeneratingRecovery ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Waiting for your passkey...</span>
+                      </>
+                    ) : (
+                      <>
+                        <KeyRound className="w-3.5 h-3.5" />
+                        <span>{recoveryStatus?.hasCodes ? 'Replace recovery codes' : 'Generate recovery codes'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Export Vault Key Section (Passkey Protected) */}
             {user && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
-                    Vault Private Key
+                    UPRAIL Account Key
                   </span>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-1">
                     <KeyRound className="w-2.5 h-2.5" />
@@ -268,7 +344,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   {!exportedKey ? (
                     <div className="space-y-2">
                       <p className="text-[11px] text-stone-600 leading-relaxed">
-                        Export the Full Access NEAR private key for your vault (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Confirmed with your passkey (Face ID, fingerprint, or PIN).
+                        Export the Full Access NEAR private key for your UPRAIL account (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Confirmed with your passkey (Face ID, fingerprint, or PIN).
                       </p>
                       {exportError && (
                         <p className="text-[11px] font-mono text-red-600 bg-red-50 p-2 rounded-xl border border-red-200">
@@ -496,6 +572,29 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         </div>
       )}
 
+      <RecoveryCodesModal
+        isOpen={!!freshRecoveryCodes && freshRecoveryCodes.length > 0}
+        codes={freshRecoveryCodes || []}
+        onDone={() => setFreshRecoveryCodes(null)}
+        title="Your new recovery codes"
+        description="Save these now. Replacing codes immediately invalidates every old unused code."
+      />
+
+      <ConfirmDialog
+        isOpen={showRegenerateRecovery}
+        onCancel={() => setShowRegenerateRecovery(false)}
+        onConfirm={() => void performRegenerateRecovery()}
+        tone="financial"
+        title="Replace recovery codes?"
+        description="You will get ten new single-use codes. Every old unused code stops working immediately."
+        confirmLabel="Replace codes"
+        warning="Make sure you can save the new codes before continuing. They are shown only once."
+        details={[
+          { label: 'Codes left', value: recoveryStatus ? String(recoveryStatus.remaining) : '—' },
+          { label: 'Confirmation', value: 'Passkey required after this step', mono: false },
+        ]}
+      />
+
       <ConfirmDialog
         isOpen={showExportConfirm}
         onCancel={() => setShowExportConfirm(false)}
@@ -506,7 +605,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         confirmLabel="Export key"
         warning="Never share this key or paste it into a website. Store it offline and delete it from your clipboard after use."
         details={[
-          { label: 'Vault', value: user?.nearAccount || 'u_…' },
+          { label: 'Account', value: user?.nearAccount || 'u_…' },
           { label: 'Protection', value: 'Passkey confirmation required after this step', mono: false },
         ]}
       />

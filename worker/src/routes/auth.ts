@@ -7,10 +7,18 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { AppContext, ErrorResponse } from '../types';
 import { generatePKCE, exchangeCode, getMe } from '../services/xApi';
-import { createSession, destroySession, requireAuth } from '../middleware/session';
+import { createSession, destroySession, requireAuth, updateSession } from '../middleware/session';
+import { requirePasskeyAuth } from '../middleware/passkeyAuth';
+import { rateLimit } from '../middleware/rateLimit';
 import * as webauthnService from '../services/webauthn';
 import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
+import {
+  ensureRecoveryCodes,
+  generateRecoveryCodes,
+  getRecoveryStatus,
+  verifyRecoveryCode,
+} from '../services/recoveryCodes';
 import { background } from '../utils/background';
 import { signPayload, verifyAndUnpack } from '../utils/crypto';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
@@ -308,23 +316,9 @@ authRouter.get('/callback', async (c) => {
       } catch {}
     }
 
-    // A passkey exists only if a credential row was registered. `near_account`
-    // is provisioned independently of passkey setup (ensureIntentAccount runs
-    // on OAuth), so it must NOT stand in for one — otherwise a user with a
-    // vault account but no passkey is treated as fully set up, skips the
-    // create-passkey step, and every fund-moving prompt ends up "looking for"
-    // a credential that was never created.
-    let hasPasskey = false;
-    if (c.env.DB) {
-      try {
-        const pk = await c.env.DB.prepare('SELECT id FROM passkeys WHERE x_id = ?')
-          .bind(xUser.id)
-          .first();
-        if (pk) hasPasskey = true;
-      } catch {}
-    }
-
-    // Establish signed cookie session (0 KV writes)
+    // Establish signed cookie session (0 KV writes). X OAuth proves identity
+    // only; the session stays unverified until the user also answers a passkey
+    // ceremony (or consumes a recovery code to replace a lost passkey).
     await createSession(c, {
       x_id: xUser.id,
       x_handle: xUser.username.toLowerCase(),
@@ -346,39 +340,23 @@ authRouter.get('/callback', async (c) => {
       'intent account provisioning (oauth)'
     );
 
-    // Intelligently route user to the right step to prevent bounce loops:
-    // 1. If user does not have a passkey yet -> /login (Step 2: Set Up Passkey)
-    // 2. If user has passkey but is not activated -> /parking (Comical Parking Gate)
-    // 3. If user has both -> /app (or returnTo if custom)
-    // The invite rides along on the redirect so a recipient opened from a
-    // share link still lands on the parking page with the code preloaded even
-    // if the browser lost it somewhere in the OAuth hop.
+    // X OAuth always hands control back to /login. The browser, not the
+    // server, knows whether this device already holds a passkey; LoginPage
+    // then either creates one, confirms one, or offers recovery. This also
+    // prevents an existing passkey row from bouncing a new device straight to
+    // the dashboard without the second factor.
     const safeInvite =
       typeof inviteCode === 'string' && /^[A-Z]{6}$/.test(inviteCode.trim().toUpperCase())
         ? inviteCode.trim().toUpperCase()
         : '';
-    const inviteParam = safeInvite ? `invite=${encodeURIComponent(safeInvite)}` : '';
-    const withInviteParam = (target: string) => {
-      if (!inviteParam) return target;
-      return target.includes('invite=') ? target : `${target}${target.includes('?') ? '&' : '?'}${inviteParam}`;
-    };
-
-    let destination: string;
-    if (!hasPasskey) {
-      destination = withInviteParam(`${appOrigin}/login`);
-    } else if (!isActivated) {
-      destination = withInviteParam(`${appOrigin}/parking`);
-    } else {
-      // Re-sanitized here: the cookie payload is signed, but defense in depth
-      // costs nothing and keeps the redirect on this origin unconditionally.
-      const safeReturnTo = sanitizeReturnTo(returnTo);
-      destination =
-        safeReturnTo !== '/' && safeReturnTo !== '/login'
-          ? withInviteParam(`${appOrigin}${safeReturnTo}`)
-          : withInviteParam(`${appOrigin}/app`);
+    const safeReturnTo = sanitizeReturnTo(returnTo);
+    const params = new URLSearchParams();
+    if (safeInvite) params.set('invite', safeInvite);
+    if (safeReturnTo !== '/' && safeReturnTo !== '/login') {
+      params.set('return_to', safeReturnTo);
     }
-
-    return c.redirect(destination);
+    const query = params.toString();
+    return c.redirect(`${appOrigin}/login${query ? `?${query}` : ''}`);
   } catch (err: any) {
     console.error('X OAuth callback processing error:', err);
     const reqUrl = new URL(c.req.url);
@@ -436,6 +414,24 @@ const getSessionHandler = async (c: any) => {
     } catch {}
   }
 
+  // Recovery-code status is optional metadata. A missing pepper or transient
+  // D1 issue must not make the whole session endpoint fail.
+  let hasRecoveryCodes = false;
+  let recoveryCodesRemaining = 0;
+  if (c.env.DB) {
+    try {
+      const status = await getRecoveryStatus(c.env, session.x_id);
+      hasRecoveryCodes = status.hasCodes;
+      recoveryCodesRemaining = status.remaining;
+    } catch {}
+  }
+
+  const passkeyVerified = session.passkey_verified === true;
+  const recoveryAuthorized =
+    session.recovery_authorized === true &&
+    typeof session.recovery_authorized_at === 'number' &&
+    Date.now() - session.recovery_authorized_at <= 10 * 60 * 1000;
+
   const user = {
     id: session.x_id,
     handle: session.x_handle,
@@ -443,6 +439,10 @@ const getSessionHandler = async (c: any) => {
     avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
     nearAccount,
     hasPasskey,
+    passkeyVerified,
+    recoveryAuthorized,
+    hasRecoveryCodes,
+    recoveryCodesRemaining,
     isActivated: !!isActivated,
     personalInviteCode: personalInviteCode || null,
   };
@@ -456,6 +456,10 @@ const getSessionHandler = async (c: any) => {
       xName: session.x_name,
       nearAccount,
       hasPasskey,
+      passkeyVerified,
+      recoveryAuthorized,
+      hasRecoveryCodes,
+      recoveryCodesRemaining,
       expiresAt: session.expires_at,
       isActivated: !!isActivated,
       personalInviteCode: personalInviteCode || null,
@@ -635,13 +639,27 @@ authRouter.post('/passkey/login-verify', async (c) => {
       x_handle: userProfile.x_handle,
       x_name: userProfile.x_name,
       near_account: userProfile.near_account,
+      is_activated: userProfile.is_activated === 1,
+      personal_invite_code: userProfile.personal_invite_code || null,
+      passkey_verified: true,
+      passkey_verified_at: Date.now(),
     });
 
     const isActivated = userProfile.is_activated === 1 || session.is_activated;
     const personalInviteCode = userProfile.personal_invite_code || session.personal_invite_code;
 
+    // Existing users who predate recovery codes get them on their next
+    // verified sign-in. Failure here must not block login.
+    let recovery: Awaited<ReturnType<typeof ensureRecoveryCodes>> = null;
+    try {
+      recovery = await ensureRecoveryCodes(c.env, session.x_id);
+    } catch (recoveryErr) {
+      console.warn('Recovery-code backfill skipped:', recoveryErr);
+    }
+
     return c.json({
       success: true,
+      recoveryCodes: recovery?.codes || null,
       user: {
         id: session.x_id,
         handle: session.x_handle,
@@ -649,6 +667,9 @@ authRouter.post('/passkey/login-verify', async (c) => {
         avatarUrl: `https://unavatar.io/twitter/${session.x_handle}`,
         nearAccount: session.near_account,
         hasPasskey: true,
+        passkeyVerified: true,
+        hasRecoveryCodes: recovery?.hasCodes ?? true,
+        recoveryCodesRemaining: recovery?.remaining ?? undefined,
         isActivated: !!isActivated,
         personalInviteCode: personalInviteCode || null,
       },
@@ -660,11 +681,132 @@ authRouter.post('/passkey/login-verify', async (c) => {
 });
 
 /**
+ * POST /auth/passkey/confirm
+ *
+ * Completes the second factor after X OAuth. requirePasskeyAuth() proves the
+ * assertion belongs to the current session's x_id, so this cannot be used to
+ * swap accounts the way the standalone passkey-login endpoint can.
+ */
+authRouter.post('/passkey/confirm', requireAuth(), requirePasskeyAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const now = Date.now();
+    await updateSession(c, {
+      passkey_verified: true,
+      passkey_verified_at: now,
+      recovery_authorized: false,
+      recovery_authorized_at: undefined,
+    });
+
+    let recovery: Awaited<ReturnType<typeof ensureRecoveryCodes>> = null;
+    try {
+      recovery = await ensureRecoveryCodes(c.env, session.x_id);
+    } catch (recoveryErr) {
+      console.warn('Recovery-code backfill skipped:', recoveryErr);
+    }
+
+    return c.json({
+      success: true,
+      passkeyVerified: true,
+      recoveryCodes: recovery?.codes || null,
+      hasRecoveryCodes: recovery?.hasCodes ?? true,
+      recoveryCodesRemaining: recovery?.remaining ?? undefined,
+    });
+  } catch (err: any) {
+    console.error('Passkey session confirmation error:', err);
+    return c.json<ErrorResponse>(
+      { error: publicErrorMessage(err, 'Passkey confirmation failed'), code: 'PASSKEY_CONFIRM_FAILED' },
+      500
+    );
+  }
+});
+
+/**
+ * GET /auth/recovery/status
+ * Returns counts only — plaintext codes are never stored or re-readable.
+ */
+authRouter.get('/recovery/status', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const status = await getRecoveryStatus(c.env, session.x_id);
+    return c.json(status);
+  } catch (err: any) {
+    console.error('Recovery status error:', err);
+    return c.json<ErrorResponse>(
+      { error: publicErrorMessage(err, 'Could not load recovery-code status'), code: 'RECOVERY_STATUS_FAILED' },
+      500
+    );
+  }
+});
+
+/**
+ * POST /auth/recovery/verify
+ *
+ * Consumes one single-use code and grants a short-lived authorization to
+ * replace a lost passkey. The account must still be X-authenticated.
+ */
+authRouter.post(
+  '/recovery/verify',
+  requireAuth(),
+  rateLimit({ limit: 5, prefix: 'recovery-verify', strict: true }),
+  async (c) => {
+    try {
+      const session = c.get('session')!;
+      const body = await c.req.json<{ code?: string }>().catch(() => null);
+      const result = await verifyRecoveryCode(c.env, session.x_id, body?.code);
+
+      if (!result.ok) {
+        return c.json<ErrorResponse>(
+          { error: 'That recovery code is invalid or has already been used.', code: 'INVALID_RECOVERY_CODE' },
+          400
+        );
+      }
+
+      await updateSession(c, {
+        recovery_authorized: true,
+        recovery_authorized_at: Date.now(),
+      });
+
+      return c.json({ success: true, remaining: result.remaining });
+    } catch (err: any) {
+      console.error('Recovery-code verification error:', err);
+      return c.json<ErrorResponse>(
+        { error: publicErrorMessage(err, 'Could not verify recovery code'), code: 'RECOVERY_VERIFY_FAILED' },
+        500
+      );
+    }
+  }
+);
+
+/**
+ * POST /auth/recovery/regenerate
+ * Requires a fresh passkey assertion; invalidates every unused old code.
+ */
+authRouter.post('/recovery/regenerate', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const generated = await generateRecoveryCodes(c.env, session.x_id, { replace: true });
+    return c.json({
+      success: true,
+      recoveryCodes: generated?.codes || [],
+      hasRecoveryCodes: true,
+      remaining: generated?.remaining || 0,
+    });
+  } catch (err: any) {
+    console.error('Recovery-code regeneration error:', err);
+    return c.json<ErrorResponse>(
+      { error: publicErrorMessage(err, 'Could not generate recovery codes'), code: 'RECOVERY_GENERATE_FAILED' },
+      500
+    );
+  }
+});
+
+/**
  * GET /auth/export-key-challenge
  * Generates a challenge for the user to authenticate with their WebAuthn passkey
  * before exporting their authentic NEAR private key.
  */
-authRouter.get('/export-key-challenge', requireAuth(), async (c) => {
+authRouter.get('/export-key-challenge', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const rpId = resolveRpId(c.env);
 
@@ -704,7 +846,7 @@ authRouter.get('/export-key-challenge', requireAuth(), async (c) => {
  * Verifies the WebAuthn passkey assertion and returns the user's authentic
  * NEAR master keypair for self-custody export.
  */
-authRouter.post('/export-key', requireAuth(), async (c) => {
+authRouter.post('/export-key', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const body = (await c.req.json().catch(() => ({}))) as any;
   const { assertion, challengeToken } = body;

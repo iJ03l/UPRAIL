@@ -192,72 +192,6 @@ export function useClaimFlow(initialCode?: string) {
     }
   };
 
-  // ── Withdraw shielded balance to an external address with Passkey ───────
-  // Sends a WebAuthn assertion (same tx_auth flow as claim) with the call to
-  // POST /api/claim/withdraw, which is gated by requirePasskeyAuth().
-  const withdrawShieldedWithPasskey = async (
-    balanceIndex: number,
-    destinationAddress: string,
-    amount?: string
-  ): Promise<{ success: boolean; txHash: string } | undefined> => {
-    const balance = shieldedBalances[balanceIndex];
-    const destination = destinationAddress.trim();
-    if (!balance || !destination) {
-      setError('Select a balance with funds and enter a destination address');
-      return;
-    }
-
-    try {
-      setIsClaiming(true);
-      setError(null);
-
-      // Same as every other fund-moving prompt: a device that never
-      // registered its own passkey can only answer with cross-device QR /
-      // security-key prompts, so register this device first (best-effort) and
-      // let any synced passkey answer the assertion below if that fails.
-      if (user?.handle && !webauthn.hasLocalPasskey(user.handle)) {
-        try {
-          await webauthn.registerPasskey(user.handle);
-          setHasPasskey(true);
-        } catch (regErr) {
-          // A synced passkey can still answer the assertion below, so fall
-          // through — unless the server confirmed no passkey exists, in which
-          // case a lookup is guaranteed to fail and the create error is the
-          // real, actionable message.
-          if (user.hasPasskey === false) {
-            const described = describePasskeyError(regErr);
-            setError(described);
-            throw new Error(described);
-          }
-          /* fall through to the assertion */
-        }
-      }
-
-      // Passkey authorization (identical to claim: tx_auth challenge + assertion)
-      const handle = user?.handle || 'wallet';
-      const assertion = await webauthn.authenticatePasskey(handle, {
-        hasServerPasskey: user?.hasPasskey,
-      });
-
-      const result = await api.withdraw({
-        destinationAddress: destination,
-        asset: balance.token.id,
-        amount: amount || 'all',
-        passkeyAssertion: assertion.authPayload,
-      });
-
-      // Refresh balances so the UI reflects the settled withdrawal
-      await loadShieldedBalances();
-      return { success: result.success, txHash: result.txHash };
-    } catch (err: any) {
-      const msg = describePasskeyError(err);
-      setError(msg);
-      throw err;
-    } finally {
-      setIsClaiming(false);
-    }
-  };
-
   // ── Claim ALL pending payments in one touch ──────────────────────────────
   const claimAllWithPasskey = async () => {
     if (pendingPayments.length === 0) {
@@ -325,7 +259,6 @@ export function useClaimFlow(initialCode?: string) {
     loadPendingPayments,
     claimPaymentWithPasskey,
     claimAllWithPasskey,
-    withdrawShieldedWithPasskey,
     clearError: () => setError(null),
     resetSuccess: () => setClaimSuccess(false),
   };

@@ -145,7 +145,7 @@ export async function executeAgentPay(
  * Creates a scoped AI chat key with mandatory USD spend caps. Passkey-gated.
  * The plaintext key (`up_live_...`) is returned once and never stored.
  */
-agentRouter.post('/keys', requireAuth(), requirePasskeyAuth(), async (c) => {
+agentRouter.post('/keys', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   const session = c.get('session')!;
   const body = (c.get('parsedBody' as any) || {}) as KeyBody;
 
@@ -227,7 +227,7 @@ agentRouter.post('/keys', requireAuth(), requirePasskeyAuth(), async (c) => {
  * GET /api/agent/keys
  * Lists the caller's AI chat keys (never the secret) along with today's USD spend.
  */
-agentRouter.get('/keys', requireAuth(), async (c) => {
+agentRouter.get('/keys', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const { results } = await c.env.DB.prepare(
     `SELECT k.id, k.agent_id, k.label, k.key_prefix, k.per_tx_limit, k.daily_limit,
@@ -279,7 +279,7 @@ agentRouter.get('/keys', requireAuth(), async (c) => {
  * POST /api/agent/keys/:id/revoke
  * Revokes an AI chat key immediately. Passkey-gated.
  */
-agentRouter.post('/keys/:id/revoke', requireAuth(), requirePasskeyAuth(), async (c) => {
+agentRouter.post('/keys/:id/revoke', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   const session = c.get('session')!;
   const id = c.req.param('id');
   const result = await c.env.DB.prepare(

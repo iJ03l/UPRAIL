@@ -23,12 +23,14 @@ import { resolveOrigin, resolveRpId, allowedWebAuthnOrigins, allowedWebAuthnRpId
 import * as webauthn from '../services/webauthn';
 import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
+import { ensureRecoveryCodes } from '../services/recoveryCodes';
 import { background } from '../utils/background';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import {
   isValidDestinationAddress,
   isNearAccountAddress,
   chainMatchesAddress,
+  hasKnownAddressFamily,
   getWithdrawChains,
   get1ClickWithdrawalQuote,
 } from '../services/oneclickWithdraw';
@@ -80,6 +82,10 @@ function explainSettlementFailure(
   // "… is not registered on 0x…". Intents-native settlement isn't wired up yet.
   if (asset.toLowerCase().startsWith('nep245:') || /not registered on 0x[0-9a-f]{40}/i.test(raw)) {
     return `This token settles through NEAR Intents and can't be withdrawn to an address yet. No funds left your account — try a different token, and contact support if you need this one out.`;
+  }
+  const minimum = raw.match(/minimum is ([\d.]+)\s+([A-Za-z0-9._-]+)/i);
+  if (minimum) {
+    return `The amount is below the minimum for this route. Try at least ${minimum[1]} ${minimum[2]}.`;
   }
   if (/not registered|doesn't have enough balance for storage|storage_deposit/.test(r)) {
     return `The destination account isn't set up to receive ${symbol}. It has to be registered first — then retry the withdrawal.`;
@@ -181,7 +187,7 @@ claimRouter.get('/withdrawal/:id', async (c) => {
  * GET /api/claim/pending
  * Returns pending escrow payments matching the logged-in user's X handle
  */
-claimRouter.get('/pending', requireAuth(), async (c) => {
+claimRouter.get('/pending', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
@@ -304,6 +310,48 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       );
     }
 
+    // Registration is the one place a passkey row can be created. Guard it so
+    // an X-only session cannot mint a replacement credential for an account
+    // that already has one:
+    //   - first passkey: allowed (normal onboarding)
+    //   - recovery code consumed: allowed, then all older passkeys are revoked
+    //   - already registered: only a session verified after the newest
+    //     credential was created may add another device
+    let existingPasskeys = 0;
+    let newestPasskeyAt = 0;
+    if (c.env.DB) {
+      try {
+        const row = await c.env.DB.prepare(
+          'SELECT COUNT(*) AS count, COALESCE(MAX(created_at), 0) AS newest FROM passkeys WHERE x_id = ?'
+        )
+          .bind(session.x_id)
+          .first<{ count: number; newest: number }>();
+        existingPasskeys = Number(row?.count) || 0;
+        newestPasskeyAt = Number(row?.newest) || 0;
+      } catch (err) {
+        console.warn('Passkey registration lookup failed:', err);
+      }
+    }
+
+    const recoveryWindow = 10 * 60 * 1000;
+    const recoveryAuthorized =
+      session.recovery_authorized === true &&
+      typeof session.recovery_authorized_at === 'number' &&
+      Date.now() - session.recovery_authorized_at <= recoveryWindow;
+
+    if (existingPasskeys > 0 && !recoveryAuthorized) {
+      const verifiedAt = Number(session.passkey_verified_at) || 0;
+      if (session.passkey_verified !== true || verifiedAt < newestPasskeyAt) {
+        return c.json<ErrorResponse>(
+          {
+            error: 'Confirm with your current passkey before adding another device.',
+            code: 'PASSKEY_CONFIRMATION_REQUIRED',
+          },
+          403
+        );
+      }
+    }
+
     // Retrieve expected challenge strictly from server cache (fail-closed, single-use, zero KV writes)
     const expectedChallenge = await consumeChallenge(c.env, {
       key: `webauthn_reg:${session.x_id}`,
@@ -364,6 +412,17 @@ claimRouter.post('/register', requireAuth(), async (c) => {
         )
         .run();
 
+      // A recovery registration is a reset: the old credential is presumed
+      // lost, so revoke every other passkey for this identity. The newly
+      // inserted credential is the only one allowed to survive.
+      if (recoveryAuthorized) {
+        await c.env.DB.prepare(
+          'DELETE FROM passkeys WHERE x_id = ? AND credential_id != ?'
+        )
+          .bind(session.x_id, verification.credentialId)
+          .run();
+      }
+
       await c.env.DB.prepare(
         `
         UPDATE x_identities
@@ -376,10 +435,24 @@ claimRouter.post('/register', requireAuth(), async (c) => {
         .run();
     }
 
-    // 3. Update the active session cookie with the resolved vault account
+    // 3. Update the active session cookie: this device has now proven the
+    // passkey, and any recovery grant is single-use.
     await updateSession(c, {
       near_account: nearAccount,
+      passkey_verified: true,
+      passkey_verified_at: now,
+      recovery_authorized: false,
+      recovery_authorized_at: undefined,
     });
+
+    // New users get their recovery codes at the same moment they create the
+    // first passkey. Existing users keep whatever batch they already saved.
+    let recovery: Awaited<ReturnType<typeof ensureRecoveryCodes>> = null;
+    try {
+      recovery = await ensureRecoveryCodes(c.env, session.x_id);
+    } catch (recoveryErr) {
+      console.warn('Recovery-code generation skipped:', recoveryErr);
+    }
 
     // Signup completes with the first passkey — provision the intent account
     // now rather than on the user's first balance read.
@@ -397,6 +470,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       success: true,
       nearAccount,
       credentialId: verification.credentialId,
+      recoveryCodes: recovery?.codes || null,
     });
   } catch (err: any) {
     console.error('Passkey registration error:', err);
@@ -417,7 +491,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
  * SECURITY: Requires both session auth AND passkey authorization.
  * The client must include `passkeyAssertion` in the body.
  */
-claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
+claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   try {
     const session = c.get('session')!;
     // Body was already parsed by requirePasskeyAuth()
@@ -814,7 +888,7 @@ claimRouter.post('/execute', requireAuth(), requirePasskeyAuth(), async (c) => {
  * Queries both onchain balances from intents.near and local virtual escrow database
  * so un-withdrawn claimed payments reflect immediately.
  */
-claimRouter.get('/balance', requireAuth(), async (c) => {
+claimRouter.get('/balance', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const session = c.get('session')!;
     const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
@@ -926,7 +1000,7 @@ claimRouter.get('/balance', requireAuth(), async (c) => {
  * Drives the Send-screen network picker so it never falls behind what the
  * solver actually supports (Sui, Robinhood, new L2s, …).
  */
-claimRouter.get('/withdraw-chains', requireAuth(), async (c) => {
+claimRouter.get('/withdraw-chains', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const asset = c.req.query('asset') || 'usdc';
     const chains = await getWithdrawChains(c.env, asset);
@@ -945,7 +1019,7 @@ claimRouter.get('/withdraw-chains', requireAuth(), async (c) => {
  * SECURITY: requires session auth AND passkey authorization — a withdrawal
  * moves real funds, so it is gated exactly like send and claim.
  */
-claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => {
+claimRouter.post('/withdraw', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   try {
     const session = c.get('session')!;
     // Body was already parsed by requirePasskeyAuth()
@@ -978,16 +1052,6 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
     const destinationAddress = body.destinationAddress.trim();
     const asset = (body.asset || 'usdc').toLowerCase();
 
-    // Destination address validation: supports NEAR accounts, EVM (0x...), Solana, and Bitcoin addresses.
-    if (!isValidDestinationAddress(destinationAddress)) {
-      return c.json<ErrorResponse>(
-        { error: 'destinationAddress is not a valid blockchain address', code: 'INVALID_DESTINATION' },
-        400
-      );
-    }
-
-    const isNearAccount = isNearAccountAddress(destinationAddress);
-
     // An explicit destination network lets the caller disambiguate EVM, where
     // the same 0x address exists on every chain. Reject a network that does
     // not match the address family so we never quote a route the address
@@ -996,6 +1060,26 @@ claimRouter.post('/withdraw', requireAuth(), requirePasskeyAuth(), async (c) => 
       typeof body.destinationChain === 'string' && body.destinationChain.trim()
         ? body.destinationChain.trim().toLowerCase()
         : undefined;
+
+    // Shape-check addresses only for families we know (NEAR, EVM, Solana,
+    // Bitcoin, XRP). For newer 1Click destinations (Starknet, Aptos, TON,
+    // Sui, …) let 1Click validate the recipient rather than rejecting it with
+    // the wrong regex.
+    if (
+      (!destinationChain || hasKnownAddressFamily(destinationChain)) &&
+      !isValidDestinationAddress(destinationAddress)
+    ) {
+      return c.json<ErrorResponse>(
+        { error: 'destinationAddress is not a valid blockchain address', code: 'INVALID_DESTINATION' },
+        400
+      );
+    }
+
+    // A selected non-NEAR network is always an external withdrawal, even if
+    // the address happens to resemble a NEAR account.
+    const isNearAccount = destinationChain
+      ? destinationChain === 'near'
+      : isNearAccountAddress(destinationAddress);
 
     if (destinationChain !== undefined) {
       if (!chainMatchesAddress(destinationChain, destinationAddress)) {

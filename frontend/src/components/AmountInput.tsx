@@ -27,11 +27,19 @@ export const AmountInput: React.FC<AmountInputProps> = ({
   const estimatedUsd = price === null ? null : numericAmount * price;
 
   const handleQuickPercent = (pct: number) => {
-    const totalBalance = parseFloat(selectedToken.balance || '0');
-    const calc = ((totalBalance * pct) / 100).toFixed(
-      selectedToken.decimals > 6 ? 4 : 2
+    if (pct === 100) {
+      // MAX must send the exact balance, not a display-rounded copy.
+      onChangeAmount(selectedToken.balance || '0');
+      return;
+    }
+    const totalBalance = parseFloat(selectedToken.balance || '0') || 0;
+    const fixed = ((totalBalance * pct) / 100).toFixed(
+      Math.min(selectedToken.decimals ?? 18, 18)
     );
-    onChangeAmount(calc);
+    const calc = fixed.includes('.')
+      ? fixed.replace(/0+$/, '').replace(/\.$/, '')
+      : fixed;
+    onChangeAmount(calc || '0');
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {

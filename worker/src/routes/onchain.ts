@@ -100,7 +100,7 @@ onchainRouter.get('/price', async (c) => {
   });
 });
 
-onchainRouter.get('/balances', requireAuth(), async (c) => {
+onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
@@ -227,7 +227,7 @@ onchainRouter.get('/balances', requireAuth(), async (c) => {
  *   amount — optional exact deposit amount (e.g. "2.13", "10")
  *   refresh — optional boolean to bypass cache and derive a new 1-time address
  */
-onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
+onchainRouter.get('/deposit-address', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const chain = c.req.query('chain');
   const token = c.req.query('token');
@@ -281,7 +281,7 @@ onchainRouter.get('/deposit-address', requireAuth(), async (c) => {
  * payment they sent or are the recipient of. Without this check the endpoint is
  * an open proxy to the 1Click status API and a cross-user address oracle.
  */
-onchainRouter.get('/deposit-status', requireAuth(), async (c) => {
+onchainRouter.get('/deposit-status', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const address = c.req.query('address');
   if (!address) {
@@ -441,7 +441,7 @@ async function probeDepositStatus(address: string): Promise<Response> {
  * Scoped strictly to the authenticated user — never leaks other users' data.
  * Pulled live from the intents contract event log.
  */
-onchainRouter.get('/history', requireAuth(), async (c) => {
+onchainRouter.get('/history', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const limitParam = c.req.query('limit');
   const parsedLimit = parseInt(limitParam || '', 10);
@@ -609,7 +609,7 @@ onchainRouter.get('/history', requireAuth(), async (c) => {
  * Returns the authenticated user's intent account info — existence, near account id.
  * In Virtual Intents Escrow, account creation is $0 and instant.
  */
-onchainRouter.get('/account', requireAuth(), async (c) => {
+onchainRouter.get('/account', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
   const report: nearRpc.ProvisionReport = { attempted: false, created: false };
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session, report);

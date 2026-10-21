@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSearchParams, useLocation, Link } from '../lib/router';
 import {
   Fingerprint,
@@ -22,8 +22,7 @@ import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 import { TokenIcon } from '../components/TokenIcon';
 import { BackBar } from '../components/BackBar';
 import { formatTokenAmount, formatUsd, sumUsd, api } from '../lib/api';
-import { PaymentIntent, PaymentStatus } from '../types';
-import { currentInvite, inviteFromSearch } from '../lib/invite';
+import { PaymentIntent, PaymentStatus, ShieldedBalance } from '../types';
 
 const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
   pending: 'Waiting',
@@ -165,100 +164,33 @@ const CreatorFeeSetupCard: React.FC<{
   );
 };
 
-// ── Shielded balance withdraw card ──────────────────────────────────────────
-const WithdrawCard: React.FC<{
-  balances: { token: { id: string; symbol: string; iconUrl?: string }; amount: string; amountUsd: number | null }[];
-  isClaiming: boolean;
-  onWithdraw: (balanceIndex: number, destination: string) => Promise<unknown>;
-}> = ({ balances, isClaiming, onWithdraw }) => {
-  const [balanceIndex, setBalanceIndex] = useState(0);
-  const [destination, setDestination] = useState('');
-  const [result, setResult] = useState<string | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
-
-  const active = balances.length > 0 ? balances[Math.min(balanceIndex, balances.length - 1)] : null;
-
-  const handleWithdraw = async () => {
-    setShowConfirm(false);
-    setResult(null);
-    try {
-      const res = (await onWithdraw(Math.min(balanceIndex, balances.length - 1), destination.trim())) as {
-        success: boolean;
-        txHash: string;
-      };
-      setResult(`Withdrawn — tx ${res.txHash}`);
-    } catch {
-      // Error is surfaced by the page-level error alert
-    }
-  };
-
-  if (balances.length === 0) return null;
+// ── Withdraw shortcut ───────────────────────────────────────────────────────
+const WithdrawRedirectCard: React.FC<{ balances: ShieldedBalance[] }> = ({ balances }) => {
+  const totalUsd = sumUsd(balances.map((b) => b.amountUsd));
+  const count = balances.length;
 
   return (
-    <>
-    <div className="rounded-3xl p-5 sm:p-6 bg-white border border-stone-200 shadow-xs space-y-4">
-      <div className="flex items-center space-x-2.5">
-        <ArrowUpRight className="w-5 h-5 text-stone-900" />
-        <div>
-          <div className="text-xs font-bold text-stone-950 font-display">Withdraw money</div>
-          <div className="text-[11px] text-stone-500 font-mono">
-            Secured by your passkey
+    <Link
+      to="/app/send?mode=wallet"
+      className="rounded-3xl p-5 sm:p-6 bg-white border border-stone-200 shadow-xs flex items-center justify-between gap-4 hover:border-black transition-colors group"
+    >
+      <div className="flex items-center space-x-3 min-w-0">
+        <div className="w-10 h-10 rounded-2xl bg-stone-100 text-stone-900 flex items-center justify-center flex-shrink-0 group-hover:bg-stone-900 group-hover:text-white transition-colors">
+          <ArrowUpRight className="w-5 h-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-xs font-bold text-stone-950 font-display">Withdraw to a wallet</div>
+          <div className="text-[11px] text-stone-500 font-mono truncate">
+            {count} asset{count === 1 ? '' : 's'} available
+            {totalUsd != null && totalUsd > 0 ? ` · ≈ ${formatUsd(totalUsd)}` : ''}
           </div>
         </div>
       </div>
-
-      <div className="flex flex-col sm:flex-row gap-2.5">
-        <select
-          value={Math.min(balanceIndex, balances.length - 1)}
-          onChange={(e) => setBalanceIndex(Number(e.target.value))}
-          className="sm:w-48 rounded-xl bg-stone-50 border border-stone-200 px-3 py-2.5 text-xs font-mono text-stone-900 focus:outline-none focus:border-black"
-        >
-          {balances.map((b, i) => (
-            <option key={`${b.token.id}-${i}`} value={i}>
-              {b.token.symbol} · {formatTokenAmount(b.amount)}
-            </option>
-          ))}
-        </select>
-        <input
-          type="text"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value.trim())}
-          placeholder="Destination address (NEAR, 0x…, Solana)…"
-          className="flex-1 rounded-xl bg-stone-50 border border-stone-200 px-3 py-2.5 text-base sm:text-xs font-mono text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white"
-        />
-      </div>
-
-      {result && (
-        <p className="text-xs font-mono text-emerald-700 break-all">{result}</p>
-      )}
-
-      <button
-        type="button"
-        onClick={() => setShowConfirm(true)}
-        disabled={isClaiming || !destination.trim() || !active}
-        className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-      >
-        <Fingerprint className="w-4 h-4" />
-        <span>Withdraw {active ? `${active.token.symbol}` : ''}</span>
-      </button>
-    </div>
-
-    <ConfirmDialog
-      isOpen={showConfirm}
-      onCancel={() => setShowConfirm(false)}
-      onConfirm={() => void handleWithdraw()}
-      tone="financial"
-      title="Confirm withdrawal"
-      description="This moves money out of your UPRAIL account to an external address."
-      confirmLabel="Withdraw"
-      warning="Withdrawals are irreversible. Double-check the destination address before continuing."
-      details={[
-        { label: 'Asset', value: active?.token.symbol || '—', emphasis: true },
-        { label: 'Amount', value: active?.amount ? formatTokenAmount(active.amount) : '—', emphasis: true },
-        { label: 'Destination', value: destination.trim() || '—' },
-      ]}
-    />
-    </>
+      <span className="shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-stone-200 px-3 py-2 text-[10px] font-display font-extrabold uppercase tracking-wider text-stone-700 group-hover:border-black group-hover:text-black transition-colors">
+        Open Send
+        <ArrowRight className="w-3.5 h-3.5" />
+      </span>
+    </Link>
   );
 };
 
@@ -281,13 +213,6 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
 
   const queryPaymentCode =
     searchParams.get('payment') || searchParams.get('code') || pathPaymentCode || '';
-  // Remember the invite that arrived with the share link: the recipient is
-  // about to be bounced through login/parking and must not have to retype it.
-  const urlInvite = useMemo(
-    () => inviteFromSearch(searchParams.toString()) || currentInvite() || '',
-    [searchParams]
-  );
-
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
   const [pendingClaim, setPendingClaim] = useState<{ id: string; all: boolean } | null>(null);
@@ -335,7 +260,6 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
     loadPendingPayments,
     claimPaymentWithPasskey,
     claimAllWithPasskey,
-    withdrawShieldedWithPasskey,
     clearError,
     resetSuccess,
   } = useClaimFlow(queryPaymentCode);
@@ -411,24 +335,6 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
             await Promise.all([loadPendingPayments(), loadShieldedBalances()]);
           }}
         />
-      )}
-
-      {/* Preloaded VIP Access Invite Banner */}
-      {urlInvite && (
-        <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-mono animate-fade-in shadow-xs">
-          <div className="flex items-center space-x-2.5">
-            <Sparkles className="w-4 h-4 text-stone-900 flex-shrink-0" />
-            <div>
-              <span className="text-stone-600">VIP Access Invite: </span>
-              <span className="font-bold text-stone-950 px-2 py-0.5 rounded bg-white border border-stone-300 tracking-wider">
-                {urlInvite.toUpperCase()}
-              </span>
-            </div>
-          </div>
-          <span className="text-[11px] text-stone-900 font-bold bg-white px-2.5 py-1 rounded-full border border-stone-200">
-            Full Access Preloaded
-          </span>
-        </div>
       )}
 
       {/* Receipt: the linked payment was already delivered to this vault */}
@@ -555,13 +461,10 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
         </div>
       )}
 
-      {/* Shielded Vault Balances + Passkey Withdraw */}
-      {user && (
-        <WithdrawCard
-          balances={shieldedBalances}
-          isClaiming={isClaiming}
-          onWithdraw={withdrawShieldedWithPasskey}
-        />
+      {/* Withdraw shortcut — the Send screen owns the full flow, including
+          destination network selection, quote, and receipt. */}
+      {!feesOnly && user && shieldedBalances.length > 0 && (
+        <WithdrawRedirectCard balances={shieldedBalances} />
       )}
 
       {/* Pending Payments List — AUTOMATICALLY DISCOVERED (No link/code input!) */}

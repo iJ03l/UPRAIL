@@ -7,6 +7,14 @@ import {
 import { api } from './api';
 import { detectInAppBrowser, inAppBrowserLabel } from './inAppBrowser';
 import { XUser } from '../types';
+import {
+  saveStoredPasskey,
+  getRegisteredPasskeys as readRegisteredPasskeys,
+  hasLocalPasskey as storedPasskeyExists,
+  type StoredPasskeyInfo,
+} from './passkeyStorage';
+
+export type { StoredPasskeyInfo } from './passkeyStorage';
 
 /**
  * Maps a WebAuthn ceremony failure to a short, actionable explanation.
@@ -111,16 +119,6 @@ export interface WebAuthnSupportStatus {
   platformAuthenticator: boolean;
 }
 
-export interface StoredPasskeyInfo {
-  credentialId: string;
-  handle: string;
-  createdAt: string;
-  algorithm: string;
-  deviceLabel: string;
-}
-
-const PASSKEY_STORAGE_KEY = 'uprail_registered_passkeys';
-
 export const webauthn = {
   /**
    * Checks if the current browser and platform support WebAuthn Passkeys.
@@ -142,29 +140,14 @@ export const webauthn = {
    * Check if a passkey has been saved locally for this handle.
    */
   hasLocalPasskey(handle?: string): boolean {
-    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return false;
-    try {
-      const list: StoredPasskeyInfo[] = JSON.parse(
-        localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
-      );
-      if (!handle) return list.length > 0;
-      const clean = handle.replace(/^@/, '').toLowerCase();
-      return list.some((p) => p.handle.toLowerCase() === clean);
-    } catch {
-      return false;
-    }
+    return storedPasskeyExists(handle);
   },
 
   /**
    * Get all registered passkeys on this device.
    */
   getRegisteredPasskeys(): StoredPasskeyInfo[] {
-    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return [];
-    try {
-      return JSON.parse(localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]');
-    } catch {
-      return [];
-    }
+    return readRegisteredPasskeys();
   },
 
   /**
@@ -195,10 +178,43 @@ export const webauthn = {
   },
 
   /**
+   * Answers the mandatory second factor after X OAuth. This proves the
+   * credential belongs to the signed-in account and keeps the same session.
+   */
+  async confirmSessionPasskey(): Promise<{
+    success: boolean;
+    passkeyVerified: boolean;
+    recoveryCodes?: string[] | null;
+    hasRecoveryCodes?: boolean;
+    recoveryCodesRemaining?: number;
+  }> {
+    const rawOptions = await api.getTxAuthOptions();
+    const options: any = { ...rawOptions, userVerification: 'preferred' };
+    delete options.allowCredentials;
+    const assertion = await startAuthentication(options);
+    return api.confirmPasskey(assertion);
+  },
+
+  /**
+   * Rotates recovery codes. Requires a fresh passkey assertion server-side.
+   */
+  async regenerateRecoveryCodes(): Promise<{ recoveryCodes: string[]; remaining: number }> {
+    const rawOptions = await api.getTxAuthOptions();
+    const options: any = { ...rawOptions, userVerification: 'preferred' };
+    delete options.allowCredentials;
+    const assertion = await startAuthentication(options);
+    return api.regenerateRecoveryCodes(assertion);
+  },
+
+  /**
    * Register a new hardware passkey (Touch ID, Face ID, Windows Hello, YubiKey)
    * using NIST P-256 (ES256) signature algorithm.
    */
-  async registerPasskey(handle: string): Promise<{ success: boolean; credentialId: string }> {
+  async registerPasskey(handle: string): Promise<{
+    success: boolean;
+    credentialId: string;
+    recoveryCodes?: string[] | null;
+  }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
     const isSupported = browserSupportsWebAuthn();
     if (!isSupported) {
@@ -265,7 +281,7 @@ export const webauthn = {
     }
 
     // Register with backend
-    await api.registerPasskeyAttestation(attResp);
+    const registered = await api.registerPasskeyAttestation(attResp);
 
     // Save passkey record locally
     const passkeyInfo: StoredPasskeyInfo = {
@@ -276,17 +292,13 @@ export const webauthn = {
       deviceLabel: navigator.platform || 'Device Biometric Key',
     };
 
-    if (typeof localStorage !== 'undefined') {
-      try {
-        const existing: StoredPasskeyInfo[] = JSON.parse(
-          localStorage.getItem(PASSKEY_STORAGE_KEY) || '[]'
-        );
-        existing.push(passkeyInfo);
-        localStorage.setItem(PASSKEY_STORAGE_KEY, JSON.stringify(existing));
-      } catch {}
-    }
+    saveStoredPasskey(passkeyInfo);
 
-    return { success: true, credentialId: attResp.id };
+    return {
+      success: true,
+      credentialId: attResp.id,
+      recoveryCodes: registered?.recoveryCodes || null,
+    };
   },
 
   /**

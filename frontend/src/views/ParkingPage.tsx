@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { currentInvite, inviteFromSearch, takeInvite } from '../lib/invite';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { GlitchLogo } from '../components/GlitchLogo';
+import { AuthLoadingScreen } from '../components/AuthLoadingScreen';
 import { useToast } from '../components/Toast';
 import {
   ArrowRight,
@@ -40,14 +41,24 @@ export const ParkingPage: React.FC = () => {
     if (preloaded) setCode(preloaded);
   }, []);
 
-  // Strict Guard: If user is already activated, forward directly to /app
-  if (!isLoading && user?.isActivated) {
-    return <Navigate to="/app" replace />;
+  if (isLoading) {
+    return <AuthLoadingScreen message="Checking your session" />;
   }
 
   // Strict Guard: If user is not logged in at all, forward to /login
-  if (!isLoading && !user) {
+  if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Parking is post-signup; a passkey-confirmed session is still mandatory.
+  if (user.hasPasskey !== true || user.passkeyVerified !== true) {
+    const returnTo = encodeURIComponent(window.location.pathname + window.location.search);
+    return <Navigate to={`/login?return_to=${returnTo}`} replace />;
+  }
+
+  // Strict Guard: If user is already activated, forward directly to /app
+  if (user.isActivated) {
+    return <Navigate to="/app" replace />;
   }
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {

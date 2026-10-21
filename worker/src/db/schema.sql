@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS passkeys (
 CREATE INDEX IF NOT EXISTS idx_passkeys_x_id ON passkeys(x_id);
 CREATE INDEX IF NOT EXISTS idx_passkeys_cred_id ON passkeys(credential_id);
 
+-- Recovery codes: one-time HMAC digests that can replace a lost passkey.
+CREATE TABLE IF NOT EXISTS recovery_codes (
+  id TEXT PRIMARY KEY,
+  x_id TEXT NOT NULL,
+  code_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  used_at INTEGER,
+  FOREIGN KEY(x_id) REFERENCES x_identities(x_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_recovery_codes_x_id ON recovery_codes(x_id, used_at);
+CREATE INDEX IF NOT EXISTS idx_recovery_codes_hash ON recovery_codes(code_hash);
+
 -- Payments: Confidential escrow records tracking payment lifecycle
 CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,

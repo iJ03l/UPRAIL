@@ -21,7 +21,7 @@ export const invitesRouter = new Hono<AppContext>();
  * Returns the authenticated user's 1 personal invite code, whether it has been used,
  * who claimed it, and any payment-attached invites.
  */
-invitesRouter.get('/my-invite', requireAuth(), async (c) => {
+invitesRouter.get('/my-invite', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const session = c.get('session')!;
     const inviteData = await getUserInvite(c.env, session.x_id, session.x_handle);
@@ -99,7 +99,7 @@ invitesRouter.post('/validate', async (c) => {
  * Redeems an invite code for the authenticated user, activating their account
  * and issuing their 1 personal invite code.
  */
-invitesRouter.post('/redeem', requireAuth(), async (c) => {
+invitesRouter.post('/redeem', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const session = c.get('session')!;
     const body = await c.req.json<RedeemInviteRequest>().catch(() => ({ code: '' }));

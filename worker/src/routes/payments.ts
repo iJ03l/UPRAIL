@@ -1048,13 +1048,13 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
 // Human send: session + physical passkey. Agent send is mounted separately in
 // routes/agent.ts with agentAuth(), reusing this exact handler so the money
 // path is identical for both callers.
-paymentsRouter.post('/send', requireAuth(), requirePasskeyAuth(), handleSendPayment);
+paymentsRouter.post('/send', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), handleSendPayment);
 
 /**
  * GET /api/payments
  * Lists sender's payment history from D1 (requires session)
  */
-paymentsRouter.get('/payments', requireAuth(), async (c) => {
+paymentsRouter.get('/payments', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
@@ -1143,7 +1143,7 @@ paymentsRouter.get('/payments/:id', async (c) => {
  * - MUST be authenticated via requireAuth()
  * - Caller MUST be the verified sender (sender_x_id === session.x_id)
  */
-paymentsRouter.post('/payments/:id/cancel', requireAuth(), async (c) => {
+paymentsRouter.post('/payments/:id/cancel', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const id = c.req.param('id');
     const session = c.get('session')!;

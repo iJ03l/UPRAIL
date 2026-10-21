@@ -62,3 +62,18 @@ export function requireQuoteSecret(env: Env): string {
 export function getInternalServiceKey(env: Env): string | null {
   return clean(env.INTERNAL_SERVICE_KEY);
 }
+
+/**
+ * Pepper for one-time passkey recovery-code hashes.
+ *
+ * A recovery code is high-entropy, so a fast HMAC is sufficient at rest. The
+ * pepper must be separate from SESSION_SECRET: rotating session cookies must
+ * not silently invalidate every user's recovery codes.
+ */
+export function requireRecoveryPepper(env: Env): string {
+  const secret = clean(env.RECOVERY_PEPPER);
+  if (!secret) {
+    throw new Error('RECOVERY_PEPPER is not configured; refusing to create or verify recovery codes');
+  }
+  return secret;
+}

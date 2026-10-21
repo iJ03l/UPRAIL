@@ -132,6 +132,18 @@ export function sanitizeReturnPath(raw: string | null | undefined): string | nul
   return value;
 }
 
+/** Removes invite params once the account no longer needs them. */
+export function stripInvite(path: string): string {
+  try {
+    const url = new URL(path, 'https://app.uprail.world');
+    url.searchParams.delete('invite');
+    url.searchParams.delete('ref');
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return path;
+  }
+}
+
 /** Appends the pending invite to a path so redirects never lose it. */
 export function withInvite(path: string): string {
   const code = currentInvite();

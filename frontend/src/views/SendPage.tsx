@@ -19,9 +19,12 @@ import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareMo
 import { usePayments } from '../hooks/usePayments';
 import { PROTOCOL_FEE_RATE, formatTokenAmount, formatUsd, api } from '../lib/api';
 import { addressFamily, familyLabel, WithdrawChain } from '../lib/withdrawChains';
+import { useSearchParams } from '../lib/router';
 import { PaymentIntent } from '../types';
 
 export const SendPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const requestedMode = searchParams.get('mode');
   const {
     tokens,
     selectedToken,
@@ -37,7 +40,9 @@ export const SendPage: React.FC = () => {
     refreshBalances,
   } = usePayments();
 
-  const [sendMode, setSendMode] = useState<'handle' | 'wallet'>('handle');
+  const [sendMode, setSendMode] = useState<'handle' | 'wallet'>(
+    requestedMode === 'wallet' ? 'wallet' : 'handle'
+  );
   const [recipient, setRecipient] = useState('');
   const [walletAddress, setWalletAddress] = useState('');
   const [destinationChain, setDestinationChain] = useState('');
@@ -56,6 +61,10 @@ export const SendPage: React.FC = () => {
   useEffect(() => {
     updateQuote(selectedToken.id, amount);
   }, [selectedToken.id, amount, updateQuote]);
+
+  useEffect(() => {
+    if (requestedMode === 'wallet') setSendMode('wallet');
+  }, [requestedMode]);
 
   const feePercentLabel = useMemo(() => {
     const amountNum = parseFloat(amount);

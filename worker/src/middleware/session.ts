@@ -101,6 +101,8 @@ export async function createSession(
     near_account?: string | null;
     is_activated?: boolean;
     personal_invite_code?: string | null;
+    passkey_verified?: boolean;
+    passkey_verified_at?: number;
   }
 ): Promise<Session> {
   const sessionId = crypto.randomUUID();
@@ -115,6 +117,10 @@ export async function createSession(
     near_account: userData.near_account || null,
     is_activated: userData.is_activated,
     personal_invite_code: userData.personal_invite_code || null,
+    passkey_verified: userData.passkey_verified === true,
+    passkey_verified_at: userData.passkey_verified === true
+      ? (userData.passkey_verified_at || now)
+      : undefined,
     created_at: now,
     expires_at: expiresAt,
   };
@@ -196,7 +202,16 @@ export async function destroySession(c: Context<AppContext>): Promise<void> {
 /**
  * Middleware guard requiring an authenticated X session
  */
-export const requireAuth = (): MiddlewareHandler<AppContext> => {
+export interface RequireAuthOptions {
+  /**
+   * When true, an X-authenticated session must also have completed the passkey
+   * second factor. Onboarding endpoints (registration, recovery, the passkey
+   * confirmation itself) deliberately stay on plain requireAuth().
+   */
+  passkeyVerified?: boolean;
+}
+
+export const requireAuth = (options: RequireAuthOptions = {}): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
     const session = c.get('session');
     if (!session || !session.x_id) {
@@ -206,6 +221,15 @@ export const requireAuth = (): MiddlewareHandler<AppContext> => {
           code: 'UNAUTHORIZED',
         },
         401
+      );
+    }
+    if (options.passkeyVerified && session.passkey_verified !== true) {
+      return c.json(
+        {
+          error: 'Confirm this sign-in with your passkey to continue.',
+          code: 'PASSKEY_CONFIRMATION_REQUIRED',
+        },
+        403
       );
     }
     return await next();

@@ -6,6 +6,11 @@ export interface XUser {
   isVerified?: boolean;
   nearAccount?: string | null;
   hasPasskey?: boolean;
+  /** True once this session has answered a passkey or consumed a recovery code. */
+  passkeyVerified?: boolean;
+  recoveryAuthorized?: boolean;
+  hasRecoveryCodes?: boolean;
+  recoveryCodesRemaining?: number;
   isActivated?: boolean;
   personalInviteCode?: string | null;
 }
