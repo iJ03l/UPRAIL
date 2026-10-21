@@ -18,6 +18,8 @@ let globalUser: XUser | null = (() => {
 
 const subscribers = new Set<(user: XUser | null) => void>();
 let inFlightAuthPromise: Promise<XUser | null> | null = null;
+let sessionChecked = false;
+let clientHydrated = false;
 
 function setGlobalUser(u: XUser | null) {
   globalUser = u;
@@ -35,11 +37,19 @@ function setGlobalUser(u: XUser | null) {
 
 export function useXAuth() {
   const [user, setUser] = useState<XUser | null>(globalUser);
-  const [isLoading, setIsLoading] = useState(true);
+  // Stay in the server-rendered loading state through hydration, then use the
+  // cached user or a completed check to paint immediately. Revalidation still
+  // runs in the background; it must not blank the page on every route mount.
+  const [isLoading, setIsLoading] = useState(
+    () => typeof window === 'undefined' || !clientHydrated || (!globalUser && !sessionChecked)
+  );
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    clientHydrated = true;
+    if (globalUser || sessionChecked) setIsLoading(false);
+
     const handler = (nextUser: XUser | null) => {
       setUser(nextUser);
       setIsLoading(false);
@@ -88,11 +98,13 @@ export function useXAuth() {
         })
         .finally(() => {
           inFlightAuthPromise = null;
+          sessionChecked = true;
           setIsLoading(false);
         });
 
       return await inFlightAuthPromise;
     } catch (err) {
+      sessionChecked = true;
       setIsLoading(false);
     }
   }, []);

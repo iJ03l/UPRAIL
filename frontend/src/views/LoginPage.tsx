@@ -144,7 +144,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   // Stage 1: Connect 𝕏 or Passkey Unlock (if !user)
   // Stage 2: Create Device Passkey (if user exists, but this specific device lacks a passkey)
   // Stage 3: Fully onboarded (has 𝕏 and passkey on this device) -> route to /parking or /app
-  const hasLocalDevicePasskey = user?.handle ? webauthn.hasLocalPasskey(user.handle) : webauthn.hasLocalPasskey();
   const isStep1 = !isLoading && !user;
   // X OAuth only proves identity. A passkey assertion (or a consumed recovery
   // code, which grants one replacement registration) is required before the
@@ -669,11 +668,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     <p className="text-xs leading-relaxed text-muted">
                       X proves who you are. Your passkey proves this sign-in is really you.
                     </p>
-                    {!hasLocalDevicePasskey && (
-                      <p className="text-xs leading-relaxed text-amber-800">
-                        No saved passkey found in this browser. You can still try a synced passkey, or use a recovery code.
-                      </p>
-                    )}
                   </div>
 
                   <button
