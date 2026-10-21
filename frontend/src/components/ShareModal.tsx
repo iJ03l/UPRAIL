@@ -45,8 +45,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const tweetText = encodeURIComponent(
     isDirect
-      ? `Hey @${payment.recipientHandle}, I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL — it's already in your account. Open the link to see it: ${payment.claimLink}`
-      : `Hey @${payment.recipientHandle}, I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL. Open the link to receive it — sign in with X, then confirm with Face ID or fingerprint. No crypto wallet needed: ${payment.claimLink}`
+      ? [
+          `Hey @${payment.recipientHandle},`,
+          '',
+          `I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL — it’s already in your account.`,
+          '',
+          'Open the receipt — no wallet needed:',
+          '',
+          payment.claimLink,
+        ].join('\n')
+      : [
+          `Hey @${payment.recipientHandle},`,
+          '',
+          `I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL — it’s waiting for you.`,
+          '',
+          'Sign in with X, then confirm with your passkey — no crypto wallet needed.',
+          '',
+          payment.claimLink,
+        ].join('\n')
   );
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
 
@@ -80,7 +96,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 <span className="text-stone-900 font-bold font-mono">
                   @{payment.recipientHandle}
                 </span>
-                's vault.
+                ’s UPRAIL account.
               </>
             ) : (
               <>

@@ -55,7 +55,13 @@ export const WalletShareModal: React.FC<WalletShareModalProps> = ({
 
   const shortDest = shortenAddress(receipt.destinationAddress);
   const tweetText = encodeURIComponent(
-    `I just sent ${formatTokenAmount(receipt.amount)} ${receipt.symbol} to ${shortDest} on UP! ${receipt.shareLink}`
+    [
+      `I just sent ${formatTokenAmount(receipt.amount)} ${receipt.symbol} to ${shortDest} on UPRAIL — settled privately.`,
+      '',
+      'Receipt — proof of payment:',
+      '',
+      receipt.shareLink,
+    ].join('\n')
   );
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
   const explorerUrl = receipt.txHash ? `https://nearblocks.io/txns/${receipt.txHash}` : null;
