@@ -499,67 +499,44 @@
 }
 
 /*
- * Live NEAR Intents status. Two slow, offset halo rings expand from a
- * breathing core — enough motion to read as telemetry, not a notification
- * badge. Motion is disabled wholesale by the reduced-motion rule below.
+ * Live NEAR Intents status: a thin ECG trace with a soft highlight sweeping
+ * along the line. Green reads as "healthy" on light surfaces; the brand orange
+ * takes over in dark mode. Reduced motion turns the trace into a still line.
  */
-@keyframes intents-ring {
+@keyframes intents-ecg-trace {
   0% {
-    transform: scale(0.7);
-    opacity: 0.55;
+    stroke-dashoffset: 100;
+    opacity: 0;
   }
-  65%, 100% {
-    transform: scale(2.6);
+  12% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
     opacity: 0;
   }
 }
 
-@keyframes intents-core-breathe {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.9;
-  }
-  50% {
-    transform: scale(1.14);
-    opacity: 1;
-  }
-}
-
-.intents-status-dot {
-  position: relative;
+.intents-pulse {
   display: inline-flex;
-  width: 7px;
-  height: 7px;
-  align-items: center;
-  justify-content: center;
+  width: 30px;
+  height: 14px;
   flex-shrink: 0;
+  color: #10b981;
+  filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.35));
 }
 
-.intents-status-core {
-  position: relative;
-  z-index: 1;
-  width: 5px;
-  height: 5px;
-  border-radius: 9999px;
-  background: #10b981;
-  box-shadow:
-    0 0 0 1px rgba(16, 185, 129, 0.28),
-    0 0 9px rgba(16, 185, 129, 0.5);
-  animation: intents-core-breathe 3.2s ease-in-out infinite;
+.dark .intents-pulse {
+  color: var(--accent);
+  filter: drop-shadow(0 0 2px rgba(224, 83, 38, 0.45));
 }
 
-.intents-status-ring {
-  position: absolute;
-  inset: -1px;
-  border-radius: 9999px;
-  border: 1px solid rgba(16, 185, 129, 0.35);
-  background: rgba(16, 185, 129, 0.14);
-  opacity: 0;
-  animation: intents-ring 3.2s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
-}
-
-.intents-status-ring--delayed {
-  animation-delay: 1.6s;
+.intents-ecg-trace {
+  stroke-dasharray: 18 82;
+  animation: intents-ecg-trace 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 @keyframes ambient-telemetry-tic {

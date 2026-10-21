@@ -33,13 +33,29 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
           {/* Center: live protocol status — compact on mobile, full label on desktop */}
           <div
-            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-50/90 border border-stone-200/80 text-[10px] sm:text-[11px] font-mono text-stone-600 flex-shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-full bg-stone-50/80 border border-stone-200/80 text-[10px] sm:text-[11px] font-mono text-stone-600 flex-shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-none"
             title="NEAR Intents is live"
           >
-            <span className="intents-status-dot" aria-hidden="true">
-              <span className="intents-status-ring" />
-              <span className="intents-status-ring intents-status-ring--delayed" />
-              <span className="intents-status-core" />
+            <span className="intents-pulse" aria-hidden="true">
+              <svg width="30" height="14" viewBox="0 0 30 14" fill="none">
+                <path
+                  d="M0 8h5l2-3 2 6 3-10 2 9 2-4h12"
+                  stroke="currentColor"
+                  strokeOpacity="0.22"
+                  strokeWidth="1.1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  className="intents-ecg-trace"
+                  d="M0 8h5l2-3 2 6 3-10 2 9 2-4h12"
+                  stroke="currentColor"
+                  strokeWidth="1.35"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  pathLength="100"
+                />
+              </svg>
             </span>
             <span className="hidden sm:inline tracking-tight">NEAR Intents Active</span>
             <span className="sm:hidden tracking-tight">Intents</span>
@@ -64,6 +80,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                   onClick={() => setIsSettingsOpen(true)}
                   className="flex items-center gap-2 h-9 sm:h-10 px-2 sm:px-3 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer group flex-shrink-0 min-w-0"
                   title="Account Settings"
+                  aria-label={`Account settings for @${user.handle}`}
                 >
                   <img
                     src={user.avatarUrl || `https://unavatar.io/twitter/${user.handle}`}
@@ -73,7 +90,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
                   />
-                  <span className="text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors max-w-[84px] sm:max-w-[150px] truncate">
+                  <span className="hidden sm:inline text-xs font-bold font-mono text-stone-900 group-hover:text-black transition-colors max-w-[150px] truncate">
                     @{user.handle}
                   </span>
                 </button>
