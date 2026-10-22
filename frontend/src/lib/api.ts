@@ -1467,37 +1467,10 @@ export const api = {
     }
   },
 
-  // ── Launchpad Creator Fees (auto-discovery + zero-key prepare) ─────────────
-
-  async prepareCreatorFeeToken(params: {
-    token: string;
-    handle?: string;
-  }): Promise<{
-    token: string;
-    handle?: string;
-    address: string;
-    registered: boolean;
-    autoSync: boolean;
-    routed?: { id?: string; amount?: string; fee?: string; routing?: string; status?: string };
-    note?: string;
-  }> {
-    const url = API_BASE ? `${API_BASE}/api/fees/prepare` : '/api/fees/prepare';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(params),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Could not register launchpad token');
-    }
-    return await res.json();
-  },
+  // ── Launchpad Creator Fees (auto-discovery + on-demand sync) ──────────────
 
   async syncCreatorFees(params?: {
     token?: string;
-    handle?: string;
   }): Promise<{
     ok: boolean;
     checked?: number;

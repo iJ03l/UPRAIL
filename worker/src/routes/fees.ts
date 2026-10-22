@@ -45,27 +45,36 @@ function jsonError(
 /**
  * POST /api/fees/prepare
  * Zero-integration path: a token that points its creator fees at escrow can be
- * prepared by anyone. Registers escrow on the token so the launchpad's push is
- * accepted, tracks the token + handle for automatic on-chain RPC fee detection,
- * and immediately routes any balance already sitting in `escrow.uprail.near`.
+ * prepared by anyone. The recipient is read from the token's on-chain
+ * description, never from the caller, so a stranger cannot redirect fees to
+ * themselves. Registers escrow on the token, tracks it for automatic RPC fee
+ * detection, and routes any balance already sitting in `escrow.uprail.near`.
  */
 feesRouter.post('/prepare', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
-    | { token?: unknown; handle?: unknown; launchpad?: unknown }
+    | { token?: unknown; launchpad?: unknown }
     | null;
   const contractId = contractFromToken(body?.token);
   if (!contractId) return jsonError(c, 400, 'A valid NEP-141 token contract is required.', 'INVALID_TOKEN');
+
+  const token = await resolveLaunchpadToken(c.env, contractId, true);
+  if (!token) return jsonError(c, 422, 'Unknown or non-NEP-141 token contract.', 'UNKNOWN_TOKEN');
+
+  const handle = deriveHandleFromDescription(token.description);
+  if (!handle) {
+    return jsonError(
+      c,
+      422,
+      'No creator handle found. Add "Fees to @handle via UPRAIL" to the token description.',
+      'NO_RECIPIENT'
+    );
+  }
 
   const reg = await registerEscrowForTokenPublic(c.env, contractId);
   if (!reg.registered) {
     return jsonError(c, 422, reg.reason || 'Could not prepare escrow for this token.', 'REGISTRATION_FAILED');
   }
 
-  let handle = normalizeHandle(body?.handle);
-  if (!handle) {
-    const tokenMeta = await resolveLaunchpadToken(c.env, contractId, true);
-    handle = deriveHandleFromDescription(tokenMeta?.description);
-  }
   const launchpad = typeof body?.launchpad === 'string' && body.launchpad.trim()
     ? body.launchpad.trim().toLowerCase()
     : undefined;
@@ -73,33 +82,29 @@ feesRouter.post('/prepare', async (c) => {
   await trackLaunchpadToken(c.env, { contractId, handle, launchpad });
 
   let syncedFee: Record<string, unknown> | undefined;
-  if (handle) {
-    try {
-      const syncRes = await syncTokenLaunchpadFees(c.env, contractId, { handle, launchpad });
-      if (syncRes.synced) {
-        syncedFee = {
-          id: syncRes.id,
-          amount: syncRes.amount,
-          fee: syncRes.fee,
-          routing: syncRes.routing,
-          status: syncRes.status,
-        };
-      }
-    } catch {}
-  }
+  try {
+    const syncRes = await syncTokenLaunchpadFees(c.env, contractId, { launchpad });
+    if (syncRes.synced) {
+      syncedFee = {
+        id: syncRes.id,
+        amount: syncRes.amount,
+        fee: syncRes.fee,
+        routing: syncRes.routing,
+        status: syncRes.status,
+      };
+    }
+  } catch {}
 
   return c.json({
     token: contractId,
-    handle: handle || undefined,
+    handle,
     address: escrowHoldingAccount(c.env),
     registered: true,
     autoSync: true,
     feePercent: protocolFeePercent(c.env),
     minFeeUsd: minFeeUsd(c.env),
     ...(syncedFee ? { routed: syncedFee } : {}),
-    note: handle
-      ? `Escrow is registered and automatic RPC fee routing is active for @${handle}. Any ${contractId} sent to ${escrowHoldingAccount(c.env)} is routed automatically.`
-      : 'Point this token\'s creator fees here (100%, permanent) and name the recipient in its description as: Fees to @handle via UPRAIL (or pass `handle`).',
+    note: `Escrow is registered and automatic RPC fee routing is active for @${handle}. Any ${contractId} sent to ${escrowHoldingAccount(c.env)} is routed automatically.`,
   });
 });
 
@@ -109,24 +114,31 @@ feesRouter.post('/prepare', async (c) => {
  * - If `txHash` is supplied: verifies that exact transaction on-chain.
  * - If `txHash` is omitted: reads `escrow.uprail.near`'s live balance on the
  *   token via `NEAR_RPC_URL` and routes any uncredited surplus automatically.
+ * The recipient always comes from the token description.
  */
 feesRouter.post('/route', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
-    | { token?: unknown; txHash?: unknown; handle?: unknown; memo?: unknown }
+    | { token?: unknown; txHash?: unknown; memo?: unknown }
     | null;
   const contractId = contractFromToken(body?.token);
   if (!contractId) return jsonError(c, 400, 'A valid NEP-141 token contract is required.', 'INVALID_TOKEN');
   const txHash = typeof body?.txHash === 'string' ? body.txHash.trim() : '';
 
-  let handle = normalizeHandle(body?.handle);
+  const token = await resolveLaunchpadToken(c.env, contractId, true);
+  if (!token) return jsonError(c, 422, 'Unknown or non-NEP-141 token contract.', 'UNKNOWN_TOKEN');
+
+  const handle = deriveHandleFromDescription(token.description);
   if (!handle) {
-    const token = await resolveLaunchpadToken(c.env, contractId, true);
-    handle = deriveHandleFromDescription(token?.description);
+    return jsonError(
+      c,
+      422,
+      'No creator handle found. Add "Fees to @handle via UPRAIL" to the token description.',
+      'NO_RECIPIENT'
+    );
   }
 
   if (!txHash) {
     const syncRes = await syncTokenLaunchpadFees(c.env, contractId, {
-      handle,
       memo: typeof body?.memo === 'string' ? body.memo : undefined,
     });
     if (!syncRes.ok) {
@@ -148,18 +160,8 @@ feesRouter.post('/route', async (c) => {
     );
   }
 
-  if (!handle) {
-    return jsonError(
-      c,
-      422,
-      'No recipient handle provided and none found in the token description. Add "Fees to @handle via UPRAIL" or pass `handle`.',
-      'NO_RECIPIENT'
-    );
-  }
-
   const result = await recordLaunchpadFee(c.env, {
     launchpad: 'direct',
-    handle,
     token: contractId,
     txHash,
     memo: typeof body?.memo === 'string' ? body.memo : undefined,
@@ -185,19 +187,19 @@ feesRouter.post('/route', async (c) => {
 /**
  * POST /api/fees/sync
  * On-demand RPC scan for incoming launchpad creator fees on `escrow.uprail.near`.
- * Accepts optional `{ token, handle }`; when omitted, scans all tracked / held
- * launchpad tokens (prioritizing the logged-in user's handle if authenticated).
+ * Accepts optional `{ token }`; when omitted, scans tracked / held launchpad
+ * tokens. Recipients come from each token's description, never from the caller.
+ * An authenticated session's handle is used only to prioritize tokens, not to
+ * choose who gets credited.
  */
 feesRouter.post('/sync', async (c) => {
   const body = (await c.req.json().catch(() => null)) as
-    | { token?: unknown; handle?: unknown }
+    | { token?: unknown }
     | null;
-  const session = c.get('session');
-  const handle = normalizeHandle(body?.handle) || normalizeHandle(session?.x_handle);
   const contractId = contractFromToken(body?.token);
 
   if (contractId) {
-    const res = await syncTokenLaunchpadFees(c.env, contractId, { handle });
+    const res = await syncTokenLaunchpadFees(c.env, contractId);
     if (!res.ok) {
       return jsonError(c, 422, res.error || 'Could not sync token fees.', 'SYNC_FAILED');
     }
@@ -215,7 +217,8 @@ feesRouter.post('/sync', async (c) => {
     });
   }
 
-  const summary = await syncAllLaunchpadFees(c.env, { handle: handle || undefined });
+  const filterHandle = normalizeHandle(c.get('session')?.x_handle);
+  const summary = await syncAllLaunchpadFees(c.env, { handle: filterHandle || undefined });
   return c.json({
     ok: true,
     checked: summary.checked,

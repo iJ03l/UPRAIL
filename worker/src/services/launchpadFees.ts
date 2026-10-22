@@ -398,7 +398,6 @@ export async function verifyInboundFeeTx(
 
 export interface RecordFeeParams {
   launchpad: string;
-  handle: string;
   token: unknown;
   txHash: string;
   memo?: string;
@@ -627,9 +626,17 @@ export async function recordLaunchpadFee(
   const token = await resolveLaunchpadToken(env, params.token);
   if (!token) return { ok: false, error: 'Unknown or non-NEP-141 token contract.' };
 
+  const handle = deriveHandleFromDescription(token.description);
+  if (!handle) {
+    return {
+      ok: false,
+      error: 'No creator handle found. Add "Fees to @handle via UPRAIL" to the token description.',
+    };
+  }
+
   await trackLaunchpadToken(env, {
     contractId: token.contractId,
-    handle: params.handle,
+    handle,
     launchpad: params.launchpad,
   });
 
@@ -707,7 +714,7 @@ export async function recordLaunchpadFee(
 
   return await creditVerifiedFeeAtomic(env, {
     launchpad: params.launchpad,
-    handle: params.handle,
+    handle,
     token,
     grossAtomic,
     intentHash: params.txHash,
@@ -723,7 +730,7 @@ export async function recordLaunchpadFee(
 export async function syncTokenLaunchpadFees(
   env: Env,
   rawToken: unknown,
-  opts?: { handle?: string | null; launchpad?: string; memo?: string }
+  opts?: { launchpad?: string; memo?: string }
 ): Promise<RecordFeeResult & { synced: boolean; handle?: string }> {
   const contractId = contractFromToken(rawToken);
   if (!contractId) {
@@ -743,17 +750,13 @@ export async function syncTokenLaunchpadFees(
   }
 
   const tracked = await getTrackedLaunchpadToken(env, contractId);
-  const handle =
-    normalizeHandle(opts?.handle) ||
-    tracked?.handle ||
-    deriveHandleFromDescription(token.description);
+  const handle = deriveHandleFromDescription(token.description);
 
   if (!handle) {
     return {
       ok: false,
       synced: false,
-      error:
-        'No creator handle found for this token. Add "Fees to @handle via UPRAIL" in the token description or pass `handle` when preparing.',
+      error: 'No creator handle found. Add "Fees to @handle via UPRAIL" to the token description.',
     };
   }
 
@@ -863,9 +866,9 @@ export async function syncAllLaunchpadFees(
   const results: Array<RecordFeeResult & { token: string; handle?: string }> = [];
   let routed = 0;
 
-  for (const [contractId, knownHandle] of ordered) {
+  for (const [contractId] of ordered) {
     try {
-      const res = await syncTokenLaunchpadFees(env, contractId, { handle: knownHandle });
+      const res = await syncTokenLaunchpadFees(env, contractId);
       if (res.synced) {
         routed++;
         results.push({ ...res, token: contractId });

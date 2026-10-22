@@ -10,8 +10,6 @@ import {
   ArrowUpRight,
   RefreshCw,
   Sparkles,
-  Copy,
-  Check,
 } from 'lucide-react';
 import { useClaimFlow } from '../hooks/useClaimFlow';
 import { useXAuth } from '../hooks/useXAuth';
@@ -32,136 +30,6 @@ const PAYMENT_STATUS_LABEL: Record<PaymentStatus, string> = {
   expired: 'Expired',
   refunded: 'Refunded',
   cancelled: 'Cancelled',
-};
-
-// ── Launchpad Creator Fee Setup & Auto-Sync Card ────────────────────────────
-const CreatorFeeSetupCard: React.FC<{
-  handle?: string;
-  onSynced: () => Promise<void>;
-}> = ({ handle, onSynced }) => {
-  const [tokenContract, setTokenContract] = useState('');
-  const [isLinking, setIsLinking] = useState(false);
-  const [copiedEscrow, setCopiedEscrow] = useState(false);
-  const [copiedDesc, setCopiedDesc] = useState(false);
-  const [statusMsg, setStatusMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
-
-  const descLine = `Fees to @${handle || 'yourhandle'} via UPRAIL`;
-
-  const copyText = (text: string, which: 'escrow' | 'desc') => {
-    navigator.clipboard.writeText(text).catch(() => {});
-    if (which === 'escrow') {
-      setCopiedEscrow(true);
-      setTimeout(() => setCopiedEscrow(false), 1800);
-    } else {
-      setCopiedDesc(true);
-      setTimeout(() => setCopiedDesc(false), 1800);
-    }
-  };
-
-  const handleLinkToken = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = tokenContract.trim();
-    if (!clean) return;
-    setIsLinking(true);
-    setStatusMsg(null);
-    try {
-      const res = await api.prepareCreatorFeeToken({ token: clean, handle });
-      await onSynced();
-      const routedNote = res.routed?.amount
-        ? ` · Routed ${formatTokenAmount(res.routed.amount)} (${res.routed.routing})`
-        : '';
-      setStatusMsg({
-        tone: 'ok',
-        text: `Linked ${res.token} → @${res.handle || handle || 'creator'} (auto-sync active)${routedNote}`,
-      });
-      setTokenContract('');
-    } catch (err: any) {
-      setStatusMsg({
-        tone: 'err',
-        text: err?.message || 'Could not register launchpad token',
-      });
-    } finally {
-      setIsLinking(false);
-    }
-  };
-
-  return (
-    <div className="rounded-3xl p-5 sm:p-6 bg-white border border-stone-200 shadow-xs space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <div className="text-xs font-bold text-stone-950 font-display">
-            Automatic Launchpad Fee Routing
-          </div>
-          <div className="text-[11px] text-stone-500 font-mono">
-            Zero-touch RPC detection · No txHash required · 5% protocol fee
-          </div>
-        </div>
-        <span className="self-start sm:self-auto text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
-          Live NEAR RPC Sync
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-mono">
-        <div className="p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[10px] uppercase text-stone-400 font-bold">1. Fee Recipient Address</div>
-            <div className="font-bold text-stone-900 truncate">escrow.uprail.near</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => copyText('escrow.uprail.near', 'escrow')}
-            className="p-2 rounded-xl bg-white border border-stone-200 hover:border-black text-stone-700 cursor-pointer flex-shrink-0"
-            title="Copy escrow address"
-          >
-            {copiedEscrow ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-
-        <div className="p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[10px] uppercase text-stone-400 font-bold">2. Token Description Line</div>
-            <div className="font-bold text-stone-900 truncate">{descLine}</div>
-          </div>
-          <button
-            type="button"
-            onClick={() => copyText(descLine, 'desc')}
-            className="p-2 rounded-xl bg-white border border-stone-200 hover:border-black text-stone-700 cursor-pointer flex-shrink-0"
-            title="Copy description line"
-          >
-            {copiedDesc ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-      </div>
-
-      <form onSubmit={handleLinkToken} className="flex flex-col sm:flex-row gap-2.5">
-        <input
-          type="text"
-          value={tokenContract}
-          onChange={(e) => setTokenContract(e.target.value)}
-          placeholder="Token contract (e.g. token.nearlytrade.near) to pre-register & sync…"
-          className="flex-1 rounded-xl bg-stone-50 border border-stone-200 px-3.5 py-2.5 text-base sm:text-xs font-mono text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white"
-        />
-        <button
-          type="submit"
-          disabled={isLinking || !tokenContract.trim()}
-          className="px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLinking ? 'animate-spin' : ''}`} />
-          <span>{isLinking ? 'Syncing…' : 'Link & Sync Token'}</span>
-        </button>
-      </form>
-
-      {statusMsg && (
-        <p
-          className={`text-xs font-mono break-all ${
-            statusMsg.tone === 'ok' ? 'text-emerald-700' : 'text-red-600'
-          }`}
-        >
-          {statusMsg.text}
-        </p>
-      )}
-    </div>
-  );
 };
 
 // ── Withdraw shortcut ───────────────────────────────────────────────────────
@@ -293,7 +161,7 @@ export const ClaimPage: React.FC = () => {
 
   const handleRefresh = async () => {
     if (isFeesView) {
-      await api.syncCreatorFees({ handle: user?.handle }).catch(() => {});
+      await api.syncCreatorFees().catch(() => {});
     }
     await Promise.all([loadPendingPayments(), loadShieldedBalances()]);
   };
@@ -373,16 +241,6 @@ export const ClaimPage: React.FC = () => {
           <span>{isFeesView ? 'Sync & Refresh' : 'Refresh'}</span>
         </button>
       </div>
-
-      {/* Zero-touch Creator Fee setup & token link card */}
-      {isFeesView && (
-        <CreatorFeeSetupCard
-          handle={user?.handle}
-          onSynced={async () => {
-            await Promise.all([loadPendingPayments(), loadShieldedBalances()]);
-          }}
-        />
-      )}
 
       {/* Receipt: the linked payment was already delivered to this vault */}
       {isReceipt && linkedPayment && (
@@ -646,7 +504,7 @@ export const ClaimPage: React.FC = () => {
               </h3>
               <p className="text-xs text-stone-500 max-w-md mx-auto leading-relaxed">
                 {isFeesView
-                  ? 'Launchpad creator fees paid to your X handle will appear here, ready to collect.'
+                  ? 'Creator fees paid to your X handle by a launchpad will appear here automatically. Nothing to set up on this page.'
                   : 'You have no pending payments. When anyone sends funds to'}
                 {!isFeesView && (
                   <>

@@ -44,6 +44,11 @@ export default function FeesDocsPage() {
           </li>
         </ol>
         <Callout>
+          <strong className="text-stone-900">Receiving is passive.</strong> The Creator fees tab
+          only lists fees a launchpad has already sent to your handle. You never paste a token
+          contract, copy an escrow address, or run a sync from that page.
+        </Callout>
+        <Callout>
           Because fees are paid in the launchpad&apos;s <strong className="text-stone-900">paired token</strong>,
           they arrive as that token. The standard <strong className="text-stone-900">5% protocol fee</strong>{' '}
           is carved out at source, exactly like a peer send; the rest is yours to hold on UPRAIL or
@@ -70,8 +75,7 @@ export default function FeesDocsPage() {
           <strong className="text-stone-900">Escrow must be pre-registered.</strong> NEP-141
           transfers to an unregistered account fail on-chain. UPRAIL registers the escrow account
           against each token <em>before</em> any fee is pushed, which is why{' '}
-          <code className="font-mono text-[13px]">POST /api/fees/prepare</code> (or
-          linking the token in the app) exists.
+          <code className="font-mono text-[13px]">POST /api/fees/prepare</code> exists.
         </Callout>
       </section>
 
@@ -95,17 +99,12 @@ export default function FeesDocsPage() {
           </li>
           <li>
             Put one line in the token description:{' '}
-            <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> (or pass{' '}
-            <code className="font-mono text-[13px]">handle</code> once during{' '}
-            <code className="font-mono text-[13px]">/api/fees/prepare</code>).
+            <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code>. This is the
+            only recipient source; UPRAIL never accepts a caller-supplied handle.
           </li>
           <li>
-            Call <code className="font-mono text-[13px]">POST /api/fees/prepare</code> once (or link
-            the token on{' '}
-            <a className="text-stone-900 underline" href="https://app.uprail.world/claim?view=fees">
-              Creator fees in your UPRAIL account
-            </a>
-            ) to register NEP-145 storage for <code className="font-mono text-[13px]">escrow.uprail.near</code>.
+            Call <code className="font-mono text-[13px]">POST /api/fees/prepare</code> once to
+            register NEP-145 storage for <code className="font-mono text-[13px]">escrow.uprail.near</code>.
             From that moment on, UPRAIL <strong className="text-stone-900">automatically detects</strong>{' '}
             every incoming token transfer to <code className="font-mono text-[13px]">escrow.uprail.near</code>{' '}
             via NEAR RPC and routes it to <code className="font-mono text-[13px]">@handle</code> — no
@@ -113,8 +112,8 @@ export default function FeesDocsPage() {
           </li>
         </ol>
         <Endpoint verb="POST" path="/api/fees/prepare" auth="public" />
-        <Code title="prepare">{`// request — handle is optional if included in token description
-{ "token": "token.near", "handle": "@creator" }
+        <Code title="prepare">{`// request — the recipient comes from the token description
+{ "token": "token.near" }
 
 // response
 {
@@ -158,6 +157,12 @@ export default function FeesDocsPage() {
   "status": "CLAIMED"
 }`}</Code>
 
+        <Callout>
+          <strong className="text-stone-900">Launchpads own the setup.</strong> The claim page is
+          receiver-only. Integration belongs in the launch flow or backend, not in a receiver&apos;s
+          wallet.
+        </Callout>
+
         <Callout tone="warn">
           <strong className="text-stone-900">Dust guard.</strong> A fee whose USD value is known and
           below <code className="font-mono text-[13px]">minFeeUsd</code> is held rather than settled
@@ -183,7 +188,8 @@ export default function FeesDocsPage() {
           Building a launchpad? No API integration is needed — pay creator fees to{' '}
           <code className="font-mono text-[13px]">escrow.uprail.near</code> and put{' '}
           <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> in the token
-          description.
+          description. When a creator picks an X account as the fee recipient, record that handle
+          there so UPRAIL can verify it on-chain.
         </p>
       </section>
     </article>
