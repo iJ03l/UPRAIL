@@ -109,6 +109,53 @@ export default function FeesDocsPage() {
           </li>
         </ol>
 
+        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
+          Fees for launchpads
+        </h3>
+        <div className="rounded-2xl border border-stone-200 divide-y divide-stone-200 text-sm">
+          <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-stone-900">UPRAIL protocol fee</span>
+            <span className="text-stone-600">
+              5% of gross routed creator fees, deducted when the fee is routed.
+            </span>
+          </div>
+          <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-stone-900">What the launchpad sends</span>
+            <span className="text-stone-600">
+              100% of creator fees to <code className="font-mono text-[13px]">escrow.uprail.near</code>.
+              Do not pre-deduct the 5%; UPRAIL deducts it once.
+            </span>
+          </div>
+          <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-stone-900">Gas</span>
+            <span className="text-stone-600">
+              Launchpads pay their normal launch and fee-transfer costs. UPRAIL escrow pays its
+              own registration, claim, and routing gas.
+            </span>
+          </div>
+          <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-stone-900">Integration fee</span>
+            <span className="text-stone-600">None.</span>
+          </div>
+          <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-stone-900">Settlement asset</span>
+            <span className="text-stone-600">
+              The launchpad&apos;s paired token. UPRAIL does not convert it.
+            </span>
+          </div>
+          <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-semibold text-stone-900">Dust</span>
+            <span className="text-stone-600">
+              Net fees below <code className="font-mono text-[13px]">$1</code> are held in escrow
+              and credited later; they are not lost.
+            </span>
+          </div>
+        </div>
+        <Callout>
+          <strong className="text-stone-900">Example:</strong> a 1,000 TOKEN creator fee sent to
+          escrow results in 50 TOKEN of protocol fee and 950 TOKEN credited to the creator.
+        </Callout>
+
         <Endpoint verb="GET" path="/api/launchpads/config" auth="public" />
         <Code title="config">{`{
   "escrowAccount": "escrow.uprail.near",
