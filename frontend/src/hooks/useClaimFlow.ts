@@ -193,15 +193,15 @@ export function useClaimFlow(initialCode?: string) {
   };
 
   // ── Claim ALL pending payments in one touch ──────────────────────────────
-  const claimAllWithPasskey = async () => {
-    if (pendingPayments.length === 0) {
+  const claimAllWithPasskey = async (paymentsToClaim: PaymentIntent[] = pendingPayments) => {
+    if (paymentsToClaim.length === 0) {
       setError('No pending payments to claim.');
       return;
     }
 
-    const recipientHandle = user?.handle || pendingPayments[0].recipientHandle;
+    const recipientHandle = user?.handle || paymentsToClaim[0].recipientHandle;
     const cleanHandle = recipientHandle.replace(/^@/, '').trim().toLowerCase();
-    const ids = pendingPayments.map((p) => p.claimCode || p.id);
+    const ids = paymentsToClaim.map((p) => p.claimCode || p.id);
 
     try {
       setIsClaiming(true);
@@ -228,7 +228,8 @@ export function useClaimFlow(initialCode?: string) {
 
       setClaimResult(result);
       setClaimSuccess(true);
-      setPendingPayments([]);
+      const claimed = new Set(ids);
+      setPendingPayments((prev) => prev.filter((p) => !claimed.has(p.claimCode || p.id)));
       setSelectedPayment(null);
 
       // Refresh balances

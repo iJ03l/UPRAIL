@@ -37,8 +37,8 @@ export default function FeesDocsPage() {
             That&apos;s it. Every creator fee the launchpad pays is credited to{' '}
             <code className="font-mono text-[13px]">@yourhandle</code> on UPRAIL (net of the 5%
             protocol fee), ready to collect with your passkey at{' '}
-            <a className="text-stone-900 underline" href="https://app.uprail.world/fees">
-              app.uprail.world/fees
+            <a className="text-stone-900 underline" href="https://app.uprail.world/claim?view=fees">
+              Creator fees in your UPRAIL account
             </a>
             .
           </li>
@@ -102,8 +102,8 @@ export default function FeesDocsPage() {
           <li>
             Call <code className="font-mono text-[13px]">POST /api/fees/prepare</code> once (or link
             the token on{' '}
-            <a className="text-stone-900 underline" href="https://app.uprail.world/fees">
-              app.uprail.world/fees
+            <a className="text-stone-900 underline" href="https://app.uprail.world/claim?view=fees">
+              Creator fees in your UPRAIL account
             </a>
             ) to register NEP-145 storage for <code className="font-mono text-[13px]">escrow.uprail.near</code>.
             From that moment on, UPRAIL <strong className="text-stone-900">automatically detects</strong>{' '}

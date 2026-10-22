@@ -232,7 +232,7 @@ export const LandingPage: React.FC = () => {
                   <ExternalLink className="w-3 h-3" />
                 </a>
                 <a
-                  href={`${appSubdomainUrl}/fees`}
+                  href={`${appSubdomainUrl}/claim?view=fees`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-5 py-2.5 rounded-xl bg-stone-950 text-white hover:bg-stone-800 font-display font-extrabold text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all"

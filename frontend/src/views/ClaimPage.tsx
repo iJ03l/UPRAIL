@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useLocation, Link } from '../lib/router';
+import { useSearchParams, useLocation, useNavigate, Link } from '../lib/router';
 import {
   Fingerprint,
   CheckCircle2,
@@ -194,10 +194,12 @@ const WithdrawRedirectCard: React.FC<{ balances: ShieldedBalance[] }> = ({ balan
   );
 };
 
-export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }) => {
+export const ClaimPage: React.FC = () => {
   const { user, isLoading: isAuthLoading } = useXAuth();
   const [searchParams] = useSearchParams();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const isFeesView = searchParams.get('view') === 'fees';
 
   // Share links are path-style: https://app.uprail.world/claim/<paymentId>
   // (the trailing segment is only a payment code when it is not a route name).
@@ -278,7 +280,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
   const handleConfirmPasskeyClaim = async () => {
     try {
       if (activeClaimId === 'all') {
-        await claimAllWithPasskey();
+        await claimAllWithPasskey(visiblePayments);
       } else if (activeClaimId) {
         await claimPaymentWithPasskey(activeClaimId);
       }
@@ -290,13 +292,14 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
   };
 
   const handleRefresh = async () => {
-    if (feesOnly) {
+    if (isFeesView) {
       await api.syncCreatorFees({ handle: user?.handle }).catch(() => {});
     }
     await Promise.all([loadPendingPayments(), loadShieldedBalances()]);
   };
 
-  const visiblePayments = feesOnly ? pendingPayments.filter((p) => p.isCreatorFee) : pendingPayments;
+  const creatorFeePayments = pendingPayments.filter((p) => p.isCreatorFee);
+  const visiblePayments = isFeesView ? creatorFeePayments : pendingPayments;
   const totalPendingUsd = sumUsd(visiblePayments.map((p) => p.amountUsd));
 
   const previewPayment =
@@ -314,21 +317,65 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
       {/* Passkeys are unavailable inside X/Telegram webviews — warn early */}
       <InAppBrowserNotice />
 
-      {/* Refresh (page title removed — the back bar owns the top now) */}
-      <div className="flex items-center justify-end">
+      {/* Payments / Creator fees tabs, plus refresh */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        {!queryPaymentCode && (
+          <div className="grid w-full grid-cols-2 gap-1.5 p-1.5 rounded-2xl bg-stone-50 border border-stone-200 sm:w-auto">
+            <button
+              type="button"
+              onClick={() => navigate('/app/claim', { replace: true })}
+              aria-pressed={!isFeesView}
+              className={`flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                !isFeesView
+                  ? 'bg-black text-white border-black'
+                  : 'bg-transparent text-stone-600 border-transparent hover:bg-stone-100 hover:text-black'
+              }`}
+            >
+              <Fingerprint className="w-3.5 h-3.5" />
+              <span>Payments</span>
+              {pendingPayments.length > 0 && (
+                <span className={`min-w-5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                  !isFeesView ? 'bg-white/10 text-white' : 'bg-stone-200 text-stone-700'
+                }`}>
+                  {pendingPayments.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/app/claim?view=fees', { replace: true })}
+              aria-pressed={isFeesView}
+              className={`flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                isFeesView
+                  ? 'bg-black text-white border-black'
+                  : 'bg-transparent text-stone-600 border-transparent hover:bg-stone-100 hover:text-black'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Creator fees</span>
+              {creatorFeePayments.length > 0 && (
+                <span className={`min-w-5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                  isFeesView ? 'bg-white/10 text-white' : 'bg-stone-200 text-stone-700'
+                }`}>
+                  {creatorFeePayments.length}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
         <button
           onClick={handleRefresh}
           disabled={isLoading}
-          className="p-2.5 rounded-xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer text-xs flex items-center space-x-1.5 font-mono font-bold"
+          className="self-end sm:self-auto p-2.5 rounded-xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer text-xs flex items-center space-x-1.5 font-mono font-bold flex-shrink-0"
           title="Refresh incoming payments"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-          <span>{feesOnly ? 'Sync & Refresh' : 'Refresh'}</span>
+          <span>{isFeesView ? 'Sync & Refresh' : 'Refresh'}</span>
         </button>
       </div>
 
-      {/* Zero-touch Creator Fee setup & token link card on /fees */}
-      {feesOnly && (
+      {/* Zero-touch Creator Fee setup & token link card */}
+      {isFeesView && (
         <CreatorFeeSetupCard
           handle={user?.handle}
           onSynced={async () => {
@@ -463,7 +510,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
 
       {/* Withdraw shortcut — the Send screen owns the full flow, including
           destination network selection, quote, and receipt. */}
-      {!feesOnly && user && shieldedBalances.length > 0 && (
+      {user && shieldedBalances.length > 0 && (
         <WithdrawRedirectCard balances={shieldedBalances} />
       )}
 
@@ -477,7 +524,7 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
                 <Sparkles className="w-5 h-5 text-stone-900" />
                 <div>
                   <div className="text-xs font-bold text-stone-950 font-display">
-                    {visiblePayments.length} {feesOnly ? 'Creator Fees' : 'Payments'} Waiting
+                    {visiblePayments.length} {isFeesView ? 'Creator Fees' : 'Payments'} Waiting
                   </div>
                   <div className="text-[11px] text-stone-500 font-mono">
                     Total: ≈ {formatUsd(totalPendingUsd)} USD
@@ -595,13 +642,13 @@ export const ClaimPage: React.FC<{ feesOnly?: boolean }> = ({ feesOnly = false }
 
             <div className="space-y-1">
               <h3 className="text-xl font-bold font-display text-stone-950">
-                {feesOnly ? 'No Creator Fees Yet' : 'All Caught Up!'}
+                {isFeesView ? 'No Creator Fees Yet' : 'All Caught Up!'}
               </h3>
               <p className="text-xs text-stone-500 max-w-md mx-auto leading-relaxed">
-                {feesOnly
+                {isFeesView
                   ? 'Launchpad creator fees paid to your X handle will appear here, ready to collect.'
                   : 'You have no pending payments. When anyone sends funds to'}
-                {!feesOnly && (
+                {!isFeesView && (
                   <>
                     {' '}
                     <span className="font-mono font-bold text-stone-900">@{user.handle}</span>, they will

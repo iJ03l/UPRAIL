@@ -6,12 +6,12 @@ import { Navigate, useLocation, PageSuspense } from '@/lib/router';
 import { ProtectedPage } from '@/components/ProtectedPage';
 
 function ClaimRoute() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const tail = pathname.replace(/^\/claim\/?/, '').replace(/\/$/, '');
   const hasId = /^[A-Za-z0-9_-]{1,64}$/.test(tail);
 
   if (!hasId) {
-    return <Navigate to="/app/claim" replace />;
+    return <Navigate to={`/app/claim${search}`} replace />;
   }
 
   return (
