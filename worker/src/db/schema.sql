@@ -225,24 +225,9 @@ CREATE TABLE IF NOT EXISTS agent_requests (
 );
 
 -- ── Launchpad creator-fee routing (migration 0005) ──────────────────────────
--- A launchpad points creator fees at an X handle and reports each fee by
--- webhook. The paired token lands in the pooled escrow account and rides the
--- same claim pipeline as a human send.
-
-CREATE TABLE IF NOT EXISTS launchpad_partners (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  key_hash TEXT NOT NULL UNIQUE,
-  key_prefix TEXT NOT NULL,
-  webhook_secret TEXT NOT NULL,
-  daily_reg_cap INTEGER NOT NULL DEFAULT 25,
-  regs_today INTEGER NOT NULL DEFAULT 0,
-  regs_day TEXT,
-  created_at INTEGER NOT NULL,
-  revoked_at INTEGER
-);
-
-CREATE INDEX IF NOT EXISTS idx_launchpad_partners_name ON launchpad_partners(name);
+-- A launchpad points creator fees at the pooled escrow account and names the
+-- recipient in the token description. UPRAIL detects each fee over NEAR RPC and
+-- routes it through the same claim pipeline as a human send.
 
 CREATE TABLE IF NOT EXISTS launchpad_events (
   id TEXT PRIMARY KEY,

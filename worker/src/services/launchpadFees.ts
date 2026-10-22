@@ -1,9 +1,9 @@
 /**
  * Launchpad creator-fee routing for UP (UPRAIL.app).
  *
- * A launchpad points creator fees at an X handle and reports each fee by
- * webhook. The paired token is pushed to the pooled escrow account and rides
- * the SAME pipeline as a human send:
+ * A launchpad points creator fees at the pooled escrow account and names the
+ * recipient in the token description. UPRAIL detects each fee over NEAR RPC and
+ * routes it through the SAME pipeline as a human send:
  *
  *   - known handle   → settled straight into the handle's vault (instant credit)
  *   - unknown handle → held as an ESCROWED receivable, claimable the moment the
@@ -20,8 +20,6 @@
 
 import { PaymentStatus, type Env } from '../types';
 import * as nearRpc from './nearRpc';
-import type { LaunchpadPartner } from './launchpadKeys';
-
 /** 2100-01-01. Launchpad fees never expire/refund; this keeps them out of sweeps. */
 export const LAUNCHPAD_FEE_EXPIRES_AT = 4102444800000;
 
@@ -306,57 +304,9 @@ export function deriveHandleFromDescription(description: unknown): string | null
 }
 
 /**
- * Registers escrow on a token so a launchpad's push is accepted. Idempotent and
- * memoized in KV; consumes one unit of the partner's daily registration quota
- * only when a real registration is attempted. Each registration costs escrow
- * gas, so the quota bounds the damage a compromised partner key can do.
- */
-export async function registerEscrowForToken(
-  env: Env,
-  partner: LaunchpadPartner,
-  contractId: string
-): Promise<{ registered: boolean; reason?: string }> {
-  const cacheKey = `fees:reg:${contractId}`;
-  if (env.CACHE) {
-    try {
-      if (await env.CACHE.get(cacheKey)) return { registered: true };
-    } catch {
-      // KV miss on error: fall through and (re)register.
-    }
-  }
-
-  const today = new Date().toISOString().slice(0, 10);
-  const regsToday = partner.regs_day === today ? partner.regs_today : 0;
-  if (regsToday >= (partner.daily_reg_cap ?? 25)) {
-    return { registered: false, reason: 'Daily escrow-registration quota reached for this partner.' };
-  }
-
-  const res = await nearRpc.ensureEscrowStorageRegistered(env, contractId);
-  if (res.registered && env.CACHE) {
-    try {
-      await env.CACHE.put(cacheKey, '1', { expirationTtl: REG_CACHE_TTL_SECONDS });
-    } catch {
-      // Best-effort; the in-isolate cache still prevents repeat txs.
-    }
-  }
-  if (res.registered && env.DB) {
-    try {
-      await env.DB.prepare(
-        'UPDATE launchpad_partners SET regs_day = ?, regs_today = ? WHERE id = ?'
-      )
-        .bind(today, regsToday + 1, partner.id)
-        .run();
-    } catch (err) {
-      console.warn('[launchpadFees] registration quota update failed:', err);
-    }
-  }
-  return res;
-}
-
-/**
- * Escrow registration for the unauthenticated zero-integration path. No partner
- * key is required — a token that points its creator fees at escrow can be
- * prepared by anyone. Abuse (a stranger making escrow spend storage gas) is
+ * Escrow registration for the zero-integration path. A token that points its
+ * creator fees at escrow can be prepared by anyone. Abuse (a stranger making
+ * escrow spend storage gas) is
  * bounded by the same per-contract KV cache plus a global daily counter, so the
  * first registration of a token is the only one that can cost anything.
  */
@@ -410,7 +360,7 @@ export interface InboundFee {
 /**
  * Confirms an on-chain transaction actually moved `contractId` tokens into the
  * escrow holding account. Everything credited to a handle is gated on this, so
- * a partner cannot mint balance by reporting a hash that did not pay us.
+ * a caller cannot mint balance by reporting a hash that did not pay us.
  */
 export async function verifyInboundFeeTx(
   env: Env,
@@ -713,7 +663,7 @@ export async function recordLaunchpadFee(
   const grossAtomic = BigInt(inbound.amountAtomic);
 
   // Guard against double-crediting if automatic RPC balance-delta sync already
-  // routed this transfer before the webhook/route call arrived.
+  // routed this transfer before the route/sync call arrived.
   if (!isSharedPoolContract(token.contractId)) {
     try {
       const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';

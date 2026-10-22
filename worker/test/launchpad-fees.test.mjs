@@ -12,19 +12,11 @@ import {
   inferLaunchpadFromContract,
   getAccountedEscrowAtomic,
 } from '../dist/launchpadFees.bundle.mjs';
-import {
-  generatePartnerKey,
-  hashPartnerKey,
-  looksLikePartnerKey,
-  buildWebhookSignature,
-  verifyWebhookSignature,
-} from '../dist/launchpadKeys.bundle.mjs';
-
 /**
- * The launchpad fee rail trusts a partner's webhook only after (a) a bearer key
- * lookup and (b) an HMAC signature over the raw body. A regression here either
- * lets an unauthenticated caller mint fees or silently drops real ones, so the
- * handle parsing, amount conversion, and signature checks are pinned.
+ * The launchpad fee rail is zero-integration: tokens point creator fees at
+ * escrow and UPRAIL detects them over RPC. A regression in handle parsing,
+ * amount conversion, or escrow accounting either lets a caller mint fees or
+ * silently drops real ones, so those paths are pinned.
  */
 describe('launchpad handle normalization', () => {
   it('strips @, trims, and lowercases', () => {
@@ -184,48 +176,3 @@ describe('automatic RPC balance-delta helpers', () => {
     assert.equal(accounted, 110000000n);
   });
 });
-
-describe('partner key generation', () => {
-  it('mints self-identifying keys and hashes deterministically', async () => {
-    const key = await generatePartnerKey();
-    assert.ok(looksLikePartnerKey(key.plaintext));
-    assert.ok(key.plaintext.startsWith('up_lp_'));
-    assert.equal(key.prefix, key.plaintext.slice(0, 'up_lp_'.length + 6));
-    assert.equal(await hashPartnerKey(key.plaintext), key.hash);
-    assert.equal(looksLikePartnerKey('up_agent_abc'), false);
-  });
-});
-
-describe('webhook signature verification', () => {
-  const secret = 'a'.repeat(64);
-  const body = JSON.stringify({ event: 'fee.paid', eventId: 'e1' });
-
-  it('accepts a signature it produced', async () => {
-    const header = await buildWebhookSignature(secret, body);
-    assert.equal(await verifyWebhookSignature(secret, header, body), true);
-  });
-
-  it('rejects a wrong secret', async () => {
-    const header = await buildWebhookSignature(secret, body);
-    assert.equal(await verifyWebhookSignature('b'.repeat(64), header, body), false);
-  });
-
-  it('rejects a tampered body', async () => {
-    const header = await buildWebhookSignature(secret, body);
-    assert.equal(await verifyWebhookSignature(secret, header, body + ' '), false);
-  });
-
-  it('rejects a stale timestamp (replay)', async () => {
-    const old = Date.now() - 10 * 60 * 1000;
-    const header = await buildWebhookSignature(secret, body, old);
-    assert.equal(await verifyWebhookSignature(secret, header, body, Date.now()), false);
-  });
-
-  it('rejects malformed or missing headers', async () => {
-    assert.equal(await verifyWebhookSignature(secret, undefined, body), false);
-    assert.equal(await verifyWebhookSignature(secret, 'garbage', body), false);
-    assert.equal(await verifyWebhookSignature(secret, 't=abc,v1=zz', body), false);
-    assert.equal(await verifyWebhookSignature('', 't=1,v1=x', body), false);
-  });
-});
-

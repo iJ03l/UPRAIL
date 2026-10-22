@@ -4447,7 +4447,7 @@ export async function ensureIntentsStorageRegistered(
  * Registers the platform escrow holding account on a NEP-141 contract so a
  * launchpad's fee push is accepted. Registration is permissionless and
  * sponsored from escrow itself; the memo cache makes it one transaction per
- * token at most, so subsequent webhook calls are free.
+ * token at most, so subsequent route/sync calls are free.
  */
 export async function ensureEscrowStorageRegistered(
   env: Env,

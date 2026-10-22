@@ -167,7 +167,7 @@ apiRouter.route('/agent', agentRouter);
 // MCP server (JSON-RPC over Streamable HTTP) — Bearer agent key
 apiRouter.route('/mcp', mcpRouter);
 
-// Launchpad creator-fee routing (partner webhook + REST resolve/ingest)
+// Launchpad creator-fee routing (zero-integration RPC detection)
 apiRouter.route('/fees', feesRouter);
 
 // Live onchain data (balances, tokens, deposit addresses, history)

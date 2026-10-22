@@ -69,8 +69,9 @@ export default function FeesDocsPage() {
         <Callout tone="warn">
           <strong className="text-stone-900">Escrow must be pre-registered.</strong> NEP-141
           transfers to an unregistered account fail on-chain. UPRAIL registers the escrow account
-          against each token <em>before</em> any fee is pushed, which is why the{' '}
-          <code className="font-mono text-[13px]">token.launched</code> event exists.
+          against each token <em>before</em> any fee is pushed, which is why{' '}
+          <code className="font-mono text-[13px]">POST /api/fees/prepare</code> (or
+          linking the token in the app) exists.
         </Callout>
       </section>
 
@@ -79,14 +80,13 @@ export default function FeesDocsPage() {
           Integration — for launchpads
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Two ways in. The <strong className="text-stone-900">zero-integration</strong> path needs no
-          key, no signing and no approval — point the token&apos;s creator fees at escrow and name the
-          recipient. The <strong className="text-stone-900">signed webhook</strong> is the accelerated
-          path for launchpads that want verified delivery plus pre-registration on token launch.
+          There is one path: <strong className="text-stone-900">zero-integration</strong>. No API
+          key, signing, or approval is required — point the token&apos;s creator fees at escrow and
+          name the recipient in the token description.
         </p>
 
         <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          Zero-integration (automatic RPC detection — no key, no txHash required)
+          Automatic RPC detection — no key, no txHash required
         </h3>
         <ol className="space-y-2 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
           <li>
@@ -158,121 +158,6 @@ export default function FeesDocsPage() {
   "status": "CLAIMED"
 }`}</Code>
 
-        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          Signed webhook (accelerated)
-        </h3>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          UPRAIL issues a per-launchpad{' '}
-          <strong className="text-stone-900">bearer partner key</strong> and a{' '}
-          <strong className="text-stone-900">webhook secret</strong>; every request carries both, and
-          the secret signs the raw body so fees can&apos;t be spoofed. It also lets you pre-register
-          escrow the moment a token launches. Onboarding is by request — contact the team.
-        </p>
-
-        <Endpoint verb="POST" path="/api/fees/webhook" auth="Bearer + HMAC" />
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Headers:
-        </p>
-        <Code title="Headers">{`Authorization: Bearer up_lp_<partner-key>
-Content-Type: application/json
-X-UPRAIL-Signature: t=<unix-seconds>,v1=<hex hmac_sha256(secret, "<t>.<raw body>")>`}</Code>
-
-        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">Events</h3>
-        <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="token.launched" type="pre-register">
-            Fired once when a token is created. UPRAIL registers the escrow account against the
-            token so later fee pushes can&apos;t race the registration.
-          </Field>
-          <Field name="fee.pending" type="prepare">
-            Fired before a fee is pushed. UPRAIL ensures escrow is registered and returns the address
-            to send to plus whether the handle routes <code className="font-mono">direct</code> or to{' '}
-            <code className="font-mono">escrow</code>.
-          </Field>
-          <Field name="fee.paid" type="report">
-            Fired after the fee has been transferred. UPRAIL verifies the on-chain transaction and
-            routes the fee to the handle.
-          </Field>
-        </div>
-
-        <p className="text-sm text-stone-600 leading-relaxed pt-2">
-          Every event carries a unique <code className="font-mono text-[13px]">eventId</code> (for
-          retries) and the token as a NEP-141 contract. A fee is only credited after its{' '}
-          <code className="font-mono text-[13px]">txHash</code> is verified on-chain, and crediting
-          is idempotent by that hash — safe to retry.
-        </p>
-
-        <Code title="token.launched">{`{
-  "event": "token.launched",
-  "eventId": "evt_001",
-  "token": "token.near"
-}`}</Code>
-        <Code title="fee.pending">{`{
-  "event": "fee.pending",
-  "eventId": "evt_002",
-  "token": "token.near",
-  "handle": "@creator"
-}`}</Code>
-        <Code title="fee.paid">{`{
-  "event": "fee.paid",
-  "eventId": "evt_003",
-  "token": "token.near",
-  "handle": "@creator",
-  "amount": "125.0",
-  "txHash": "…",
-  "memo": "creator-fees"
-}`}</Code>
-
-        <p className="text-sm text-stone-600 leading-relaxed pt-2">
-          All three respond <code className="font-mono text-[13px]">202 Accepted</code>.{' '}
-          <code className="font-mono text-[13px]">fee.pending</code> returns the escrow address and
-          mode; <code className="font-mono text-[13px]">fee.paid</code> returns the routed payment.
-        </p>
-        <Code title="fee.paid → 202">{`{
-  "received": true,
-  "eventId": "evt_003",
-  "id": "pay_…",
-  "asset": "token.near",
-  "amount": "125.0",
-  "routing": "direct",     // or "escrow"
-  "status": "CLAIMED"      // or "ESCROWED"
-}`}</Code>
-
-        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          REST alternative
-        </h3>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Prefer request/response over events? The same two steps are exposed as plain POSTs, both
-          authenticated with the bearer partner key.
-        </p>
-        <Endpoint verb="POST" path="/api/fees/resolve" auth="Bearer partner key" />
-        <Code title="resolve">{`// request
-{ "token": "token.near", "handle": "@creator" }
-
-// response
-{
-  "handle": "creator",
-  "token": "token.near",
-  "address": "escrow.uprail.near",
-  "mode": "direct",     // or "escrow"
-  "registered": true,
-  "feePercent": 0.05,
-  "minFeeUsd": 1
-}`}</Code>
-        <Endpoint verb="POST" path="/api/fees/ingest" auth="Bearer partner key" />
-        <Code title="ingest → 201">{`// request
-{ "token": "token.near", "handle": "@creator", "amount": "125.0", "txHash": "…" }
-
-// response
-{
-  "id": "pay_…",
-  "handle": "creator",
-  "asset": "token.near",
-  "amount": "118.75",   // net of the 5% protocol fee
-  "fee": "6.25",
-  "routing": "direct",
-  "status": "CLAIMED"
-}`}</Code>
-
         <Callout tone="warn">
           <strong className="text-stone-900">Dust guard.</strong> A fee whose USD value is known and
           below <code className="font-mono text-[13px]">minFeeUsd</code> is held rather than settled
@@ -295,8 +180,10 @@ X-UPRAIL-Signature: t=<unix-seconds>,v1=<hex hmac_sha256(secret, "<t>.<raw body>
           </Field>
         </div>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Building a launchpad? The webhook above is deliberately generic — any launchpad that can
-          make a signed HTTP request and a NEP-141 transfer can integrate.
+          Building a launchpad? No API integration is needed — pay creator fees to{' '}
+          <code className="font-mono text-[13px]">escrow.uprail.near</code> and put{' '}
+          <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> in the token
+          description.
         </p>
       </section>
     </article>
