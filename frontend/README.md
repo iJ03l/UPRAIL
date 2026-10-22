@@ -1,6 +1,6 @@
 # UP frontend (Next.js)
 
-Next.js 14 App Router, built as a **static export** and served by the Cloudflare
+Next.js 16 App Router, built as a **static export** and served by the Cloudflare
 Worker from `worker/wrangler.jsonc` (`assets.directory = ../frontend/dist`).
 
 ## Scripts

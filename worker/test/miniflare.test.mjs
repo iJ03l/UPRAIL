@@ -1,8 +1,8 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { createHash, createHmac } from 'node:crypto';
-import { Miniflare } from 'miniflare';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 function signTestSession(session) {
   const payload = JSON.stringify(session);
@@ -37,41 +37,46 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
   let mf;
 
   before(async () => {
-    mf = new Miniflare({
-      modules: true,
-      scriptPath: 'dist/worker.js',
-      modulesRules: [{ type: 'CompiledWasm', include: ['**/*.wasm'] }],
-      compatibilityDate: '2026-10-08',
-      compatibilityFlags: ['nodejs_compat'],
-      d1Databases: { DB: 'uprail-db' },
-      kvNamespaces: { CACHE: 'cache' },
-      durableObjects: {
-        ESCROW: 'EscrowDO',
-        NEAR_CONTAINER: 'NearContainer',
-      },
-      bindings: {
-        X_CLIENT_ID: 'test_client_id',
-        NEAR_API_BASE: 'https://1click.chaindefuser.com',
-        SOLVER_RELAY_URL: 'https://solver-relay-v2.chaindefuser.com/rpc',
-        ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
-        FEE_ACCOUNT_ID: 'fees.uprail.near',
-        FEE_PERCENT: '0.05',
-        PAYMENT_EXPIRY_DAYS: '30',
-        WEBAUTHN_RP_ID: 'uprail.world',
-        WEBAUTHN_RP_NAME: 'UPRAIL',
-        WEBAUTHN_ORIGIN: 'https://app.uprail.world',
-        SESSION_SECRET: 'test_session_secret_do_not_use_in_production',
-        INTERNAL_SERVICE_KEY: 'test_internal_service_key',
-        // Points at a closed local port: the settlement service is "configured"
-        // but unreachable, exercising the x402 local-escrow fallback.
-        SETTLEMENT_SERVICE_URL: 'http://127.0.0.1:1',
-        // Throwaway ed25519 key generated for this test run. It is NOT a
-        // real escrow key and must never appear in .dev.vars or a deployment.
-        ESCROW_PRIVATE_KEY:
-          'ed25519:3bPadi6kwbpV3pkzKEcG8NDp74yof3CYGS2aXZECvV8Wggv37W1HfxTvA7EuvhBzFoadXeHtPK62pRywWqryzYU3',
-        NEAR_RPC_URL: 'https://near.invalid',
-      },
-    });
+    const distDir = new URL('../dist/', import.meta.url);
+    const wasmModules = (await readdir(distDir))
+      .filter((file) => file.endsWith('.wasm'))
+      .map((file) => ({ type: 'CompiledWasm', path: `dist/${file}` }));
+
+    mf = new Miniflare(
+      convertV4MiniflareOptions({
+        modules: [{ type: 'ESModule', path: 'dist/worker.js' }, ...wasmModules],
+        compatibilityDate: '2026-10-08',
+        compatibilityFlags: ['nodejs_compat'],
+        d1Databases: { DB: 'uprail-db' },
+        kvNamespaces: { CACHE: 'cache' },
+        durableObjects: {
+          ESCROW: 'EscrowDO',
+          NEAR_CONTAINER: 'NearContainer',
+        },
+        bindings: {
+          X_CLIENT_ID: 'test_client_id',
+          NEAR_API_BASE: 'https://1click.chaindefuser.com',
+          SOLVER_RELAY_URL: 'https://solver-relay-v2.chaindefuser.com/rpc',
+          ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+          FEE_ACCOUNT_ID: 'fees.uprail.near',
+          FEE_PERCENT: '0.05',
+          PAYMENT_EXPIRY_DAYS: '30',
+          WEBAUTHN_RP_ID: 'uprail.world',
+          WEBAUTHN_RP_NAME: 'UPRAIL',
+          WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+          SESSION_SECRET: 'test_session_secret_do_not_use_in_production',
+          INTERNAL_SERVICE_KEY: 'test_internal_service_key',
+          // Points at a closed local port: the settlement service is "configured"
+          // but unreachable, exercising the x402 local-escrow fallback.
+          SETTLEMENT_SERVICE_URL: 'http://127.0.0.1:1',
+          // Throwaway ed25519 key generated for this test run. It is NOT a
+          // real escrow key and must never appear in .dev.vars or a deployment.
+          ESCROW_PRIVATE_KEY:
+            'ed25519:3bPadi6kwbpV3pkzKEcG8NDp74yof3CYGS2aXZECvV8Wggv37W1HfxTvA7EuvhBzFoadXeHtPK62pRywWqryzYU3',
+          NEAR_RPC_URL: 'https://near.invalid',
+        },
+      }),
+    );
 
     // Apply schema migrations to the in-memory D1 database, exactly as
     // `wrangler d1 migrations apply` does in production. Route handlers

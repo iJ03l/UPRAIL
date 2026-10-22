@@ -8,7 +8,7 @@ A sender pays to `@handle`; the recipient claims with Touch ID / Face ID; amount
 
 | Path | What it is |
 | --- | --- |
-| `frontend/` | Next.js 14 app, **static export** served by the Worker |
+| `frontend/` | Next.js 16 app, **static export** served by the Worker |
 | `worker/` | Cloudflare Worker (Hono): auth, payments, claim, invites, onchain proxy, static assets |
 | `go-near-service/` | Go settlement service: 1Click quotes, intents relay, refunds, account creation |
 | `worker/src/db/` | D1 schema + migrations (`migrations/*.sql`) |
@@ -33,6 +33,8 @@ Settlement lives **only** in the Go service. The Worker never signs intents itse
   the Worker deploys on the free tier, which cannot run Worker containers.
 
 ## Quick start
+
+Node.js 22.23.4+ is required (`nvm use` reads `.nvmrc`; Node 24.22.1 recommended).
 
 ```bash
 # Frontend (Next dev on :3000, API proxied to the Worker on :8787)

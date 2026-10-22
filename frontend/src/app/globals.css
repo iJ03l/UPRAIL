@@ -205,8 +205,7 @@
  * intentional high-contrast accent surfaces (buttons, banners) that must keep
  * their contrast in both themes.
  */
-@layer utilities {
-  /* surfaces */
+/* surfaces */
   .dark .bg-white { background-color: var(--bg); }
   .dark .bg-white\/95 { background-color: color-mix(in srgb, var(--bg) 95%, transparent); }
   .dark .bg-white\/90 { background-color: color-mix(in srgb, var(--bg) 90%, transparent); }
@@ -363,7 +362,6 @@
   }
 
   /* translucent modal scrims stay dark (they sit over the page, either theme) */
-}
 
 /* Cinematic Glitch & Signal Disruption Styles for UPRAIL Brand */
 @keyframes glitch-rgb-orange {
