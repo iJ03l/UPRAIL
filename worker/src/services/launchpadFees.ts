@@ -20,6 +20,7 @@
 
 import { PaymentStatus, type Env } from '../types';
 import * as nearRpc from './nearRpc';
+
 /** 2100-01-01. Launchpad fees never expire/refund; this keeps them out of sweeps. */
 export const LAUNCHPAD_FEE_EXPIRES_AT = 4102444800000;
 
@@ -306,9 +307,9 @@ export function deriveHandleFromDescription(description: unknown): string | null
 /**
  * Escrow registration for the zero-integration path. A token that points its
  * creator fees at escrow can be prepared by anyone. Abuse (a stranger making
- * escrow spend storage gas) is
- * bounded by the same per-contract KV cache plus a global daily counter, so the
- * first registration of a token is the only one that can cost anything.
+ * escrow spend storage gas) is bounded by the same per-contract KV cache plus a
+ * global daily counter, so the first registration of a token is the only one
+ * that can cost anything.
  */
 export async function registerEscrowForTokenPublic(
   env: Env,
