@@ -96,11 +96,12 @@ export default function FeesDocsPage() {
           </li>
           <li>
             After the launch finalizes, build the registration payload and sign its canonical hash
-            with a full-access key on the token&apos;s parent account.
+            with an access key controlled by the launchpad on the token&apos;s parent account.
           </li>
           <li>
             Call <code className="font-mono text-[13px]">POST /api/launchpads/register</code>.
             UPRAIL verifies the signature, the on-chain fee recipient, and binds token → handle.
+            The response includes the claim URL to show the creator.
           </li>
           <li>
             If your token contract accrues fees internally, add a generic{' '}
@@ -162,7 +163,7 @@ export default function FeesDocsPage() {
   "registration": {
     "method": "POST",
     "path": "/api/launchpads/register",
-    "auth": "NEP-413 signature from the token parent account",
+    "auth": "NEP-413 signature from an access key on the token parent account",
     "proofRecipient": "uprail.near",
     "proofTtlSeconds": 300
   },
@@ -181,8 +182,9 @@ export default function FeesDocsPage() {
           , where canonical JSON sorts object keys recursively. Sign it as NEP-413 with recipient{' '}
           <code className="font-mono text-[13px]">uprail.near</code>, a 32-byte nonce, and an{' '}
           <code className="font-mono text-[13px]">issuedAt</code> within 5 minutes. The key must be
-          a full-access key on the token&apos;s parent account. Nonces are single-use for 10
-          minutes, so retries must generate a fresh nonce and signature.
+          an access key on the token&apos;s parent account; full-access and function-call keys both
+          work, so use a dedicated launchpad key. Nonces are single-use for 10 minutes, so retries
+          must generate a fresh nonce and signature.
         </p>
         <Code title="register">{`POST /api/launchpads/register
 
@@ -220,6 +222,7 @@ export default function FeesDocsPage() {
   "handle": "alice",
   "launchpad": "custom",
   "verifiedFeeTo": "escrow.uprail.near",
+  "claimUrl": "https://app.uprail.world/claim?view=fees",
   "created": true
 }`}</Code>
 

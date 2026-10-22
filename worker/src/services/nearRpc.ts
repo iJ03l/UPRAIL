@@ -639,7 +639,12 @@ export async function viewContractMethod(
   return viewFunction(rpcUrl, contractId.toLowerCase(), method, args);
 }
 
-export async function hasFullAccessKey(
+export function isAccessKeyPermission(permission: unknown): boolean {
+  if (permission === 'FullAccess') return true;
+  return Boolean(permission && typeof permission === 'object' && 'FunctionCall' in permission);
+}
+
+export async function hasAccessKey(
   env: Env,
   accountId: string,
   publicKey: string
@@ -652,7 +657,7 @@ export async function hasFullAccessKey(
       account_id: accountId,
       public_key: publicKey,
     });
-    return result?.permission === 'FullAccess' || result?.permission?.FullAccess !== undefined;
+    return isAccessKeyPermission(result?.permission);
   } catch {
     return false;
   }

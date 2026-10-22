@@ -130,7 +130,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const body = await res.json();
     assert.equal(body.escrowAccount, 'escrow.uprail.near');
     assert.equal(body.registration.proofRecipient, 'uprail.near');
-    assert.equal(body.registration.auth, 'NEP-413 signature from the token parent account');
+    assert.equal(body.registration.auth, 'NEP-413 signature from an access key on the token parent account');
     assert.deepEqual(body.verificationKinds, ['token_config', 'factory']);
     assert.deepEqual(body.claimKinds, ['token_claim']);
   });

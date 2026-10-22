@@ -96,6 +96,7 @@ export type LaunchpadRegistrationResult =
       launchpadName: string;
       launchId: string | null;
       verifiedFeeTo: string;
+      claimUrl: string;
       created: boolean;
     }
   | {
@@ -111,6 +112,11 @@ const LAUNCHPAD_ID_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
 
 function normalizeAccountId(value: string | undefined | null): string {
   return (value || '').trim().toLowerCase();
+}
+
+function launchpadClaimUrl(env: Env): string {
+  const origin = (env.WEBAUTHN_ORIGIN || 'https://app.uprail.world').replace(/\/+$/, '');
+  return `${origin}/claim?view=fees`;
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -466,6 +472,7 @@ export async function registerLaunchpadToken(
     launchpadName,
     launchId: verification.launchId,
     verifiedFeeTo: binding.verifiedFeeTo,
+    claimUrl: launchpadClaimUrl(env),
     created: !existing,
   };
 }

@@ -22,7 +22,7 @@ launchpadsRouter.get('/config', (c) => {
     registration: {
       method: 'POST',
       path: '/api/launchpads/register',
-      auth: 'NEP-413 signature from the token parent account',
+      auth: 'NEP-413 signature from an access key on the token parent account',
       proofRecipient: recipient,
       proofTtlSeconds: 300,
       message: 'UPRAIL launchpad registration\\n<sha256(canonical-json(payload))>',
@@ -76,6 +76,7 @@ launchpadsRouter.post('/register', async (c) => {
       launchpadName: result.launchpadName,
       launchId: result.launchId,
       verifiedFeeTo: result.verifiedFeeTo,
+      claimUrl: result.claimUrl,
       created: result.created,
     },
     result.created ? 201 : 200

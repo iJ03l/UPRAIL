@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58Decode } from '../utils/base58';
-import { hasFullAccessKey, nep413Serialize } from './nearRpc';
+import { hasAccessKey, nep413Serialize } from './nearRpc';
 
 export interface LaunchpadProof {
   signerId: string;
@@ -97,8 +97,8 @@ export async function verifyLaunchpadProof(
   if (!(await verifyLaunchpadProofSignature(proof, message, expectedRecipient))) {
     return { ok: false, error: 'Invalid proof signature.' };
   }
-  if (!(await hasFullAccessKey(env, signerId, proof.publicKey))) {
-    return { ok: false, error: 'Proof key is not a full-access key on the signer account.' };
+  if (!(await hasAccessKey(env, signerId, proof.publicKey))) {
+    return { ok: false, error: 'Proof key is not an access key on the signer account.' };
   }
   if (env.CACHE) {
     try {

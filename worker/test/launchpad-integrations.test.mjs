@@ -13,7 +13,11 @@ import {
   parseLaunchpadVerificationConfig,
   registerLaunchpadToken,
 } from '../dist/launchpadIntegrations.bundle.mjs';
-import { nep413Serialize, parseNearFtEvents } from '../dist/nearRpc.bundle.mjs';
+import {
+  isAccessKeyPermission,
+  nep413Serialize,
+  parseNearFtEvents,
+} from '../dist/nearRpc.bundle.mjs';
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
@@ -80,6 +84,16 @@ describe('launchpad proof verification', () => {
     assert.equal(await verifyLaunchpadProofSignature(proof, message, 'uprail.near'), true);
     assert.equal(await verifyLaunchpadProofSignature(proof, `${message} `, 'uprail.near'), false);
     assert.equal(await verifyLaunchpadProofSignature(proof, message, 'other.near'), false);
+  });
+
+  it('accepts full-access and function-call keys as launchpad authority', () => {
+    assert.equal(isAccessKeyPermission('FullAccess'), true);
+    assert.equal(
+      isAccessKeyPermission({ FunctionCall: { receiver_id: 'launchpad.near', method_names: [] } }),
+      true
+    );
+    assert.equal(isAccessKeyPermission(undefined), false);
+    assert.equal(isAccessKeyPermission({}), false);
   });
 
   it('bounds proof timestamps to five minutes', () => {
