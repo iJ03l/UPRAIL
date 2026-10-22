@@ -274,14 +274,18 @@
   .dark .hover\:text-stone-900:hover { color: var(--fg); }
   .dark .hover\:text-stone-600:hover { color: var(--fg-muted); }
   /* Never let a remaining dark hover utility paint an interactive surface
-     near-black in dark mode. Primary inverted buttons above override this. */
+     near-black in dark mode. Resolve it to the same light hover as the
+     inverted primary buttons, with a solid fallback for engines that drop
+     color-mix(). */
   .dark button.hover\:bg-stone-800:hover,
   .dark a.hover\:bg-stone-800:hover,
   .dark button.hover\:bg-stone-900:hover,
   .dark a.hover\:bg-stone-900:hover,
   .dark button.hover\:bg-black:hover,
   .dark a.hover\:bg-black:hover {
-    background-color: var(--bg-inset);
+    background-color: var(--fg);
+    background-color: color-mix(in srgb, var(--fg) 82%, var(--bg));
+    color: var(--bg);
   }
   .dark .hover\:border-stone-200:hover { border-color: var(--line); }
   .dark .hover\:border-stone-300:hover { border-color: var(--line-strong); }
