@@ -108,6 +108,11 @@ export default function FeesDocsPage() {
             <code className="font-mono text-[13px]">claim</code> config. UPRAIL claims them into
             escrow and routes them to the creator.
           </li>
+          <li>
+            Share the returned <code className="font-mono text-[13px]">claimUrl</code> with the
+            creator. It opens their Creator fees tab and renders a personalized preview card with
+            that token&apos;s pending total. Each token gets its own link and card.
+          </li>
         </ol>
 
         <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
@@ -222,9 +227,30 @@ export default function FeesDocsPage() {
   "handle": "alice",
   "launchpad": "custom",
   "verifiedFeeTo": "escrow.uprail.near",
-  "claimUrl": "https://app.uprail.world/claim?view=fees",
+  "claimUrl": "https://app.uprail.world/claim?view=fees&handle=alice&asset=nep141:alice.launchpad.near&v=...&k=...",
   "created": true
 }`}</Code>
+
+        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
+          Claim link and preview card
+        </h3>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          The returned link is specific to one creator handle and one token asset. Opening it
+          takes them to their Creator fees tab; the same URL serves a preview card to X, Discord,
+          Telegram and other link-preview crawlers. The card shows that asset&apos;s pending total
+          and fee count, generated from live escrowed creator fees — so it grows as more fees for
+          that token arrive. If the creator earns fees in several tokens, share each token&apos;s
+          link separately so each preview shows only its own total. The{' '}
+          <code className="font-mono text-[13px]">k</code>{' '}
+          parameter authorizes that handle + asset preview, so share the complete URL rather than
+          editing it.
+        </p>
+        <Callout>
+          <strong className="text-stone-900">Social cache:</strong> platforms cache previews per
+          exact URL. Use the latest <code className="font-mono text-[13px]">claimUrl</code> from a
+          fresh registration when re-sharing after the total changes, or append a new{' '}
+          <code className="font-mono text-[13px]">v</code> value to force a re-crawl.
+        </Callout>
 
         <p className="text-sm text-stone-600 leading-relaxed">
           Verification supports two generic forms:{' '}

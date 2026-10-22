@@ -5,6 +5,7 @@
  *   GET /og/claim/<paymentId>.png
  *   GET /og/invite/<code>.png
  *   GET /og/receipt/<withdrawalId>.png
+ *   GET /og/fees/<handle>.png?asset=<asset>&k=<signed-key>
  *
  * The card is generated from the live row so a share always shows the real
  * sender, amount and ticker instead of the generic static artwork.
@@ -13,6 +14,13 @@ import { Hono, type Context } from 'hono';
 import type { AppContext } from '../types';
 import { plainAmount, resolveShareTicker } from '../services/share';
 import { renderOgCard } from '../services/ogCard';
+import {
+  creatorFeeCardKeyValid,
+  emptyCreatorFeeCardSummary,
+  getCreatorFeeCardSummary,
+  normalizeCreatorFeeAsset,
+  normalizeCreatorFeeHandle,
+} from '../services/creatorFeesCard';
 
 export const ogRouter = new Hono<AppContext>();
 
@@ -147,6 +155,28 @@ ogRouter.get('/receipt/:file', (c) => {
       headline: amountLabel || 'Payment sent',
       subline: 'Settled privately across chains',
       detail: 'Confidential by default on UPRAIL.',
+    });
+  });
+});
+
+ogRouter.get('/fees/:file', (c) => {
+  const handle = normalizeCreatorFeeHandle(pngId(c.req.param('file')));
+  const asset = normalizeCreatorFeeAsset(c.req.query('asset'));
+  if (!handle || !asset) return c.text('Not found', 404);
+
+  return cached(c, async () => {
+    const valid = await creatorFeeCardKeyValid(c.env, handle, asset, c.req.query('k'));
+    const summary = valid
+      ? await getCreatorFeeCardSummary(c.env, handle, asset)
+      : emptyCreatorFeeCardSummary(handle, asset);
+    return renderOgCard({
+      eyebrow: 'CREATOR FEES',
+      headline: summary.headline,
+      subline: summary.subline,
+      detail: valid
+        ? summary.detail
+        : 'Open the private claim link to see the pending total.',
+      cacheControl: 'public, max-age=60, s-maxage=60',
     });
   });
 });

@@ -14,6 +14,13 @@ import {
   registerLaunchpadToken,
 } from '../dist/launchpadIntegrations.bundle.mjs';
 import {
+  creatorFeeCardKey,
+  creatorFeeCardKeyValid,
+  getCreatorFeeCardSummary,
+  normalizeCreatorFeeAsset,
+  normalizeCreatorFeeHandle,
+} from '../dist/creatorFeesCard.bundle.mjs';
+import {
   isAccessKeyPermission,
   nep413Serialize,
   parseNearFtEvents,
@@ -228,5 +235,49 @@ describe('launchpad claim amount parsing', () => {
         amountAtomic: '175',
       },
     ]);
+  });
+});
+
+describe('creator fee preview cards', () => {
+  it('normalizes and validates handles', () => {
+    assert.equal(normalizeCreatorFeeHandle('@Alice'), 'alice');
+    assert.equal(normalizeCreatorFeeHandle('bad-handle'), '');
+    assert.equal(normalizeCreatorFeeHandle(''), '');
+    assert.equal(normalizeCreatorFeeAsset('NEP141:Alice.Token'), 'nep141:alice.token');
+    assert.equal(normalizeCreatorFeeAsset('bad asset'), '');
+  });
+
+  it('signs card keys only for the matching handle', async () => {
+    const env = { SESSION_SECRET: 'test-secret' };
+    const key = await creatorFeeCardKey(env, 'alice', 'nep141:alice.token');
+    assert.ok(key);
+    assert.equal(await creatorFeeCardKeyValid(env, 'alice', 'nep141:alice.token', key), true);
+    assert.equal(await creatorFeeCardKeyValid(env, 'bob', 'nep141:alice.token', key), false);
+    assert.equal(await creatorFeeCardKeyValid(env, 'alice', 'nep141:bob.token', key), false);
+    assert.equal(await creatorFeeCardKeyValid({}, 'alice', 'nep141:alice.token', key), false);
+  });
+
+  it('summarizes live pending creator fees per handle', async () => {
+    const rows = [
+      { asset: 'near', amount: '450', created_at: 2 },
+      { asset: 'near', amount: '500', created_at: 1 },
+    ];
+    const env = {
+      SESSION_SECRET: 'test-secret',
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            all: async () => ({ results: rows }),
+          }),
+        }),
+      },
+    };
+    const summary = await getCreatorFeeCardSummary(env, '@Alice', 'near');
+    assert.equal(summary.handle, 'alice');
+    assert.equal(summary.asset, 'near');
+    assert.equal(summary.count, 2);
+    assert.equal(summary.headline, '950.00 NEAR');
+    assert.equal(summary.subline, '@alice · 2 creator fees waiting');
+    assert.match(summary.detail, /Claim with Face ID/);
   });
 });

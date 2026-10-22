@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import * as nearRpc from './nearRpc';
+import { creatorFeeCardKey } from './creatorFeesCard';
 import {
   buildLaunchpadRegistrationMessage,
   canonicalJson,
@@ -114,9 +115,16 @@ function normalizeAccountId(value: string | undefined | null): string {
   return (value || '').trim().toLowerCase();
 }
 
-function launchpadClaimUrl(env: Env): string {
+async function launchpadClaimUrl(env: Env, handle: string, asset: string): Promise<string> {
   const origin = (env.WEBAUTHN_ORIGIN || 'https://app.uprail.world').replace(/\/+$/, '');
-  return `${origin}/claim?view=fees`;
+  const url = new URL('/claim', origin);
+  url.searchParams.set('view', 'fees');
+  url.searchParams.set('handle', handle);
+  url.searchParams.set('asset', asset);
+  url.searchParams.set('v', Date.now().toString(36));
+  const key = await creatorFeeCardKey(env, handle, asset);
+  if (key) url.searchParams.set('k', key);
+  return url.toString();
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -472,7 +480,7 @@ export async function registerLaunchpadToken(
     launchpadName,
     launchId: verification.launchId,
     verifiedFeeTo: binding.verifiedFeeTo,
-    claimUrl: launchpadClaimUrl(env),
+    claimUrl: await launchpadClaimUrl(env, handle, tokenInfo.asset),
     created: !existing,
   };
 }

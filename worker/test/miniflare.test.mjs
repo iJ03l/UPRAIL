@@ -87,8 +87,10 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0002_payment_identity_and_missing_tables.sql',
       '0003_withdrawal_error_diagnostics.sql',
       '0004_agent_rail.sql',
+      '0005_launchpad_fees.sql',
       '0007_recovery_codes.sql',
       '0008_recovery_code_ciphertext.sql',
+      '0009_remove_launchpad_partners.sql',
       '0010_launchpad_token_bindings.sql',
     ];
     for (const file of migrations) {
@@ -716,6 +718,22 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
 
     const missing = await mf.dispatchFetch('http://localhost/og/claim/not-a-png');
     assert.equal(missing.status, 404);
+  });
+
+  it('renders a dynamic creator-fee OG image with short cache headers', async () => {
+    const res = await mf.dispatchFetch('http://localhost/og/fees/fee_preview.png?asset=near');
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'image/png');
+    assert.equal(res.headers.get('cache-control'), 'public, max-age=60, s-maxage=60');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.deepEqual([...bytes.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    assert.ok(bytes.length > 1000);
+
+    const missing = await mf.dispatchFetch('http://localhost/og/fees/not-a-handle.png?asset=near');
+    assert.equal(missing.status, 404);
+
+    const missingAsset = await mf.dispatchFetch('http://localhost/og/fees/fee_preview.png');
+    assert.equal(missingAsset.status, 404);
   });
 });
 

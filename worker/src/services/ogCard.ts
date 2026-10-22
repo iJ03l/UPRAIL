@@ -16,6 +16,7 @@ export interface OgCardOptions {
   headline: string;
   subline?: string;
   detail?: string;
+  cacheControl?: string;
 }
 
 const ACCENT = '#E05326';
@@ -91,8 +92,7 @@ export async function renderOgCard(opts: OgCardOptions): Promise<Response> {
     status: 200,
     headers: {
       'Content-Type': 'image/png',
-      // Card content is immutable for a given payment/invite/withdrawal id.
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': opts.cacheControl || 'public, max-age=31536000, immutable',
     },
   });
 }

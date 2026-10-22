@@ -35,6 +35,13 @@ import { refundEscrowedPayment } from './services/refunds';
 import { syncAllLaunchpadFees } from './services/launchpadFees';
 import { syncAllLaunchpadClaims } from './services/launchpadIntegrations';
 import { pruneExpiredAuthChallenges } from './services/maintenance';
+import {
+  creatorFeeCardKeyValid,
+  emptyCreatorFeeCardSummary,
+  getCreatorFeeCardSummary,
+  normalizeCreatorFeeAsset,
+  normalizeCreatorFeeHandle,
+} from './services/creatorFeesCard';
 
 // Export Durable Object classes for runtime
 export { EscrowDO } from './durable-objects/escrow';
@@ -349,6 +356,49 @@ app.notFound(async (c) => {
     const userAgent = c.req.header('user-agent');
     const isBot = isBotRequest(userAgent, url.searchParams.get('card') === '1');
     const claimMatch = url.pathname.match(CLAIM_DEEP_LINK);
+
+    const isFeesView = url.searchParams.get('view') === 'fees';
+    const feesHandle = normalizeCreatorFeeHandle(
+      url.searchParams.get('handle') || url.searchParams.get('h')
+    );
+    const feesAsset = normalizeCreatorFeeAsset(url.searchParams.get('asset'));
+    const isFeesPath =
+      url.pathname === '/claim' ||
+      url.pathname === '/claim/' ||
+      url.pathname === '/app/claim' ||
+      url.pathname === '/app/claim/' ||
+      url.pathname === '/fees' ||
+      url.pathname === '/app/fees';
+    if (
+      isBot &&
+      isFeesView &&
+      isFeesPath &&
+      feesHandle &&
+      feesAsset &&
+      !STATIC_ASSET_RE.test(url.pathname)
+    ) {
+      const cardKey = url.searchParams.get('k') || '';
+      const valid = await creatorFeeCardKeyValid(c.env, feesHandle, feesAsset, cardKey);
+      const summary = valid
+        ? await getCreatorFeeCardSummary(c.env, feesHandle, feesAsset)
+        : emptyCreatorFeeCardSummary(feesHandle, feesAsset);
+      const title =
+        valid && summary.count > 0
+          ? `${summary.headline} in creator fees for @${feesHandle}`
+          : `Creator fees for @${feesHandle} on UPRAIL`;
+      const description =
+        valid && summary.count > 0
+          ? summary.subline + '. Claim with Face ID or fingerprint.'
+          : 'Open the private claim link to see the pending creator fees.';
+      const imageQuery = new URLSearchParams({ asset: feesAsset, v: summary.version });
+      if (cardKey) imageQuery.set('k', cardKey);
+      return renderShareCardHtml({
+        title,
+        description,
+        imageUrl: `${url.origin}/og/fees/${feesHandle}.png?${imageQuery.toString()}`,
+        url: url.href,
+      });
+    }
 
     if (claimMatch) {
       const paymentId = claimMatch[1];
