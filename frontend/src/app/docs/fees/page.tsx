@@ -24,7 +24,7 @@ export default function FeesDocsPage() {
         <ol className="space-y-2 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
           <li>
             Launch your token on a supported launchpad (see{' '}
-            <a className="text-stone-900 underline" href="https://docs.uprail.world/fees#launchpads">
+            <a className="text-stone-900 underline" href="#launchpads">
               below
             </a>
             ).
@@ -72,10 +72,9 @@ export default function FeesDocsPage() {
           </Field>
         </div>
         <Callout tone="warn">
-          <strong className="text-stone-900">Escrow must be pre-registered.</strong> NEP-141
-          transfers to an unregistered account fail on-chain. UPRAIL registers the escrow account
-          against each token <em>before</em> any fee is pushed, which is why{' '}
-          <code className="font-mono text-[13px]">POST /api/fees/prepare</code> exists.
+          <strong className="text-stone-900">Recipients are verified on-chain.</strong> UPRAIL
+          reads the token&apos;s live fee recipient before accepting a handle. The caller can
+          choose the handle, but never the destination wallet.
         </Callout>
       </section>
 
@@ -84,33 +83,131 @@ export default function FeesDocsPage() {
           Integration — for launchpads
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          There is one path: <strong className="text-stone-900">zero-integration</strong>. No API
-          key, signing, or approval is required — point the token&apos;s creator fees at escrow and
-          name the recipient in the token description.
+          There is no partner allowlist or API key. Any launchpad can register its own tokens by
+          signing a NEP-413 message from the token&apos;s <strong className="text-stone-900">parent account</strong>{' '}
+          (for example <code className="font-mono text-[13px]">launchpad.justhoot.near</code> signs
+          for <code className="font-mono text-[13px]">*.launchpad.justhoot.near</code>).
         </p>
 
-        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          Automatic RPC detection — no key, no txHash required
-        </h3>
         <ol className="space-y-2 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
           <li>
-            Point <strong className="text-stone-900">100% of the token&apos;s creator fees</strong> at{' '}
-            <code className="font-mono text-[13px]">escrow.uprail.near</code>, permanently.
+            Set the creator fee recipient to{' '}
+            <code className="font-mono text-[13px]">escrow.uprail.near</code>.
           </li>
           <li>
-            Put one line in the token description:{' '}
-            <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code>. This is the
-            only recipient source; UPRAIL never accepts a caller-supplied handle.
+            After the launch finalizes, build the registration payload and sign its canonical hash
+            with a full-access key on the token&apos;s parent account.
           </li>
           <li>
-            Call <code className="font-mono text-[13px]">POST /api/fees/prepare</code> once to
-            register NEP-145 storage for <code className="font-mono text-[13px]">escrow.uprail.near</code>.
-            From that moment on, UPRAIL <strong className="text-stone-900">automatically detects</strong>{' '}
-            every incoming token transfer to <code className="font-mono text-[13px]">escrow.uprail.near</code>{' '}
-            via NEAR RPC and routes it to <code className="font-mono text-[13px]">@handle</code> — no
-            per-payout API call or <code className="font-mono text-[13px]">txHash</code> required.
+            Call <code className="font-mono text-[13px]">POST /api/launchpads/register</code>.
+            UPRAIL verifies the signature, the on-chain fee recipient, and binds token → handle.
+          </li>
+          <li>
+            If your token contract accrues fees internally, add a generic{' '}
+            <code className="font-mono text-[13px]">claim</code> config. UPRAIL claims them into
+            escrow and routes them to the creator.
           </li>
         </ol>
+
+        <Endpoint verb="GET" path="/api/launchpads/config" auth="public" />
+        <Code title="config">{`{
+  "escrowAccount": "escrow.uprail.near",
+  "registration": {
+    "method": "POST",
+    "path": "/api/launchpads/register",
+    "auth": "NEP-413 signature from the token parent account",
+    "proofRecipient": "uprail.near",
+    "proofTtlSeconds": 300
+  },
+  "verificationKinds": ["token_config", "factory"],
+  "claimKinds": ["token_claim"]
+}`}</Code>
+
+        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
+          Registration proof
+        </h3>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          The signed message is{' '}
+          <code className="font-mono text-[13px]">
+            UPRAIL launchpad registration\n&lt;sha256(canonical-json(payload))&gt;
+          </code>
+          , where canonical JSON sorts object keys recursively. Sign it as NEP-413 with recipient{' '}
+          <code className="font-mono text-[13px]">uprail.near</code>, a 32-byte nonce, and an{' '}
+          <code className="font-mono text-[13px]">issuedAt</code> within 5 minutes. The key must be
+          a full-access key on the token&apos;s parent account. Nonces are single-use for 10
+          minutes, so retries must generate a fresh nonce and signature.
+        </p>
+        <Code title="register">{`POST /api/launchpads/register
+
+{
+  "token": "alice.launchpad.near",
+  "handle": "@alice",
+  "launchpad": { "id": "custom", "name": "Custom Launchpad" },
+  "verification": {
+    "kind": "token_config",
+    "method": "get_config",
+    "paths": [["creator_id"], ["fee_to"], ["owner_id"]]
+  },
+  "claim": {
+    "kind": "token_claim",
+    "owedMethod": "get_owed_fees",
+    "accountArg": "account_id",
+    "owedTokenPath": ["token"],
+    "owedQuotePath": ["quote"],
+    "claimMethod": "claim_owed_fees",
+    "quoteContract": "wrap.near"
+  },
+  "issuedAt": 1800000000000,
+  "proof": {
+    "signerId": "launchpad.near",
+    "publicKey": "ed25519:…",
+    "signature": "base64…",
+    "nonce": "base64…",
+    "recipient": "uprail.near"
+  }
+}
+
+// 201
+{
+  "token": "alice.launchpad.near",
+  "handle": "alice",
+  "launchpad": "custom",
+  "verifiedFeeTo": "escrow.uprail.near",
+  "created": true
+}`}</Code>
+
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Verification supports two generic forms:{' '}
+          <code className="font-mono text-[13px]">token_config</code> reads configured paths from
+          the token contract, and <code className="font-mono text-[13px]">factory</code> looks up a
+          launch id and fee recipient on a factory contract. Claim configs are optional and only
+          needed when fees accrue inside the token.
+        </p>
+
+        <Endpoint verb="POST" path="/api/launchpads/claim" auth="public" />
+        <Code title="claim">{`POST /api/launchpads/claim
+{ "token": "alice.launchpad.near" }
+
+// 200
+{ "token": "alice.launchpad.near", "claimed": true, "pending": false, "txHash": "…" }`}</Code>
+
+        <Callout>
+          <strong className="text-stone-900">Handle corrections.</strong> A launchpad may correct a
+          mistaken handle until the first fee is routed. After that, the binding is locked so an
+          operator cannot redirect a creator&apos;s accrued fees.
+        </Callout>
+
+        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
+          Zero-integration fallback
+        </h3>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          A launchpad that cannot call the registration endpoint can still use the description path.
+          Point creator fees at <code className="font-mono text-[13px]">escrow.uprail.near</code>,
+          add <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> to the token
+          description, and call{' '}
+          <code className="font-mono text-[13px]">POST /api/fees/prepare</code> once to register
+          escrow storage. UPRAIL then discovers fee transfers over NEAR RPC.
+        </p>
         <Endpoint verb="POST" path="/api/fees/prepare" auth="public" />
         <Code title="prepare">{`// request — the recipient comes from the token description
 { "token": "token.near" }
@@ -126,36 +223,7 @@ export default function FeesDocsPage() {
   "minFeeUsd": 1
 }`}</Code>
         <Endpoint verb="POST" path="/api/fees/sync" auth="public" />
-        <Code title="sync (optional instant trigger)">{`// request — omit txHash; UPRAIL reads escrow's live on-chain balance via RPC
-{ "token": "token.near" }
-
-// response
-{
-  "ok": true,
-  "synced": true,
-  "token": "token.near",
-  "handle": "creator",
-  "id": "fee_…",
-  "asset": "nep141:token.near",
-  "amount": "118.75",   // net of the 5% protocol fee
-  "fee": "6.25",
-  "routing": "direct",  // or "escrow"
-  "status": "CLAIMED"
-}`}</Code>
         <Endpoint verb="POST" path="/api/fees/route" auth="public" />
-        <Code title="route → 201 (txHash optional)">{`// request — txHash is optional; omit it to auto-sync live RPC balance delta
-{ "token": "token.near", "txHash": "…" }
-
-// response
-{
-  "id": "fee_…",
-  "handle": "creator",
-  "asset": "nep141:token.near",
-  "amount": "118.75",   // net of the 5% protocol fee
-  "fee": "6.25",
-  "routing": "direct",  // or "escrow"
-  "status": "CLAIMED"
-}`}</Code>
 
         <Callout>
           <strong className="text-stone-900">Launchpads own the setup.</strong> The claim page is
@@ -173,23 +241,32 @@ export default function FeesDocsPage() {
 
       <section id="launchpads" className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">Supported launchpads</h2>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Any launchpad whose tokens are subaccounts of an account it controls can integrate. No
+          deployment or allowlist change is required on UPRAIL.
+        </p>
         <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="Nearly" type="nearly.trade">
-            NEAR-native launchpad. Creator fees are paid in the paired token and split between the
-            creator and referral.
+          <Field name="Nearly" type="factory">
+            Uses <code className="font-mono">get_launch_by_token</code> +{' '}
+            <code className="font-mono">get_fee_to</code>; configure a{' '}
+            <code className="font-mono">factory</code> verification.
           </Field>
-          <Field name="JustHoot" type="justhoot.fun">
-            NEAR-native launchpad. Tokens live under{' '}
-            <code className="font-mono">*.launchpad.justhoot.near</code>; creator rewards accrue to
-            the nominated recipient.
+          <Field name="JustHoot" type="token_config">
+            Tokens live under <code className="font-mono">*.launchpad.justhoot.near</code>; configure
+            a <code className="font-mono">token_config</code> verification and the generic claim
+            method.
           </Field>
         </div>
+        <Callout tone="warn">
+          <strong className="text-stone-900">JustHoot ownership.</strong> Current JustHoot tokens
+          expose the fee recipient as <code className="font-mono text-[13px]">owner_id</code>, so
+          pointing fees at escrow also makes escrow the token owner. If JustHoot exposes a separate
+          creator-fee field, use that instead.
+        </Callout>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Building a launchpad? No API integration is needed — pay creator fees to{' '}
-          <code className="font-mono text-[13px]">escrow.uprail.near</code> and put{' '}
-          <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> in the token
-          description. When a creator picks an X account as the fee recipient, record that handle
-          there so UPRAIL can verify it on-chain.
+          Building a launchpad? Issue tokens under your own account, point creator fees at escrow,
+          and register with a signed proof. The fallback description path remains available for
+          launches that already shipped.
         </p>
       </section>
     </article>

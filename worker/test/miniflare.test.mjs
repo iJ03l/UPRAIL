@@ -89,6 +89,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0004_agent_rail.sql',
       '0007_recovery_codes.sql',
       '0008_recovery_code_ciphertext.sql',
+      '0010_launchpad_token_bindings.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
@@ -121,6 +122,58 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const body = await res.json();
     assert.equal(body.status, 'ok');
     assert.equal(body.service, 'uprail-worker');
+  });
+
+  it('GET /api/launchpads/config exposes self-serve proof details', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/launchpads/config');
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.escrowAccount, 'escrow.uprail.near');
+    assert.equal(body.registration.proofRecipient, 'uprail.near');
+    assert.equal(body.registration.auth, 'NEP-413 signature from the token parent account');
+    assert.deepEqual(body.verificationKinds, ['token_config', 'factory']);
+    assert.deepEqual(body.claimKinds, ['token_claim']);
+  });
+
+  it('POST /api/launchpads/register requires a signed proof', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/launchpads/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: 'alice.launchpad.near',
+        handle: 'alice',
+        launchpad: { id: 'custom', name: 'Custom' },
+        verification: { kind: 'token_config', method: 'get_config', paths: [['fee_to']] },
+        issuedAt: Date.now(),
+      }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'PROOF_REQUIRED');
+  });
+
+  it('POST /api/launchpads/register rejects a proof from the wrong signer', async () => {
+    const res = await mf.dispatchFetch('http://localhost/api/launchpads/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: 'alice.launchpad.near',
+        handle: 'alice',
+        launchpad: { id: 'custom', name: 'Custom' },
+        verification: { kind: 'token_config', method: 'get_config', paths: [['fee_to']] },
+        issuedAt: Date.now(),
+        proof: {
+          signerId: 'other.near',
+          publicKey: 'ed25519:11111111111111111111111111111111',
+          signature: 'AAAA',
+          nonce: 'AAAA',
+          recipient: 'uprail.near',
+        },
+      }),
+    });
+    assert.equal(res.status, 401);
+    const body = await res.json();
+    assert.equal(body.code, 'WRONG_SIGNER');
   });
 
   it('POST /api/resolve validates handle correctly', async () => {

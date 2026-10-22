@@ -54,8 +54,9 @@ export default function DocsOverviewPage() {
         >
           <h2 className="font-display font-extrabold text-stone-950">Creator fees</h2>
           <p className="text-sm text-stone-600">
-            Launch on Nearly or JustHoot, point your creator fees at an X handle, and UPRAIL routes
-            the paired token to that handle like a normal send.
+            Launch on any integrating launchpad with an X handle as the creator-fee recipient.
+            UPRAIL verifies the launch on-chain and routes the paired token to that handle like a
+            normal send.
           </p>
           <span className="text-[11px] font-mono font-bold text-stone-500">
             /docs/fees →

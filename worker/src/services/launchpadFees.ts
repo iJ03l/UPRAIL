@@ -1,9 +1,10 @@
 /**
  * Launchpad creator-fee routing for UP (UPRAIL.app).
  *
- * A launchpad points creator fees at the pooled escrow account and names the
- * recipient in the token description. UPRAIL detects each fee over NEAR RPC and
- * routes it through the SAME pipeline as a human send:
+ * Integrated launchpads bind a token to an X handle through the signed
+ * registration endpoint; older launches still use the token description as a
+ * fallback. UPRAIL detects each fee over NEAR RPC and routes it through the
+ * SAME pipeline as a human send:
  *
  *   - known handle   → settled straight into the handle's vault (instant credit)
  *   - unknown handle → held as an ESCROWED receivable, claimable the moment the
@@ -20,6 +21,7 @@
 
 import { PaymentStatus, type Env } from '../types';
 import * as nearRpc from './nearRpc';
+import { getLaunchpadTokenBinding, listLaunchpadTokenBindings } from './launchpadBindings';
 
 /** 2100-01-01. Launchpad fees never expire/refund; this keeps them out of sweeps. */
 export const LAUNCHPAD_FEE_EXPIRES_AT = 4102444800000;
@@ -476,7 +478,7 @@ export async function getAccountedEscrowAtomic(
   }
 }
 
-async function creditVerifiedFeeAtomic(
+export async function creditVerifiedFeeAtomic(
   env: Env,
   opts: {
     launchpad: string;
@@ -626,18 +628,20 @@ export async function recordLaunchpadFee(
   const token = await resolveLaunchpadToken(env, params.token);
   if (!token) return { ok: false, error: 'Unknown or non-NEP-141 token contract.' };
 
-  const handle = deriveHandleFromDescription(token.description);
+  const binding = await getLaunchpadTokenBinding(env, token.contractId);
+  const handle = binding?.handle || deriveHandleFromDescription(token.description);
   if (!handle) {
     return {
       ok: false,
       error: 'No creator handle found. Add "Fees to @handle via UPRAIL" to the token description.',
     };
   }
+  const launchpad = params.launchpad || binding?.launchpad || inferLaunchpadFromContract(token.contractId);
 
   await trackLaunchpadToken(env, {
     contractId: token.contractId,
     handle,
-    launchpad: params.launchpad,
+    launchpad,
   });
 
   // Idempotency: the same inbound tx must never be credited twice.
@@ -713,7 +717,7 @@ export async function recordLaunchpadFee(
   }
 
   return await creditVerifiedFeeAtomic(env, {
-    launchpad: params.launchpad,
+    launchpad,
     handle,
     token,
     grossAtomic,
@@ -749,8 +753,9 @@ export async function syncTokenLaunchpadFees(
     return { ok: false, synced: false, error: 'Unknown or non-NEP-141 token contract.' };
   }
 
+  const binding = await getLaunchpadTokenBinding(env, contractId);
   const tracked = await getTrackedLaunchpadToken(env, contractId);
-  const handle = deriveHandleFromDescription(token.description);
+  const handle = binding?.handle || deriveHandleFromDescription(token.description);
 
   if (!handle) {
     return {
@@ -760,7 +765,8 @@ export async function syncTokenLaunchpadFees(
     };
   }
 
-  const launchpad = opts?.launchpad || tracked?.launchpad || inferLaunchpadFromContract(contractId);
+  const launchpad =
+    opts?.launchpad || binding?.launchpad || tracked?.launchpad || inferLaunchpadFromContract(contractId);
   await trackLaunchpadToken(env, { contractId, handle, launchpad });
 
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
@@ -831,7 +837,15 @@ export async function syncAllLaunchpadFees(
     } catch {}
   }
 
-  // 2. Pull tracked tokens from KV list
+  // 2. Pull integrated tokens that use launchpad-native bindings.
+  for (const binding of await listLaunchpadTokenBindings(env, 50)) {
+    const c = contractFromToken(binding.token);
+    if (!c || isSharedPoolContract(c)) continue;
+    const current = candidates.get(c);
+    if (!candidates.has(c) || !current) candidates.set(c, binding.handle);
+  }
+
+  // 3. Pull tracked tokens from KV list
   if (env.CACHE) {
     try {
       const list = (await env.CACHE.get(TRACKED_TOKENS_LIST_KEY, 'json')) as string[] | null;
@@ -846,7 +860,7 @@ export async function syncAllLaunchpadFees(
     } catch {}
   }
 
-  // 3. Discover any NEP-141 token held by escrow.uprail.near (zero-API tokens!)
+  // 4. Discover any NEP-141 token held by escrow.uprail.near (zero-API tokens!)
   try {
     const escrow = escrowHoldingAccount(env);
     const held = await nearRpc.fetchAccountFtBalancesStrict(escrow);

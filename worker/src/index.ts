@@ -26,12 +26,14 @@ import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
 import { mcpRouter } from './routes/mcp';
 import { feesRouter } from './routes/fees';
+import { launchpadsRouter } from './routes/launchpads';
 import { ogRouter } from './routes/og';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import { plainAmount, resolveShareTicker } from './services/share';
 import { refundEscrowedPayment } from './services/refunds';
 import { syncAllLaunchpadFees } from './services/launchpadFees';
+import { syncAllLaunchpadClaims } from './services/launchpadIntegrations';
 import { pruneExpiredAuthChallenges } from './services/maintenance';
 
 // Export Durable Object classes for runtime
@@ -169,6 +171,9 @@ apiRouter.route('/mcp', mcpRouter);
 
 // Launchpad creator-fee routing (zero-integration RPC detection)
 apiRouter.route('/fees', feesRouter);
+
+// Self-serve launchpad binding + generic claim attribution
+apiRouter.route('/launchpads', launchpadsRouter);
 
 // Live onchain data (balances, tokens, deposit addresses, history)
 // All scoped per authenticated user — no data leakage across users
@@ -619,7 +624,18 @@ export default {
       console.warn('[cron] launchpad fee auto-sync failed:', e);
     }
 
-    // 6. Prune expired WebAuthn/OAuth challenges. They are single-use and
+    // 6. Claim launchpad creator fees. Token and quote amounts are attributed
+    //    from the escrow-signed claim transaction, never from shared balances.
+    try {
+      const claims = await syncAllLaunchpadClaims(env, { maxTokens: 10 });
+      if (claims.claimed > 0) {
+        console.log(`[cron] claimed creator fees for ${claims.claimed} token(s) across ${claims.checked} binding(s)`);
+      }
+    } catch (e) {
+      console.warn('[cron] launchpad claim sync failed:', e);
+    }
+
+    // 7. Prune expired WebAuthn/OAuth challenges. They are single-use and
     //    rejected once expired, so a day of rows is enough for debugging.
     try {
       const pruned = await pruneExpiredAuthChallenges(env, now);

@@ -43,6 +43,8 @@
     // Daily cap on escrow registrations triggered by the unauthenticated
     // zero-integration fee path, bounding gas a stranger can make escrow spend.
     "PUBLIC_REG_DAILY_CAP": "50",
+    // Daily registration cap per self-serve launchpad parent account.
+    "LAUNCHPAD_DAILY_REG_CAP": "100",
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",

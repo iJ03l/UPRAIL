@@ -629,6 +629,62 @@ async function viewFunction(
   }
 }
 
+export async function viewContractMethod(
+  env: Env,
+  contractId: string,
+  method: string,
+  args: Record<string, unknown> = {}
+): Promise<unknown> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  return viewFunction(rpcUrl, contractId.toLowerCase(), method, args);
+}
+
+export async function hasFullAccessKey(
+  env: Env,
+  accountId: string,
+  publicKey: string
+): Promise<boolean> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  try {
+    const result = await nearRpc(rpcUrl, 'query', {
+      request_type: 'view_access_key',
+      finality: 'final',
+      account_id: accountId,
+      public_key: publicKey,
+    });
+    return result?.permission === 'FullAccess' || result?.permission?.FullAccess !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+export async function executeEscrowContractCall(
+  env: Env,
+  contractId: string,
+  method: string,
+  args: Record<string, unknown> = {},
+  gas = 100_000_000_000_000n
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  try {
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const signing = escrowSigningKey(env, rpcUrl);
+    if ('error' in signing) return { success: false, error: signing.error };
+    const res = await signAndBroadcastFunctionCall({
+      ...signing,
+      receiverId: contractId.toLowerCase(),
+      method,
+      args: JSON.stringify(args),
+      gas,
+      deposit: 0n,
+    });
+    return res.ok
+      ? { success: true, txHash: res.txHash }
+      : { success: false, error: res.error || `${method} failed` };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export function formatAmount(raw: string, decimals: number): string {
@@ -2480,13 +2536,67 @@ export interface NearTxTransfer {
   memo?: string;
 }
 
+export interface NearFtEvent {
+  contract: string;
+  from: string | null;
+  to: string | null;
+  amountAtomic: string;
+}
+
 export interface NearTxProbe {
   found: boolean;
   success: boolean;
   signer: string | null;
   executor: string | null;
   transfers: NearTxTransfer[];
+  events: NearFtEvent[];
   error?: string;
+}
+
+/**
+ * Extracts NEP-141 `ft_transfer` events from a final transaction result. Claim
+ * flows use this to read the exact amount a contract moved into escrow, instead
+ * of trusting a pre-claim snapshot that fees may have outgrown.
+ */
+export function parseNearFtEvents(result: any): NearFtEvent[] {
+  const events: NearFtEvent[] = [];
+  const receivers = new Map<string, string>();
+  for (const receipt of result?.receipts || []) {
+    if (receipt?.receipt_id && receipt?.receiver_id) {
+      receivers.set(String(receipt.receipt_id), String(receipt.receiver_id));
+    }
+  }
+  for (const outcome of result?.receipts_outcome || []) {
+    const contract = String(
+      outcome?.outcome?.executor_id || receivers.get(String(outcome?.id)) || ''
+    ).toLowerCase();
+    if (!contract) continue;
+    for (const log of outcome?.outcome?.logs || []) {
+      if (typeof log !== 'string' || !log.startsWith('EVENT_JSON:')) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(log.slice('EVENT_JSON:'.length));
+      } catch {
+        continue;
+      }
+      if (parsed?.standard !== 'nep141' || parsed?.event !== 'ft_transfer') continue;
+      const data = Array.isArray(parsed.data) ? parsed.data : [parsed.data];
+      for (const item of data) {
+        if (!item || item.amount === undefined) continue;
+        events.push({
+          contract,
+          from: item.old_owner_id ? String(item.old_owner_id) : null,
+          to: item.new_owner_id
+            ? String(item.new_owner_id)
+            : item.receiver_id
+              ? String(item.receiver_id)
+              : null,
+          amountAtomic: String(item.amount),
+        });
+      }
+    }
+  }
+  return events;
 }
 
 /** Decodes a base64 UTF-8 string (NEAR FunctionCall args). */
@@ -2520,6 +2630,7 @@ export async function probeNearTransaction(
     signer: null,
     executor: null,
     transfers: [],
+    events: [],
     error,
   });
   if (!txHash) return empty('missing tx hash');
@@ -2563,7 +2674,7 @@ export async function probeNearTransaction(
       }
     }
   }
-  return { found: true, success, signer, executor, transfers };
+  return { found: true, success, signer, executor, transfers, events: parseNearFtEvents(result) };
 }
 
 /**

@@ -60,6 +60,10 @@ export interface Env {
    */
   PUBLIC_REG_DAILY_CAP?: string;
 
+  // Self-serve launchpad registration is authenticated by a NEP-413 signature
+  // from each token's parent account. This cap bounds registrations per day.
+  LAUNCHPAD_DAILY_REG_CAP?: string;
+
   // Worker Secrets
   X_CLIENT_SECRET?: string;
   ESCROW_PRIVATE_KEY?: string;

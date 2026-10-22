@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS agent_requests (
   UNIQUE(agent_key_id, idempotency_key)
 );
 
--- ── Launchpad creator-fee routing (migration 0005) ──────────────────────────
+-- ── Launchpad creator-fee routing (migrations 0005 + 0010) ──────────────────
 -- A launchpad points creator fees at the pooled escrow account and names the
 -- recipient in the token description. UPRAIL detects each fee over NEAR RPC and
 -- routes it through the same claim pipeline as a human send.
@@ -245,4 +245,31 @@ CREATE TABLE IF NOT EXISTS launchpad_events (
 
 CREATE INDEX IF NOT EXISTS idx_launchpad_events_tx ON launchpad_events(tx_hash);
 CREATE INDEX IF NOT EXISTS idx_launchpad_events_token ON launchpad_events(partner_id, token);
+
+CREATE TABLE IF NOT EXISTS launchpad_token_bindings (
+  token TEXT PRIMARY KEY,
+  launchpad TEXT NOT NULL,
+  launchpad_name TEXT,
+  handle TEXT NOT NULL,
+  authority TEXT,
+  verification_json TEXT,
+  claim_json TEXT,
+  launch_id TEXT,
+  verified_fee_to TEXT NOT NULL,
+  pending_claim_tx TEXT,
+  pending_claim_at INTEGER,
+  pending_claim_token_atomic TEXT,
+  pending_claim_quote_atomic TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_launchpad_token_bindings_handle
+  ON launchpad_token_bindings(handle);
+CREATE INDEX IF NOT EXISTS idx_launchpad_token_bindings_launchpad
+  ON launchpad_token_bindings(launchpad);
+CREATE INDEX IF NOT EXISTS idx_launchpad_token_bindings_pending
+  ON launchpad_token_bindings(pending_claim_tx);
+CREATE INDEX IF NOT EXISTS idx_launchpad_token_bindings_claim
+  ON launchpad_token_bindings(claim_json);
 
