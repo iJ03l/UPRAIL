@@ -6,6 +6,7 @@ export interface CreatorFeeCardSummary {
   handle: string;
   asset: string;
   count: number;
+  pendingCount: number;
   headline: string;
   subline: string;
   detail: string;
@@ -15,14 +16,8 @@ export interface CreatorFeeCardSummary {
 interface CreatorFeeRow {
   asset: string;
   amount: string;
+  status: string;
   created_at: number;
-}
-
-interface FeeGroup {
-  asset: string;
-  amount: number;
-  count: number;
-  latest: number;
 }
 
 const HANDLE_RE = /^[a-z0-9_]{1,15}$/;
@@ -84,6 +79,7 @@ export function emptyCreatorFeeCardSummary(
     handle,
     asset,
     count: 0,
+    pendingCount: 0,
     headline: `@${handle}`,
     subline: 'Creator fees on UPRAIL',
     detail: 'No fees yet. This card updates as they arrive.',
@@ -104,11 +100,11 @@ export async function getCreatorFeeCardSummary(
   if (env.DB) {
     try {
       const result = await env.DB.prepare(
-        `SELECT asset, amount, created_at
+        `SELECT asset, amount, status, created_at
          FROM payments
          WHERE LOWER(recipient_handle) = ?
            AND LOWER(asset) = ?
-           AND status = 'ESCROWED'
+           AND status IN ('ESCROWED', 'CLAIMED')
            AND origin LIKE 'launchpad:%'
          ORDER BY created_at DESC
          LIMIT 100`
@@ -121,48 +117,44 @@ export async function getCreatorFeeCardSummary(
     }
   }
 
-  const groups = new Map<string, FeeGroup>();
+  let total = 0;
+  let pending = 0;
+  let count = 0;
+  let pendingCount = 0;
   let latest = 0;
   for (const row of rows) {
+    if (row.status !== 'ESCROWED' && row.status !== 'CLAIMED') continue;
     const amount = Number(row.amount);
     if (!Number.isFinite(amount) || amount <= 0) continue;
-    const asset = (row.asset || '').toLowerCase();
-    const group = groups.get(asset) || {
-      asset,
-      amount: 0,
-      count: 0,
-      latest: 0,
-    };
-    group.amount += amount;
-    group.count += 1;
-    group.latest = Math.max(group.latest, Number(row.created_at) || 0);
-    groups.set(asset, group);
-    latest = Math.max(latest, group.latest);
+    total += amount;
+    count += 1;
+    if (row.status === 'ESCROWED') {
+      pending += amount;
+      pendingCount += 1;
+    }
+    latest = Math.max(latest, Number(row.created_at) || 0);
   }
 
-  const entries = [...groups.values()].sort((a, b) => b.latest - a.latest);
-  if (entries.length === 0) return emptyCreatorFeeCardSummary(handle, assetFilter);
+  if (count === 0) return emptyCreatorFeeCardSummary(handle, assetFilter);
 
-  const count = entries.reduce((sum, entry) => sum + entry.count, 0);
-  const labels = await Promise.all(
-    entries.slice(0, 3).map(async (entry) => {
-      const ticker = await resolveShareTicker(env, entry.asset);
-      return plainAmount(String(entry.amount), ticker) || `${entry.count} fees`;
-    })
-  );
-  const primary = labels[0] || `${count} creator fees`;
-  const others = labels.slice(1);
-  if (entries.length > 3) others.push(`+${entries.length - 3} more`);
+  const ticker = await resolveShareTicker(env, assetFilter);
+  const totalLabel = plainAmount(String(total), ticker) || `${count} creator fees`;
+  const pendingLabel = plainAmount(String(pending), ticker);
 
   return {
     handle,
     asset: assetFilter,
     count,
-    headline: primary,
-    subline: `@${handle} · ${count} creator fee${count === 1 ? '' : 's'} waiting`,
-    detail: others.length
-      ? `${others.join(' · ')} also waiting. Claim with Face ID or fingerprint.`
-      : 'Claim with Face ID or fingerprint. Updates as fees arrive.',
-    version: `${count}-${latest}-${Math.round(entries[0].amount * 1e6)}`,
+    pendingCount,
+    headline: totalLabel,
+    subline:
+      pendingCount > 0
+        ? `@${handle} · ${count} creator fee${count === 1 ? '' : 's'} · ${pendingCount} pending`
+        : `@${handle} · ${count} creator fee${count === 1 ? '' : 's'} settled`,
+    detail:
+      pendingCount > 0
+        ? `${pendingLabel} ready to claim with Face ID or fingerprint.`
+        : 'No pending fees. Settled to your UPRAIL balance.',
+    version: `${count}-${pendingCount}-${latest}-${Math.round(total * 1e6)}-${Math.round(pending * 1e6)}`,
   };
 }

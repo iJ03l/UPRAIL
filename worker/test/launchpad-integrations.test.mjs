@@ -257,10 +257,10 @@ describe('creator fee preview cards', () => {
     assert.equal(await creatorFeeCardKeyValid({}, 'alice', 'nep141:alice.token', key), false);
   });
 
-  it('summarizes live pending creator fees per handle', async () => {
+  it('summarizes total and pending creator fees per handle', async () => {
     const rows = [
-      { asset: 'near', amount: '450', created_at: 2 },
-      { asset: 'near', amount: '500', created_at: 1 },
+      { asset: 'near', amount: '450', status: 'ESCROWED', created_at: 2 },
+      { asset: 'near', amount: '500', status: 'CLAIMED', created_at: 1 },
     ];
     const env = {
       SESSION_SECRET: 'test-secret',
@@ -276,8 +276,32 @@ describe('creator fee preview cards', () => {
     assert.equal(summary.handle, 'alice');
     assert.equal(summary.asset, 'near');
     assert.equal(summary.count, 2);
+    assert.equal(summary.pendingCount, 1);
     assert.equal(summary.headline, '950.00 NEAR');
-    assert.equal(summary.subline, '@alice · 2 creator fees waiting');
-    assert.match(summary.detail, /Claim with Face ID/);
+    assert.equal(summary.subline, '@alice · 2 creator fees · 1 pending');
+    assert.match(summary.detail, /450\.00 NEAR ready to claim/);
+  });
+
+  it('shows settled direct fees with no pending amount', async () => {
+    const rows = [
+      { asset: 'near', amount: '450', status: 'CLAIMED', created_at: 2 },
+      { asset: 'near', amount: '500', status: 'CLAIMED', created_at: 1 },
+    ];
+    const env = {
+      SESSION_SECRET: 'test-secret',
+      DB: {
+        prepare: () => ({
+          bind: () => ({
+            all: async () => ({ results: rows }),
+          }),
+        }),
+      },
+    };
+    const summary = await getCreatorFeeCardSummary(env, 'alice', 'near');
+    assert.equal(summary.count, 2);
+    assert.equal(summary.pendingCount, 0);
+    assert.equal(summary.headline, '950.00 NEAR');
+    assert.equal(summary.subline, '@alice · 2 creator fees settled');
+    assert.equal(summary.detail, 'No pending fees. Settled to your UPRAIL balance.');
   });
 });

@@ -111,7 +111,8 @@ export default function FeesDocsPage() {
           <li>
             Share the returned <code className="font-mono text-[13px]">claimUrl</code> with the
             creator. It opens their Creator fees tab and renders a personalized preview card with
-            that token&apos;s pending total. Each token gets its own link and card.
+            that token&apos;s total earned and pending amount. Each token gets its own link and
+            card.
           </li>
         </ol>
 
@@ -237,10 +238,11 @@ export default function FeesDocsPage() {
         <p className="text-sm text-stone-600 leading-relaxed">
           The returned link is specific to one creator handle and one token asset. Opening it
           takes them to their Creator fees tab; the same URL serves a preview card to X, Discord,
-          Telegram and other link-preview crawlers. The card shows that asset&apos;s pending total
-          and fee count, generated from live escrowed creator fees — so it grows as more fees for
-          that token arrive. If the creator earns fees in several tokens, share each token&apos;s
-          link separately so each preview shows only its own total. The{' '}
+          Telegram and other link-preview crawlers. The card shows that asset&apos;s total
+          launchpad creator fees and how many are still pending. Fees that were claimed or routed
+          directly still count toward the total, so the card does not reset when they settle; only
+          the pending amount drops. If the creator earns fees in several tokens, share each
+          token&apos;s link separately so each preview shows only its own total. The{' '}
           <code className="font-mono text-[13px]">k</code>{' '}
           parameter authorizes that handle + asset preview, so share the complete URL rather than
           editing it.

@@ -388,7 +388,7 @@ app.notFound(async (c) => {
           : `Creator fees for @${feesHandle} on UPRAIL`;
       const description =
         valid && summary.count > 0
-          ? summary.subline + '. Claim with Face ID or fingerprint.'
+          ? `${summary.subline}. ${summary.detail}`
           : 'Open the private claim link to see the pending creator fees.';
       const imageQuery = new URLSearchParams({ asset: feesAsset, v: summary.version });
       if (cardKey) imageQuery.set('k', cardKey);
