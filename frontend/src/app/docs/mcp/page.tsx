@@ -20,6 +20,97 @@ export default function McpDocsPage() {
       </header>
 
       <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Before you connect</h2>
+        <div className="rounded-2xl border border-stone-200 px-4 py-1">
+          <Field name="1. Account" type="required">
+            Activate your UPRAIL account at{' '}
+            <a className="text-stone-900 underline" href="https://app.uprail.world">
+              app.uprail.world
+            </a>{' '}
+            and fund the vault with the token you want to send.
+          </Field>
+          <Field name="2. Key" type="required">
+            Open{' '}
+            <a className="text-stone-900 underline" href="https://app.uprail.world/app/agents">
+              AI Chat Payments
+            </a>
+            , choose the chat you are connecting, set a per-payment and daily USD limit, and confirm
+            with your passkey. Use a separate low-limit key for each chat.
+          </Field>
+          <Field name="3. Connect" type="required">
+            Copy the 1-click MCP URL, MCP JSON, or OpenAPI spec below, add it to the chat, then start
+            a fresh conversation and enable the connector.
+          </Field>
+          <Field name="4. Test" type="recommended">
+            Ask for your balance first, then send a $1 payment to a handle you control. Confirm it in
+            the UPRAIL app history before increasing limits.
+          </Field>
+        </div>
+        <Callout>
+          <strong className="text-stone-900">Support depends on the client.</strong> UPRAIL works
+          with any chat that accepts a remote MCP server or OpenAPI Actions. Some plans or client
+          versions hide custom connectors; in that case use the OpenAPI option where available.
+          Client labels change, so treat the menu names below as a guide rather than an exact map.
+        </Callout>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Which setup should each chat use?
+        </h2>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
+            <h3 className="text-sm font-display font-bold text-stone-950">Grok Bot</h3>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              1-click MCP URL in Grok&apos;s Tools / Connectors / Remote MCP settings. If your Grok
+              client does not expose custom MCP servers, use OpenAPI Actions with the spec and a
+              Bearer key.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
+            <h3 className="text-sm font-display font-bold text-stone-950">Meta Muse</h3>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              1-click MCP URL in Connectors / MCP URL. In Meta Muse Studio, the OpenAPI spec can be
+              imported as an Action with a Bearer key.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
+            <h3 className="text-sm font-display font-bold text-stone-950">
+              OpenAI Dot / ChatGPT
+            </h3>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Import the OpenAPI spec in Actions / Tools → Import from URL, then use API Key (Bearer).
+              Use the MCP URL for clients that support remote MCP connectors.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
+            <h3 className="text-sm font-display font-bold text-stone-950">Claude Web &amp; Mobile</h3>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              1-click MCP URL in Settings → Integrations / Connectors → Add MCP Server. Use the JSON
+              form for Claude Desktop.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
+            <h3 className="text-sm font-display font-bold text-stone-950">
+              Claude Desktop, Cursor &amp; Windsurf
+            </h3>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Use the MCP JSON config with the endpoint and an{' '}
+              <code className="font-mono text-[12px]">Authorization: Bearer up_agent_…</code>{' '}
+              header.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
+            <h3 className="text-sm font-display font-bold text-stone-950">Any other chat</h3>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Use remote MCP if supported, otherwise OpenAPI Actions. UPRAIL cannot add connector
+              support to a client that does not expose MCP or Actions.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">
           Option A — 1-Click Connector URL (Grok Bot, Meta Muse, OpenAI Dot, Claude Web/Mobile)
         </h2>
@@ -68,6 +159,24 @@ export default function McpDocsPage() {
     }
   }
 }`}</Code>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Connect, then test with $1
+        </h2>
+        <ol className="list-decimal pl-5 space-y-2 text-sm text-stone-600 leading-relaxed">
+          <li>Save the connector or Action in the chat, then open a fresh conversation.</li>
+          <li>Enable the UPRAIL connector and ask a read-only question, e.g. “What is my UPRAIL balance?”</li>
+          <li>Send $1 to a handle you control, then check the payment in UPRAIL history.</li>
+          <li>Only raise the key limits after that test succeeds.</li>
+        </ol>
+        <Callout>
+          <strong className="text-stone-900">If the tools do not appear:</strong> the client likely
+          does not support that connector type. Try the OpenAPI option instead. If a payment times
+          out, check history before retrying; some chats do not send an{' '}
+          <code className="font-mono text-[13px]">idempotencyKey</code> automatically.
+        </Callout>
       </section>
 
       <section className="space-y-3">

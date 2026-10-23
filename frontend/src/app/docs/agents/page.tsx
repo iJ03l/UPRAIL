@@ -12,11 +12,28 @@ export default function AgentsDocsPage() {
           Send &amp; receive from any AI chat
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Connect ChatGPT, Claude, Cursor, or any AI chat interface to your UPRAIL vault using a
-          Passkey-authorized key. Every key enforces live USD spend limits (max per payment and max
-          per day) with atomic reservations before any funds move.
+          Connect Grok Bot, Meta Muse, OpenAI Dot / ChatGPT, Claude, Cursor, or any AI chat interface
+          to your UPRAIL vault using a Passkey-authorized key. Every key enforces live USD spend
+          limits (max per payment and max per day) with atomic reservations before any funds move.
         </p>
+        <Callout>
+          <strong className="text-stone-900">Per-chat setup:</strong> see the{' '}
+          <a className="text-stone-900 underline" href="/docs/mcp">
+            MCP &amp; OpenAPI connector guide
+          </a>{' '}
+          for the exact URL, JSON, or Action to use in Grok, Meta Muse, OpenAI Dot, Claude, Cursor,
+          or another chat.
+        </Callout>
       </header>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Before you start</h2>
+        <Callout>
+          <strong className="text-stone-900">Prerequisites:</strong> activate your UPRAIL account,
+          fund the vault with the token you will send, and have a passkey ready. Create a separate
+          low-limit key for each chat, then test with $1 before increasing limits.
+        </Callout>
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">1. Create an AI chat key</h2>

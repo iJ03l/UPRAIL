@@ -13,8 +13,8 @@ export default function DocsOverviewPage() {
         </h1>
         <p className="text-base text-stone-600 leading-relaxed max-w-2xl">
           UPRAIL moves value between X handles on NEAR Confidential Intents — no wallet, no seed
-          phrase. Connect <strong className="text-stone-900">any AI chat interface</strong> (ChatGPT,
-          Claude, Cursor) to send, receive, and check payments, or route{' '}
+          phrase. Connect <strong className="text-stone-900">any AI chat interface</strong> (Grok Bot,
+          Meta Muse, OpenAI Dot / ChatGPT, Claude, Cursor) to send, receive, and check payments, or route{' '}
           <strong className="text-stone-900">launchpad creator fees</strong> straight to an X handle.
         </p>
       </header>
@@ -38,10 +38,11 @@ export default function DocsOverviewPage() {
           href="/docs/mcp"
           className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
         >
-          <h2 className="font-display font-extrabold text-stone-950">MCP server &amp; ChatGPT Actions</h2>
+          <h2 className="font-display font-extrabold text-stone-950">MCP server &amp; OpenAPI Actions</h2>
           <p className="text-sm text-stone-600">
-            Drop UPRAIL into Claude, Cursor, Windsurf, or ChatGPT Actions. Tools to send payments,
-            receive across chains, read balances, and list activity.
+            Connect Grok Bot, Meta Muse, OpenAI Dot / ChatGPT, Claude, Cursor, or any other MCP /
+            OpenAPI chat. Tools to send payments, receive across chains, read balances, and list
+            activity.
           </p>
           <span className="text-[11px] font-mono font-bold text-stone-500">
             /docs/mcp →
