@@ -34,15 +34,9 @@ export async function agentUsdValue(env: Env, asset: string, amount: number): Pr
   return null;
 }
 
-/** True for things that are clearly a wallet address / account rather than an X handle. */
-export function looksLikeAddress(value: string): boolean {
-  const v = (value || '').trim();
-  return (
-    /^0x[0-9a-fA-F]{40}$/.test(v) ||
-    /^[0-9a-f]{64}$/.test(v) ||
-    /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v) ||
-    /\.(near|testnet)$/i.test(v)
-  );
+/** True only for a syntactically valid X handle (with or without a leading @). */
+export function isValidAgentHandle(value: string): boolean {
+  return /^[a-zA-Z0-9_]{1,15}$/.test((value || '').trim().replace(/^@+/, ''));
 }
 
 /**
@@ -61,7 +55,7 @@ export function evaluateAgentPolicy(
       detail: 'This connection has no spend limits. Create a new connection in UPRAIL → AI Chat.',
     };
   }
-  if (looksLikeAddress(intent.recipientHandle)) {
+  if (!isValidAgentHandle(intent.recipientHandle)) {
     return {
       allowed: false,
       reason: 'recipient_not_handle',

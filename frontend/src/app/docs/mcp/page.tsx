@@ -29,6 +29,12 @@ export default function McpDocsPage() {
           header field, paste your 1-click URL directly:
         </p>
         <Code title="1-Click MCP Server URL">{`https://api.uprail.world/api/mcp?key=up_agent_YOUR_KEY`}</Code>
+        <Callout>
+          <strong className="text-stone-900">The URL contains your secret key.</strong> Use a
+          dedicated key for connector URLs, never paste it into a public chat, and revoke the key
+          immediately if the URL is exposed. Header-based MCP config authenticates without putting
+          the secret in a URL.
+        </Callout>
       </section>
 
       <section className="space-y-3">

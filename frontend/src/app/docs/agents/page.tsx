@@ -76,11 +76,21 @@ export default function AgentsDocsPage() {
         <h2 className="text-xl font-display font-extrabold text-stone-950">2. Send a payment</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
           Authenticate with your key in the <code className="font-mono">Authorization</code> header.
-          UPRAIL automatically quotes and settles the payment in a single request:
+          REST actions reject keys in the URL; the query-string form is limited to the MCP connector
+          URL. UPRAIL automatically quotes and settles the payment in a single request:
         </p>
         <Code title="Header">{`Authorization: Bearer up_agent_…`}</Code>
         <Endpoint verb="POST" path="/api/agent/pay" auth="Bearer agent key" />
-        <Code title="Request">{`{
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Send an <code className="font-mono">Idempotency-Key</code> with retryable requests. A
+          repeated key never sends a second payment; it returns{' '}
+          <code className="font-mono">AGENT_REQUEST_ALREADY_COMPLETED</code> with the original
+          payment id instead.
+        </p>
+        <Code title="Request">{`Authorization: Bearer up_agent_…
+Idempotency-Key: 6f1c2a3e-order-42
+
+{
   "recipientHandle": "@alice",
   "asset": "USDC",
   "amount": 10,

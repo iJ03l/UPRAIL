@@ -10,6 +10,7 @@
 import type { Env } from '../types';
 
 const KEY_PREFIX = 'up_agent_';
+const AGENT_KEY_RE = new RegExp(`^${KEY_PREFIX}[0-9a-f]{48}$`);
 /** 24 random bytes → 48 hex chars. Plenty of entropy for a bearer token. */
 const KEY_BYTES = 24;
 
@@ -45,9 +46,9 @@ export async function generateAgentKey(): Promise<GeneratedAgentKey> {
   };
 }
 
-/** True when a string looks like one of our agent keys (cheap pre-filter). */
+/** True when a string is exactly one of our agent keys (cheap pre-filter). */
 export function looksLikeAgentKey(value: string): boolean {
-  return typeof value === 'string' && value.startsWith(KEY_PREFIX);
+  return typeof value === 'string' && AGENT_KEY_RE.test(value);
 }
 
 /** UTC calendar day as YYYY-MM-DD, the bucket for daily spend. */

@@ -3,7 +3,7 @@
  *
  * Implemented as a JSON-RPC 2.0 server over Streamable HTTP: a single POST
  * endpoint that accepts `initialize`, `tools/list`, and `tools/call`. Requests
- * authenticate with the same Bearer AI chat key (`up_live_...`) as `/api/agent/*`,
+ * authenticate with the same Bearer AI chat key (`up_agent_...`) as `/api/agent/*`,
  * enforcing the owner's USD spend caps on every payment.
  *
  * Tools:
@@ -18,9 +18,15 @@ import { Context, Hono } from 'hono';
 import type { AppContext } from '../types';
 import { requireAgent } from '../middleware/agentAuth';
 import { executeAgentPay } from './agent';
+import { publicErrorMessage } from '../utils/errors';
 import * as nearRpc from '../services/nearRpc';
 
 export const mcpRouter = new Hono<AppContext>();
+
+mcpRouter.use('*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store');
+});
 
 const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = { name: 'uprail', version: '1.0.0' };
@@ -55,6 +61,11 @@ const TOOLS = [
         memo: {
           type: 'string',
           description: 'Optional note attached to the payment',
+        },
+        idempotencyKey: {
+          type: 'string',
+          description:
+            'Optional unique key. Retrying with the same key never sends a second payment.',
         },
       },
       required: ['recipientHandle', 'asset', 'amount'],
@@ -172,6 +183,7 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
         asset: args?.asset,
         amount: args?.amount,
         memo: args?.memo,
+        idempotencyKey: args?.idempotencyKey,
       });
       const payload = await response.json().catch(() => ({}));
       return toolText(payload, response.status !== 201);
@@ -250,7 +262,7 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
            FROM payments
           WHERE sender_x_id = ?
              OR recipient_x_id = ?
-             OR LOWER(recipient_handle) = LOWER(?)
+             OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?))
           ORDER BY created_at DESC
           LIMIT 25`
       )
@@ -277,7 +289,7 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
   }
 }
 
-mcpRouter.post('/', requireAgent(), async (c) => {
+mcpRouter.post('/', requireAgent({ allowQueryKey: true }), async (c) => {
   const message = (c.get('parsedBody' as any) ||
     (await c.req.json().catch(() => null))) as JsonRpcRequest | null;
 
@@ -331,7 +343,7 @@ mcpRouter.post('/', requireAgent(), async (c) => {
         return c.json(rpcResult(id, result));
       } catch (err: any) {
         console.error('[mcp] tool call failed:', name, err);
-        return c.json(rpcResult(id, toolText({ error: err?.message || 'tool failed' }, true)));
+        return c.json(rpcResult(id, toolText({ error: publicErrorMessage(err, 'tool failed') }, true)));
       }
     }
 

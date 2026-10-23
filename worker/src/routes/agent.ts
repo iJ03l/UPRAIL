@@ -16,10 +16,21 @@ import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { requireAgent, authorizeAgentSend } from '../middleware/agentAuth';
 import { generateAgentKey, currentUtcDay } from '../services/agentKeys';
+import {
+  claimAgentRequest,
+  completeAgentRequest,
+  failAgentRequest,
+  normalizeIdempotencyKey,
+} from '../services/agentRequests';
 import { paymentsRouter, handleSendPayment } from './payments';
 import * as nearRpc from '../services/nearRpc';
 
 export const agentRouter = new Hono<AppContext>();
+
+agentRouter.use('*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store');
+});
 
 const MAX_NAME = 48;
 const MAX_KEY_DAYS = 365;
@@ -29,6 +40,9 @@ const MAX_LIMIT_USD = 100_000;
 
 interface KeyBody {
   name?: string;
+  mode?: string | null;
+  asset?: string | null;
+  allowlist?: unknown;
   perTxLimit?: number | string | null;
   dailyLimit?: number | string | null;
   expiresInDays?: number | string | null;
@@ -38,20 +52,25 @@ function parseUsdLimit(value: unknown, fallback: number): number | null {
   if (value === null || value === undefined || value === '') return fallback;
   const n = typeof value === 'string' ? parseFloat(value) : Number(value);
   if (!Number.isFinite(n) || n <= 0 || n > MAX_LIMIT_USD) return null;
-  return Math.round(n * 100) / 100;
+  const rounded = Math.round(n * 100) / 100;
+  return rounded >= 0.01 ? rounded : null;
+}
+
+function shouldReleaseAgentSpend(status: number, code?: string): boolean {
+  if (status >= 400 && status < 500) return true;
+  return code === 'PAYMENT_RECORD_FAILED';
 }
 
 /**
  * Shared payment execution pipeline for both `POST /api/agent/pay` and the MCP
  * `pay_handle` tool.
  *
- * 1. Enforces the key's USD per-transaction and daily spend caps, atomically
- *    reserving the USD amount before any funds move.
- * 2. Automatically obtains a fresh signed quote from the quote pipeline when
- *    the caller has not pre-fetched `quoteSignature` + `depositAddress`.
- * 3. Delegates settlement to `handleSendPayment` and releases the reserved USD
- *    spend if settlement does not succeed (HTTP 201).
+ * Enforces the USD caps with an atomic reservation, obtains a signed quote when
+ * needed, and delegates settlement to the same handler as a human send. The
+ * reservation is released only when the failure is definitely pre-settlement;
+ * ambiguous settlement failures stay charged to keep the daily cap fail-closed.
  */
+
 export async function executeAgentPay(
   c: Context<AppContext>,
   rawBody: Record<string, any>
@@ -75,6 +94,69 @@ export async function executeAgentPay(
     );
   }
 
+  const idempotency = normalizeIdempotencyKey(
+    c.req.header('Idempotency-Key') ?? rawBody?.idempotencyKey
+  );
+  if (!idempotency.ok) {
+    return c.json(
+      {
+        error: 'Invalid Idempotency-Key. Use 1-128 letters, numbers, dots, colons, underscores or hyphens.',
+        code: 'INVALID_IDEMPOTENCY_KEY',
+      },
+      400
+    );
+  }
+  const idempotencyKey = idempotency.key;
+
+  if (idempotencyKey) {
+    const claim = await claimAgentRequest(c.env, agent.key_id, idempotencyKey);
+    if (claim.state === 'replay') {
+      return c.json(
+        {
+          error: 'This idempotency key already completed a payment.',
+          code: 'AGENT_REQUEST_ALREADY_COMPLETED',
+          paymentId: claim.paymentId,
+        },
+        409
+      );
+    }
+    if (claim.state === 'in_progress') {
+      return c.json(
+        {
+          error: 'A payment with this idempotency key is already in progress.',
+          code: 'AGENT_REQUEST_IN_PROGRESS',
+        },
+        409
+      );
+    }
+    if (claim.state === 'unknown') {
+      return c.json(
+        {
+          error:
+            'A previous payment with this idempotency key has an unknown outcome. Check your payment history before retrying.',
+          code: 'AGENT_REQUEST_UNKNOWN',
+        },
+        409
+      );
+    }
+    if (claim.state === 'unavailable') {
+      return c.json(
+        {
+          error: 'Could not safely record the idempotency key. Try again later.',
+          code: 'AGENT_REQUEST_UNAVAILABLE',
+        },
+        503
+      );
+    }
+  }
+
+  const markFailed = async () => {
+    if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'FAILED');
+  };
+  const markUnknown = async () => {
+    if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'UNKNOWN');
+  };
+
   const auth = await authorizeAgentSend(c, agent, {
     recipientHandle,
     asset,
@@ -82,6 +164,7 @@ export async function executeAgentPay(
     memo,
   });
   if (!auth.allowed) {
+    await markFailed();
     return auth.response;
   }
 
@@ -92,14 +175,27 @@ export async function executeAgentPay(
       typeof rawBody?.depositAddress === 'string' ? rawBody.depositAddress.trim() : '';
 
     if (!quoteSignature || !depositAddress) {
-      const quoteReq = new Request('https://uprail.internal/quote', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipientHandle, asset, amount }),
-      });
-      const quoteRes = await paymentsRouter.fetch(quoteReq, c.env, c.executionCtx);
+      let quoteRes: Response;
+      try {
+        const quoteReq = new Request('https://uprail.internal/quote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipientHandle, asset, amount }),
+        });
+        quoteRes = await paymentsRouter.fetch(quoteReq, c.env, c.executionCtx);
+      } catch (err) {
+        await auth.release();
+        await markFailed();
+        console.error('[agent] quote request failed:', err);
+        return c.json(
+          { error: 'Failed to prepare payment quote.', code: 'QUOTE_FAILED' },
+          502
+        );
+      }
+
       if (!quoteRes.ok) {
         await auth.release();
+        await markFailed();
         const errData = (await quoteRes.json().catch(() => ({}))) as {
           error?: string;
           code?: string;
@@ -130,20 +226,48 @@ export async function executeAgentPay(
     });
 
     const response = await handleSendPayment(c);
-    if (response.status !== 201) {
+
+    const payload = (await response.clone().json().catch(() => null)) as {
+      paymentId?: unknown;
+      code?: unknown;
+    } | null;
+    const code = typeof payload?.code === 'string' ? payload.code : undefined;
+
+    if (response.status === 201) {
+      if (idempotencyKey) {
+        const paymentId = typeof payload?.paymentId === 'string' ? payload.paymentId : null;
+        if (paymentId) {
+          const recorded = await completeAgentRequest(
+            c.env,
+            agent.key_id,
+            idempotencyKey,
+            paymentId
+          );
+          if (!recorded) {
+            console.error('[agent] payment settled but idempotency row was not completed');
+          }
+        } else {
+          await markUnknown();
+        }
+      }
+    } else if (shouldReleaseAgentSpend(response.status, code)) {
       await auth.release();
+      await markFailed();
+    } else {
+      await markUnknown();
     }
+
     return response;
   } catch (err) {
-    await auth.release();
+    await markUnknown();
     throw err;
   }
 }
 
 /**
  * POST /api/agent/keys
- * Creates a scoped AI chat key with mandatory USD spend caps. Passkey-gated.
- * The plaintext key (`up_live_...`) is returned once and never stored.
+ * Creates an AI chat key with mandatory USD spend caps. Passkey-gated.
+ * The plaintext key (`up_agent_...`) is returned once and never stored.
  */
 agentRouter.post('/keys', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   const session = c.get('session')!;
@@ -152,6 +276,30 @@ agentRouter.post('/keys', requireAuth({ passkeyVerified: true }), requirePasskey
   const name = String(body.name || '').trim().slice(0, MAX_NAME);
   if (!name) {
     return c.json({ error: 'A name for your AI chat is required.', code: 'INVALID_NAME' }, 400);
+  }
+
+  const mode = body.mode == null || body.mode === '' ? 'autonomous' : String(body.mode);
+  if (mode !== 'autonomous') {
+    return c.json(
+      {
+        error: 'Only autonomous AI chat keys are supported. Always-ask mode is not available.',
+        code: 'UNSUPPORTED_AGENT_MODE',
+      },
+      400
+    );
+  }
+  const hasAssetScope = body.asset != null && String(body.asset).trim() !== '';
+  const hasAllowlist =
+    body.allowlist != null &&
+    !(Array.isArray(body.allowlist) && body.allowlist.length === 0);
+  if (hasAssetScope || hasAllowlist) {
+    return c.json(
+      {
+        error: 'Asset and recipient allowlists are not supported on AI chat keys.',
+        code: 'UNSUPPORTED_AGENT_SCOPE',
+      },
+      400
+    );
   }
 
   const perTxUsd = parseUsdLimit(body.perTxLimit, DEFAULT_PER_TX_USD);
@@ -176,8 +324,17 @@ agentRouter.post('/keys', requireAuth({ passkeyVerified: true }), requirePasskey
   }
 
   let expiresAt: number | null = null;
-  const days = body.expiresInDays == null || body.expiresInDays === '' ? null : Number(body.expiresInDays);
-  if (days !== null && Number.isFinite(days) && days > 0) {
+  if (body.expiresInDays != null && body.expiresInDays !== '') {
+    const days = Number(body.expiresInDays);
+    if (!Number.isFinite(days) || days <= 0) {
+      return c.json(
+        {
+          error: 'Key expiration must be a positive number of days (maximum 365).',
+          code: 'INVALID_KEY_EXPIRY',
+        },
+        400
+      );
+    }
     expiresAt = Date.now() + Math.min(days, MAX_KEY_DAYS) * 86400 * 1000;
   }
 
@@ -189,19 +346,16 @@ agentRouter.post('/keys', requireAuth({ passkeyVerified: true }), requirePasskey
   const dailyLimit = String(dailyUsd);
 
   try {
-    await c.env.DB.prepare(
-      'INSERT INTO agents (id, x_id, name, mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-    )
-      .bind(agentId, session.x_id, name, 'autonomous', now, now)
-      .run();
-
-    await c.env.DB.prepare(
-      `INSERT INTO agent_keys
-        (id, agent_id, x_id, label, key_hash, key_prefix, asset, per_tx_limit, daily_limit, allowlist, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)`
-    )
-      .bind(keyId, agentId, session.x_id, name, hash, prefix, perTxLimit, dailyLimit, expiresAt, now)
-      .run();
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        'INSERT INTO agents (id, x_id, name, mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(agentId, session.x_id, name, mode, now, now),
+      c.env.DB.prepare(
+        `INSERT INTO agent_keys
+          (id, agent_id, x_id, label, key_hash, key_prefix, asset, per_tx_limit, daily_limit, allowlist, expires_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?)`
+      ).bind(keyId, agentId, session.x_id, name, hash, prefix, perTxLimit, dailyLimit, expiresAt, now),
+    ]);
   } catch (err) {
     console.error('[agent] key creation failed:', err);
     return c.json({ error: 'Could not create the AI chat key.', code: 'AGENT_KEY_CREATE_FAILED' }, 500);
@@ -351,7 +505,7 @@ agentRouter.get('/receive', requireAgent(), async (c) => {
         const { results } = await c.env.DB.prepare(
           `SELECT id, sender_x_handle, asset, amount, memo, status, created_at, expires_at
              FROM payments
-            WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?))
+            WHERE (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?)))
               AND status = 'ESCROWED'
             ORDER BY created_at DESC
             LIMIT 25`
@@ -416,7 +570,7 @@ agentRouter.get('/payments', requireAgent(), async (c) => {
        FROM payments
       WHERE sender_x_id = ?
          OR recipient_x_id = ?
-         OR LOWER(recipient_handle) = LOWER(?)
+         OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?))
       ORDER BY created_at DESC
       LIMIT 50`
   )
@@ -464,20 +618,24 @@ agentRouter.get('/openapi.json', (c) => {
           scheme: 'bearer',
           description: 'Paste your UPRAIL AI Chat key (starts with up_agent_)',
         },
-        ApiKeyQuery: {
-          type: 'apiKey',
-          in: 'query',
-          name: 'key',
-          description: 'Or pass your UPRAIL AI Chat key as ?key=up_agent_…',
-        },
       },
     },
-    security: [{ BearerAuth: [] }, { ApiKeyQuery: [] }],
+    security: [{ BearerAuth: [] }],
     paths: {
       '/api/agent/pay': {
         post: {
           operationId: 'sendPayment',
           summary: 'Send a confidential payment to an X @handle',
+          parameters: [
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: false,
+              schema: { type: 'string', maxLength: 128 },
+              description:
+                'Unique key for retry safety. A repeated key never sends a second payment.',
+            },
+          ],
           requestBody: {
             required: true,
             content: {
@@ -502,6 +660,12 @@ agentRouter.get('/openapi.json', (c) => {
                       type: 'string',
                       description: 'Optional payment note',
                     },
+                    idempotencyKey: {
+                      type: 'string',
+                      maxLength: 128,
+                      description:
+                        'Optional unique key for retry safety; the Idempotency-Key header takes precedence.',
+                    },
                   },
                 },
               },
@@ -510,6 +674,7 @@ agentRouter.get('/openapi.json', (c) => {
           responses: {
             '201': { description: 'Payment sent and escrowed for recipient' },
             '403': { description: 'Blocked by USD spend limit' },
+            '409': { description: 'Idempotency key already used or still in progress' },
           },
         },
       },
@@ -558,7 +723,7 @@ agentRouter.get('/openapi.json', (c) => {
               name: 'asset',
               in: 'query',
               required: false,
-              schema: { type: 'string', default: 'USDC' },
+              schema: { type: 'string', default: 'NEAR' },
               description: 'Token symbol to check (e.g. USDC, USDT, NEAR)',
             },
           ],

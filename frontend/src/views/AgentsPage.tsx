@@ -568,6 +568,10 @@ export const AgentsPage: React.FC = () => {
                 (MCP Server URL), or <strong>Claude Web &amp; Mobile</strong> (Settings → Integrations →
                 Add MCP Server). No extra headers required.
               </p>
+              <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                This URL embeds your secret key. Use a dedicated key and revoke it if the URL is
+                exposed.
+              </p>
             </div>
           )}
 
@@ -815,6 +819,9 @@ const CreatedKeyModal: React.FC<{
               <p className="text-[11px] text-stone-500">
                 Paste this URL directly into <strong>Grok</strong>, <strong>Meta Muse</strong>,{' '}
                 <strong>OpenAI Dot</strong>, or <strong>Claude Web/Mobile</strong> MCP Server URL.
+              </p>
+              <p className="text-[11px] text-amber-700">
+                This URL contains your secret key. Revoke it if the URL is exposed.
               </p>
             </div>
           )}

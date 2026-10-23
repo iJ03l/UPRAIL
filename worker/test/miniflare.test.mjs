@@ -601,6 +601,11 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.ok(body.paths['/api/agent/receive']);
     assert.ok(body.paths['/api/agent/balance']);
     assert.ok(body.paths['/api/agent/payments']);
+    assert.equal(body.components.securitySchemes.ApiKeyQuery, undefined);
+    assert.deepEqual(body.security, [{ BearerAuth: [] }]);
+    assert.ok(
+      body.paths['/api/agent/pay'].post.parameters.some((p) => p.name === 'Idempotency-Key')
+    );
   });
 
   it('agent authentication resolves a seeded key, lists MCP tools, and enforces USD spend caps', async () => {
@@ -676,6 +681,129 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const overLimitBody = await overLimit.json();
     assert.equal(overLimitBody.code, 'AGENT_POLICY_DENIED');
     assert.equal(overLimitBody.reason, 'per_tx_limit');
+  });
+
+  it('agent rail rejects wallet recipients, limits query keys to MCP, and prevents retry double-pays', async () => {
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    const rawKey = 'up_agent_' + 'b'.repeat(48);
+    const keyHash = createHash('sha256').update(rawKey).digest('hex');
+
+    await db
+      .prepare(
+        `INSERT INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`
+      )
+      .bind('xid_audit_1', 'audit_tester', 'Audit Tester', 'audit_tester.near', now, now)
+      .run();
+    await db
+      .prepare(
+        'INSERT INTO agents (id, x_id, name, mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .bind('agent_audit_1', 'xid_audit_1', 'Audit Agent', 'autonomous', now, now)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO agent_keys (id, agent_id, x_id, label, key_hash, key_prefix, per_tx_limit, daily_limit, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind('key_audit_1', 'agent_audit_1', 'xid_audit_1', 'Audit Agent', keyHash, 'up_agent_bbbbbb', '25', '100', now)
+      .run();
+
+    const addressAttempt = await mf.dispatchFetch('http://localhost/api/agent/pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` },
+      body: JSON.stringify({ recipientHandle: 'alice.other', asset: 'USDC', amount: 1 }),
+    });
+    assert.equal(addressAttempt.status, 403);
+    const addressBody = await addressAttempt.json();
+    assert.equal(addressBody.code, 'AGENT_POLICY_DENIED');
+    assert.equal(addressBody.reason, 'recipient_not_handle');
+
+    const restQueryKey = await mf.dispatchFetch(
+      `http://localhost/api/agent/receive?key=${encodeURIComponent(rawKey)}`
+    );
+    assert.equal(restQueryKey.status, 401);
+    assert.equal((await restQueryKey.json()).code, 'AGENT_KEY_REQUIRED');
+
+    const mcpQueryKey = await mf.dispatchFetch(
+      `http://localhost/api/mcp?key=${encodeURIComponent(rawKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'tools/list' }),
+      }
+    );
+    assert.equal(mcpQueryKey.status, 200);
+    assert.equal((await mcpQueryKey.json()).result.tools.length, 5);
+
+    await db
+      .prepare(
+        `INSERT INTO agent_requests (id, agent_key_id, idempotency_key, payment_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'COMPLETED', ?)`
+      )
+      .bind('req_completed_1', 'key_audit_1', 'idem-completed', 'pay_idem_completed', now)
+      .run();
+    const replay = await mf.dispatchFetch('http://localhost/api/agent/pay', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${rawKey}`,
+        'Idempotency-Key': 'idem-completed',
+      },
+      body: JSON.stringify({ recipientHandle: '@alice', asset: 'USDC', amount: 1 }),
+    });
+    assert.equal(replay.status, 409);
+    const replayBody = await replay.json();
+    assert.equal(replayBody.code, 'AGENT_REQUEST_ALREADY_COMPLETED');
+    assert.equal(replayBody.paymentId, 'pay_idem_completed');
+
+    await db
+      .prepare(
+        `INSERT INTO agent_requests (id, agent_key_id, idempotency_key, payment_id, status, created_at)
+         VALUES (?, ?, ?, NULL, 'PENDING', ?)`
+      )
+      .bind('req_pending_1', 'key_audit_1', 'idem-pending', now)
+      .run();
+    const inProgress = await mf.dispatchFetch('http://localhost/api/agent/pay', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${rawKey}`,
+        'Idempotency-Key': 'idem-pending',
+      },
+      body: JSON.stringify({ recipientHandle: '@alice', asset: 'USDC', amount: 1 }),
+    });
+    assert.equal(inProgress.status, 409);
+    assert.equal((await inProgress.json()).code, 'AGENT_REQUEST_IN_PROGRESS');
+
+    await db
+      .prepare(
+        `INSERT INTO payments
+           (id, sender_x_handle, recipient_x_id, recipient_handle, asset, amount, status,
+            created_at, expires_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        'pay_handle_reuse_1',
+        'mallory',
+        'xid_other',
+        'audit_tester',
+        'USDC',
+        '1',
+        'ESCROWED',
+        now,
+        now + 86400000,
+        now
+      )
+      .run();
+    const history = await mf.dispatchFetch('http://localhost/api/agent/payments', {
+      headers: { Authorization: `Bearer ${rawKey}` },
+    });
+    assert.equal(history.status, 200);
+    const historyBody = await history.json();
+    assert.ok(!historyBody.payments.some((p) => p.id === 'pay_handle_reuse_1'));
+    assert.equal(history.headers.get('cache-control'), 'no-store');
   });
 
   it('renders a per-payment OG image instead of the generic static card', async () => {
