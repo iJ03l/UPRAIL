@@ -516,12 +516,78 @@ export interface IntentTx {
 }
 
 
-async function nearRpc(
-  rpcUrl: string,
+const FASTNEAR_RPC_URL = 'https://free.rpc.fastnear.com';
+const READ_ONLY_RPC_METHODS = new Set([
+  'query',
+  'tx',
+  'EXPERIMENTAL_tx_status',
+  'block',
+  'status',
+  'gas_price',
+  'validators',
+  'health',
+]);
+const RPC_MAX_CONCURRENT = 6;
+const rpcInflight = new Map<string, Promise<any>>();
+const rpcWaiters: Array<() => void> = [];
+let rpcActive = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireRpcSlot(): Promise<void> {
+  if (rpcActive < RPC_MAX_CONCURRENT) {
+    rpcActive++;
+    return;
+  }
+  await new Promise<void>((resolve) => rpcWaiters.push(resolve));
+  rpcActive++;
+}
+
+function releaseRpcSlot(): void {
+  rpcActive--;
+  rpcWaiters.shift()?.();
+}
+
+async function fetchRpc(targetUrl: string, body: string): Promise<Response> {
+  await acquireRpcSlot();
+  try {
+    return await fetch(targetUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'UPRAIL-Worker/1.0',
+      },
+      body,
+      signal: AbortSignal.timeout(12_000),
+    });
+  } finally {
+    releaseRpcSlot();
+  }
+}
+
+function retryDelayMs(response: Response | null, attempt: number): number {
+  if (attempt <= 0) return 0;
+  const retryAfter = response?.headers.get('retry-after');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) return Math.min(2000, Math.max(250, seconds * 1000));
+    const at = Date.parse(retryAfter);
+    if (Number.isFinite(at)) return Math.min(2000, Math.max(250, at - Date.now()));
+  }
+  return 350 + Math.floor(Math.random() * 300);
+}
+
+function isRetryableRpcFailure(err: unknown): boolean {
+  return err instanceof Error && /NEAR RPC HTTP error: 429/.test(err.message);
+}
+
+async function nearRpcRaw(
+  targetUrl: string,
   method: string,
   params: Record<string, unknown>
 ): Promise<any> {
-  const targetUrl = rpcUrl || 'https://free.rpc.fastnear.com';
   const body = JSON.stringify({
     jsonrpc: '2.0',
     id: 'uprail',
@@ -529,27 +595,14 @@ async function nearRpc(
     params,
   });
 
-  // Public NEAR RPC endpoints throttle aggressively (HTTP 429) and Workers share
-  // egress IPs, so a neighbour's burst can starve us. A 429/5xx is transient,
-  // not fatal: retrying with backoff prevents a momentary throttle from looking
-  // like a real failure — e.g. a key registration that silently no-ops and later
-  // strands a balance when the signed intent panics on intents.near.
   let lastError: unknown;
-  // 2 attempts (1 retry): enough to ride out a transient throttle without
-  // multiplying subrequests — the Worker has a hard 50-subrequest budget and a
-  // retry storm here starves every other call in the same invocation.
+  let lastResponse: Response | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }
+    if (attempt > 0) await sleep(retryDelayMs(lastResponse, attempt));
 
     let resp: Response;
     try {
-      resp = await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      });
+      resp = await fetchRpc(targetUrl, body);
     } catch (netErr) {
       lastError = netErr;
       continue;
@@ -557,11 +610,17 @@ async function nearRpc(
 
     if (resp.status === 429 || resp.status >= 500) {
       lastError = new Error(`NEAR RPC HTTP error: ${resp.status}`);
+      lastResponse = resp;
+      if (resp.status === 429) {
+        console.warn(`[nearRpc] 429 ${method} attempt ${attempt + 1}`);
+      }
       continue;
     }
 
     if (!resp.ok) {
-      throw new Error(`NEAR RPC HTTP error: ${resp.status}`);
+      const detail = await resp.text().catch(() => '');
+      console.warn(`[nearRpc] ${resp.status} ${method}`);
+      throw new Error(`NEAR RPC HTTP error: ${resp.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
     }
 
     const json = await resp.json() as any;
@@ -579,6 +638,36 @@ async function nearRpc(
   }
 
   throw lastError instanceof Error ? lastError : new Error('NEAR RPC request failed');
+}
+
+async function nearRpc(
+  rpcUrl: string,
+  method: string,
+  params: Record<string, unknown>
+): Promise<any> {
+  const targetUrl = rpcUrl || FASTNEAR_RPC_URL;
+  const readOnly = READ_ONLY_RPC_METHODS.has(method);
+  const key = readOnly ? `${targetUrl}\n${method}\n${JSON.stringify(params)}` : '';
+  if (key) {
+    const pending = rpcInflight.get(key);
+    if (pending) return pending;
+  }
+
+  const request = nearRpcRaw(targetUrl, method, params).catch((err) => {
+    if (readOnly && targetUrl !== FASTNEAR_RPC_URL && isRetryableRpcFailure(err)) {
+      return nearRpcRaw(FASTNEAR_RPC_URL, method, params);
+    }
+    throw err;
+  });
+
+  if (key) {
+    rpcInflight.set(key, request);
+    const cleanup = () => {
+      if (rpcInflight.get(key) === request) rpcInflight.delete(key);
+    };
+    request.then(cleanup, cleanup);
+  }
+  return request;
 }
 
 // ─── Contract view call ───────────────────────────────────────────────────────
