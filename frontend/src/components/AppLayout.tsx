@@ -18,7 +18,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-white text-stone-900 flex flex-col font-sans selection:bg-black selection:text-white relative">
+    <div className="min-h-screen bg-surface text-stone-900 flex flex-col font-sans selection:bg-black selection:text-white relative">
       {/* Quantus Background Canvas (Fullscreen on dashboard/app) */}
       <QuantusInteractiveCanvas fullScreenRoam={true} />
 
@@ -26,7 +26,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         Clean, properly placed top header (no bloated navbar)
         Mobile & Desktop optimized
       */}
-      <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-stone-100">
+      <header className="sticky top-0 z-30 w-full bg-surface-glass backdrop-blur-md border-b border-stone-100">
         <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 h-16 sm:h-[72px] flex items-center justify-between gap-2 sm:gap-4">
           {/* Left: Brand with Cinematic Glitch — icon-only on mobile, full wordmark on sm+ */}
           <GlitchLogo href="/app" size="md" hideWordmarkOnMobile className="flex-shrink-0" />

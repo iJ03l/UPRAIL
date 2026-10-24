@@ -13,7 +13,7 @@ export const AuthLoadingScreen: React.FC<AuthLoadingScreenProps> = ({
   hint = 'This only takes a moment.',
 }) => {
   return (
-    <div className="min-h-[100dvh] w-full bg-surface-subtle text-ink flex flex-col items-center justify-center px-6 font-sans">
+    <div className="min-h-[100dvh] w-full bg-surface text-ink flex flex-col items-center justify-center px-6 font-sans">
       <div className="flex flex-col items-center gap-6 text-center">
         <GlitchLogo href={false} size="lg" />
         <div className="flex items-center gap-2.5">

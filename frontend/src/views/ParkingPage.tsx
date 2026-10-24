@@ -118,7 +118,7 @@ export const ParkingPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[100dvh] w-full bg-stone-50 text-stone-900 flex flex-col justify-center items-center px-4 py-8 sm:px-6 sm:py-12 relative overflow-hidden font-sans selection:bg-black selection:text-white">
+    <div className="min-h-[100dvh] w-full bg-surface text-stone-900 flex flex-col justify-center items-center px-4 py-8 sm:px-6 sm:py-12 relative overflow-hidden font-sans selection:bg-black selection:text-white">
       {/* Interactive Background Canvas */}
       <QuantusInteractiveCanvas fullScreenRoam={true} />
 

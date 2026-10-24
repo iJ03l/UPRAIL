@@ -11,8 +11,8 @@ export const metadata: Metadata = {
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-white text-stone-900">
-      <header className="sticky top-0 z-30 border-b border-stone-200 bg-white/90 backdrop-blur">
+    <div className="min-h-screen bg-surface text-stone-900">
+      <header className="sticky top-0 z-30 border-b border-stone-200 bg-surface-glass backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <a href="/docs" className="flex items-center space-x-2">
             <img

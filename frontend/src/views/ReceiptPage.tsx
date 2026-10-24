@@ -82,7 +82,7 @@ export const ReceiptPage: React.FC<ReceiptPageProps> = ({ id }) => {
   const explorerUrl = receipt?.txHash ? `https://nearblocks.io/txns/${receipt.txHash}` : null;
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-12 bg-stone-50">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center px-4 py-12 bg-surface">
       <div className="mb-6">
         <GlitchLogo href="/" size="md" />
       </div>

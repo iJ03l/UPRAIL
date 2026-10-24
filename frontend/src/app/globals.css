@@ -9,10 +9,10 @@
  * remapped in the `.dark` block near the bottom of this file.
  */
 :root {
-  --bg: #ffffff;
-  --bg-subtle: #fafaf9;
-  --bg-muted: #f5f5f4;
-  --bg-inset: #e7e5e4;
+  --bg: #f7f5f0;
+  --bg-subtle: #f2efe9;
+  --bg-muted: #ebe7df;
+  --bg-inset: #ded8ce;
   --fg: #1c1917;
   --fg-muted: #78716c;
   --fg-subtle: #a8a29e;
@@ -136,6 +136,10 @@
 }
 
 @layer utilities {
+  .bg-surface-glass {
+    background-color: color-mix(in srgb, var(--bg) 88%, transparent);
+  }
+
   .glass-card {
     background: color-mix(in srgb, var(--bg-muted) 85%, transparent);
     backdrop-filter: blur(18px);

@@ -35,14 +35,14 @@ export const LandingPage: React.FC = () => {
   };
 
   return (
-    <div className="relative min-h-screen bg-white text-stone-900 overflow-x-hidden selection:bg-black selection:text-white font-sans">
+    <div className="relative min-h-screen bg-surface text-stone-900 overflow-x-hidden selection:bg-black selection:text-white font-sans">
       {/* 
         Interactive Pixel Background & Adventurous Figurine
       */}
       <QuantusInteractiveCanvas />
 
       {/* Clean Header */}
-      <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-white/80 backdrop-blur-md">
+      <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-surface-glass backdrop-blur-md">
         <div className="w-full px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between">
           {/* Brand with Cinematic Glitch — icon-only on mobile, full wordmark on sm+ */}
           <GlitchLogo href="/" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
@@ -292,7 +292,7 @@ export const LandingPage: React.FC = () => {
       </main>
 
       {/* Clean Footer */}
-      <footer className="w-full border-t border-stone-200 bg-white py-8 relative z-20">
+      <footer className="w-full border-t border-stone-200 bg-surface py-8 relative z-20">
         <div className="w-full px-4 sm:px-8 lg:px-12 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-mono text-stone-400">
           <div className="flex items-center space-x-2">
             <GlitchLogo href="/" size="sm" />

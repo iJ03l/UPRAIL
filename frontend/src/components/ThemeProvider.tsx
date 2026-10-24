@@ -35,7 +35,7 @@ function applyTheme(resolved: ResolvedTheme) {
   const root = document.documentElement;
   root.classList.toggle('dark', resolved === 'dark');
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#1B1C1E' : '#FFFFFF');
+  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#1B1C1E' : '#F7F5F0');
 }
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

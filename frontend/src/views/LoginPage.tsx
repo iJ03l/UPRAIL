@@ -370,7 +370,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   }
 
   return (
-    <div className="min-h-[100dvh] w-full bg-surface-subtle text-ink flex flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-16 selection:bg-ink selection:text-surface relative overflow-hidden font-sans">
+    <div className="min-h-[100dvh] w-full bg-surface text-ink flex flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-16 selection:bg-ink selection:text-surface relative overflow-hidden font-sans">
       {/* Interactive Background Canvas */}
       <QuantusInteractiveCanvas fullScreenRoam={true} />
 
@@ -378,7 +378,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       <main className="relative z-10 w-full max-w-md space-y-4">
         {/* Passkeys are unavailable inside X/Telegram webviews — warn early */}
         <InAppBrowserNotice />
-        <div className="bg-surface border border-line rounded-3xl p-7 sm:p-9 shadow-xl space-y-8">
+        <div className="bg-white border border-line rounded-3xl p-7 sm:p-9 shadow-xl space-y-8">
 
           {/* Brand & Heading */}
           <header className="flex flex-col items-center text-center space-y-4">

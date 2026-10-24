@@ -60,7 +60,7 @@ export default function RootLayout({
           name="viewport"
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
         />
-        <meta name="theme-color" content="#FFFFFF" />
+        <meta name="theme-color" content="#F7F5F0" />
         {/* Apply the stored theme before first paint to avoid a light flash. */}
         <script
           dangerouslySetInnerHTML={{
@@ -94,7 +94,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body className="bg-white text-stone-900 min-h-screen selection:bg-black selection:text-white antialiased overflow-x-hidden">
+      <body className="bg-surface text-stone-900 min-h-screen selection:bg-black selection:text-white antialiased overflow-x-hidden">
         <ThemeProvider>
           <ToastProvider>
             <DomainGate>{children}</DomainGate>

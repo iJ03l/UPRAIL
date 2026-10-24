@@ -11,7 +11,7 @@ export default function NotFound() {
   }, [router]);
 
   return (
-    <div className="min-h-screen bg-stone-50 flex items-center justify-center font-mono text-xs text-stone-500">
+    <div className="min-h-screen bg-surface flex items-center justify-center font-mono text-xs text-stone-500">
       Page not found — taking you home...
     </div>
   );
