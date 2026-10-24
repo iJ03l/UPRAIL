@@ -1,227 +1,259 @@
 import React from 'react';
-import { Code, Callout, Endpoint, Field } from '@/components/docs/DocsUI';
+import { Callout } from '@/components/docs/DocsUI';
+
+const APP_SETUP_URL = 'https://app.uprail.world/app/agents';
+const CLAUDE_CONNECTORS_URL = 'https://claude.ai/customize/connectors';
+const CHATGPT_CONNECTORS_URL = 'https://chatgpt.com/plugins';
+const GROK_CONNECTORS_URL = 'https://grok.com/connectors';
+const META_MUSE_URL = 'https://muse.ai/';
+
+const buttonClass =
+  'inline-flex items-center justify-center rounded-xl bg-black px-4 py-2.5 text-xs font-display font-bold uppercase tracking-wider text-white transition-colors hover:bg-stone-800';
+const secondaryButtonClass =
+  'inline-flex items-center justify-center rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-xs font-display font-bold uppercase tracking-wider text-stone-900 transition-colors hover:border-stone-900';
 
 export default function McpDocsPage() {
   return (
     <article className="space-y-8">
       <header className="space-y-3">
         <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-orange-600">
-          MCP &amp; OpenAPI Actions
+          Connect a chat
         </div>
         <h1 className="text-3xl font-display font-extrabold tracking-tight text-stone-950">
-          Connect Claude, OpenAI Dot, Grok Bot, Meta Muse &amp; Cursor
+          Connect Claude, ChatGPT, Grok, Meta Muse &amp; Cursor
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          UPRAIL exposes a universal <strong className="text-stone-900">1-Click MCP URL</strong>, a
-          standard <strong className="text-stone-900">MCP JSON config</strong>, and an{' '}
-          <strong className="text-stone-900">OpenAPI 3.1 spec</strong> so you can connect any AI chat
-          interface in seconds. Every tool call runs under your key&apos;s USD spend limits.
+          UPRAIL connects to your AI chat as a remote MCP connector. Create a key in the UPRAIL app,
+          then follow the steps for your chat below. Claude and Cursor can open with the connection
+          prefilled; other chats open the right settings page and copy what you need.
         </p>
       </header>
 
       <section className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">Before you connect</h2>
-        <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="1. Account" type="required">
-            Activate your UPRAIL account at{' '}
-            <a className="text-stone-900 underline" href="https://app.uprail.world">
-              app.uprail.world
-            </a>{' '}
-            and fund the vault with the token you want to send.
-          </Field>
-          <Field name="2. Key" type="required">
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Activate your UPRAIL account and fund the vault with the token you want to send.</li>
+          <li>
             Open{' '}
-            <a className="text-stone-900 underline" href="https://app.uprail.world/app/agents">
+            <a className="text-stone-900 underline" href={APP_SETUP_URL}>
               AI Chat Payments
             </a>
-            , choose the chat you are connecting, set a per-payment and daily USD limit, and confirm
-            with your passkey. Use a separate low-limit key for each chat.
-          </Field>
-          <Field name="3. Connect" type="required">
-            Copy the 1-click MCP URL, MCP JSON, or OpenAPI spec below, add it to the chat, then start
-            a fresh conversation and enable the connector.
-          </Field>
-          <Field name="4. Test" type="recommended">
-            Ask for your balance first, then send a $1 payment to a handle you control. Confirm it in
-            the UPRAIL app history before increasing limits.
-          </Field>
-        </div>
-        <Callout>
-          <strong className="text-stone-900">Support depends on the client.</strong> UPRAIL works
-          with any chat that accepts a remote MCP server or OpenAPI Actions. Some plans or client
-          versions hide custom connectors; in that case use the OpenAPI option where available.
-          Client labels change, so treat the menu names below as a guide rather than an exact map.
-        </Callout>
+            , choose your chat, and create a key with a low per-payment and daily USD limit.
+          </li>
+          <li>Confirm the key with your passkey. The secret is shown once.</li>
+          <li>Use the setup action on the key screen, then test with $1 before raising limits.</li>
+        </ol>
+        <a href={APP_SETUP_URL} className={buttonClass}>
+          Create an AI chat key
+        </a>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">
-          Which setup should each chat use?
-        </h2>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
-            <h3 className="text-sm font-display font-bold text-stone-950">Grok Bot</h3>
-            <p className="text-xs text-stone-600 leading-relaxed">
-              1-click MCP URL in Grok&apos;s Tools / Connectors / Remote MCP settings. If your Grok
-              client does not expose custom MCP servers, use OpenAPI Actions with the spec and a
-              Bearer key.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
-            <h3 className="text-sm font-display font-bold text-stone-950">Meta Muse</h3>
-            <p className="text-xs text-stone-600 leading-relaxed">
-              1-click MCP URL in Connectors / MCP URL. In Meta Muse Studio, the OpenAPI spec can be
-              imported as an Action with a Bearer key.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
-            <h3 className="text-sm font-display font-bold text-stone-950">
-              OpenAI Dot / ChatGPT
-            </h3>
-            <p className="text-xs text-stone-600 leading-relaxed">
-              Import the OpenAPI spec in Actions / Tools → Import from URL, then use API Key (Bearer).
-              Use the MCP URL for clients that support remote MCP connectors.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
-            <h3 className="text-sm font-display font-bold text-stone-950">Claude Web &amp; Mobile</h3>
-            <p className="text-xs text-stone-600 leading-relaxed">
-              1-click MCP URL in Settings → Integrations / Connectors → Add MCP Server. Use the JSON
-              form for Claude Desktop.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
-            <h3 className="text-sm font-display font-bold text-stone-950">
-              Claude Desktop, Cursor &amp; Windsurf
-            </h3>
-            <p className="text-xs text-stone-600 leading-relaxed">
-              Use the MCP JSON config with the endpoint and an{' '}
-              <code className="font-mono text-[12px]">Authorization: Bearer up_agent_…</code>{' '}
-              header.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
-            <h3 className="text-sm font-display font-bold text-stone-950">Any other chat</h3>
-            <p className="text-xs text-stone-600 leading-relaxed">
-              Use remote MCP if supported, otherwise OpenAPI Actions. UPRAIL cannot add connector
-              support to a client that does not expose MCP or Actions.
-            </p>
-          </div>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Choose your chat</h2>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {[
+            ['#claude', 'Claude'],
+            ['#chatgpt', 'ChatGPT / OpenAI Dot'],
+            ['#grok', 'Grok'],
+            ['#meta-muse', 'Meta Muse'],
+            ['#cursor', 'Cursor / Windsurf'],
+            ['#other', 'Any other chat'],
+          ].map(([href, label]) => (
+            <a
+              key={href}
+              href={href}
+              className="rounded-xl border border-stone-200 px-3 py-2 text-xs font-mono font-bold text-stone-700 transition-colors hover:border-stone-900 hover:text-stone-950"
+            >
+              {label}
+            </a>
+          ))}
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">
-          Option A — 1-Click Connector URL (Grok Bot, Meta Muse, OpenAI Dot, Claude Web/Mobile)
-        </h2>
-        <Endpoint verb="POST" path="/api/mcp?key=up_agent_…" auth="Self-authenticated URL" />
-        <p className="text-sm text-stone-600 leading-relaxed">
-          For AI chats that accept a single Remote MCP / Connector URL without a separate custom
-          header field, paste your 1-click URL directly:
-        </p>
-        <Code title="1-Click MCP Server URL">{`https://api.uprail.world/api/mcp?key=up_agent_YOUR_KEY`}</Code>
+      <section id="claude" className="scroll-mt-24 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-xl font-display font-extrabold text-stone-950">Claude</h2>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-700">
+            Prefilled install
+          </span>
+        </div>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Create a Claude key in UPRAIL. The key screen shows an Add to Claude button.</li>
+          <li>
+            Click it. Claude opens the Add custom connector dialog with the UPRAIL name and URL
+            already filled in.
+          </li>
+          <li>Review the details and click Connect.</li>
+          <li>Start a fresh Claude conversation and enable UPRAIL.</li>
+        </ol>
+        <div className="flex flex-wrap gap-2">
+          <a href={`${APP_SETUP_URL}?platform=claude`} className={buttonClass}>
+            Create Claude key
+          </a>
+          <a
+            href={CLAUDE_CONNECTORS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={secondaryButtonClass}
+          >
+            Open Claude connectors
+          </a>
+        </div>
         <Callout>
-          <strong className="text-stone-900">The URL contains your secret key.</strong> Use a
-          dedicated key for connector URLs, never paste it into a public chat, and revoke the key
-          immediately if the URL is exposed. Header-based MCP config authenticates without putting
-          the secret in a URL.
+          The install link prefills the form but never bypasses Claude&apos;s review. You still
+          confirm the connector inside Claude.
         </Callout>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">
-          Option B — OpenAI Dot / ChatGPT, Grok &amp; Meta Muse OpenAPI Actions
-        </h2>
-        <Endpoint verb="GET" path="/api/agent/openapi.json" auth="public" />
-        <p className="text-sm text-stone-600 leading-relaxed">
-          In <strong className="text-stone-900">OpenAI Dot / ChatGPT</strong>,{' '}
-          <strong className="text-stone-900">Grok Studio</strong>, or{' '}
-          <strong className="text-stone-900">Meta Muse</strong>, open{' '}
-          <strong className="text-stone-900">Actions / Tools → Import from URL</strong>, paste{' '}
-          <code className="font-mono text-[13px]">https://api.uprail.world/api/agent/openapi.json</code>,
-          and set Authentication to <strong className="text-stone-900">API Key (Bearer)</strong> with
-          your <code className="font-mono text-[13px]">up_agent_…</code> key.
-        </p>
+      <section id="chatgpt" className="scroll-mt-24 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-xl font-display font-extrabold text-stone-950">
+            ChatGPT / OpenAI Dot
+          </h2>
+          <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
+            Manual connector
+          </span>
+        </div>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Create an OpenAI / ChatGPT key in UPRAIL.</li>
+          <li>On the key screen, click Copy URL &amp; open ChatGPT connectors.</li>
+          <li>In ChatGPT, go to Settings → Connectors → Add custom connector.</li>
+          <li>Paste the URL from your clipboard, save, and start a fresh chat.</li>
+        </ol>
+        <div className="flex flex-wrap gap-2">
+          <a href={`${APP_SETUP_URL}?platform=openai`} className={buttonClass}>
+            Create OpenAI key
+          </a>
+          <a
+            href={CHATGPT_CONNECTORS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={secondaryButtonClass}
+          >
+            Open ChatGPT connectors
+          </a>
+        </div>
+        <Callout>
+          Custom connectors require a paid ChatGPT plan and the developer-mode connector setting.
+          OpenAI Dot uses the same connector once it is added to your account.
+        </Callout>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">
-          Option C — Claude Desktop, Cursor &amp; Windsurf (MCP JSON)
-        </h2>
-        <Endpoint verb="POST" path="/api/mcp" auth="Bearer agent key" />
-        <Code title="MCP config JSON">{`{
-  "mcpServers": {
-    "uprail": {
-      "url": "https://api.uprail.world/api/mcp",
-      "headers": {
-        "Authorization": "Bearer up_agent_…"
-      }
-    }
-  }
-}`}</Code>
+      <section id="grok" className="scroll-mt-24 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-xl font-display font-extrabold text-stone-950">Grok</h2>
+          <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
+            Manual connector
+          </span>
+        </div>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Create a Grok key in UPRAIL.</li>
+          <li>On the key screen, click Copy URL &amp; open Grok connectors.</li>
+          <li>Choose New Connector → Custom.</li>
+          <li>Paste the URL, connect, then start a fresh Grok conversation.</li>
+        </ol>
+        <div className="flex flex-wrap gap-2">
+          <a href={`${APP_SETUP_URL}?platform=grok`} className={buttonClass}>
+            Create Grok key
+          </a>
+          <a
+            href={GROK_CONNECTORS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={secondaryButtonClass}
+          >
+            Open Grok connectors
+          </a>
+        </div>
+        <Callout>
+          Grok discovers the UPRAIL tools after you connect. If your Grok workspace hides custom
+          connectors, ask your workspace admin to enable them.
+        </Callout>
+      </section>
+
+      <section id="meta-muse" className="scroll-mt-24 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-xl font-display font-extrabold text-stone-950">Meta Muse</h2>
+          <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
+            Setup prompt
+          </span>
+        </div>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Create a Meta Muse key in UPRAIL.</li>
+          <li>On the key screen, click Copy setup prompt &amp; open Muse.</li>
+          <li>Paste the prompt into your Muse chat and send it.</li>
+          <li>Muse creates the UPRAIL custom connector. Approve it, then ask for your balance.</li>
+        </ol>
+        <div className="flex flex-wrap gap-2">
+          <a href={`${APP_SETUP_URL}?platform=metamuse`} className={buttonClass}>
+            Create Muse key
+          </a>
+          <a
+            href={META_MUSE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={secondaryButtonClass}
+          >
+            Open Meta Muse
+          </a>
+        </div>
+        <Callout>
+          The prompt contains your key. Use a dedicated low-limit key for Muse, and revoke it if the
+          conversation is shared.
+        </Callout>
+      </section>
+
+      <section id="cursor" className="scroll-mt-24 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-xl font-display font-extrabold text-stone-950">
+            Cursor / Windsurf
+          </h2>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-700">
+            Prefilled install
+          </span>
+        </div>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Create a Cursor key in UPRAIL.</li>
+          <li>On the key screen, click Open in Cursor.</li>
+          <li>Cursor prompts you to install the UPRAIL MCP server. Approve it.</li>
+          <li>Start a new Cursor chat and ask for your UPRAIL balance.</li>
+        </ol>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Windsurf users should copy the MCP config from the key screen&apos;s Advanced setup and
+          add it as a remote server.
+        </p>
+        <a href={`${APP_SETUP_URL}?platform=cursor`} className={buttonClass}>
+          Create Cursor key
+        </a>
+      </section>
+
+      <section id="other" className="scroll-mt-24 space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Any other chat</h2>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Create a key for your chat in UPRAIL.</li>
+          <li>Copy the connector URL from the key screen.</li>
+          <li>Add it as a remote MCP server in your chat.</li>
+          <li>If your client asks for an OpenAPI Action instead, use the import URL under Advanced setup.</li>
+        </ol>
+        <a href={`${APP_SETUP_URL}?platform=other`} className={buttonClass}>
+          Create a key for another chat
+        </a>
       </section>
 
       <section className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">
           Connect, then test with $1
         </h2>
-        <ol className="list-decimal pl-5 space-y-2 text-sm text-stone-600 leading-relaxed">
-          <li>Save the connector or Action in the chat, then open a fresh conversation.</li>
-          <li>Enable the UPRAIL connector and ask a read-only question, e.g. “What is my UPRAIL balance?”</li>
-          <li>Send $1 to a handle you control, then check the payment in UPRAIL history.</li>
-          <li>Only raise the key limits after that test succeeds.</li>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Save the connector in the chat, then open a fresh conversation.</li>
+          <li>Enable UPRAIL and ask a read-only question, such as “What is my UPRAIL balance?”</li>
+          <li>Send $1 to a handle you control.</li>
+          <li>Check the payment in UPRAIL history before raising the key limits.</li>
         </ol>
         <Callout>
-          <strong className="text-stone-900">If the tools do not appear:</strong> the client likely
-          does not support that connector type. Try the OpenAPI option instead. If a payment times
-          out, check history before retrying; some chats do not send an{' '}
-          <code className="font-mono text-[13px]">idempotencyKey</code> automatically.
-        </Callout>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Available tools</h2>
-
-        <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="pay_handle" type="recipientHandle, asset, amount, memo?">
-            Send a confidential payment to an X <code className="font-mono">@handle</code> within
-            your USD spend limits.
-          </Field>
-          <Field name="receive_payment" type="chain?, token?, amount?">
-            Get your UPRAIL <code className="font-mono">@handle</code>, check pending incoming
-            payments, or generate a fresh deposit address on any supported blockchain.
-          </Field>
-          <Field name="get_balance" type="asset?: string">
-            Read your available UPRAIL balance for a token (e.g. USDC, USDT, NEAR).
-          </Field>
-          <Field name="list_payments" type="none">
-            List your recent sent and received payments on UPRAIL.
-          </Field>
-          <Field name="resolve_handle" type="handle: string">
-            Check if an X <code className="font-mono">@handle</code> has activated UPRAIL.
-          </Field>
-        </div>
-
-        <h3 className="text-base font-display font-bold text-stone-950 pt-2">Example MCP call</h3>
-        <Code title="tools/call">{`{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "pay_handle",
-    "arguments": {
-      "recipientHandle": "@alice",
-      "asset": "USDC",
-      "amount": 10,
-      "memo": "coffee"
-    }
-  }
-}`}</Code>
-        <Callout>
-          <strong className="text-stone-900">Shared USD enforcement.</strong> Both MCP{' '}
-          <code className="font-mono text-[13px]">pay_handle</code> and REST{' '}
-          <code className="font-mono text-[13px]">POST /api/agent/pay</code> run through the exact
-          same atomic USD spend reservation and quote-and-send pipeline.
+          <strong className="text-stone-900">If the tools do not appear:</strong> start a fresh chat,
+          confirm the connector is enabled, and check that your plan supports custom connectors. If a
+          payment times out, check history before retrying.
         </Callout>
       </section>
     </article>

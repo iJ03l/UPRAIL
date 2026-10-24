@@ -4,9 +4,9 @@ import { DocsNav } from '@/components/docs/DocsNav';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://docs.uprail.world'),
-  title: 'UPRAIL Docs — AI Chat payments, MCP & creator fees',
+  title: 'UPRAIL Docs — AI Chat payments, connector setup & creator fees',
   description:
-    'Documentation for UPRAIL AI chat payments (Grok Bot, Meta Muse, OpenAI Dot, ChatGPT, Claude, Cursor), the MCP server, OpenAPI Actions, and launchpad creator-fee routing to an X handle.',
+    'Documentation for UPRAIL AI chat payments (Grok Bot, Meta Muse, OpenAI Dot, ChatGPT, Claude, Cursor), per-chat connector setup, and launchpad creator-fee routing to an X handle.',
 };
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {

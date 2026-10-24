@@ -26,8 +26,8 @@ export default function DocsOverviewPage() {
         >
           <h2 className="font-display font-extrabold text-stone-950">AI Chat payments</h2>
           <p className="text-sm text-stone-600">
-            Passkey-authorized Bearer keys with mandatory USD spend caps (`perTxLimit` and
-            `dailyLimit`) that let you send, receive, and check payments from any AI chat.
+            Passkey-authorized keys with per-payment and daily USD limits that let you send,
+            receive, and check payments from any AI chat.
           </p>
           <span className="text-[11px] font-mono font-bold text-stone-500">
             /docs/agents →
@@ -38,11 +38,10 @@ export default function DocsOverviewPage() {
           href="/docs/mcp"
           className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
         >
-          <h2 className="font-display font-extrabold text-stone-950">MCP server &amp; OpenAPI Actions</h2>
+          <h2 className="font-display font-extrabold text-stone-950">Connect your chat</h2>
           <p className="text-sm text-stone-600">
-            Connect Grok Bot, Meta Muse, OpenAI Dot / ChatGPT, Claude, Cursor, or any other MCP /
-            OpenAPI chat. Tools to send payments, receive across chains, read balances, and list
-            activity.
+            Step-by-step setup for Claude, ChatGPT, Grok, Meta Muse, Cursor, and any other chat that
+            supports a remote connector.
           </p>
           <span className="text-[11px] font-mono font-bold text-stone-500">
             /docs/mcp →
@@ -73,9 +72,11 @@ export default function DocsOverviewPage() {
           funds until the recipient receives it with a passkey.
         </p>
         <Callout>
-          <strong className="text-stone-900">Base URL.</strong> All API calls use{' '}
-          <code className="font-mono text-[13px]">https://api.uprail.world</code>. Docs live at{' '}
-          <code className="font-mono text-[13px]">https://docs.uprail.world</code>.
+          <strong className="text-stone-900">New to UPRAIL?</strong> Start with{' '}
+          <a className="text-stone-900 underline" href="/docs/agents">
+            AI Chat payments
+          </a>{' '}
+          to create a key, then follow the chat setup guide.
         </Callout>
       </section>
     </article>

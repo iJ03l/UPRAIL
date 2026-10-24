@@ -1,5 +1,7 @@
 import React from 'react';
-import { Code, Callout, Endpoint, Field } from '@/components/docs/DocsUI';
+import { Callout } from '@/components/docs/DocsUI';
+
+const APP_SETUP_URL = 'https://app.uprail.world/app/agents';
 
 export default function AgentsDocsPage() {
   return (
@@ -9,151 +11,209 @@ export default function AgentsDocsPage() {
           AI Chat Payments
         </div>
         <h1 className="text-3xl font-display font-extrabold tracking-tight text-stone-950">
-          Send &amp; receive from any AI chat
+          Send &amp; receive from your AI chat
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Connect Grok Bot, Meta Muse, OpenAI Dot / ChatGPT, Claude, Cursor, or any AI chat interface
-          to your UPRAIL vault using a Passkey-authorized key. Every key enforces live USD spend
-          limits (max per payment and max per day) with atomic reservations before any funds move.
+          Create a passkey-authorized key in the UPRAIL app, connect it to Claude, ChatGPT, Grok,
+          Meta Muse, Cursor, or another AI chat, then send, receive, and check payments without
+          leaving the conversation. Every key has a per-payment and daily USD limit.
         </p>
         <Callout>
-          <strong className="text-stone-900">Per-chat setup:</strong> see the{' '}
+          <strong className="text-stone-900">Start here:</strong> create a low-limit key, follow the
+          setup steps for your chat in the{' '}
           <a className="text-stone-900 underline" href="/docs/mcp">
-            MCP &amp; OpenAPI connector guide
-          </a>{' '}
-          for the exact URL, JSON, or Action to use in Grok, Meta Muse, OpenAI Dot, Claude, Cursor,
-          or another chat.
+            connecting guide
+          </a>
+          , then test with $1 before raising the limits.
         </Callout>
       </header>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Before you start</h2>
-        <Callout>
-          <strong className="text-stone-900">Prerequisites:</strong> activate your UPRAIL account,
-          fund the vault with the token you will send, and have a passkey ready. Create a separate
-          low-limit key for each chat, then test with $1 before increasing limits.
-        </Callout>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">How it works</h2>
+        <ol className="space-y-3 text-sm text-stone-600 leading-relaxed">
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-stone-900 text-[11px] font-mono font-bold text-white">
+              1
+            </span>
+            <span>
+              <strong className="text-stone-900">Create a key.</strong> Pick your chat, set a
+              per-payment limit and a daily limit, then approve with Face ID, fingerprint, or your
+              PIN. The secret is shown once.
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-stone-900 text-[11px] font-mono font-bold text-white">
+              2
+            </span>
+            <span>
+              <strong className="text-stone-900">Connect your chat.</strong> The key screen gives
+              you the right action for the chat you picked. Claude and Cursor open with the
+              connection prefilled; other chats open the right settings page and copy what you
+              need.
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-stone-900 text-[11px] font-mono font-bold text-white">
+              3
+            </span>
+            <span>
+              <strong className="text-stone-900">Ask in chat.</strong> Start a fresh conversation,
+              enable the UPRAIL connector, and ask for your balance or send a payment in plain
+              language.
+            </span>
+          </li>
+        </ol>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">1. Create an AI chat key</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">1. Create your key</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Create a key in one tap at{' '}
-          <a
-            className="text-stone-900 underline"
-            href="https://app.uprail.world/app/agents"
-          >
-            app.uprail.world/app/agents
-          </a>
-          . Creating or revoking a key requires Face ID, fingerprint, or your PIN (a passkey).
+          Open AI Chat Payments in the UPRAIL app, choose the chat you are connecting, and confirm
+          the key with your passkey. Use a separate key for each chat so you can revoke one without
+          affecting the others.
         </p>
-        <Endpoint verb="POST" path="/api/agent/keys" auth="cookie + passkey" />
-        <Code title="Request">{`{
-  "name": "Claude",
-  "perTxLimit": 25,
-  "dailyLimit": 100,
-  "expiresInDays": 90
-}`}</Code>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          The response returns the plaintext key <strong className="text-stone-900">once</strong>.
-          Only a SHA-256 hash is stored server-side.
-        </p>
-        <Code title="Response 201">{`{
-  "id": "…",
-  "agentId": "…",
-  "name": "Claude",
-  "perTxLimit": "25",
-  "dailyLimit": "100",
-  "expiresAt": 1760000000000,
-  "keyPrefix": "up_agent_3f9c",
-  "key": "up_agent_…"   // shown once
-}`}</Code>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Spend limits (USD)</h2>
-        <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="perTxLimit" type="number (USD)">
-            Maximum USD value allowed for a single payment (default <code className="font-mono">$25</code>).
-          </Field>
-          <Field name="dailyLimit" type="number (USD)">
-            Maximum cumulative USD value allowed per UTC day (default <code className="font-mono">$100</code>).
-          </Field>
-          <Field name="expiresInDays" type="number | null">
-            Optional key expiration in days (up to 365 days).
-          </Field>
+        <a
+          href={APP_SETUP_URL}
+          className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-2.5 text-xs font-display font-bold uppercase tracking-wider text-white transition-colors hover:bg-stone-800"
+        >
+          Create an AI chat key
+        </a>
+        <div className="rounded-2xl border border-stone-200 p-4 space-y-2 text-sm text-stone-600 leading-relaxed">
+          <p>
+            <strong className="text-stone-900">Per-payment limit:</strong> the most one payment can
+            move, in USD.
+          </p>
+          <p>
+            <strong className="text-stone-900">Daily limit:</strong> the most the key can spend in
+            one UTC day, in USD.
+          </p>
+          <p>
+            <strong className="text-stone-900">Expiry:</strong> optional. Choose a shorter lifetime
+            for a test key.
+          </p>
         </div>
-        <Callout>
-          <strong className="text-stone-900">Live USD pricing.</strong> Spend caps are evaluated in
-          USD using live on-chain token prices so token unit differences can never bypass your limits.
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          2. Connect your chat
+        </h2>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          After the key is created, the UPRAIL app shows a setup action for the chat you selected.
+          Use the per-chat guide for the exact menu path and what to expect.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <a
+            className="rounded-2xl border border-stone-200 p-4 transition-colors hover:border-stone-900"
+            href="/docs/mcp#claude"
+          >
+            <h3 className="text-sm font-display font-bold text-stone-950">Claude</h3>
+            <p className="mt-1 text-xs text-stone-600">
+              Open the prefilled custom connector, review it, then connect.
+            </p>
+          </a>
+          <a
+            className="rounded-2xl border border-stone-200 p-4 transition-colors hover:border-stone-900"
+            href="/docs/mcp#chatgpt"
+          >
+            <h3 className="text-sm font-display font-bold text-stone-950">
+              ChatGPT / OpenAI Dot
+            </h3>
+            <p className="mt-1 text-xs text-stone-600">
+              Add a custom connector in Settings, then paste the UPRAIL URL.
+            </p>
+          </a>
+          <a
+            className="rounded-2xl border border-stone-200 p-4 transition-colors hover:border-stone-900"
+            href="/docs/mcp#grok"
+          >
+            <h3 className="text-sm font-display font-bold text-stone-950">Grok</h3>
+            <p className="mt-1 text-xs text-stone-600">
+              Create a custom MCP connector and paste the UPRAIL URL.
+            </p>
+          </a>
+          <a
+            className="rounded-2xl border border-stone-200 p-4 transition-colors hover:border-stone-900"
+            href="/docs/mcp#meta-muse"
+          >
+            <h3 className="text-sm font-display font-bold text-stone-950">Meta Muse</h3>
+            <p className="mt-1 text-xs text-stone-600">
+              Paste the setup prompt and let Muse create the connector.
+            </p>
+          </a>
+          <a
+            className="rounded-2xl border border-stone-200 p-4 transition-colors hover:border-stone-900"
+            href="/docs/mcp#cursor"
+          >
+            <h3 className="text-sm font-display font-bold text-stone-950">Cursor / Windsurf</h3>
+            <p className="mt-1 text-xs text-stone-600">
+              Open the install link in Cursor, or paste the config in Windsurf.
+            </p>
+          </a>
+          <a
+            className="rounded-2xl border border-stone-200 p-4 transition-colors hover:border-stone-900"
+            href="/docs/mcp#other"
+          >
+            <h3 className="text-sm font-display font-bold text-stone-950">Any other chat</h3>
+            <p className="mt-1 text-xs text-stone-600">
+              Add the UPRAIL URL as a remote MCP connector.
+            </p>
+          </a>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">3. Test with $1</h2>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Open a fresh conversation and enable the UPRAIL connector.</li>
+          <li>Ask a read-only question first, such as “What is my UPRAIL balance?”</li>
+          <li>Send $1 to a handle you control.</li>
+          <li>Check the payment in UPRAIL history before increasing your limits.</li>
+        </ol>
+        <div className="grid gap-2 text-xs font-mono text-stone-700 sm:grid-cols-3">
+          <div className="rounded-xl border border-stone-200 p-3">
+            “Send 10 USDC to @alice for coffee”
+          </div>
+          <div className="rounded-xl border border-stone-200 p-3">
+            “Give me a Base USDC address to receive $50”
+          </div>
+          <div className="rounded-xl border border-stone-200 p-3">
+            “Check my UPRAIL balance and recent payments”
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Manage &amp; revoke</h2>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Every connected chat appears under AI Chat Payments with its limits and today&apos;s
+          spend. Revoke a key at any time with your passkey. Revoking is immediate: that chat can no
+          longer read your balance or move funds.
+        </p>
+        <Callout tone="warn">
+          <strong className="text-stone-900">Treat the key like cash.</strong> Never paste it into a
+          public or shared chat. The Meta Muse setup prompt is for your own private Muse chat, so use
+          a dedicated low-limit key there. If a link or key is exposed, revoke it and create a new
+          one.
         </Callout>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">2. Send a payment</h2>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Authenticate with your key in the <code className="font-mono">Authorization</code> header.
-          REST actions reject keys in the URL; the query-string form is limited to the MCP connector
-          URL. UPRAIL automatically quotes and settles the payment in a single request:
-        </p>
-        <Code title="Header">{`Authorization: Bearer up_agent_…`}</Code>
-        <Endpoint verb="POST" path="/api/agent/pay" auth="Bearer agent key" />
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Send an <code className="font-mono">Idempotency-Key</code> with retryable requests. A
-          repeated key never sends a second payment; it returns{' '}
-          <code className="font-mono">AGENT_REQUEST_ALREADY_COMPLETED</code> with the original
-          payment id instead.
-        </p>
-        <Code title="Request">{`Authorization: Bearer up_agent_…
-Idempotency-Key: 6f1c2a3e-order-42
-
-{
-  "recipientHandle": "@alice",
-  "asset": "USDC",
-  "amount": 10,
-  "memo": "coffee"
-}`}</Code>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">
-          3. Receive payments &amp; deposit addresses
-        </h2>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Retrieve your UPRAIL <code className="font-mono">@handle</code>, view pending incoming
-          payments, or generate a single-use deposit address on any supported chain (
-          <code className="font-mono">near</code>, <code className="font-mono">base</code>,{' '}
-          <code className="font-mono">ethereum</code>, <code className="font-mono">arbitrum</code>,{' '}
-          <code className="font-mono">solana</code>, <code className="font-mono">bitcoin</code>):
-        </p>
-        <Endpoint
-          verb="GET"
-          path="/api/agent/receive?chain=base&token=USDC&amount=50"
-          auth="Bearer agent key"
-        />
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">
-          4. Check balance &amp; activity
-        </h2>
-        <Endpoint verb="GET" path="/api/agent/balance?asset=USDC" auth="Bearer agent key" />
-        <Endpoint verb="GET" path="/api/agent/payments" auth="Bearer agent key" />
-        <Endpoint verb="GET" path="/api/agent/openapi.json" auth="public (ChatGPT Actions)" />
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Errors</h2>
-        <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="401" type="AGENT_KEY_REQUIRED">
-            Missing or malformed Bearer token (<code className="font-mono">up_agent_…</code>).
-          </Field>
-          <Field name="401" type="AGENT_KEY_INVALID">No key with that value exists.</Field>
-          <Field name="403" type="AGENT_KEY_REVOKED">The key was revoked by the owner.</Field>
-          <Field name="403" type="AGENT_KEY_EXPIRED">The key passed its expiration date.</Field>
-          <Field name="403" type="AGENT_POLICY_DENIED">
-            Payment exceeds the key&apos;s per-payment or daily USD spend cap.
-          </Field>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Troubleshooting</h2>
+        <div className="space-y-3 text-sm text-stone-600 leading-relaxed">
+          <p>
+            <strong className="text-stone-900">The UPRAIL tools do not appear.</strong> Make sure
+            you started a fresh conversation after connecting. If they still do not appear, your
+            plan or chat version may not support custom connectors.
+          </p>
+          <p>
+            <strong className="text-stone-900">A payment timed out.</strong> Check UPRAIL history
+            before retrying. The payment may have completed even if the chat lost the response.
+          </p>
+          <p>
+            <strong className="text-stone-900">The key was exposed.</strong> Revoke it immediately
+            in AI Chat Payments. Creating a replacement key takes one passkey confirmation.
+          </p>
         </div>
       </section>
     </article>
