@@ -13,6 +13,7 @@
   --bg-subtle: #f2efe9;
   --bg-muted: #ebe7df;
   --bg-inset: #ded8ce;
+  --bg-card: #faf8f3;
   --fg: #1c1917;
   --fg-muted: #78716c;
   --fg-subtle: #a8a29e;
@@ -200,6 +201,14 @@
   }
 }
 
+:root:not(.dark) .bg-white { background-color: var(--bg-card); }
+:root:not(.dark) .bg-white\/95 { background-color: color-mix(in srgb, var(--bg-card) 95%, transparent); }
+:root:not(.dark) .bg-white\/90 { background-color: color-mix(in srgb, var(--bg-card) 90%, transparent); }
+:root:not(.dark) .bg-white\/80 { background-color: color-mix(in srgb, var(--bg-card) 80%, transparent); }
+:root:not(.dark) .hover\:bg-white:hover { background-color: var(--bg-card); }
+:root:not(.dark) .focus\:bg-white:focus { background-color: var(--bg-card); }
+:root:not(.dark) .focus-within\:bg-white:focus-within { background-color: var(--bg-card); }
+
 /*
  * Dark-mode remap of the app's light neutral utilities onto the semantic
  * tokens above. The app was built as a single light theme with ~1,000 neutral
@@ -209,7 +218,6 @@
  * intentional high-contrast accent surfaces (buttons, banners) that must keep
  * their contrast in both themes.
  */
-/* surfaces */
   .dark .bg-white { background-color: var(--bg); }
   .dark .bg-white\/95 { background-color: color-mix(in srgb, var(--bg) 95%, transparent); }
   .dark .bg-white\/90 { background-color: color-mix(in srgb, var(--bg) 90%, transparent); }
