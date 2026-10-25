@@ -1156,6 +1156,10 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
       );
     }
 
+    console.log(
+      `[withdraw] prepare x=${session.x_id} handle=${session.x_handle} asset=${asset} amount=${amountStr} destination=${destinationAddress} chain=${destinationChain || 'auto'}`
+    );
+
     // Plain balance on the sender's own pk account is deposited into intents
     // first — ft_transfer_call with the user's own address as memo — so the
     // 1Click withdrawal can spend directly-received tokens. No-op when the
@@ -1226,7 +1230,7 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
           // the plain-NEAR rail, which then failed with the misleading "not
           // available for this asset". Fail retryably and leave funds untouched.
           console.warn(
-            `[withdraw] transient intents-rail failure for ${asset}: ${plainDeposit.reason}`
+            `[withdraw] transient intents-rail failure x=${session.x_id} handle=${session.x_handle} asset=${asset} amount=${amountStr} destination=${destinationAddress} reason=${plainDeposit.reason}`
           );
           return c.json<ErrorResponse>(
             {
@@ -1238,7 +1242,7 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
           );
         } else {
           console.warn(
-            `[withdraw] intents rail unavailable for ${asset} (${plainDeposit.reason}) — settling with a direct ft_transfer`
+            `[withdraw] intents rail unavailable x=${session.x_id} handle=${session.x_handle} asset=${asset} amount=${amountStr} reason=${plainDeposit.reason} — settling with a direct ft_transfer`
           );
           settlementRail = 'native';
         }
@@ -1249,7 +1253,7 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
         // skipped and the later intents ft_withdraw fails on an empty balance.
         // Log the decision so the persisted failure can be traced back to it.
         console.warn(
-          `[withdraw] no plain balance to move for ${asset} (${session.x_handle}) — settling from intents`
+          `[withdraw] no plain balance to move x=${session.x_id} handle=${session.x_handle} asset=${asset} amount=${amountStr} — settling from intents`
         );
       }
     } catch (plainErr) {
