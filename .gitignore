@@ -33,3 +33,6 @@ bin/
 
 # UPRAIL Motion Studio (motion framework & AI generation assets)
 motion-studio/
+
+# Local external skill repositories
+.agents/skills/motion-graphics/
