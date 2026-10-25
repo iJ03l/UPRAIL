@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { AlertTriangle, ArrowRight, Fingerprint, ShieldAlert, X } from 'lucide-react';
+import { Portal } from './Portal';
 
 export type ConfirmTone = 'default' | 'financial' | 'danger';
 
@@ -90,12 +91,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md animate-fade-in"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !isLoading) onCancel();
-      }}
-    >
+    <Portal>
+      <div
+        className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !isLoading) onCancel();
+        }}
+      >
       <div
         role="dialog"
         aria-modal="true"
@@ -197,6 +199,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </button>
         </div>
       </div>
-    </div>
+      </div>
+    </Portal>
   );
 };

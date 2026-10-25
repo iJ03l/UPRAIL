@@ -27,6 +27,7 @@ import { api } from '../lib/api';
 import { useSearchParams } from '../lib/router';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { SkeletonList } from '../components/Skeleton';
+import { Portal } from '../components/Portal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import type { AgentKey, CreatedAgentKey } from '../types';
@@ -760,8 +761,9 @@ const CreatedKeyModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
-      <div className="relative w-full max-w-lg rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+    <Portal>
+      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+        <div className="relative w-full max-w-lg rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center space-x-2 text-stone-900">
           <ShieldCheck className="w-5 h-5 text-emerald-600" />
           <h3 className="text-lg font-display font-extrabold">{created.name} is ready to connect</h3>
@@ -996,7 +998,8 @@ const CreatedKeyModal: React.FC<{
         >
           {ack ? 'Done' : 'Copy your key or URL above to continue'}
         </button>
+        </div>
       </div>
-    </div>
+    </Portal>
   );
 };
