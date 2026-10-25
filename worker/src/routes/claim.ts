@@ -48,6 +48,11 @@ export const claimRouter = new Hono<AppContext>();
 function isTransientRailReason(reason: string | undefined): boolean {
   if (!reason) return false;
   const r = reason.toLowerCase();
+  // A validated account error is deterministic, even though the RPC wraps it
+  // in the same bare "Server error" envelope as a throttle. Treating
+  // NotEnoughBalance as transient told the user to retry a withdrawal that
+  // could never succeed and hid the real fix (fund the gas-paying account).
+  if (r.includes('notenoughbalance') || r.includes('lackbalanceforstate')) return false;
   return [
     'too many subrequests',
     'could not read',
@@ -1175,19 +1180,41 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
     let nearAccountForDeposit: string | null = null;
     try {
       nearAccountForDeposit = await nearRpc.resolveUserNearAccount(c.env, session);
-      const plainBefore = await nearRpc.getPlainAssetBalance(
+      const intentHolding = await nearRpc.getIntentAssetBalance(
         c.env,
         asset,
         nearAccountForDeposit
       );
+      const coveredByIntents =
+        intentHolding !== null &&
+        intentHolding.balance >=
+          BigInt(nearRpc.toBaseUnits(amountStr, intentHolding.decimals) || '0');
 
-      plainDeposit = await nearRpc.depositPlainBalanceToIntents(
-        c.env,
-        session.x_id,
-        asset,
-        amountStr,
-        nearAccountForDeposit
-      );
+      let plainBefore: bigint | null = null;
+      if (coveredByIntents) {
+        // The intents ledger already holds this amount. Depositing the same
+        // amount again from the user's plain balance only burns gas and can
+        // fail outright when the native NEAR balance is too thin to cover a
+        // congested 100 TGas ft_transfer_call.
+        plainDeposit = { deposited: true };
+        console.log(
+          `[withdraw] intents already covers x=${session.x_id} handle=${session.x_handle} asset=${asset} amount=${amountStr} — skipping plain deposit`
+        );
+      } else {
+        plainBefore = await nearRpc.getPlainAssetBalance(
+          c.env,
+          asset,
+          nearAccountForDeposit
+        );
+
+        plainDeposit = await nearRpc.depositPlainBalanceToIntents(
+          c.env,
+          session.x_id,
+          asset,
+          amountStr,
+          nearAccountForDeposit
+        );
+      }
 
       // Whole-balance NEAR withdraw: the user has native NEAR but no room for
       // the gas needed to wrap it. Explain it up front (400) rather than failing
@@ -1200,6 +1227,20 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
           {
             error: `You're withdrawing your whole NEAR balance — about ${pretty} NEAR has to stay in your wallet to pay network gas. Lower the amount and try again.`,
             code: 'INSUFFICIENT_PLAIN_BALANCE',
+          },
+          400
+        );
+      }
+
+      if (!plainDeposit.deposited && plainDeposit.reason?.includes('NotEnoughBalance')) {
+        console.warn(
+          `[withdraw] insufficient native NEAR for gas x=${session.x_id} handle=${session.x_handle} asset=${asset} amount=${amountStr} reason=${plainDeposit.reason}`
+        );
+        return c.json<ErrorResponse>(
+          {
+            error:
+              'Not enough native NEAR to cover network gas for this withdrawal. Add a little NEAR to your wallet and try again.',
+            code: 'INSUFFICIENT_NATIVE_GAS',
           },
           400
         );

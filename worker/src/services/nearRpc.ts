@@ -3760,6 +3760,37 @@ async function getPlainNearBalanceStrict(
 }
 
 /**
+ * Onchain intents balance for one asset, in base units. Returns `null` when the
+ * balance cannot be read, so callers never mistake an RPC failure for "the
+ * intents ledger is empty" and burn gas depositing a duplicate amount.
+ */
+export async function getIntentAssetBalance(
+  env: Env,
+  asset: string,
+  nearAccount: string
+): Promise<{ balance: bigint; decimals: number } | null> {
+  try {
+    if (!nearAccount) return null;
+    const tokens = await getSupportedTokens(env);
+    let token = resolveTokenForAsset(asset, tokens);
+    if (!token) token = await resolveRheaToken(env, asset);
+    if (!token?.defuse_asset_id) return null;
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const contractId = env.INTENTS_CONTRACT_ID || 'intents.near';
+    const raw = await viewFunction(rpcUrl, contractId, 'mt_balance_of', {
+      account_id: nearAccount,
+      token_id: token.defuse_asset_id,
+    });
+    return {
+      balance: BigInt(String(raw ?? '0')),
+      decimals: token.decimals ?? 18,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Plain (directly-held) NEP-141 balance of an account, in base units.
  *
  * Callers use this to tell a deposit that genuinely failed from one whose
