@@ -90,8 +90,8 @@ export default function AgentsDocsPage() {
             spend in one UTC day, in USD.
           </p>
           <p>
-            <strong className="text-stone-900">Expiry:</strong> connections last 90 days. Reconnect
-            with a fresh passkey approval when prompted.
+            <strong className="text-stone-900">Expiry:</strong> choose 1–365 days on the approval
+            screen. Reconnect with a fresh passkey approval when it expires.
           </p>
         </div>
       </section>

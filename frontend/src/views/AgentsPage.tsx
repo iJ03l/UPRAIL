@@ -444,7 +444,7 @@ export const AgentsPage: React.FC = () => {
               <div className="rounded-xl bg-stone-900 border border-stone-800 p-2.5">
                 <span className="block font-bold text-white">Approve once</span>
                 <span className="text-stone-400">
-                  UPRAIL opens for Face ID, then the app appears below.
+                  Set limits and a 1–365 day duration, then confirm with Face ID.
                 </span>
               </div>
             </div>

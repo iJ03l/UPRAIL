@@ -101,8 +101,8 @@ export default function McpDocsPage() {
           <li>In your AI app, add a custom or remote MCP connector.</li>
           <li>Paste <span className="font-mono text-stone-900">{MCP_ENDPOINT}</span> and save.</li>
           <li>
-            The app opens UPRAIL in your browser. Sign in, confirm with your passkey, and approve the
-            per-payment and daily limits.
+            The app opens UPRAIL in your browser. Sign in, confirm with your passkey, and choose the
+            per-payment limit, daily limit, and a 1–365 day connection duration.
           </li>
           <li>
             Return to the chat and start a fresh conversation. The app now appears under{' '}

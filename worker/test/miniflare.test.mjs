@@ -798,6 +798,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(consent.status, 200);
     const consentHtml = await consent.text();
     assert.match(consentHtml, /Connect Miniflare AI/);
+    assert.match(consentHtml, /name="connection_days"/);
     const handle = /name="handle" value="([^"]+)"/.exec(consentHtml)?.[1];
     assert.ok(handle, 'consent page must carry a security handle');
 
@@ -820,6 +821,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         handle,
         per_tx_limit: '25',
         daily_limit: '100',
+        connection_days: '30',
       }).toString(),
       redirect: 'manual',
     });
@@ -870,6 +872,8 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(connection.oauthClientName, 'Miniflare AI');
     assert.equal(connection.connectionStatus, 'active');
     assert.ok(connection.oauthGrantId);
+    assert.ok(connection.expiresAt > Date.now() + 29 * 86400 * 1000);
+    assert.ok(connection.expiresAt < Date.now() + 31 * 86400 * 1000);
 
     await db
       .prepare('UPDATE agent_keys SET revoked_at = ? WHERE id = ?')

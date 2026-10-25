@@ -681,10 +681,6 @@ agentRouter.post('/keys/:id/revoke', requireAuth({ passkeyVerified: true }), req
     .bind(Date.now(), id, session.x_id)
     .run();
 
-  if (!result.meta?.changes) {
-    return c.json({ id, revoked: true, oauthGrantsRevoked: 0 });
-  }
-
   let oauthGrantsRevoked = 0;
   if (key.auth_method === 'oauth') {
     try {
@@ -719,7 +715,17 @@ agentRouter.post('/keys/:id/delete', requireAuth({ passkeyVerified: true }), req
     return c.json({ error: 'Key not found.', code: 'AGENT_KEY_NOT_FOUND' }, 404);
   }
   const now = Date.now();
-  const dead = Boolean(key.revoked_at) || Boolean(key.expires_at && key.expires_at < now);
+  let dead = Boolean(key.revoked_at) || Boolean(key.expires_at && key.expires_at < now);
+  if (!dead && key.auth_method === 'oauth') {
+    try {
+      const grants = await listAllOAuthGrants(c.env, session.x_id);
+      const grant = grants.find((item) => item?.metadata?.agentKeyId === id);
+      const grantExpired = Boolean(grant?.expiresAt && grant.expiresAt * 1000 < now);
+      if (!grant || grantExpired) dead = true;
+    } catch (err) {
+      console.warn('[agent] OAuth grant check before delete failed:', err);
+    }
+  }
   if (!dead) {
     return c.json(
       {
@@ -745,8 +751,8 @@ agentRouter.post('/keys/:id/delete', requireAuth({ passkeyVerified: true }), req
     c.env.DB.prepare(
       `DELETE FROM agent_keys
         WHERE id = ? AND x_id = ?
-          AND (revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < ?))`
-    ).bind(id, session.x_id, now),
+          AND (? = 1 OR revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < ?))`
+    ).bind(id, session.x_id, dead ? 1 : 0, now),
     c.env.DB.prepare(
       `DELETE FROM agents
         WHERE id = ? AND x_id = ?
