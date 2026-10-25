@@ -11,12 +11,12 @@ export default function AgentsDocsPage() {
           AI Chat Payments
         </div>
         <h1 className="text-3xl font-display font-extrabold tracking-tight text-stone-950">
-          Send &amp; receive from your AI chat
+          Send, receive &amp; withdraw from your AI chat
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
           Create a passkey-authorized key in the UPRAIL app, connect it to Claude, ChatGPT, Grok,
-          Meta Muse, Cursor, or another AI chat, then send, receive, and check payments without
-          leaving the conversation. Every key has a per-payment and daily USD limit.
+          Meta Muse, Cursor, or another AI chat, then send, receive, withdraw, and check payments
+          without leaving the conversation. Every key has a per-transaction and daily USD limit.
         </p>
         <Callout>
           <strong className="text-stone-900">Start here:</strong> create a low-limit key, follow the
@@ -37,7 +37,7 @@ export default function AgentsDocsPage() {
             </span>
             <span>
               <strong className="text-stone-900">Create a key.</strong> Pick your chat, set a
-              per-payment limit and a daily limit, then approve with Face ID, fingerprint, or your
+              per-transaction limit and a daily limit, then approve with Face ID, fingerprint, or your
               PIN. The secret is shown once.
             </span>
           </li>
@@ -58,8 +58,8 @@ export default function AgentsDocsPage() {
             </span>
             <span>
               <strong className="text-stone-900">Ask in chat.</strong> Start a fresh conversation,
-              enable the UPRAIL connector, and ask for your balance or send a payment in plain
-              language.
+              enable the UPRAIL connector, and ask for your balance, send a payment, or withdraw
+              to a wallet in plain language.
             </span>
           </li>
         </ol>
@@ -80,7 +80,7 @@ export default function AgentsDocsPage() {
         </a>
         <div className="rounded-2xl border border-stone-200 p-4 space-y-2 text-sm text-stone-600 leading-relaxed">
           <p>
-            <strong className="text-stone-900">Per-payment limit:</strong> the most one payment can
+            <strong className="text-stone-900">Per-transaction limit:</strong> the most one payment or withdrawal can
             move, in USD.
           </p>
           <p>
@@ -170,7 +170,7 @@ export default function AgentsDocsPage() {
           <li>Send $1 to a handle you control.</li>
           <li>Check the payment in UPRAIL history before increasing your limits.</li>
         </ol>
-        <div className="grid gap-2 text-xs font-mono text-stone-700 sm:grid-cols-3">
+        <div className="grid gap-2 text-xs font-mono text-stone-700 sm:grid-cols-2">
           <div className="rounded-xl border border-stone-200 p-3">
             “Send 10 USDC to @alice for coffee”
           </div>
@@ -178,9 +178,17 @@ export default function AgentsDocsPage() {
             “Give me a Base USDC address to receive $50”
           </div>
           <div className="rounded-xl border border-stone-200 p-3">
+            “Withdraw 5 USDC to 0x… on Base”
+          </div>
+          <div className="rounded-xl border border-stone-200 p-3">
             “Check my UPRAIL balance and recent payments”
           </div>
         </div>
+        <Callout tone="warn">
+          <strong className="text-stone-900">Withdrawals are irreversible.</strong> Always state the
+          amount and destination network explicitly. The key&apos;s USD limits apply to withdrawals
+          too, and the chat cannot use “all” as an amount.
+        </Callout>
       </section>
 
       <section className="space-y-3">
@@ -188,7 +196,8 @@ export default function AgentsDocsPage() {
         <p className="text-sm text-stone-600 leading-relaxed">
           Every connected chat appears under AI Chat Payments with its limits and today&apos;s
           spend. Revoke a key at any time with your passkey. Revoking is immediate: that chat can no
-          longer read your balance or move funds.
+          longer read your balance or move funds. Once revoked, you can permanently delete the key
+          record from the same screen.
         </p>
         <Callout tone="warn">
           <strong className="text-stone-900">Treat the key like cash.</strong> Never paste it into a

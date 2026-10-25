@@ -1062,12 +1062,14 @@ paymentsRouter.get('/payments', requireAuth({ passkeyVerified: true }), async (c
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
-      WHERE sender_x_id = ? OR LOWER(recipient_handle) = ?
+      WHERE sender_x_id = ?
+         OR recipient_x_id = ?
+         OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = ?)
       ORDER BY created_at DESC
       LIMIT 50
     `
     )
-      .bind(session.x_id, userHandle)
+      .bind(session.x_id, session.x_id, userHandle)
       .all<Payment>();
 
     return c.json({ payments: results || [] });

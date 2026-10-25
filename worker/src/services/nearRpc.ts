@@ -5816,7 +5816,7 @@ export async function getVirtualBalanceDeltas(
   try {
     // 1. Claimed payments received by user (synthetic claims only)
     const claimedRows = await env.DB.prepare(
-      "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?)) AND status = 'CLAIMED'"
+      "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?))) AND status = 'CLAIMED'"
     )
       .bind(session.x_id, session.x_handle)
       .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
@@ -5829,7 +5829,7 @@ export async function getVirtualBalanceDeltas(
 
     // 2. Sent active payments by user (debited from balance)
     const sentRows = await env.DB.prepare(
-      "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR LOWER(sender_x_handle) = LOWER(?)) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+      "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR (sender_x_id IS NULL AND LOWER(sender_x_handle) = LOWER(?))) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
     )
       .bind(session.x_id, session.x_handle)
       .all<{

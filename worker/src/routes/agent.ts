@@ -14,7 +14,11 @@ import { Context, Hono } from 'hono';
 import type { AppContext } from '../types';
 import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
-import { requireAgent, authorizeAgentSend } from '../middleware/agentAuth';
+import {
+  requireAgent,
+  authorizeAgentSend,
+  authorizeAgentWithdrawal,
+} from '../middleware/agentAuth';
 import { generateAgentKey, currentUtcDay } from '../services/agentKeys';
 import {
   claimAgentRequest,
@@ -23,6 +27,7 @@ import {
   normalizeIdempotencyKey,
 } from '../services/agentRequests';
 import { paymentsRouter, handleSendPayment } from './payments';
+import { handleWithdraw } from './claim';
 import * as nearRpc from '../services/nearRpc';
 
 export const agentRouter = new Hono<AppContext>();
@@ -265,6 +270,171 @@ export async function executeAgentPay(
 }
 
 /**
+ * Shared withdrawal execution pipeline for REST `/api/agent/withdraw` and the
+ * MCP `withdraw_to_wallet` tool. Enforces the same per-key USD caps as sends,
+ * then delegates settlement to the human withdrawal path. The agent key is the
+ * authorization factor; withdrawals still require an explicit amount.
+ */
+export async function executeAgentWithdraw(
+  c: Context<AppContext>,
+  rawBody: Record<string, any>
+): Promise<Response> {
+  const agent = c.get('agent')!;
+  const destinationAddress = String(rawBody?.destinationAddress || '').trim();
+  const destinationChain =
+    String(rawBody?.destinationChain || rawBody?.chain || '')
+      .trim()
+      .toLowerCase() || undefined;
+  const asset = String(rawBody?.asset || 'usdc').trim().toLowerCase();
+  const amountStr = String(rawBody?.amount ?? '').trim();
+
+  if (!destinationAddress) {
+    return c.json(
+      { error: 'destinationAddress is required.', code: 'INVALID_REQUEST' },
+      400
+    );
+  }
+  if (
+    !amountStr ||
+    amountStr === 'all' ||
+    !/^\d{1,15}(\.\d{1,18})?$/.test(amountStr) ||
+    Number(amountStr) <= 0
+  ) {
+    return c.json(
+      {
+        error: 'A positive explicit amount is required for AI chat withdrawals.',
+        code: 'INVALID_AMOUNT',
+      },
+      400
+    );
+  }
+
+  const parsedAmount = Number(amountStr);
+  const idempotency = normalizeIdempotencyKey(
+    c.req.header('Idempotency-Key') ?? rawBody?.idempotencyKey
+  );
+  if (!idempotency.ok) {
+    return c.json(
+      {
+        error:
+          'Invalid Idempotency-Key. Use 1-128 letters, numbers, dots, colons, underscores or hyphens.',
+        code: 'INVALID_IDEMPOTENCY_KEY',
+      },
+      400
+    );
+  }
+  const idempotencyKey = idempotency.key;
+
+  if (idempotencyKey) {
+    const claim = await claimAgentRequest(c.env, agent.key_id, idempotencyKey);
+    if (claim.state === 'replay') {
+      return c.json(
+        {
+          error: 'This idempotency key already completed a withdrawal.',
+          code: 'AGENT_REQUEST_ALREADY_COMPLETED',
+          withdrawalId: claim.paymentId,
+        },
+        409
+      );
+    }
+    if (claim.state === 'in_progress') {
+      return c.json(
+        {
+          error: 'A withdrawal with this idempotency key is already in progress.',
+          code: 'AGENT_REQUEST_IN_PROGRESS',
+        },
+        409
+      );
+    }
+    if (claim.state === 'unknown') {
+      return c.json(
+        {
+          error:
+            'A previous withdrawal with this idempotency key has an unknown outcome. Check your history before retrying.',
+          code: 'AGENT_REQUEST_UNKNOWN',
+        },
+        409
+      );
+    }
+    if (claim.state === 'unavailable') {
+      return c.json(
+        {
+          error: 'Could not safely record the idempotency key. Try again later.',
+          code: 'AGENT_REQUEST_UNAVAILABLE',
+        },
+        503
+      );
+    }
+  }
+
+  const markFailed = async () => {
+    if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'FAILED');
+  };
+  const markUnknown = async () => {
+    if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'UNKNOWN');
+  };
+
+  const auth = await authorizeAgentWithdrawal(c, agent, {
+    asset,
+    amount: parsedAmount,
+    destinationAddress,
+    destinationChain,
+  });
+  if (!auth.allowed) {
+    await markFailed();
+    return auth.response;
+  }
+
+  c.set('parsedBody' as any, {
+    destinationAddress,
+    destinationChain,
+    asset,
+    amount: amountStr,
+  });
+
+  try {
+    const response = await handleWithdraw(c);
+    const payload = (await response.clone().json().catch(() => null)) as {
+      withdrawalId?: unknown;
+    } | null;
+    const withdrawalId =
+      typeof payload?.withdrawalId === 'string' ? payload.withdrawalId : null;
+
+    if (response.ok) {
+      if (idempotencyKey) {
+        if (withdrawalId) {
+          const recorded = await completeAgentRequest(
+            c.env,
+            agent.key_id,
+            idempotencyKey,
+            withdrawalId
+          );
+          if (!recorded) {
+            console.error('[agent] withdrawal settled but idempotency row was not completed');
+          }
+        } else {
+          await markUnknown();
+        }
+      }
+    } else if (
+      (response.status >= 400 && response.status < 500) ||
+      response.status === 502 ||
+      response.status === 503
+    ) {
+      await auth.release();
+      await markFailed();
+    } else {
+      await markUnknown();
+    }
+
+    return response;
+  } catch (err) {
+    await markUnknown();
+    throw err;
+  }
+}
+
+/**
  * POST /api/agent/keys
  * Creates an AI chat key with mandatory USD spend caps. Passkey-gated.
  * The plaintext key (`up_agent_...`) is returned once and never stored.
@@ -449,6 +619,54 @@ agentRouter.post('/keys/:id/revoke', requireAuth({ passkeyVerified: true }), req
 });
 
 /**
+ * POST /api/agent/keys/:id/delete
+ * Permanently removes a revoked or expired key and its spend/idempotency
+ * history. Passkey-gated and owner-scoped; active keys must be revoked first.
+ */
+agentRouter.post('/keys/:id/delete', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
+  const session = c.get('session')!;
+  const id = c.req.param('id');
+  const key = await c.env.DB.prepare(
+    'SELECT agent_id, revoked_at, expires_at FROM agent_keys WHERE id = ? AND x_id = ?'
+  )
+    .bind(id, session.x_id)
+    .first<{ agent_id: string; revoked_at: number | null; expires_at: number | null }>();
+
+  if (!key) {
+    return c.json({ error: 'Key not found.', code: 'AGENT_KEY_NOT_FOUND' }, 404);
+  }
+  const now = Date.now();
+  const dead = Boolean(key.revoked_at) || Boolean(key.expires_at && key.expires_at < now);
+  if (!dead) {
+    return c.json(
+      {
+        error: 'Revoke this key before deleting it.',
+        code: 'AGENT_KEY_NOT_REVOKED',
+      },
+      409
+    );
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM agent_spend WHERE agent_key_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM agent_requests WHERE agent_key_id = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM agent_approvals WHERE agent_key_id = ?').bind(id),
+    c.env.DB.prepare(
+      `DELETE FROM agent_keys
+        WHERE id = ? AND x_id = ?
+          AND (revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < ?))`
+    ).bind(id, session.x_id, now),
+    c.env.DB.prepare(
+      `DELETE FROM agents
+        WHERE id = ? AND x_id = ?
+          AND NOT EXISTS (SELECT 1 FROM agent_keys WHERE agent_id = ?)`
+    ).bind(key.agent_id, session.x_id, key.agent_id),
+  ]);
+
+  return c.json({ id, deleted: true });
+});
+
+/**
  * POST /api/agent/pay
  * Bearer-authenticated. Sends a confidential payment to an X @handle within the
  * key's USD spend caps. Auto-quotes when no quoteSignature is supplied.
@@ -458,6 +676,18 @@ agentRouter.post('/pay', requireAgent(), async (c) => {
     (c.get('parsedBody' as any) as Record<string, any> | undefined) ||
     ((await c.req.json().catch(() => ({}))) as Record<string, any>);
   return await executeAgentPay(c, body);
+});
+
+/**
+ * POST /api/agent/withdraw
+ * Bearer-authenticated. Withdraws to an external wallet address within the
+ * key's USD spend caps. Requires an explicit amount (no "all").
+ */
+agentRouter.post('/withdraw', requireAgent(), async (c) => {
+  const body =
+    (c.get('parsedBody' as any) as Record<string, any> | undefined) ||
+    ((await c.req.json().catch(() => ({}))) as Record<string, any>);
+  return await executeAgentWithdraw(c, body);
 });
 
 /**
@@ -673,6 +903,61 @@ agentRouter.get('/openapi.json', (c) => {
           },
           responses: {
             '201': { description: 'Payment sent and escrowed for recipient' },
+            '403': { description: 'Blocked by USD spend limit' },
+            '409': { description: 'Idempotency key already used or still in progress' },
+          },
+        },
+      },
+      '/api/agent/withdraw': {
+        post: {
+          operationId: 'withdrawToWallet',
+          summary: 'Withdraw funds from the UPRAIL vault to an external wallet address',
+          parameters: [
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: false,
+              schema: { type: 'string', maxLength: 128 },
+              description:
+                'Unique key for retry safety. A repeated key never sends a second withdrawal.',
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['destinationAddress', 'asset', 'amount'],
+                  properties: {
+                    destinationAddress: {
+                      type: 'string',
+                      description: 'Destination wallet address',
+                    },
+                    destinationChain: {
+                      type: 'string',
+                      description: 'Optional destination network, e.g. base, ethereum, solana, bitcoin, near',
+                    },
+                    asset: {
+                      type: 'string',
+                      description: 'Token symbol, e.g. USDC, USDT, NEAR',
+                    },
+                    amount: {
+                      type: 'string',
+                      description: 'Explicit human-readable amount; "all" is not accepted',
+                    },
+                    idempotencyKey: {
+                      type: 'string',
+                      maxLength: 128,
+                      description: 'Optional unique key for retry safety',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'Withdrawal settled' },
             '403': { description: 'Blocked by USD spend limit' },
             '409': { description: 'Idempotency key already used or still in progress' },
           },

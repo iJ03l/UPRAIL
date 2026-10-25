@@ -1467,6 +1467,23 @@ export const api = {
     }
   },
 
+  /** Permanently deletes a revoked or expired key. Passkey-gated. */
+  async deleteAgentKey(id: string, passkeyAssertion: unknown): Promise<void> {
+    const url = API_BASE
+      ? `${API_BASE}/api/agent/keys/${encodeURIComponent(id)}/delete`
+      : `/api/agent/keys/${encodeURIComponent(id)}/delete`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ passkeyAssertion }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete key');
+    }
+  },
+
   // ── Launchpad Creator Fees (auto-discovery + on-demand sync) ──────────────
 
   async syncCreatorFees(params?: {

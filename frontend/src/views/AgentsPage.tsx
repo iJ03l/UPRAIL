@@ -7,6 +7,7 @@ import {
   KeyRound,
   ShieldCheck,
   Trash2,
+  Ban,
   Loader2,
   Copy,
   Check,
@@ -163,6 +164,7 @@ export const AgentsPage: React.FC = () => {
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateConfirm, setShowCreateConfirm] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<AgentKey | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AgentKey | null>(null);
 
   // Create form state
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformId>('claude');
@@ -220,7 +222,7 @@ export const AgentsPage: React.FC = () => {
     const perTxNum = parseFloat(perTxLimit);
     const dailyNum = parseFloat(dailyLimit);
     if (!Number.isFinite(perTxNum) || perTxNum <= 0 || !Number.isFinite(dailyNum) || dailyNum <= 0) {
-      setError('Enter positive USD limits for both per-payment and daily spend.');
+      setError('Enter positive USD limits for both per-transaction and daily spend.');
       return;
     }
     if (perTxNum > dailyNum) {
@@ -279,6 +281,28 @@ export const AgentsPage: React.FC = () => {
     }
   };
 
+  const handleDelete = (k: AgentKey) => {
+    setDeleteTarget(k);
+  };
+
+  const performDelete = async () => {
+    if (!deleteTarget) return;
+    const k = deleteTarget;
+    setDeleteTarget(null);
+    setBusyId(k.id);
+    setError(null);
+    try {
+      const assertion = await authorizeWithPasskey(`Delete AI chat key “${k.name}”`);
+      await api.deleteAgentKey(k.id, assertion);
+      toast(`“${k.name}” deleted`);
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete key');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const activePlatformObj = CHAT_PLATFORMS.find((p) => p.id === selectedPlatform) || CHAT_PLATFORMS[0];
 
   return (
@@ -291,9 +315,9 @@ export const AgentsPage: React.FC = () => {
             <h1 className="text-xl sm:text-2xl font-display font-extrabold tracking-tight">AI Chat Payments</h1>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-stone-500 max-w-xl">
-            Send, receive, and check payments directly from Claude, OpenAI Dot / ChatGPT, Grok Bot,
-            Meta Muse, Cursor, or any AI chat. Protected by strict USD spend limits and revocable in
-            one tap.
+            Send, receive, withdraw, and check payments directly from Claude, OpenAI Dot / ChatGPT,
+            Grok Bot, Meta Muse, Cursor, or any AI chat. Protected by strict USD spend limits and
+            revocable in one tap.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
@@ -531,7 +555,7 @@ export const AgentsPage: React.FC = () => {
                       )}
                     </div>
                     <div className="mt-1 text-[11px] text-stone-500 font-mono truncate">
-                      {k.keyPrefix}… · Max ${perTxLimitNum || 25}/payment · Max ${dailyLimitNum || 100}/day
+                      {k.keyPrefix}… · Max ${perTxLimitNum || 25}/transaction · Max ${dailyLimitNum || 100}/day
                     </div>
                     <div className="mt-0.5 text-[10px] text-stone-400 font-mono">
                       Created {formatDate(k.createdAt)}
@@ -555,20 +579,36 @@ export const AgentsPage: React.FC = () => {
                       </div>
                     )}
                   </div>
-                  {!dead && (
-                    <button
-                      onClick={() => handleRevoke(k)}
-                      disabled={busyId === k.id || isAuthorizing}
-                      className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-stone-200 text-stone-500 hover:text-red-600 hover:border-red-200 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
-                    >
-                      {busyId === k.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="w-3.5 h-3.5" />
-                      )}
-                      <span>Revoke</span>
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {!dead && (
+                      <button
+                        onClick={() => handleRevoke(k)}
+                        disabled={busyId === k.id || isAuthorizing}
+                        className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-stone-200 text-stone-500 hover:text-red-600 hover:border-red-200 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {busyId === k.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Ban className="w-3.5 h-3.5" />
+                        )}
+                        <span>Revoke</span>
+                      </button>
+                    )}
+                    {dead && (
+                      <button
+                        onClick={() => handleDelete(k)}
+                        disabled={busyId === k.id || isAuthorizing}
+                        className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {busyId === k.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                        <span>Delete</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -659,6 +699,25 @@ export const AgentsPage: React.FC = () => {
           { label: 'Max per payment', value: `$${perTxLimit || '0'}` },
           { label: 'Daily limit', value: `$${dailyLimit || '0'}` },
           { label: 'Expires', value: expiresInDays ? `${expiresInDays} days` : 'Never', mono: false },
+        ]}
+      />
+
+      <ConfirmDialog
+        isOpen={Boolean(deleteTarget)}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void performDelete()}
+        tone="danger"
+        title="Delete AI chat key"
+        description={
+          deleteTarget
+            ? `Permanently remove “${deleteTarget.name}” and its spend history from this account.`
+            : undefined
+        }
+        confirmLabel="Delete permanently"
+        warning="This cannot be undone. The key is already revoked or expired; deleting only removes its record."
+        details={[
+          { label: 'Name', value: deleteTarget?.name || '—', mono: false, emphasis: true },
+          { label: 'Key', value: `${deleteTarget?.keyPrefix || ''}…` },
         ]}
       />
 
@@ -976,7 +1035,7 @@ const CreatedKeyModal: React.FC<{
         <div className="flex items-start space-x-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
           <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
           <span>
-            Capped at <strong>${created.perTxLimit}/payment</strong> and{' '}
+            Capped at <strong>${created.perTxLimit}/transaction</strong> and{' '}
             <strong>${created.dailyLimit}/day</strong>. You can revoke this key anytime.
           </span>
         </div>

@@ -350,7 +350,7 @@ async function callerOwnsDepositAddress(
         WHERE deposit_address = ?
           AND (sender_x_id = ?
                OR recipient_x_id = ?
-               OR LOWER(recipient_handle) = LOWER(?))
+               OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?)))
         LIMIT 1`
     )
       .bind(address, session.x_id, session.x_id, session.x_handle)

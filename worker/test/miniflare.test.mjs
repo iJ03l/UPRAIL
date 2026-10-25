@@ -592,12 +592,30 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.code, 'AGENT_KEY_REQUIRED');
   });
 
+  it('agent withdrawal and key deletion require authorization', async () => {
+    const withdraw = await mf.dispatchFetch('http://localhost/api/agent/withdraw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ destinationAddress: 'alice.near', asset: 'USDC', amount: '1' }),
+    });
+    assert.equal(withdraw.status, 401);
+    assert.equal((await withdraw.json()).code, 'AGENT_KEY_REQUIRED');
+
+    const deleteKey = await mf.dispatchFetch('http://localhost/api/agent/keys/akey1/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(deleteKey.status, 401);
+  });
+
   it('GET /api/agent/openapi.json serves OpenAPI 3.1.0 spec for AI chat actions', async () => {
     const res = await mf.dispatchFetch('http://localhost/api/agent/openapi.json');
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.openapi, '3.1.0');
     assert.ok(body.paths['/api/agent/pay']);
+    assert.ok(body.paths['/api/agent/withdraw']);
     assert.ok(body.paths['/api/agent/receive']);
     assert.ok(body.paths['/api/agent/balance']);
     assert.ok(body.paths['/api/agent/payments']);
@@ -643,7 +661,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(listed.status, 200);
     const listedBody = await listed.json();
     const names = listedBody.result.tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ['get_balance', 'list_payments', 'pay_handle', 'receive_payment', 'resolve_handle']);
+    assert.deepEqual(names, ['get_balance', 'list_payments', 'pay_handle', 'receive_payment', 'resolve_handle', 'withdraw_to_wallet']);
 
     const resolved = await mf.dispatchFetch('http://localhost/api/mcp', {
       method: 'POST',
@@ -681,6 +699,20 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const overLimitBody = await overLimit.json();
     assert.equal(overLimitBody.code, 'AGENT_POLICY_DENIED');
     assert.equal(overLimitBody.reason, 'per_tx_limit');
+
+    const overLimitWithdraw = await mf.dispatchFetch('http://localhost/api/agent/withdraw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` },
+      body: JSON.stringify({
+        destinationAddress: 'alice.near',
+        asset: 'USDC',
+        amount: '50',
+      }),
+    });
+    assert.equal(overLimitWithdraw.status, 403);
+    const overLimitWithdrawBody = await overLimitWithdraw.json();
+    assert.equal(overLimitWithdrawBody.code, 'AGENT_POLICY_DENIED');
+    assert.equal(overLimitWithdrawBody.reason, 'per_tx_limit');
   });
 
   it('agent rail rejects wallet recipients, limits query keys to MCP, and prevents retry double-pays', async () => {
@@ -735,7 +767,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       }
     );
     assert.equal(mcpQueryKey.status, 200);
-    assert.equal((await mcpQueryKey.json()).result.tools.length, 5);
+    assert.equal((await mcpQueryKey.json()).result.tools.length, 6);
 
     await db
       .prepare(
@@ -804,6 +836,21 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     const historyBody = await history.json();
     assert.ok(!historyBody.payments.some((p) => p.id === 'pay_handle_reuse_1'));
     assert.equal(history.headers.get('cache-control'), 'no-store');
+
+    const mcpReceive = await mf.dispatchFetch('http://localhost/api/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 11,
+        method: 'tools/call',
+        params: { name: 'receive_payment', arguments: {} },
+      }),
+    });
+    assert.equal(mcpReceive.status, 200);
+    const mcpReceiveBody = await mcpReceive.json();
+    const mcpReceivePayload = JSON.parse(mcpReceiveBody.result.content[0].text);
+    assert.ok(!mcpReceivePayload.pendingPayments.some((p) => p.id === 'pay_handle_reuse_1'));
   });
 
   it('renders a per-payment OG image instead of the generic static card', async () => {

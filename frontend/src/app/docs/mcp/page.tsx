@@ -25,7 +25,9 @@ export default function McpDocsPage() {
         <p className="text-sm text-stone-600 leading-relaxed">
           UPRAIL connects to your AI chat as a remote MCP connector. Create a key in the UPRAIL app,
           then follow the steps for your chat below. Claude and Cursor can open with the connection
-          prefilled; other chats open the right settings page and copy what you need.
+          prefilled; other chats open the right settings page and copy what you need. The connector
+          can check balances, send to X handles, generate deposit addresses, and withdraw to wallet
+          addresses within your key limits.
         </p>
       </header>
 
@@ -38,7 +40,7 @@ export default function McpDocsPage() {
             <a className="text-stone-900 underline" href={APP_SETUP_URL}>
               AI Chat Payments
             </a>
-            , choose your chat, and create a key with a low per-payment and daily USD limit.
+            , choose your chat, and create a key with a low per-transaction and daily USD limit.
           </li>
           <li>Confirm the key with your passkey. The secret is shown once.</li>
           <li>Use the setup action on the key screen, then test with $1 before raising limits.</li>
@@ -46,6 +48,30 @@ export default function McpDocsPage() {
         <a href={APP_SETUP_URL} className={buttonClass}>
           Create an AI chat key
         </a>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">What your chat can do</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {[
+            ['pay_handle', 'Send to an X @handle within your USD limits.'],
+            ['withdraw_to_wallet', 'Withdraw an explicit amount to a supported wallet address.'],
+            ['receive_payment', 'Show your handle, pending payments, or a deposit address.'],
+            ['get_balance', 'Check the available balance for one named asset.'],
+            ['list_payments', 'Show your 25 most recent sent and received payments.'],
+            ['resolve_handle', 'Check whether an X handle is registered on UPRAIL.'],
+          ].map(([tool, detail]) => (
+            <div key={tool} className="rounded-xl border border-stone-200 p-3">
+              <div className="text-xs font-mono font-bold text-stone-900">{tool}</div>
+              <p className="mt-1 text-xs text-stone-600 leading-relaxed">{detail}</p>
+            </div>
+          ))}
+        </div>
+        <Callout tone="warn">
+          <strong className="text-stone-900">Withdrawals are irreversible.</strong> The chat must use
+          an explicit amount and the correct destination network. USD limits apply to both payments
+          and withdrawals, and every key can use every tool.
+        </Callout>
       </section>
 
       <section className="space-y-3">
@@ -248,7 +274,8 @@ export default function McpDocsPage() {
           <li>Save the connector in the chat, then open a fresh conversation.</li>
           <li>Enable UPRAIL and ask a read-only question, such as “What is my UPRAIL balance?”</li>
           <li>Send $1 to a handle you control.</li>
-          <li>Check the payment in UPRAIL history before raising the key limits.</li>
+          <li>Withdraw a small test amount to a wallet you control.</li>
+          <li>Check both transactions in UPRAIL history before raising the key limits.</li>
         </ol>
         <Callout>
           <strong className="text-stone-900">If the tools do not appear:</strong> start a fresh chat,

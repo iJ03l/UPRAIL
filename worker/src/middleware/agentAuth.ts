@@ -16,7 +16,11 @@ import {
   reserveAgentSpend,
   releaseAgentSpend,
 } from '../services/agentKeys';
-import { agentUsdValue, evaluateAgentPolicy } from '../services/agentPolicy';
+import {
+  agentUsdValue,
+  evaluateAgentPolicy,
+  evaluateAgentSpendPolicy,
+} from '../services/agentPolicy';
 import { SESSION_TTL_SECONDS } from './session';
 
 const DEFAULT_PER_TX_USD = 25;
@@ -168,9 +172,60 @@ export interface AgentIntent {
   memo?: string;
 }
 
+export interface AgentWithdrawalIntent {
+  asset: string;
+  amount: number;
+  destinationAddress: string;
+  destinationChain?: string;
+}
+
 export type AgentSendAuthorization =
   | { allowed: true; reservedUsd: number; release: () => Promise<void> }
   | { allowed: false; response: Response };
+
+async function reserveAgentBudget(
+  c: Context<AppContext>,
+  principal: AgentPrincipal,
+  usd: number
+): Promise<AgentSendAuthorization> {
+  const dailyLimit = principal.daily_limit_usd;
+  if (dailyLimit === null) {
+    return {
+      allowed: false,
+      response: c.json(
+        {
+          error: 'This connection has no spend limits. Create a new connection in UPRAIL → AI Chat.',
+          code: 'AGENT_POLICY_DENIED',
+          reason: 'no_limits',
+        },
+        403
+      ),
+    };
+  }
+
+  const reserved = await reserveAgentSpend(c.env, principal.key_id, usd, dailyLimit);
+  if (!reserved) {
+    const spentToday = await getAgentSpendToday(c.env, principal.key_id);
+    const remaining = Math.max(0, dailyLimit - spentToday);
+    return {
+      allowed: false,
+      response: c.json(
+        {
+          error: `This transfer (~$${usd.toFixed(2)}) exceeds your remaining daily limit ($${remaining.toFixed(2)} left of $${dailyLimit}).`,
+          code: 'AGENT_POLICY_DENIED',
+          reason: 'daily_limit',
+        },
+        403
+      ),
+    };
+  }
+
+  return {
+    allowed: true,
+    reservedUsd: usd,
+    release: () => releaseAgentSpend(c.env, principal.key_id, usd),
+  };
+}
 
 /**
  * Enforces the key's USD spend policy and atomically reserves the USD amount
@@ -188,7 +243,7 @@ export async function authorizeAgentSend(
     usd,
   });
 
-  if (!verdict.allowed || usd === null || principal.daily_limit_usd === null) {
+  if (!verdict.allowed || usd === null) {
     return {
       allowed: false,
       response: c.json(
@@ -202,26 +257,35 @@ export async function authorizeAgentSend(
     };
   }
 
-  const reserved = await reserveAgentSpend(c.env, principal.key_id, usd, principal.daily_limit_usd);
-  if (!reserved) {
-    const spentToday = await getAgentSpendToday(c.env, principal.key_id);
-    const remaining = Math.max(0, principal.daily_limit_usd - spentToday);
+  return reserveAgentBudget(c, principal, usd);
+}
+
+/**
+ * Enforces the same USD spend caps for withdrawals to an external wallet.
+ * Withdrawals are bearer-authorized like payments, but the destination is an
+ * address rather than an X handle.
+ */
+export async function authorizeAgentWithdrawal(
+  c: Context<AppContext>,
+  principal: AgentPrincipal,
+  intent: AgentWithdrawalIntent
+): Promise<AgentSendAuthorization> {
+  const usd = await agentUsdValue(c.env, intent.asset, intent.amount);
+  const verdict = evaluateAgentSpendPolicy(principal, usd);
+
+  if (!verdict.allowed || usd === null) {
     return {
       allowed: false,
       response: c.json(
         {
-          error: `This payment (~$${usd.toFixed(2)}) exceeds your remaining daily limit ($${remaining.toFixed(2)} left of $${principal.daily_limit_usd}).`,
+          error: verdict.detail || 'Withdrawal denied by agent spend limit.',
           code: 'AGENT_POLICY_DENIED',
-          reason: 'daily_limit',
+          reason: verdict.reason,
         },
         403
       ),
     };
   }
 
-  return {
-    allowed: true,
-    reservedUsd: usd,
-    release: () => releaseAgentSpend(c.env, principal.key_id, usd),
-  };
+  return reserveAgentBudget(c, principal, usd);
 }

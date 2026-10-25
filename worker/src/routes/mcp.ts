@@ -7,17 +7,18 @@
  * enforcing the owner's USD spend caps on every payment.
  *
  * Tools:
- *  - pay_handle       — Send a confidential payment to any X @handle
- *  - receive_payment  — Get your @handle, pending incoming payments, or a fresh deposit address
- *  - get_balance      — Check your available UPRAIL balance
- *  - list_payments    — View recent sent and received payments
- *  - resolve_handle   — Check if an X @handle has activated UPRAIL
+ *  - pay_handle        — Send a confidential payment to any X @handle
+ *  - withdraw_to_wallet — Send funds from the vault to an external wallet address
+ *  - receive_payment   — Get your @handle, pending incoming payments, or a fresh deposit address
+ *  - get_balance       — Check your available UPRAIL balance
+ *  - list_payments     — View recent sent and received payments
+ *  - resolve_handle    — Check if an X @handle has activated UPRAIL
  */
 
 import { Context, Hono } from 'hono';
 import type { AppContext } from '../types';
 import { requireAgent } from '../middleware/agentAuth';
-import { executeAgentPay } from './agent';
+import { executeAgentPay, executeAgentWithdraw } from './agent';
 import { publicErrorMessage } from '../utils/errors';
 import * as nearRpc from '../services/nearRpc';
 
@@ -42,7 +43,7 @@ const TOOLS = [
   {
     name: 'pay_handle',
     description:
-      'Send a confidential payment to an X (Twitter) @handle on UPRAIL. Subject to the key’s per-payment and daily USD spend caps.',
+      'Send a confidential payment to an X (Twitter) @handle on UPRAIL. Subject to the key’s per-transaction and daily USD spend caps.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -69,6 +70,38 @@ const TOOLS = [
         },
       },
       required: ['recipientHandle', 'asset', 'amount'],
+    },
+  },
+  {
+    name: 'withdraw_to_wallet',
+    description:
+      'Withdraw funds from your confidential UPRAIL vault to an external wallet address. Subject to the key’s per-payment and daily USD spend caps. Requires an explicit amount; “all” is not accepted.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        destinationAddress: {
+          type: 'string',
+          description: 'Destination wallet address (EVM, Solana, Bitcoin, NEAR, or another supported chain)',
+        },
+        asset: {
+          type: 'string',
+          description: 'Asset symbol, e.g. USDC, USDT, NEAR, ETH, SOL, BTC',
+        },
+        amount: {
+          type: ['string', 'number'],
+          description: 'Explicit human-readable token amount to withdraw',
+        },
+        chain: {
+          type: 'string',
+          description: 'Optional destination network, e.g. base, ethereum, arbitrum, solana, bitcoin, near',
+        },
+        idempotencyKey: {
+          type: 'string',
+          description:
+            'Optional unique key. Retrying with the same key never sends a second withdrawal.',
+        },
+      },
+      required: ['destinationAddress', 'asset', 'amount'],
     },
   },
   {
@@ -189,6 +222,18 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
       return toolText(payload, response.status !== 201);
     }
 
+    case 'withdraw_to_wallet': {
+      const response = await executeAgentWithdraw(c, {
+        destinationAddress: args?.destinationAddress,
+        destinationChain: args?.chain ?? args?.destinationChain,
+        asset: args?.asset,
+        amount: args?.amount,
+        idempotencyKey: args?.idempotencyKey,
+      });
+      const payload = await response.json().catch(() => ({}));
+      return toolText(payload, !response.ok);
+    }
+
     case 'receive_payment': {
       const chain = String(args?.chain || '').trim().toLowerCase();
       const token = String(args?.token || '').trim().toUpperCase() || undefined;
@@ -227,7 +272,7 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
           const { results } = await c.env.DB.prepare(
             `SELECT id, sender_x_handle, asset, amount, memo, status, created_at, expires_at
                FROM payments
-              WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = LOWER(?))
+              WHERE (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?)))
                 AND status = 'ESCROWED'
               ORDER BY created_at DESC
               LIMIT 25`

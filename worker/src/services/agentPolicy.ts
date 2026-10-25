@@ -44,9 +44,9 @@ export function isValidAgentHandle(value: string): boolean {
  * enforced separately with an atomic reservation (see reserveAgentSpend) so two
  * concurrent chat requests can never jointly exceed it.
  */
-export function evaluateAgentPolicy(
+export function evaluateAgentSpendPolicy(
   principal: AgentPrincipal,
-  intent: { recipientHandle: string; usd: number | null }
+  usd: number | null
 ): AgentPolicyVerdict {
   if (principal.per_tx_limit_usd === null || principal.daily_limit_usd === null) {
     return {
@@ -55,33 +55,41 @@ export function evaluateAgentPolicy(
       detail: 'This connection has no spend limits. Create a new connection in UPRAIL → AI Chat.',
     };
   }
-  if (!isValidAgentHandle(intent.recipientHandle)) {
-    return {
-      allowed: false,
-      reason: 'recipient_not_handle',
-      detail: 'AI chat payments go to X handles only (e.g. @alice). Withdraw to a wallet from the UPRAIL app.',
-    };
-  }
-  if (intent.usd === null) {
+  if (usd === null) {
     return {
       allowed: false,
       reason: 'unpriced_asset',
       detail: 'This asset has no live USD price, so it cannot be checked against your limits. Use USDC, USDT or NEAR.',
     };
   }
-  if (intent.usd > principal.per_tx_limit_usd + 1e-9) {
+  if (usd > principal.per_tx_limit_usd + 1e-9) {
     return {
       allowed: false,
       reason: 'per_tx_limit',
-      detail: `This payment is ~$${intent.usd.toFixed(2)}, above your per-payment limit of $${principal.per_tx_limit_usd}.`,
+      detail: `This transfer is ~$${usd.toFixed(2)}, above your per-transaction limit of $${principal.per_tx_limit_usd}.`,
     };
   }
-  if (intent.usd > principal.daily_limit_usd + 1e-9) {
+  if (usd > principal.daily_limit_usd + 1e-9) {
     return {
       allowed: false,
       reason: 'daily_limit',
-      detail: `This payment exceeds your daily limit of $${principal.daily_limit_usd}.`,
+      detail: `This transfer exceeds your daily limit of $${principal.daily_limit_usd}.`,
     };
   }
   return { allowed: true };
+}
+
+export function evaluateAgentPolicy(
+  principal: AgentPrincipal,
+  intent: { recipientHandle: string; usd: number | null }
+): AgentPolicyVerdict {
+  if (!isValidAgentHandle(intent.recipientHandle)) {
+    return {
+      allowed: false,
+      reason: 'recipient_not_handle',
+      detail:
+        'AI chat payments go to X handles only (e.g. @alice). Use the withdrawal tool for a wallet address.',
+    };
+  }
+  return evaluateAgentSpendPolicy(principal, intent.usd);
 }

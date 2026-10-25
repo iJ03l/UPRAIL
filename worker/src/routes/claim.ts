@@ -3,7 +3,7 @@
  * Pending payment discovery, WebAuthn passkey registration, claim execution, and balance checks
  */
 
-import { Hono } from 'hono';
+import { Context, Hono } from 'hono';
 import {
   AppContext,
   ClaimExecuteRequest,
@@ -210,7 +210,7 @@ claimRouter.get('/pending', requireAuth({ passkeyVerified: true }), async (c) =>
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
-      WHERE (recipient_x_id = ? OR LOWER(recipient_handle) = ?)
+      WHERE (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = ?))
         AND status = 'ESCROWED'
       ORDER BY created_at DESC
     `
@@ -1037,7 +1037,11 @@ claimRouter.get('/withdraw-chains', requireAuth({ passkeyVerified: true }), asyn
  * SECURITY: requires session auth AND passkey authorization — a withdrawal
  * moves real funds, so it is gated exactly like send and claim.
  */
-claimRouter.post('/withdraw', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
+claimRouter.post('/withdraw', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), (c) =>
+  handleWithdraw(c)
+);
+
+export async function handleWithdraw(c: Context<AppContext>): Promise<Response> {
   try {
     const session = c.get('session')!;
     // Body was already parsed by requirePasskeyAuth()
@@ -1511,5 +1515,5 @@ claimRouter.post('/withdraw', requireAuth({ passkeyVerified: true }), requirePas
       500
     );
   }
-});
+}
 
