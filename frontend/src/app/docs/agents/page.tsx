@@ -2,6 +2,7 @@ import React from 'react';
 import { Callout } from '@/components/docs/DocsUI';
 
 const APP_SETUP_URL = 'https://app.uprail.world/app/agents';
+const MCP_ENDPOINT = 'https://api.uprail.world/api/mcp';
 
 export default function AgentsDocsPage() {
   return (
@@ -14,13 +15,13 @@ export default function AgentsDocsPage() {
           Send, receive &amp; withdraw from your AI chat
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Create a passkey-authorized key in the UPRAIL app, connect it to Claude, ChatGPT, Grok,
-          Meta Muse, Cursor, or another AI chat, then send, receive, withdraw, and check payments
-          without leaving the conversation. Every key has a per-transaction and daily USD limit.
+          Connect Claude, ChatGPT, Grok, Meta Muse, Cursor, or another AI chat to UPRAIL with OAuth
+          and Face ID. No secret key is copied into the chat. Every connection has a
+          per-transaction and daily USD limit, and you can disconnect it in one tap.
         </p>
         <Callout>
-          <strong className="text-stone-900">Start here:</strong> create a low-limit key, follow the
-          setup steps for your chat in the{' '}
+          <strong className="text-stone-900">Start here:</strong> open AI Chat Payments, click{' '}
+          <strong>Connect AI Chat</strong>, and approve low limits. Follow the per-chat steps in the{' '}
           <a className="text-stone-900 underline" href="/docs/mcp">
             connecting guide
           </a>
@@ -36,9 +37,8 @@ export default function AgentsDocsPage() {
               1
             </span>
             <span>
-              <strong className="text-stone-900">Create a key.</strong> Pick your chat, set a
-              per-transaction limit and a daily limit, then approve with Face ID, fingerprint, or your
-              PIN. The secret is shown once.
+              <strong className="text-stone-900">Choose your chat.</strong> UPRAIL gives you the MCP
+              URL and the exact settings page. Nothing secret is created or copied.
             </span>
           </li>
           <li className="flex gap-3">
@@ -46,10 +46,9 @@ export default function AgentsDocsPage() {
               2
             </span>
             <span>
-              <strong className="text-stone-900">Connect your chat.</strong> The key screen gives
-              you the right action for the chat you picked. Claude and Cursor open with the
-              connection prefilled; other chats open the right settings page and copy what you
-              need.
+              <strong className="text-stone-900">Approve with your passkey.</strong> The chat opens
+              UPRAIL in your browser. Set a per-transaction and daily USD limit, then confirm with
+              Face ID, Touch ID, fingerprint, or your PIN.
             </span>
           </li>
           <li className="flex gap-3">
@@ -58,49 +57,53 @@ export default function AgentsDocsPage() {
             </span>
             <span>
               <strong className="text-stone-900">Ask in chat.</strong> Start a fresh conversation,
-              enable the UPRAIL connector, and ask for your balance, send a payment, or withdraw
-              to a wallet in plain language.
+              enable the UPRAIL connector, and ask for your balance, send a payment, or withdraw to
+              a wallet in plain language.
             </span>
           </li>
         </ol>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">1. Create your key</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">1. Connect your chat</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Open AI Chat Payments in the UPRAIL app, choose the chat you are connecting, and confirm
-          the key with your passkey. Use a separate key for each chat so you can revoke one without
-          affecting the others.
+          Open AI Chat Payments and click <strong>Connect AI Chat</strong>. Pick your app, then add
+          this URL as a custom or remote MCP connector. Leave authentication empty: OAuth discovery
+          handles it.
         </p>
+        <code className="block break-all rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 font-mono text-xs text-stone-800">
+          {MCP_ENDPOINT}
+        </code>
         <a
           href={APP_SETUP_URL}
           className="inline-flex items-center justify-center rounded-xl bg-black px-4 py-2.5 text-xs font-display font-bold uppercase tracking-wider text-white transition-colors hover:bg-stone-800"
         >
-          Create an AI chat key
+          Connect an AI chat
         </a>
         <div className="rounded-2xl border border-stone-200 p-4 space-y-2 text-sm text-stone-600 leading-relaxed">
           <p>
-            <strong className="text-stone-900">Per-transaction limit:</strong> the most one payment or withdrawal can
-            move, in USD.
+            <strong className="text-stone-900">Per-transaction limit:</strong> the most one payment
+            or withdrawal can move, in USD.
           </p>
           <p>
-            <strong className="text-stone-900">Daily limit:</strong> the most the key can spend in
-            one UTC day, in USD.
+            <strong className="text-stone-900">Daily limit:</strong> the most the connection can
+            spend in one UTC day, in USD.
           </p>
           <p>
-            <strong className="text-stone-900">Expiry:</strong> optional. Choose a shorter lifetime
-            for a test key.
+            <strong className="text-stone-900">Expiry:</strong> connections last 90 days. Reconnect
+            with a fresh passkey approval when prompted.
           </p>
         </div>
       </section>
 
       <section className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">
-          2. Connect your chat
+          2. Approve the connection
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          After the key is created, the UPRAIL app shows a setup action for the chat you selected.
-          Use the per-chat guide for the exact menu path and what to expect.
+          Your browser opens the UPRAIL consent page. Review the app name and the limits, then
+          approve. If you verified your passkey within the last five minutes, UPRAIL skips the
+          second prompt. Otherwise it asks for Face ID or fingerprint once.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <a
@@ -109,7 +112,7 @@ export default function AgentsDocsPage() {
           >
             <h3 className="text-sm font-display font-bold text-stone-950">Claude</h3>
             <p className="mt-1 text-xs text-stone-600">
-              Open the prefilled custom connector, review it, then connect.
+              Add a custom connector, paste the URL, then approve in the browser.
             </p>
           </a>
           <a
@@ -138,7 +141,7 @@ export default function AgentsDocsPage() {
           >
             <h3 className="text-sm font-display font-bold text-stone-950">Meta Muse</h3>
             <p className="mt-1 text-xs text-stone-600">
-              Paste the setup prompt and let Muse create the connector.
+              Ask Muse to add a remote MCP connector with the UPRAIL URL.
             </p>
           </a>
           <a
@@ -147,7 +150,7 @@ export default function AgentsDocsPage() {
           >
             <h3 className="text-sm font-display font-bold text-stone-950">Cursor / Windsurf</h3>
             <p className="mt-1 text-xs text-stone-600">
-              Open the install link in Cursor, or paste the config in Windsurf.
+              Add a remote MCP server with the URL and approve OAuth.
             </p>
           </a>
           <a
@@ -186,24 +189,25 @@ export default function AgentsDocsPage() {
         </div>
         <Callout tone="warn">
           <strong className="text-stone-900">Withdrawals are irreversible.</strong> Always state the
-          amount and destination network explicitly. The key&apos;s USD limits apply to withdrawals
-          too, and the chat cannot use “all” as an amount.
+          amount and destination network explicitly. The connection&apos;s USD limits apply to
+          withdrawals too, and the chat cannot use “all” as an amount.
         </Callout>
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">Manage &amp; revoke</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Manage &amp; disconnect
+        </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Every connected chat appears under AI Chat Payments with its limits and today&apos;s
-          spend. Revoke a key at any time with your passkey. Revoking is immediate: that chat can no
-          longer read your balance or move funds. Once revoked, you can permanently delete the key
-          record from the same screen.
+          Every connected app appears under <strong>Connected AI Chats</strong> with its client
+          name, limits, and today&apos;s spend. Click <strong>Disconnect</strong> and confirm with
+          your passkey. Revocation is immediate: the app can no longer read your balance or move
+          funds. Reconnecting requires a fresh approval.
         </p>
         <Callout tone="warn">
-          <strong className="text-stone-900">Treat the key like cash.</strong> Never paste it into a
-          public or shared chat. The Meta Muse setup prompt is for your own private Muse chat, so use
-          a dedicated low-limit key there. If a link or key is exposed, revoke it and create a new
-          one.
+          <strong className="text-stone-900">Manual Bearer keys are different.</strong> Bots and
+          OpenAPI clients may still use a one-time Bearer key. Treat that key like cash, never paste
+          it into a public chat, and revoke it immediately if exposed.
         </Callout>
       </section>
 
@@ -216,12 +220,17 @@ export default function AgentsDocsPage() {
             plan or chat version may not support custom connectors.
           </p>
           <p>
+            <strong className="text-stone-900">The consent page did not open.</strong> Allow
+            pop-ups for the AI app, then retry the connection. If it still fails, add the MCP URL
+            manually and choose OAuth when prompted.
+          </p>
+          <p>
             <strong className="text-stone-900">A payment timed out.</strong> Check UPRAIL history
             before retrying. The payment may have completed even if the chat lost the response.
           </p>
           <p>
-            <strong className="text-stone-900">The key was exposed.</strong> Revoke it immediately
-            in AI Chat Payments. Creating a replacement key takes one passkey confirmation.
+            <strong className="text-stone-900">A connection was exposed or lost.</strong>{' '}
+            Disconnect it immediately in AI Chat Payments. Reconnecting takes one passkey approval.
           </p>
         </div>
       </section>

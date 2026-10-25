@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
 function signTestSession(session) {
@@ -46,9 +46,9 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       convertV4MiniflareOptions({
         modules: [{ type: 'ESModule', path: 'dist/worker.js' }, ...wasmModules],
         compatibilityDate: '2026-10-08',
-        compatibilityFlags: ['nodejs_compat'],
+        compatibilityFlags: ['nodejs_compat', 'global_fetch_strictly_public'],
         d1Databases: { DB: 'uprail-db' },
-        kvNamespaces: { CACHE: 'cache' },
+        kvNamespaces: { CACHE: 'cache', OAUTH_KV: 'oauth-kv' },
         durableObjects: {
           ESCROW: 'EscrowDO',
           NEAR_CONTAINER: 'NearContainer',
@@ -74,6 +74,8 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
           ESCROW_PRIVATE_KEY:
             'ed25519:3bPadi6kwbpV3pkzKEcG8NDp74yof3CYGS2aXZECvV8Wggv37W1HfxTvA7EuvhBzFoadXeHtPK62pRywWqryzYU3',
           NEAR_RPC_URL: 'https://near.invalid',
+          OAUTH_ISSUER: 'http://localhost',
+          OAUTH_RESOURCE: 'http://localhost/api/mcp',
         },
       }),
     );
@@ -92,6 +94,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0008_recovery_code_ciphertext.sql',
       '0009_remove_launchpad_partners.sql',
       '0010_launchpad_token_bindings.sql',
+      '0011_oauth_connections.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
@@ -581,15 +584,14 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.code, 'UNAUTHORIZED');
   });
 
-  it('POST /api/mcp requires an agent key', async () => {
+  it('POST /api/mcp requires OAuth or a Bearer agent key', async () => {
     const res = await mf.dispatchFetch('http://localhost/api/mcp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }),
     });
     assert.equal(res.status, 401);
-    const body = await res.json();
-    assert.equal(body.code, 'AGENT_KEY_REQUIRED');
+    assert.match(res.headers.get('www-authenticate') || '', /resource_metadata=/);
   });
 
   it('agent withdrawal and key deletion require authorization', async () => {
@@ -715,7 +717,178 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(overLimitWithdrawBody.reason, 'per_tx_limit');
   });
 
-  it('agent rail rejects wallet recipients, limits query keys to MCP, and prevents retry double-pays', async () => {
+  it('OAuth metadata, DCR, consent, token exchange, and MCP access work end to end', async () => {
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    const xId = 'xid_oauth_1';
+
+    await db
+      .prepare(
+        `INSERT INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?)`
+      )
+      .bind(xId, 'oauth_tester', 'OAuth Tester', 'oauth_tester.near', now, now)
+      .run();
+
+    const metadata = await mf.dispatchFetch(
+      'http://localhost/.well-known/oauth-authorization-server'
+    );
+    assert.equal(metadata.status, 200);
+    const metadataBody = await metadata.json();
+    assert.equal(metadataBody.issuer, 'http://localhost');
+    assert.ok(metadataBody.authorization_endpoint.endsWith('/authorize'));
+    assert.ok(metadataBody.token_endpoint.endsWith('/oauth/token'));
+    assert.ok(metadataBody.registration_endpoint.endsWith('/oauth/register'));
+    assert.ok(metadataBody.scopes_supported.includes('mcp'));
+
+    const resourceMetadata = await mf.dispatchFetch(
+      'http://localhost/.well-known/oauth-protected-resource/api/mcp'
+    );
+    assert.equal(resourceMetadata.status, 200);
+    const resourceBody = await resourceMetadata.json();
+    assert.equal(resourceBody.resource, 'http://localhost/api/mcp');
+    assert.deepEqual(resourceBody.authorization_servers, ['http://localhost']);
+
+    const redirectUri = 'http://localhost/oauth/callback';
+    const registration = await mf.dispatchFetch('http://localhost/oauth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'Miniflare AI',
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: 'none',
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+      }),
+    });
+    assert.equal(registration.status, 201);
+    const client = await registration.json();
+    assert.ok(client.client_id);
+
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const state = 'state_oauth_test';
+    const authorizeParams = new URLSearchParams({
+      response_type: 'code',
+      client_id: client.client_id,
+      redirect_uri: redirectUri,
+      scope: 'mcp',
+      state,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      resource: 'http://localhost/api/mcp',
+    });
+    const session = signTestSession({
+      session_id: 'session_oauth_1',
+      x_id: xId,
+      x_handle: 'oauth_tester',
+      x_name: 'OAuth Tester',
+      near_account: 'oauth_tester.near',
+      passkey_verified: true,
+      passkey_verified_at: now,
+      created_at: now,
+      expires_at: now + 60 * 60 * 1000,
+    });
+    const sessionCookie = `uprail_session=${session}`;
+
+    const consent = await mf.dispatchFetch(
+      `http://localhost/authorize?${authorizeParams.toString()}`,
+      { headers: { Cookie: sessionCookie } }
+    );
+    assert.equal(consent.status, 200);
+    const consentHtml = await consent.text();
+    assert.match(consentHtml, /Connect Miniflare AI/);
+    const handle = /name="handle" value="([^"]+)"/.exec(consentHtml)?.[1];
+    assert.ok(handle, 'consent page must carry a security handle');
+
+    const consentCookies = (
+      typeof consent.headers.getSetCookie === 'function'
+        ? consent.headers.getSetCookie()
+        : [consent.headers.get('set-cookie') || '']
+    )
+      .filter(Boolean)
+      .map((cookie) => cookie.split(';')[0]);
+    const cookieHeader = [sessionCookie, ...consentCookies].join('; ');
+
+    const approval = await mf.dispatchFetch('http://localhost/authorize/approve', {
+      method: 'POST',
+      headers: {
+        Cookie: cookieHeader,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        handle,
+        per_tx_limit: '25',
+        daily_limit: '100',
+      }).toString(),
+      redirect: 'manual',
+    });
+    assert.equal(approval.status, 302);
+    const location = approval.headers.get('location');
+    assert.ok(location, 'approval must redirect back to the client');
+    const redirect = new URL(location);
+    assert.equal(redirect.origin + redirect.pathname, redirectUri);
+    assert.equal(redirect.searchParams.get('state'), state);
+    const code = redirect.searchParams.get('code');
+    assert.ok(code);
+
+    const token = await mf.dispatchFetch('http://localhost/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        client_id: client.client_id,
+        code_verifier: verifier,
+      }).toString(),
+    });
+    assert.equal(token.status, 200);
+    const tokenBody = await token.json();
+    assert.ok(tokenBody.access_token);
+    assert.ok(tokenBody.refresh_token);
+    assert.equal(String(tokenBody.token_type).toLowerCase(), 'bearer');
+
+    const mcp = await mf.dispatchFetch('http://localhost/api/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenBody.access_token}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 30, method: 'tools/list' }),
+    });
+    assert.equal(mcp.status, 200);
+    assert.equal((await mcp.json()).result.tools.length, 6);
+
+    const listed = await mf.dispatchFetch('http://localhost/api/agent/keys', {
+      headers: { Cookie: sessionCookie },
+    });
+    assert.equal(listed.status, 200);
+    const listedBody = await listed.json();
+    const connection = listedBody.keys.find((key) => key.authMethod === 'oauth');
+    assert.ok(connection, 'OAuth connection must appear in the dashboard list');
+    assert.equal(connection.oauthClientName, 'Miniflare AI');
+    assert.equal(connection.connectionStatus, 'active');
+    assert.ok(connection.oauthGrantId);
+
+    await db
+      .prepare('UPDATE agent_keys SET revoked_at = ? WHERE id = ?')
+      .bind(Date.now(), connection.id)
+      .run();
+    const afterRevoke = await mf.dispatchFetch('http://localhost/api/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenBody.access_token}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 31, method: 'tools/list' }),
+    });
+    assert.equal(afterRevoke.status, 403);
+    const afterRevokeBody = await afterRevoke.json();
+    assert.equal(afterRevokeBody.code, 'AGENT_KEY_REVOKED');
+  });
+
+  it('agent rail rejects wallet recipients, removes query keys, and prevents retry double-pays', async () => {
     const db = await mf.getD1Database('DB');
     const now = Date.now();
     const rawKey = 'up_agent_' + 'b'.repeat(48);
@@ -766,8 +939,8 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         body: JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'tools/list' }),
       }
     );
-    assert.equal(mcpQueryKey.status, 200);
-    assert.equal((await mcpQueryKey.json()).result.tools.length, 6);
+    assert.equal(mcpQueryKey.status, 401);
+    assert.match(mcpQueryKey.headers.get('www-authenticate') || '', /resource_metadata=/);
 
     await db
       .prepare(

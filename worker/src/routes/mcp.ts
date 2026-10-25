@@ -16,7 +16,7 @@
  */
 
 import { Context, Hono } from 'hono';
-import type { AppContext } from '../types';
+import type { AgentPrincipal, AppContext, Env, Session } from '../types';
 import { requireAgent } from '../middleware/agentAuth';
 import { executeAgentPay, executeAgentWithdraw } from './agent';
 import { publicErrorMessage } from '../utils/errors';
@@ -334,7 +334,7 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
   }
 }
 
-mcpRouter.post('/', requireAgent({ allowQueryKey: true }), async (c) => {
+async function mcpHandler(c: Context<AppContext>): Promise<Response> {
   const message = (c.get('parsedBody' as any) ||
     (await c.req.json().catch(() => null))) as JsonRpcRequest | null;
 
@@ -395,9 +395,36 @@ mcpRouter.post('/', requireAgent({ allowQueryKey: true }), async (c) => {
     default:
       return c.json(rpcError(id, -32601, `Method not found: ${method}`));
   }
-});
+}
 
 /** Minimal GET probe so clients can confirm the endpoint exists. */
-mcpRouter.get('/', (c) =>
-  c.json({ name: SERVER_INFO.name, version: SERVER_INFO.version, protocol: 'mcp' })
+function mcpProbe(c: Context<AppContext>): Response {
+  return c.json({ name: SERVER_INFO.name, version: SERVER_INFO.version, protocol: 'mcp' });
+}
+
+export async function handleMcpRequest(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  session: Session,
+  agent: AgentPrincipal
+): Promise<Response> {
+  const parsedBody = await request.clone().json().catch(() => null);
+  const app = new Hono<AppContext>();
+  app.use('*', async (c, next) => {
+    c.set('session', session);
+    c.set('agent', agent);
+    c.set('parsedBody' as any, parsedBody);
+    await next();
+    c.header('Cache-Control', 'no-store');
+  });
+  app.post('/api/mcp', mcpHandler);
+  app.get('/api/mcp', mcpProbe);
+  return await app.fetch(request, env, ctx);
+}
+
+mcpRouter.post('/', requireAgent(), async (c) =>
+  handleMcpRequest(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext, c.get('session')!, c.get('agent')!)
 );
+
+mcpRouter.get('/', requireAgent(), mcpProbe);

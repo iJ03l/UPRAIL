@@ -211,6 +211,13 @@ export interface AgentKey {
   createdAt: number;
   /** USD spend recorded against this key for the current UTC day (0 when none). */
   spentToday?: number;
+  /** 'oauth' for a browser-approved AI app, 'key' for a manual Bearer key. */
+  authMethod?: 'oauth' | 'key';
+  oauthClientId?: string | null;
+  oauthClientName?: string | null;
+  oauthGrantId?: string | null;
+  oauthConnectedAt?: number | null;
+  connectionStatus?: 'active' | 'revoked' | 'expired' | 'disconnected';
 }
 
 /** The create response — `key` is the plaintext secret, shown exactly once. */

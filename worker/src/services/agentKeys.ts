@@ -116,3 +116,162 @@ export async function releaseAgentSpend(env: Env, keyId: string, usd: number): P
     console.warn('[agentKeys] spend release failed:', err);
   }
 }
+
+export const AGENT_DEFAULT_PER_TX_USD = 25;
+export const AGENT_DEFAULT_DAILY_USD = 100;
+export const AGENT_MAX_LIMIT_USD = 100_000;
+export const AGENT_MAX_NAME_LENGTH = 48;
+
+/** Parse a positive USD limit, rounded to cents. Returns null when invalid. */
+export function parseAgentUsdLimit(value: unknown, fallback: number): number | null {
+  if (value === null || value === undefined || value === '') return fallback;
+  const n = typeof value === 'string' ? parseFloat(value) : Number(value);
+  if (!Number.isFinite(n) || n <= 0 || n > AGENT_MAX_LIMIT_USD) return null;
+  const rounded = Math.round(n * 100) / 100;
+  return rounded >= 0.01 ? rounded : null;
+}
+
+export interface AgentKeyRow {
+  id: string;
+  agent_id: string;
+  x_id: string;
+  label: string | null;
+  key_prefix: string;
+  per_tx_limit: string | null;
+  daily_limit: string | null;
+  expires_at: number | null;
+  revoked_at: number | null;
+  auth_method: 'key' | 'oauth';
+  oauth_client_id: string | null;
+  oauth_client_name: string | null;
+}
+
+const AGENT_KEY_COLUMNS = `id, agent_id, x_id, label, key_prefix, per_tx_limit, daily_limit,
+  expires_at, revoked_at, auth_method, oauth_client_id, oauth_client_name`;
+
+/** Resolve a manual Bearer key to its policy row. OAuth tokens never match this. */
+export async function findAgentKeyByRawKey(env: Env, rawKey: string): Promise<AgentKeyRow | null> {
+  if (!env.DB || !looksLikeAgentKey(rawKey)) return null;
+  const keyHash = await hashAgentKey(rawKey);
+  return await env.DB.prepare(
+    `SELECT ${AGENT_KEY_COLUMNS} FROM agent_keys WHERE key_hash = ?`
+  )
+    .bind(keyHash)
+    .first<AgentKeyRow>();
+}
+
+/** Resolve an agent key by id (OAuth token props and dashboard paths). */
+export async function getAgentKeyById(env: Env, keyId: string): Promise<AgentKeyRow | null> {
+  if (!env.DB) return null;
+  return await env.DB.prepare(
+    `SELECT ${AGENT_KEY_COLUMNS} FROM agent_keys WHERE id = ?`
+  )
+    .bind(keyId)
+    .first<AgentKeyRow>();
+}
+
+export interface OAuthAgentKeyInput {
+  xId: string;
+  clientId: string;
+  clientName: string;
+  perTxUsd: number;
+  dailyUsd: number;
+  expiresAt: number;
+}
+
+export interface OAuthAgentKeyResult {
+  keyId: string;
+  agentId: string;
+  name: string;
+  created: boolean;
+}
+
+/**
+ * Create or reuse the OAuth connection row for one user + OAuth client. A
+ * reauthorization extends the same connection rather than creating duplicates.
+ * No plaintext key exists for OAuth rows; the stored hash is random and unused.
+ */
+export async function upsertOAuthAgentKey(
+  env: Env,
+  input: OAuthAgentKeyInput
+): Promise<OAuthAgentKeyResult> {
+  const name = input.clientName.trim().slice(0, AGENT_MAX_NAME_LENGTH) || 'AI chat';
+  const existing = await env.DB.prepare(
+    `SELECT id, agent_id FROM agent_keys
+      WHERE x_id = ? AND oauth_client_id = ? AND auth_method = 'oauth' AND revoked_at IS NULL
+      ORDER BY created_at DESC LIMIT 1`
+  )
+    .bind(input.xId, input.clientId)
+    .first<{ id: string; agent_id: string }>();
+
+  const now = Date.now();
+  if (existing) {
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE agent_keys
+            SET per_tx_limit = ?, daily_limit = ?, expires_at = ?,
+                oauth_client_name = ?, label = COALESCE(label, ?)
+          WHERE id = ? AND x_id = ?`
+      ).bind(
+        String(input.perTxUsd),
+        String(input.dailyUsd),
+        input.expiresAt,
+        name,
+        name,
+        existing.id,
+        input.xId
+      ),
+      env.DB.prepare('UPDATE agents SET name = ?, updated_at = ? WHERE id = ? AND x_id = ?')
+        .bind(name, now, existing.agent_id, input.xId),
+    ]);
+    return { keyId: existing.id, agentId: existing.agent_id, name, created: false };
+  }
+
+  const agentId = crypto.randomUUID();
+  const keyId = crypto.randomUUID();
+  const generated = await generateAgentKey();
+  const prefix = `oauth_${generated.prefix.slice(KEY_PREFIX.length)}`;
+
+  await env.DB.batch([
+    env.DB.prepare(
+      'INSERT INTO agents (id, x_id, name, mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(agentId, input.xId, name, 'autonomous', now, now),
+    env.DB.prepare(
+      `INSERT INTO agent_keys
+        (id, agent_id, x_id, label, key_hash, key_prefix, asset, per_tx_limit, daily_limit,
+         allowlist, expires_at, created_at, auth_method, oauth_client_id, oauth_client_name)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, 'oauth', ?, ?)`
+    ).bind(
+      keyId,
+      agentId,
+      input.xId,
+      name,
+      generated.hash,
+      prefix,
+      String(input.perTxUsd),
+      String(input.dailyUsd),
+      input.expiresAt,
+      now,
+      input.clientId,
+      name
+    ),
+  ]);
+
+  return { keyId, agentId, name, created: true };
+}
+
+/** Remove a key created by an aborted OAuth consent. */
+export async function deleteAbortedOAuthAgentKey(
+  env: Env,
+  keyId: string,
+  agentId: string
+): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM agent_spend WHERE agent_key_id = ?').bind(keyId),
+    env.DB.prepare('DELETE FROM agent_requests WHERE agent_key_id = ?').bind(keyId),
+    env.DB.prepare('DELETE FROM agent_keys WHERE id = ?').bind(keyId),
+    env.DB.prepare(
+      'DELETE FROM agents WHERE id = ? AND NOT EXISTS (SELECT 1 FROM agent_keys WHERE agent_id = ?)'
+    ).bind(agentId, agentId),
+  ]);
+}

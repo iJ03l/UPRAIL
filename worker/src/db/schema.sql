@@ -188,11 +188,17 @@ CREATE TABLE IF NOT EXISTS agent_keys (
   last_used_at INTEGER,
   revoked_at INTEGER,
   created_at INTEGER NOT NULL,
+  -- 'key' for a manual Bearer key, 'oauth' for an OAuth 2.1 connection.
+  auth_method TEXT NOT NULL DEFAULT 'key',
+  -- OAuth client identity, used to reuse one connection on reauthorization.
+  oauth_client_id TEXT,
+  oauth_client_name TEXT,
   FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_keys_agent ON agent_keys(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_keys_x_id ON agent_keys(x_id);
+CREATE INDEX IF NOT EXISTS idx_agent_keys_oauth_client ON agent_keys(x_id, oauth_client_id);
 
 CREATE TABLE IF NOT EXISTS agent_spend (
   agent_key_id TEXT NOT NULL,

@@ -3,7 +3,7 @@
   "name": "uprail-worker",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-08",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": {
     "enabled": true,
     // Full sampling: volume is low (~5k requests/day), so complete logs cost
@@ -48,7 +48,10 @@
     "PAYMENT_EXPIRY_DAYS": "30",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",
-    "WEBAUTHN_ORIGIN": "https://app.uprail.world"
+    "WEBAUTHN_ORIGIN": "https://app.uprail.world",
+    // OAuth 2.1 authorization server + MCP resource. Override locally if needed.
+    "OAUTH_ISSUER": "https://app.uprail.world",
+    "OAUTH_RESOURCE": "https://api.uprail.world/api/mcp"
   },
   // Secrets (set via `wrangler secret put NAME`, never committed):
   //   X_CLIENT_SECRET, SESSION_SECRET, INTERNAL_SERVICE_KEY,
@@ -84,6 +87,10 @@
     {
       "binding": "CACHE",
       "id": "45901b063153427da3bf4e668d996d91"
+    },
+    {
+      "binding": "OAUTH_KV",
+      "id": "a7ae2e9c6ff94c4791c95292c36a14f9"
     }
   ]
 }

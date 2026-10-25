@@ -2,6 +2,8 @@ import React from 'react';
 import { Callout } from '@/components/docs/DocsUI';
 
 const APP_SETUP_URL = 'https://app.uprail.world/app/agents';
+const MCP_ENDPOINT = 'https://api.uprail.world/api/mcp';
+const OPENAPI_SPEC_URL = 'https://api.uprail.world/api/agent/openapi.json';
 const CLAUDE_CONNECTORS_URL = 'https://claude.ai/customize/connectors';
 const CHATGPT_CONNECTORS_URL = 'https://chatgpt.com/plugins';
 const GROK_CONNECTORS_URL = 'https://grok.com/connectors';
@@ -11,6 +13,14 @@ const buttonClass =
   'inline-flex items-center justify-center rounded-xl bg-black px-4 py-2.5 text-xs font-display font-bold uppercase tracking-wider text-white transition-colors hover:bg-stone-800';
 const secondaryButtonClass =
   'inline-flex items-center justify-center rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-xs font-display font-bold uppercase tracking-wider text-stone-900 transition-colors hover:border-stone-900';
+
+function UrlBox({ value }: { value: string }) {
+  return (
+    <code className="block break-all rounded-xl border border-stone-200 bg-stone-50 px-3 py-2.5 font-mono text-xs text-stone-800">
+      {value}
+    </code>
+  );
+}
 
 export default function McpDocsPage() {
   return (
@@ -23,11 +33,9 @@ export default function McpDocsPage() {
           Connect Claude, ChatGPT, Grok, Meta Muse &amp; Cursor
         </h1>
         <p className="text-sm text-stone-600 leading-relaxed">
-          UPRAIL connects to your AI chat as a remote MCP connector. Create a key in the UPRAIL app,
-          then follow the steps for your chat below. Claude and Cursor can open with the connection
-          prefilled; other chats open the right settings page and copy what you need. The connector
-          can check balances, send to X handles, generate deposit addresses, and withdraw to wallet
-          addresses within your key limits.
+          UPRAIL is a remote MCP server with OAuth 2.1. Add one URL to your AI chat, approve the
+          connection with Face ID or fingerprint, and set per-payment and daily USD limits. There is
+          no secret key to paste, and you can disconnect the app in one tap.
         </p>
       </header>
 
@@ -39,15 +47,28 @@ export default function McpDocsPage() {
             Open{' '}
             <a className="text-stone-900 underline" href={APP_SETUP_URL}>
               AI Chat Payments
-            </a>
-            , choose your chat, and create a key with a low per-transaction and daily USD limit.
+            </a>{' '}
+            and click <strong>Connect AI Chat</strong>.
           </li>
-          <li>Confirm the key with your passkey. The secret is shown once.</li>
-          <li>Use the setup action on the key screen, then test with $1 before raising limits.</li>
+          <li>Keep your device passkey available. Approval uses Face ID, Touch ID, or fingerprint.</li>
+          <li>Start with low limits and test with $1 before raising them.</li>
         </ol>
         <a href={APP_SETUP_URL} className={buttonClass}>
-          Create an AI chat key
+          Open AI Chat Payments
         </a>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">The only URL you need</h2>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Add this as a custom or remote MCP connector. Leave authentication empty: your chat
+          discovers the OAuth endpoints automatically.
+        </p>
+        <UrlBox value={MCP_ENDPOINT} />
+        <Callout>
+          <strong className="text-stone-900">OAuth, not a key.</strong> The app receives its own
+          revocable tokens. UPRAIL never puts a spending secret in the connector URL.
+        </Callout>
       </section>
 
       <section className="space-y-3">
@@ -70,7 +91,28 @@ export default function McpDocsPage() {
         <Callout tone="warn">
           <strong className="text-stone-900">Withdrawals are irreversible.</strong> The chat must use
           an explicit amount and the correct destination network. USD limits apply to both payments
-          and withdrawals, and every key can use every tool.
+          and withdrawals, and every connection can use every tool.
+        </Callout>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Connect in four steps</h2>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>In your AI app, add a custom or remote MCP connector.</li>
+          <li>Paste <span className="font-mono text-stone-900">{MCP_ENDPOINT}</span> and save.</li>
+          <li>
+            The app opens UPRAIL in your browser. Sign in, confirm with your passkey, and approve the
+            per-payment and daily limits.
+          </li>
+          <li>
+            Return to the chat and start a fresh conversation. The app now appears under{' '}
+            <strong>Connected AI Chats</strong>, where you can disconnect it instantly.
+          </li>
+        </ol>
+        <Callout>
+          <strong className="text-stone-900">Recent passkey approvals:</strong> if you confirmed
+          your passkey within the last five minutes, UPRAIL skips the second prompt and only asks
+          you to approve the limits.
         </Callout>
       </section>
 
@@ -97,66 +139,39 @@ export default function McpDocsPage() {
       </section>
 
       <section id="claude" className="scroll-mt-24 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-xl font-display font-extrabold text-stone-950">Claude</h2>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-700">
-            Prefilled install
-          </span>
-        </div>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Claude</h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
-          <li>Create a Claude key in UPRAIL. The key screen shows an Add to Claude button.</li>
-          <li>
-            Click it. Claude opens the Add custom connector dialog with the UPRAIL name and URL
-            already filled in.
-          </li>
-          <li>Review the details and click Connect.</li>
-          <li>Start a fresh Claude conversation and enable UPRAIL.</li>
+          <li>Open Claude&apos;s custom connectors settings.</li>
+          <li>Add a custom connector named UPRAIL and paste the MCP URL.</li>
+          <li>Click Connect. Claude opens UPRAIL for browser approval.</li>
+          <li>Approve the limits, then enable UPRAIL in a fresh Claude conversation.</li>
         </ol>
         <div className="flex flex-wrap gap-2">
-          <a href={`${APP_SETUP_URL}?platform=claude`} className={buttonClass}>
-            Create Claude key
-          </a>
-          <a
-            href={CLAUDE_CONNECTORS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={secondaryButtonClass}
-          >
+          <a href={CLAUDE_CONNECTORS_URL} target="_blank" rel="noopener noreferrer" className={buttonClass}>
             Open Claude connectors
           </a>
+          <a href={APP_SETUP_URL} className={secondaryButtonClass}>
+            Open AI Chat Payments
+          </a>
         </div>
-        <Callout>
-          The install link prefills the form but never bypasses Claude&apos;s review. You still
-          confirm the connector inside Claude.
-        </Callout>
       </section>
 
       <section id="chatgpt" className="scroll-mt-24 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-xl font-display font-extrabold text-stone-950">
-            ChatGPT / OpenAI Dot
-          </h2>
-          <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
-            Manual connector
-          </span>
-        </div>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          ChatGPT / OpenAI Dot
+        </h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
-          <li>Create an OpenAI / ChatGPT key in UPRAIL.</li>
-          <li>On the key screen, click Copy URL &amp; open ChatGPT connectors.</li>
           <li>In ChatGPT, go to Settings → Connectors → Add custom connector.</li>
-          <li>Paste the URL from your clipboard, save, and start a fresh chat.</li>
+          <li>Name it UPRAIL and paste the MCP URL. Leave authentication empty.</li>
+          <li>Approve the OAuth connection in the browser.</li>
+          <li>Start a fresh chat with the connector enabled.</li>
         </ol>
         <div className="flex flex-wrap gap-2">
-          <a href={`${APP_SETUP_URL}?platform=openai`} className={buttonClass}>
-            Create OpenAI key
-          </a>
-          <a
-            href={CHATGPT_CONNECTORS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={secondaryButtonClass}
-          >
+          <a href={CHATGPT_CONNECTORS_URL} target="_blank" rel="noopener noreferrer" className={buttonClass}>
             Open ChatGPT connectors
+          </a>
+          <a href={APP_SETUP_URL} className={secondaryButtonClass}>
+            Open AI Chat Payments
           </a>
         </div>
         <Callout>
@@ -166,104 +181,96 @@ export default function McpDocsPage() {
       </section>
 
       <section id="grok" className="scroll-mt-24 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-xl font-display font-extrabold text-stone-950">Grok</h2>
-          <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
-            Manual connector
-          </span>
-        </div>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Grok</h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
-          <li>Create a Grok key in UPRAIL.</li>
-          <li>On the key screen, click Copy URL &amp; open Grok connectors.</li>
-          <li>Choose New Connector → Custom.</li>
-          <li>Paste the URL, connect, then start a fresh Grok conversation.</li>
+          <li>Open Grok connectors and choose New Connector → Custom.</li>
+          <li>Paste the MCP URL and connect.</li>
+          <li>Approve the OAuth connection in the browser.</li>
+          <li>Start a fresh Grok conversation and ask for your balance.</li>
         </ol>
         <div className="flex flex-wrap gap-2">
-          <a href={`${APP_SETUP_URL}?platform=grok`} className={buttonClass}>
-            Create Grok key
-          </a>
-          <a
-            href={GROK_CONNECTORS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={secondaryButtonClass}
-          >
+          <a href={GROK_CONNECTORS_URL} target="_blank" rel="noopener noreferrer" className={buttonClass}>
             Open Grok connectors
           </a>
+          <a href={APP_SETUP_URL} className={secondaryButtonClass}>
+            Open AI Chat Payments
+          </a>
         </div>
-        <Callout>
-          Grok discovers the UPRAIL tools after you connect. If your Grok workspace hides custom
-          connectors, ask your workspace admin to enable them.
-        </Callout>
       </section>
 
       <section id="meta-muse" className="scroll-mt-24 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-xl font-display font-extrabold text-stone-950">Meta Muse</h2>
-          <span className="rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
-            Setup prompt
-          </span>
-        </div>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">Meta Muse</h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
-          <li>Create a Meta Muse key in UPRAIL.</li>
-          <li>On the key screen, click Copy setup prompt &amp; open Muse.</li>
-          <li>Paste the prompt into your Muse chat and send it.</li>
-          <li>Muse creates the UPRAIL custom connector. Approve it, then ask for your balance.</li>
+          <li>Open Meta Muse.</li>
+          <li>Ask it to create a custom remote MCP connector named UPRAIL.</li>
+          <li>Paste the MCP URL. Authentication is OAuth, not a key.</li>
+          <li>Approve the browser connection and test with a balance question.</li>
         </ol>
         <div className="flex flex-wrap gap-2">
-          <a href={`${APP_SETUP_URL}?platform=metamuse`} className={buttonClass}>
-            Create Muse key
-          </a>
-          <a
-            href={META_MUSE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={secondaryButtonClass}
-          >
+          <a href={META_MUSE_URL} target="_blank" rel="noopener noreferrer" className={buttonClass}>
             Open Meta Muse
           </a>
+          <a href={APP_SETUP_URL} className={secondaryButtonClass}>
+            Open AI Chat Payments
+          </a>
         </div>
-        <Callout>
-          The prompt contains your key. Use a dedicated low-limit key for Muse, and revoke it if the
-          conversation is shared.
-        </Callout>
       </section>
 
       <section id="cursor" className="scroll-mt-24 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-xl font-display font-extrabold text-stone-950">
-            Cursor / Windsurf
-          </h2>
-          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-700">
-            Prefilled install
-          </span>
-        </div>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Cursor / Windsurf
+        </h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
-          <li>Create a Cursor key in UPRAIL.</li>
-          <li>On the key screen, click Open in Cursor.</li>
-          <li>Cursor prompts you to install the UPRAIL MCP server. Approve it.</li>
-          <li>Start a new Cursor chat and ask for your UPRAIL balance.</li>
+          <li>Open MCP settings in Cursor or Windsurf.</li>
+          <li>Add a remote server named UPRAIL with the MCP URL.</li>
+          <li>Approve the OAuth connection when prompted.</li>
+          <li>Start a new chat and ask for your UPRAIL balance.</li>
         </ol>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Windsurf users should copy the MCP config from the key screen&apos;s Advanced setup and
-          add it as a remote server.
-        </p>
-        <a href={`${APP_SETUP_URL}?platform=cursor`} className={buttonClass}>
-          Create Cursor key
-        </a>
+        <UrlBox
+          value={JSON.stringify({ mcpServers: { uprail: { url: MCP_ENDPOINT } } }, null, 2)}
+        />
       </section>
 
       <section id="other" className="scroll-mt-24 space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">Any other chat</h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
-          <li>Create a key for your chat in UPRAIL.</li>
-          <li>Copy the connector URL from the key screen.</li>
-          <li>Add it as a remote MCP server in your chat.</li>
-          <li>If your client asks for an OpenAPI Action instead, use the import URL under Advanced setup.</li>
+          <li>Add a remote MCP server with the URL above.</li>
+          <li>Choose OAuth if your client asks how to authenticate.</li>
+          <li>Approve the connection in UPRAIL.</li>
+          <li>
+            If your client only supports OpenAPI Actions, use the manual Bearer key flow described
+            below.
+          </li>
         </ol>
-        <a href={`${APP_SETUP_URL}?platform=other`} className={buttonClass}>
-          Create a key for another chat
-        </a>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Manual Bearer keys (OpenAPI, bots, older clients)
+        </h2>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          Some clients cannot complete OAuth. For those, open AI Chat Payments and choose{' '}
+          <strong>Use a manual Bearer key instead</strong>. The key is shown once, works with the
+          REST API and OpenAPI Actions, and is still capped by the same USD limits.
+        </p>
+        <UrlBox value={OPENAPI_SPEC_URL} />
+        <Callout tone="warn">
+          <strong className="text-stone-900">Treat a Bearer key like cash.</strong> Anyone who has
+          it can spend within its limits until you revoke it. Never put a Bearer key in a shared
+          chat or public URL.
+        </Callout>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Disconnect or change limits
+        </h2>
+        <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
+          <li>Open AI Chat Payments and find the app under Connected AI Chats.</li>
+          <li>Click Disconnect and confirm with your passkey.</li>
+          <li>The app&apos;s tokens stop working immediately. Reconnecting requires a fresh approval.</li>
+          <li>To change limits, disconnect and reconnect with the new amounts.</li>
+        </ol>
       </section>
 
       <section className="space-y-3">
@@ -271,11 +278,11 @@ export default function McpDocsPage() {
           Connect, then test with $1
         </h2>
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
-          <li>Save the connector in the chat, then open a fresh conversation.</li>
+          <li>Save the connector, then open a fresh conversation.</li>
           <li>Enable UPRAIL and ask a read-only question, such as “What is my UPRAIL balance?”</li>
           <li>Send $1 to a handle you control.</li>
           <li>Withdraw a small test amount to a wallet you control.</li>
-          <li>Check both transactions in UPRAIL history before raising the key limits.</li>
+          <li>Check both transactions in UPRAIL history before raising the connection limits.</li>
         </ol>
         <Callout>
           <strong className="text-stone-900">If the tools do not appear:</strong> start a fresh chat,

@@ -14,11 +14,12 @@
  */
 
 import { MiddlewareHandler } from 'hono';
-import type { AppContext, ErrorResponse } from '../types';
+import type { AppContext, Env, ErrorResponse } from '../types';
 import * as webauthnService from '../services/webauthn';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import { resolveRpId, allowedWebAuthnOrigins, allowedWebAuthnRpIds } from '../services/webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
+import { updateSession } from './session';
 
 /**
  * Middleware that verifies a WebAuthn passkey assertion is present and valid
@@ -69,198 +70,196 @@ export const requirePasskeyAuth = (): MiddlewareHandler<AppContext> => {
       );
     }
 
-    // Defensive normalization: ensure assertion and all WebAuthn fields are base64url compliant
-    if (assertion) {
-      if (typeof assertion.id === 'string') {
-        assertion.id = assertion.id.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      }
-      if (typeof assertion.rawId === 'string') {
-        assertion.rawId = assertion.rawId.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      }
-      // SimpleWebAuthn strictly requires id === rawId
-      if (assertion.id && (!assertion.rawId || assertion.rawId !== assertion.id)) {
-        assertion.rawId = assertion.id;
-      }
-
-      if (assertion.response && typeof assertion.response === 'object') {
-        if (typeof assertion.response.authenticatorData === 'string') {
-          assertion.response.authenticatorData = assertion.response.authenticatorData
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-        if (typeof assertion.response.clientDataJSON === 'string') {
-          assertion.response.clientDataJSON = assertion.response.clientDataJSON
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-        if (typeof assertion.response.signature === 'string') {
-          assertion.response.signature = assertion.response.signature
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-        if (typeof assertion.response.userHandle === 'string') {
-          assertion.response.userHandle = assertion.response.userHandle
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-      }
-    }
-
-    // Extract challenge from clientDataJSON
-    let challenge: string | null = null;
-    try {
-      if (assertion?.response?.clientDataJSON) {
-        const base64 = assertion.response.clientDataJSON
-          .replace(/-/g, '+')
-          .replace(/_/g, '/');
-        const clientDataStr = atob(base64);
-        const clientData = JSON.parse(clientDataStr);
-        challenge = clientData.challenge;
-      }
-    } catch {
-      challenge = null;
-    }
-
-    if (!challenge) {
+    const verified = await verifyPasskeyAssertion(c.env, session.x_id, assertion);
+    if (!verified.ok) {
       return c.json<ErrorResponse>(
-        { error: 'Missing or malformed passkey challenge', code: 'INVALID_CHALLENGE' },
-        400
+        { error: verified.message, code: verified.code },
+        verified.status
       );
     }
 
-    // Verify challenge was issued by this server and consume it (single-use, fail-closed)
-    const challengeKey = `passkey_tx_auth:${session.x_id}:${challenge}`;
-    const consumed = await consumeChallenge(c.env, {
-      key: challengeKey,
-      purpose: 'tx_auth',
-      expectedChallenge: challenge,
-    });
-
-    if (!consumed) {
-      return c.json<ErrorResponse>(
-        {
-          error: 'Passkey challenge expired or not recognized. Request a fresh challenge and retry.',
-          code: 'CHALLENGE_EXPIRED',
-        },
-        400
-      );
-    }
-
-    // Look up the user's registered passkey credential
-    let passkeyRow: { x_id?: string; public_key: string; counter: number; credential_id?: string } | null = null;
-
-    if (c.env.DB) {
-      try {
-        passkeyRow = await c.env.DB.prepare(
-          'SELECT x_id, public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ?'
-        )
-          .bind(session.x_id, assertion.id)
-          .first<any>();
-      } catch {}
-    }
-
-    // A valid assertion from another account's credential must be rejected as
-    // an account mismatch, never accepted because the current user happens to
-    // have one passkey. This check runs before the alternate-encoding fallback.
-    if (!passkeyRow && c.env.DB) {
-      try {
-        const foreign = await c.env.DB.prepare(
-          'SELECT x_id FROM passkeys WHERE credential_id = ?'
-        )
-          .bind(assertion.id)
-          .first<{ x_id: string }>();
-        if (foreign && foreign.x_id !== session.x_id) {
-          return c.json<ErrorResponse>(
-            {
-              error: 'This passkey belongs to a different UPRAIL account.',
-              code: 'ACCOUNT_MISMATCH',
-            },
-            403
-          );
-        }
-      } catch {}
-    }
-
-    // Fallback: if only one passkey exists for this user, look it up even if credential_id had an alternate encoding
-    if (!passkeyRow && c.env.DB) {
-      try {
-        const rows = await c.env.DB.prepare(
-          'SELECT x_id, public_key, counter, credential_id FROM passkeys WHERE x_id = ?'
-        )
-          .bind(session.x_id)
-          .all<any>();
-        if (rows.results && rows.results.length === 1) {
-          passkeyRow = rows.results[0];
-          if (passkeyRow && passkeyRow.credential_id) {
-            assertion.id = webauthnService.toBase64Url(passkeyRow.credential_id);
-            assertion.rawId = assertion.id;
-          }
-        }
-      } catch {}
-    }
-
-    if (!passkeyRow) {
-      return c.json<ErrorResponse>(
-        {
-          error: 'Passkey credential not found. Please register a passkey for your account.',
-          code: 'CREDENTIAL_NOT_FOUND',
-        },
-        403
-      );
-    }
-
-    if (passkeyRow.x_id && passkeyRow.x_id !== session.x_id) {
-      return c.json<ErrorResponse>(
-        {
-          error: 'This passkey belongs to a different UPRAIL account.',
-          code: 'ACCOUNT_MISMATCH',
-        },
-        403
-      );
-    }
-
-    // Verify the WebAuthn assertion cryptographically
-    let verification: { verified: boolean; newCounter?: number };
-    try {
-      verification = await webauthnService.verifyAuthentication({
-        assertion,
-        expectedChallenge: challenge,
-        expectedOrigin: allowedWebAuthnOrigins(c.env),
-        expectedRPID: allowedWebAuthnRpIds(c.env),
-        credential: {
-          id: assertion.id,
-          publicKey: passkeyRow.public_key,
-          counter: Number(passkeyRow.counter) || 0,
-        },
-      });
-    } catch (err: any) {
-      console.error('[PasskeyAuth] Verification threw:', err);
-      return c.json<ErrorResponse>(
-        { error: `Passkey verification failed: ${publicErrorMessage(err)}`, code: 'VERIFICATION_FAILED' },
-        403
-      );
-    }
-
-    if (!verification.verified) {
-      return c.json<ErrorResponse>(
-        { error: 'Passkey signature invalid. Transaction rejected.', code: 'SIGNATURE_INVALID' },
-        403
-      );
-    }
-
-    // Update counter to prevent clone/replay attacks on the credential
-    if (verification.newCounter !== undefined) {
-      const newCounter = verification.newCounter;
-      if (c.env.DB) {
-        await c.env.DB.prepare(
-          'UPDATE passkeys SET counter = ? WHERE x_id = ? AND credential_id = ?'
-        )
-          .bind(newCounter, session.x_id, assertion.id)
-          .run()
-          .catch(() => {});
-      }
-    }
-
-    // ✅ Passkey verified — proceed to the handler
+    await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
     return await next();
   };
 };
+
+export const RECENT_PASSKEY_MS = 5 * 60 * 1000;
+
+export function hasRecentPasskey(session: { passkey_verified?: boolean; passkey_verified_at?: number } | null): boolean {
+  return Boolean(
+    session?.passkey_verified &&
+    session.passkey_verified_at &&
+    Date.now() - session.passkey_verified_at < RECENT_PASSKEY_MS
+  );
+}
+
+export type PasskeyVerificationResult =
+  | { ok: true }
+  | { ok: false; status: 400 | 403; message: string; code: string };
+
+export async function verifyPasskeyAssertion(
+  env: Env,
+  xId: string,
+  assertion: any
+): Promise<PasskeyVerificationResult> {
+  if (typeof assertion.id === 'string') {
+    assertion.id = assertion.id.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  if (typeof assertion.rawId === 'string') {
+    assertion.rawId = assertion.rawId.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  if (assertion.id && (!assertion.rawId || assertion.rawId !== assertion.id)) {
+    assertion.rawId = assertion.id;
+  }
+
+  if (assertion.response && typeof assertion.response === 'object') {
+    for (const key of ['authenticatorData', 'clientDataJSON', 'signature', 'userHandle'] as const) {
+      if (typeof assertion.response[key] === 'string') {
+        assertion.response[key] = assertion.response[key]
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+    }
+  }
+
+  let challenge: string | null = null;
+  try {
+    if (assertion?.response?.clientDataJSON) {
+      const base64 = assertion.response.clientDataJSON.replace(/-/g, '+').replace(/_/g, '/');
+      const clientData = JSON.parse(atob(base64));
+      challenge = clientData.challenge;
+    }
+  } catch {
+    challenge = null;
+  }
+
+  if (!challenge) {
+    return { ok: false, status: 400, message: 'Missing or malformed passkey challenge', code: 'INVALID_CHALLENGE' };
+  }
+
+  const challengeKey = `passkey_tx_auth:${xId}:${challenge}`;
+  const consumed = await consumeChallenge(env, {
+    key: challengeKey,
+    purpose: 'tx_auth',
+    expectedChallenge: challenge,
+  });
+  if (!consumed) {
+    return {
+      ok: false,
+      status: 400,
+      message: 'Passkey challenge expired or not recognized. Request a fresh challenge and retry.',
+      code: 'CHALLENGE_EXPIRED',
+    };
+  }
+
+  let passkeyRow: { x_id?: string; public_key: string; counter: number; credential_id?: string } | null = null;
+
+  if (env.DB) {
+    try {
+      passkeyRow = await env.DB.prepare(
+        'SELECT x_id, public_key, counter FROM passkeys WHERE x_id = ? AND credential_id = ?'
+      )
+        .bind(xId, assertion.id)
+        .first<any>();
+    } catch {}
+  }
+
+  if (!passkeyRow && env.DB) {
+    try {
+      const foreign = await env.DB.prepare(
+        'SELECT x_id FROM passkeys WHERE credential_id = ?'
+      )
+        .bind(assertion.id)
+        .first<{ x_id: string }>();
+      if (foreign && foreign.x_id !== xId) {
+        return {
+          ok: false,
+          status: 403,
+          message: 'This passkey belongs to a different UPRAIL account.',
+          code: 'ACCOUNT_MISMATCH',
+        };
+      }
+    } catch {}
+  }
+
+  if (!passkeyRow && env.DB) {
+    try {
+      const rows = await env.DB.prepare(
+        'SELECT x_id, public_key, counter, credential_id FROM passkeys WHERE x_id = ?'
+      )
+        .bind(xId)
+        .all<any>();
+      if (rows.results && rows.results.length === 1) {
+        passkeyRow = rows.results[0];
+        if (passkeyRow && passkeyRow.credential_id) {
+          assertion.id = webauthnService.toBase64Url(passkeyRow.credential_id);
+          assertion.rawId = assertion.id;
+        }
+      }
+    } catch {}
+  }
+
+  if (!passkeyRow) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'Passkey credential not found. Please register a passkey for your account.',
+      code: 'CREDENTIAL_NOT_FOUND',
+    };
+  }
+
+  if (passkeyRow.x_id && passkeyRow.x_id !== xId) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'This passkey belongs to a different UPRAIL account.',
+      code: 'ACCOUNT_MISMATCH',
+    };
+  }
+
+  let verification: { verified: boolean; newCounter?: number };
+  try {
+    verification = await webauthnService.verifyAuthentication({
+      assertion,
+      expectedChallenge: challenge,
+      expectedOrigin: allowedWebAuthnOrigins(env),
+      expectedRPID: allowedWebAuthnRpIds(env),
+      credential: {
+        id: assertion.id,
+        publicKey: passkeyRow.public_key,
+        counter: Number(passkeyRow.counter) || 0,
+      },
+    });
+  } catch (err: any) {
+    console.error('[PasskeyAuth] Verification threw:', err);
+    return {
+      ok: false,
+      status: 403,
+      message: `Passkey verification failed: ${publicErrorMessage(err)}`,
+      code: 'VERIFICATION_FAILED',
+    };
+  }
+
+  if (!verification.verified) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'Passkey signature invalid. Transaction rejected.',
+      code: 'SIGNATURE_INVALID',
+    };
+  }
+
+  if (verification.newCounter !== undefined && env.DB) {
+    const newCounter = verification.newCounter;
+    await env.DB.prepare(
+      'UPDATE passkeys SET counter = ? WHERE x_id = ? AND credential_id = ?'
+    )
+      .bind(newCounter, xId, assertion.id)
+      .run()
+      .catch(() => {});
+  }
+
+  return { ok: true };
+}
 
 /**
  * GET handler — issues a fresh single-use passkey challenge for a fund-moving action.

@@ -24,10 +24,12 @@ import { healthRouter } from './routes/health';
 import { onchainRouter } from './routes/onchain';
 import { invitesRouter } from './routes/invites';
 import { agentRouter } from './routes/agent';
-import { mcpRouter } from './routes/mcp';
 import { feesRouter } from './routes/fees';
 import { launchpadsRouter } from './routes/launchpads';
 import { ogRouter } from './routes/og';
+import { oauthRouter } from './routes/oauth';
+import { getAuthorizationServer } from './oauth/authorization';
+import { getResourceServer } from './oauth/resource';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
 import { plainAmount, resolveShareTicker } from './services/share';
@@ -162,7 +164,22 @@ app.route('/health', healthRouter);
 app.route('/auth/x', authRouter);
 app.route('/auth', authRouter);
 
-// 3. API Routes
+// 3. OAuth 2.1 authorization server for MCP clients
+app.route('/', oauthRouter);
+app.all('/.well-known/oauth-authorization-server', (c) =>
+  getAuthorizationServer(c.env).fetch(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext)
+);
+app.all('/oauth/token', (c) =>
+  getAuthorizationServer(c.env).fetch(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext)
+);
+app.all('/oauth/register', (c) =>
+  getAuthorizationServer(c.env).fetch(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext)
+);
+app.all('/.well-known/oauth-protected-resource/api/mcp', (c) =>
+  getResourceServer(c.env).fetch(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext)
+);
+
+// 4. API Routes
 const apiRouter = new Hono<AppContext>();
 
 // Payments, invites, and claim flows
@@ -173,8 +190,10 @@ apiRouter.route('/claim', claimRouter);
 // AI chat payment rail (scoped Bearer keys + USD spend caps)
 apiRouter.route('/agent', agentRouter);
 
-// MCP server (JSON-RPC over Streamable HTTP) — Bearer agent key
-apiRouter.route('/mcp', mcpRouter);
+// MCP server (JSON-RPC over Streamable HTTP) — OAuth token or legacy Bearer key
+apiRouter.all('/mcp', (c) =>
+  getResourceServer(c.env).fetch(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext)
+);
 
 // Launchpad creator-fee routing (zero-integration RPC detection)
 apiRouter.route('/fees', feesRouter);
@@ -694,6 +713,17 @@ export default {
       }
     } catch (e) {
       console.warn('[cron] auth challenge prune failed:', e);
+    }
+
+    // 8. Purge expired OAuth grants, tokens, and DCR clients from KV.
+    try {
+      const purged = await getAuthorizationServer(env).purgeExpiredData(env);
+      const count = purged.grantsPurged + purged.tokensPurged;
+      if (count > 0) {
+        console.log(`[cron] purged ${count} expired OAuth record(s)`);
+      }
+    } catch (e) {
+      console.warn('[cron] OAuth purge failed:', e);
     }
   },
 };

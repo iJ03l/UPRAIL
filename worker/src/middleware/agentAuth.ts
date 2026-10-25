@@ -8,13 +8,13 @@
  */
 
 import { Context, MiddlewareHandler } from 'hono';
-import type { AgentPrincipal, AppContext, Session } from '../types';
+import type { AgentPrincipal, AppContext, Env, Session } from '../types';
 import {
-  hashAgentKey,
-  looksLikeAgentKey,
+  findAgentKeyByRawKey,
   getAgentSpendToday,
   reserveAgentSpend,
   releaseAgentSpend,
+  type AgentKeyRow,
 } from '../services/agentKeys';
 import {
   agentUsdValue,
@@ -26,16 +26,6 @@ import { SESSION_TTL_SECONDS } from './session';
 const DEFAULT_PER_TX_USD = 25;
 const DEFAULT_DAILY_USD = 100;
 
-interface AgentKeyRow {
-  id: string;
-  agent_id: string;
-  x_id: string;
-  per_tx_limit: string | null;
-  daily_limit: string | null;
-  expires_at: number | null;
-  revoked_at: number | null;
-}
-
 function jsonError(
   c: Context<AppContext>,
   status: 401 | 403,
@@ -45,110 +35,106 @@ function jsonError(
   return c.json({ error: message, code }, status);
 }
 
-export interface AgentAuthOptions {
-  allowQueryKey?: boolean;
+export type AgentPrincipalResolution =
+  | { ok: true; session: Session; agent: AgentPrincipal }
+  | { ok: false; status: 401 | 403; message: string; code: string };
+
+export async function resolveAgentPrincipal(
+  env: Env,
+  row: AgentKeyRow,
+  options: { touch?: boolean; executionCtx?: ExecutionContext } = {}
+): Promise<AgentPrincipalResolution> {
+  if (row.revoked_at) {
+    return { ok: false, status: 403, message: 'This agent key has been revoked.', code: 'AGENT_KEY_REVOKED' };
+  }
+  if (row.expires_at && row.expires_at < Date.now()) {
+    return { ok: false, status: 403, message: 'This agent key has expired.', code: 'AGENT_KEY_EXPIRED' };
+  }
+
+  const identity = await env.DB.prepare(
+    'SELECT x_handle, x_name, near_account, is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
+  )
+    .bind(row.x_id)
+    .first<{
+      x_handle: string;
+      x_name: string;
+      near_account: string | null;
+      is_activated: number | null;
+      personal_invite_code: string | null;
+    }>();
+
+  if (!identity) {
+    return {
+      ok: false,
+      status: 403,
+      message: 'The owner of this agent key no longer exists.',
+      code: 'AGENT_OWNER_MISSING',
+    };
+  }
+
+  const now = Date.now();
+  const session: Session = {
+    session_id: `agent:${row.id}`,
+    x_id: row.x_id,
+    x_handle: identity.x_handle,
+    x_name: identity.x_name,
+    near_account: identity.near_account,
+    is_activated: identity.is_activated == null ? undefined : Boolean(identity.is_activated),
+    personal_invite_code: identity.personal_invite_code,
+    created_at: now,
+    expires_at: now + SESSION_TTL_SECONDS * 1000,
+  };
+
+  const perTx = row.per_tx_limit == null ? DEFAULT_PER_TX_USD : parseFloat(row.per_tx_limit);
+  const daily = row.daily_limit == null ? DEFAULT_DAILY_USD : parseFloat(row.daily_limit);
+  const principal: AgentPrincipal = {
+    key_id: row.id,
+    agent_id: row.agent_id,
+    x_id: row.x_id,
+    per_tx_limit_usd: Number.isFinite(perTx) && perTx > 0 ? perTx : DEFAULT_PER_TX_USD,
+    daily_limit_usd: Number.isFinite(daily) && daily > 0 ? daily : DEFAULT_DAILY_USD,
+  };
+
+  if (options.touch !== false) {
+    options.executionCtx?.waitUntil?.(
+      env.DB.prepare('UPDATE agent_keys SET last_used_at = ? WHERE id = ?')
+        .bind(now, row.id)
+        .run()
+        .catch((err: unknown) => console.warn('[agentAuth] last_used update failed:', err))
+    );
+  }
+
+  return { ok: true, session, agent: principal };
 }
 
-export const requireAgent = (options: AgentAuthOptions = {}): MiddlewareHandler<AppContext> => {
+export const requireAgent = (): MiddlewareHandler<AppContext> => {
   return async (c, next) => {
     const header = (c.req.header('Authorization') || '').trim();
     const bearerMatch = /^Bearer\s+(.+)$/i.exec(header);
-    const queryKey = options.allowQueryKey
-      ? (c.req.query('key') || '').trim() || (c.req.query('api_key') || '').trim()
-      : '';
-    const candidate =
+    const rawKey =
       bearerMatch?.[1]?.trim() ||
-      (looksLikeAgentKey(header) ? header : '') ||
       (c.req.header('X-Agent-Key') || '').trim() ||
-      (c.req.header('X-API-Key') || '').trim() ||
-      queryKey;
-    const rawKey = candidate;
-    if (!rawKey || !looksLikeAgentKey(rawKey)) {
-      return jsonError(
-        c,
-        401,
-        options.allowQueryKey
-          ? 'Agent key required. Send "Authorization: Bearer up_agent_…" or append "?key=up_agent_…".'
-          : 'Agent key required. Send "Authorization: Bearer up_agent_…".',
-        'AGENT_KEY_REQUIRED'
-      );
+      (c.req.header('X-API-Key') || '').trim();
+
+    if (!rawKey) {
+      return jsonError(c, 401, 'Agent key required. Send "Authorization: Bearer up_agent_…".', 'AGENT_KEY_REQUIRED');
     }
 
-    if (!c.env.DB) {
-      return jsonError(c, 401, 'Agent authentication unavailable.', 'AGENT_KEY_REQUIRED');
-    }
-
-    const keyHash = await hashAgentKey(rawKey);
     let row: AgentKeyRow | null = null;
     try {
-      row = await c.env.DB.prepare(
-        `SELECT k.id, k.agent_id, k.x_id, k.per_tx_limit, k.daily_limit,
-                k.expires_at, k.revoked_at
-           FROM agent_keys k
-          WHERE k.key_hash = ?`
-      )
-        .bind(keyHash)
-        .first<AgentKeyRow>();
+      row = await findAgentKeyByRawKey(c.env, rawKey);
     } catch (err) {
       console.error('[agentAuth] key lookup failed:', err);
       return jsonError(c, 401, 'Agent authentication failed.', 'AGENT_KEY_REQUIRED');
     }
 
     if (!row) return jsonError(c, 401, 'Invalid agent key.', 'AGENT_KEY_INVALID');
-    if (row.revoked_at) return jsonError(c, 403, 'This agent key has been revoked.', 'AGENT_KEY_REVOKED');
-    if (row.expires_at && row.expires_at < Date.now()) {
-      return jsonError(c, 403, 'This agent key has expired.', 'AGENT_KEY_EXPIRED');
-    }
 
-    const identity = await c.env.DB.prepare(
-      'SELECT x_handle, x_name, near_account, is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
-    )
-      .bind(row.x_id)
-      .first<{
-        x_handle: string;
-        x_name: string;
-        near_account: string | null;
-        is_activated: number | null;
-        personal_invite_code: string | null;
-      }>();
+    const resolved = await resolveAgentPrincipal(c.env, row, { executionCtx: c.executionCtx as unknown as ExecutionContext });
+    if (!resolved.ok) return jsonError(c, resolved.status, resolved.message, resolved.code);
 
-    if (!identity) {
-      return jsonError(c, 403, 'The owner of this agent key no longer exists.', 'AGENT_OWNER_MISSING');
-    }
-
-    const now = Date.now();
-    const session: Session = {
-      session_id: `agent:${row.id}`,
-      x_id: row.x_id,
-      x_handle: identity.x_handle,
-      x_name: identity.x_name,
-      near_account: identity.near_account,
-      is_activated: identity.is_activated == null ? undefined : Boolean(identity.is_activated),
-      personal_invite_code: identity.personal_invite_code,
-      created_at: now,
-      expires_at: now + SESSION_TTL_SECONDS * 1000,
-    };
-    c.set('session', session);
-
-    const perTx = row.per_tx_limit == null ? DEFAULT_PER_TX_USD : parseFloat(row.per_tx_limit);
-    const daily = row.daily_limit == null ? DEFAULT_DAILY_USD : parseFloat(row.daily_limit);
-
-    const principal: AgentPrincipal = {
-      key_id: row.id,
-      agent_id: row.agent_id,
-      x_id: row.x_id,
-      per_tx_limit_usd: Number.isFinite(perTx) && perTx > 0 ? perTx : DEFAULT_PER_TX_USD,
-      daily_limit_usd: Number.isFinite(daily) && daily > 0 ? daily : DEFAULT_DAILY_USD,
-    };
-    c.set('agent', principal);
-
-    // Fire-and-forget last-used stamp.
-    c.executionCtx?.waitUntil?.(
-      c.env.DB.prepare('UPDATE agent_keys SET last_used_at = ? WHERE id = ?')
-        .bind(now, row.id)
-        .run()
-        .catch((err: unknown) => console.warn('[agentAuth] last_used update failed:', err))
-    );
+    c.set('session', resolved.session);
+    c.set('agent', resolved.agent);
 
     const method = c.req.method.toUpperCase();
     const contentType = c.req.header('Content-Type') || '';

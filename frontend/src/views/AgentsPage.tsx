@@ -101,15 +101,19 @@ const CHAT_PLATFORMS: ChatPlatform[] = [
   },
 ];
 
-function buildMcpJson(apiKey: string): string {
+function buildMcpJson(apiKey?: string): string {
   return JSON.stringify(
     {
       mcpServers: {
         uprail: {
           url: MCP_ENDPOINT,
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
+          ...(apiKey
+            ? {
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                },
+              }
+            : {}),
         },
       },
     },
@@ -118,37 +122,38 @@ function buildMcpJson(apiKey: string): string {
   );
 }
 
-function buildOneClickMcpUrl(apiKey: string): string {
-  return `${MCP_ENDPOINT}?key=${apiKey}`;
-}
-
-function buildClaudeInstallUrl(apiKey: string): string {
+function buildClaudeInstallUrl(): string {
   return `${CLAUDE_CONNECTORS_URL}?modal=add-custom-connector&connectorName=UPRAIL&connectorUrl=${encodeURIComponent(
-    buildOneClickMcpUrl(apiKey)
+    MCP_ENDPOINT
   )}`;
 }
 
-function buildCursorInstallUrl(apiKey: string): string {
-  const config = {
-    url: MCP_ENDPOINT,
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  };
-  return `cursor://anysphere.cursor-deeplink/mcp/install?name=UPRAIL&config=${encodeURIComponent(
-    btoa(JSON.stringify(config))
-  )}`;
-}
-
-function buildMuseSetupPrompt(apiKey: string): string {
+function buildMuseSetupPrompt(): string {
   return [
     'Create a custom connector for UPRAIL using this remote MCP server:',
     'Name: UPRAIL',
     'Transport: Streamable HTTP',
-    `URL: ${buildOneClickMcpUrl(apiKey)}`,
-    'Authentication: None (the key is embedded in the URL).',
+    `URL: ${MCP_ENDPOINT}`,
+    'Authentication: OAuth (open the URL and approve with Face ID).',
     'Then list the tools and ask for my UPRAIL balance.',
   ].join('\n');
+}
+
+function platformSettingsUrl(platform: PlatformId): string {
+  switch (platform) {
+    case 'claude':
+      return CLAUDE_CONNECTORS_URL;
+    case 'openai':
+      return CHATGPT_CONNECTORS_URL;
+    case 'grok':
+      return GROK_CONNECTORS_URL;
+    case 'metamuse':
+      return META_MUSE_URL;
+    case 'cursor':
+      return 'https://cursor.com';
+    default:
+      return DOCS_SETUP_URL;
+  }
 }
 
 export const AgentsPage: React.FC = () => {
@@ -161,6 +166,7 @@ export const AgentsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedAgentKey | null>(null);
+  const [showConnect, setShowConnect] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showCreateConfirm, setShowCreateConfirm] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<AgentKey | null>(null);
@@ -187,9 +193,10 @@ export const AgentsPage: React.FC = () => {
     appliedPlatformParam.current = requested;
     setSelectedPlatform(platform.id);
     setName(platform.defaultName);
-    setShowCreate(true);
+    setShowConnect(true);
+    setShowCreate(false);
     const timer = window.setTimeout(() => {
-      document.getElementById('create-agent-key')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('connect-ai-chat')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 80);
     return () => window.clearTimeout(timer);
   }, [searchParams]);
@@ -240,7 +247,7 @@ export const AgentsPage: React.FC = () => {
     const dailyNum = parseFloat(dailyLimit);
     setCreating(true);
     try {
-      const assertion = await authorizeWithPasskey(`Connect AI chat “${trimmedName}”`);
+      const assertion = await authorizeWithPasskey(`Create manual Bearer key “${trimmedName}”`);
       const res = await api.createAgentKey({
         name: trimmedName,
         perTxLimit: String(perTxNum),
@@ -253,7 +260,7 @@ export const AgentsPage: React.FC = () => {
       toast(`Key created for ${res.name}`);
       await refresh();
     } catch (err: any) {
-      setError(err.message || 'Failed to create AI chat key');
+      setError(err.message || 'Failed to create manual Bearer key');
     } finally {
       setCreating(false);
     }
@@ -270,9 +277,10 @@ export const AgentsPage: React.FC = () => {
     setBusyId(k.id);
     setError(null);
     try {
-      const assertion = await authorizeWithPasskey(`Revoke AI chat key “${k.name}”`);
+      const action = k.authMethod === 'oauth' ? 'Disconnect' : 'Revoke';
+      const assertion = await authorizeWithPasskey(`${action} “${k.name}”`);
       await api.revokeAgentKey(k.id, assertion);
-      toast(`“${k.name}” revoked`);
+      toast(k.authMethod === 'oauth' ? `“${k.name}” disconnected` : `“${k.name}” revoked`);
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Failed to revoke key');
@@ -292,7 +300,7 @@ export const AgentsPage: React.FC = () => {
     setBusyId(k.id);
     setError(null);
     try {
-      const assertion = await authorizeWithPasskey(`Delete AI chat key “${k.name}”`);
+      const assertion = await authorizeWithPasskey(`Delete connection “${k.name}”`);
       await api.deleteAgentKey(k.id, assertion);
       toast(`“${k.name}” deleted`);
       await refresh();
@@ -304,6 +312,7 @@ export const AgentsPage: React.FC = () => {
   };
 
   const activePlatformObj = CHAT_PLATFORMS.find((p) => p.id === selectedPlatform) || CHAT_PLATFORMS[0];
+  const ActivePlatformIcon = activePlatformObj.icon;
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -316,8 +325,8 @@ export const AgentsPage: React.FC = () => {
           </div>
           <p className="mt-1 text-xs sm:text-sm text-stone-500 max-w-xl">
             Send, receive, withdraw, and check payments directly from Claude, OpenAI Dot / ChatGPT,
-            Grok Bot, Meta Muse, Cursor, or any AI chat. Protected by strict USD spend limits and
-            revocable in one tap.
+            Grok Bot, Meta Muse, Cursor, or any AI chat. Connect with OAuth + Face ID, protected by
+            strict USD spend limits and revocable in one tap.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
@@ -331,11 +340,14 @@ export const AgentsPage: React.FC = () => {
             <span>Setup docs</span>
           </a>
           <button
-            onClick={() => setShowCreate((v) => !v)}
+            onClick={() => {
+              setShowConnect((v) => !v);
+              setShowCreate(false);
+            }}
             className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer flex-shrink-0"
           >
-            {showCreate ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-            <span>{showCreate ? 'Cancel' : 'Connect AI Chat'}</span>
+            {showConnect ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            <span>{showConnect ? 'Close' : 'Connect AI Chat'}</span>
           </button>
         </div>
       </div>
@@ -355,12 +367,195 @@ export const AgentsPage: React.FC = () => {
         </div>
       )}
 
+      {/* OAuth connect panel */}
+      {showConnect && (
+        <div
+          id="connect-ai-chat"
+          className="p-5 rounded-3xl bg-stone-50 border border-stone-200 space-y-5 scroll-mt-24"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center space-x-2 text-stone-900">
+                <ActivePlatformIcon className="w-4 h-4" />
+                <h2 className="text-sm font-display font-bold uppercase tracking-wider">
+                  Connect {activePlatformObj.label}
+                </h2>
+              </div>
+              <p className="mt-1 text-xs text-stone-500 max-w-xl">
+                Add UPRAIL as a custom remote MCP connector. Your AI app opens UPRAIL for a
+                Face ID approval — there is no secret key to copy.
+              </p>
+            </div>
+            <span className="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 self-start">
+              OAUTH 2.1
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+              1. Pick your AI chat app
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {CHAT_PLATFORMS.map((p) => {
+                const active = selectedPlatform === p.id;
+                const Icon = p.icon;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => selectPlatform(p)}
+                    className={`text-left p-3 rounded-2xl border transition-colors cursor-pointer ${
+                      active
+                        ? 'border-stone-900 bg-white shadow-xs'
+                        : 'border-stone-200 bg-white hover:border-stone-400'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5">
+                      <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${active ? 'text-stone-900' : 'text-stone-500'}`} />
+                      <span className="text-xs font-bold text-stone-900 truncate">{p.label}</span>
+                    </div>
+                    <p className="mt-1 text-[10px] leading-snug text-stone-500">{p.blurb}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-stone-950 text-stone-100 p-4 space-y-4">
+            <div className="space-y-2">
+              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
+                2. Remote MCP server URL
+              </div>
+              <CopyRow value={MCP_ENDPOINT} />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-3 text-[11px] leading-relaxed">
+              <div className="rounded-xl bg-stone-900 border border-stone-800 p-2.5">
+                <span className="block font-bold text-white">Add connector</span>
+                <span className="text-stone-400">
+                  In {activePlatformObj.label}, choose a custom or remote MCP connector.
+                </span>
+              </div>
+              <div className="rounded-xl bg-stone-900 border border-stone-800 p-2.5">
+                <span className="block font-bold text-white">Paste the URL</span>
+                <span className="text-stone-400">
+                  Leave authentication empty; OAuth discovery starts automatically.
+                </span>
+              </div>
+              <div className="rounded-xl bg-stone-900 border border-stone-800 p-2.5">
+                <span className="block font-bold text-white">Approve once</span>
+                <span className="text-stone-400">
+                  UPRAIL opens for Face ID, then the app appears below.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href={platformSettingsUrl(activePlatformObj.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center space-x-1.5 px-4 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer"
+            >
+              <ActivePlatformIcon className="w-3.5 h-3.5" />
+              <span>Open {activePlatformObj.label}</span>
+            </a>
+            {activePlatformObj.id === 'claude' && (
+              <a
+                href={buildClaudeInstallUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Prefill Claude connector</span>
+              </a>
+            )}
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(MCP_ENDPOINT);
+                toast('MCP server URL copied');
+              }}
+              className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copy URL</span>
+            </button>
+            {activePlatformObj.id === 'cursor' && (
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(buildMcpJson());
+                  toast('MCP config copied');
+                }}
+                className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Copy MCP config</span>
+              </button>
+            )}
+            {activePlatformObj.id === 'metamuse' && (
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(buildMuseSetupPrompt());
+                  toast('Setup prompt copied');
+                }}
+                className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>Copy setup prompt</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-stone-200">
+            <p className="text-[11px] text-stone-500 max-w-lg">
+              Tokens stay scoped to this app and can be disconnected in one tap. Manual Bearer keys
+              are still available for OpenAPI Actions, bots, and older clients.
+            </p>
+            <button
+              onClick={() => {
+                setShowConnect(false);
+                setShowCreate(true);
+              }}
+              className="text-[11px] font-mono font-bold text-stone-600 hover:text-stone-950 transition-colors cursor-pointer flex-shrink-0"
+            >
+              Use a manual Bearer key instead →
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Create form */}
       {showCreate && (
         <div
           id="create-agent-key"
           className="p-5 rounded-3xl bg-stone-50 border border-stone-200 space-y-5 scroll-mt-24"
         >
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+            <div>
+              <div className="flex items-center space-x-2 text-stone-900">
+                <KeyRound className="w-4 h-4" />
+                <h2 className="text-sm font-display font-bold uppercase tracking-wider">
+                  Advanced: manual Bearer key
+                </h2>
+              </div>
+              <p className="mt-1 text-xs text-stone-500 max-w-xl">
+                Use this only for OpenAPI Actions, bots, or clients without OAuth support. OAuth is
+                safer because the secret never leaves UPRAIL.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreate(false);
+                setShowConnect(true);
+              }}
+              className="text-[11px] font-mono font-bold text-stone-600 hover:text-stone-950 transition-colors cursor-pointer self-start"
+            >
+              Use OAuth instead →
+            </button>
+          </div>
+
           <div className="space-y-2.5">
             <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
               1. Pick your AI chat app
@@ -461,7 +656,7 @@ export const AgentsPage: React.FC = () => {
               ) : (
                 <KeyRound className="w-4 h-4" />
               )}
-              <span>Create key with passkey</span>
+              <span>Create Bearer key with passkey</span>
             </button>
           </div>
         </div>
@@ -493,7 +688,7 @@ export const AgentsPage: React.FC = () => {
             <div className="space-y-1">
               <p className="text-sm font-bold text-stone-900">No AI chats connected yet</p>
               <p className="text-xs text-stone-500 max-w-sm mx-auto">
-                Pick your AI chat below to generate a Passkey-authorized key with built-in USD spend limits.
+                Pick your AI chat below to connect it with OAuth and Face ID. No secret key to copy.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
@@ -505,7 +700,8 @@ export const AgentsPage: React.FC = () => {
                     type="button"
                     onClick={() => {
                       selectPlatform(p);
-                      setShowCreate(true);
+                      setShowConnect(true);
+                      setShowCreate(false);
                     }}
                     className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-xs font-bold text-stone-900 transition-colors cursor-pointer"
                   >
@@ -519,9 +715,12 @@ export const AgentsPage: React.FC = () => {
         ) : (
           <div className="space-y-2">
             {keys.map((k) => {
+              const isOAuth = k.authMethod === 'oauth';
               const revoked = Boolean(k.revokedAt);
               const expired = k.expiresAt ? k.expiresAt < Date.now() : false;
-              const dead = revoked || expired;
+              const status =
+                k.connectionStatus || (revoked ? 'revoked' : expired ? 'expired' : 'active');
+              const dead = status !== 'active';
               const dailyLimitNum = k.dailyLimit ? parseFloat(k.dailyLimit) || 0 : 0;
               const perTxLimitNum = k.perTxLimit ? parseFloat(k.perTxLimit) || 0 : 0;
               const spentToday = k.spentToday ?? 0;
@@ -539,26 +738,42 @@ export const AgentsPage: React.FC = () => {
                     <div className="flex items-center space-x-2">
                       <span className="text-sm font-bold text-stone-950 truncate">{k.name}</span>
                       {!dead && (
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          ACTIVE
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                            isOAuth
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-sky-50 text-sky-700 border-sky-200'
+                          }`}
+                        >
+                          {isOAuth ? 'OAUTH' : 'BEARER'}
                         </span>
                       )}
-                      {revoked && (
+                      {status === 'revoked' && (
                         <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-200 text-stone-600">
                           REVOKED
                         </span>
                       )}
-                      {!revoked && expired && (
+                      {status === 'expired' && (
                         <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-200 text-stone-600">
                           EXPIRED
                         </span>
                       )}
+                      {status === 'disconnected' && (
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                          REAUTHORIZE
+                        </span>
+                      )}
                     </div>
                     <div className="mt-1 text-[11px] text-stone-500 font-mono truncate">
-                      {k.keyPrefix}… · Max ${perTxLimitNum || 25}/transaction · Max ${dailyLimitNum || 100}/day
+                      {isOAuth
+                        ? `OAuth · ${k.oauthClientName || 'AI app'}`
+                        : `${k.keyPrefix}…`}{' '}
+                      · Max ${perTxLimitNum || 25}/transaction · Max ${dailyLimitNum || 100}/day
                     </div>
                     <div className="mt-0.5 text-[10px] text-stone-400 font-mono">
-                      Created {formatDate(k.createdAt)}
+                      {isOAuth
+                        ? `Connected ${formatDate(k.oauthConnectedAt || k.createdAt)}`
+                        : `Created ${formatDate(k.createdAt)}`}
                       {k.lastUsedAt ? ` · Last used ${formatDate(k.lastUsedAt)}` : ' · Never used'}
                       {k.expiresAt ? ` · Expires ${formatDate(k.expiresAt)}` : ''}
                     </div>
@@ -591,7 +806,7 @@ export const AgentsPage: React.FC = () => {
                         ) : (
                           <Ban className="w-3.5 h-3.5" />
                         )}
-                        <span>Revoke</span>
+                        <span>{isOAuth ? 'Disconnect' : 'Revoke'}</span>
                       </button>
                     )}
                     {dead && (
@@ -631,27 +846,28 @@ export const AgentsPage: React.FC = () => {
               </div>
               <div className="text-xs font-bold text-white">Pick your chat</div>
               <p className="text-[11px] text-stone-400 leading-relaxed">
-                Choose Claude, ChatGPT, Grok, Meta Muse, Cursor, or another chat above and create a
-                key with passkey approval.
+                Choose Claude, ChatGPT, Grok, Meta Muse, Cursor, or another chat above. No secret key
+                is created.
               </p>
             </div>
             <div className="rounded-2xl bg-stone-900 border border-stone-800 p-3 space-y-1.5">
               <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
                 Step 2
               </div>
-              <div className="text-xs font-bold text-white">Use the setup action</div>
+              <div className="text-xs font-bold text-white">Add the MCP URL</div>
               <p className="text-[11px] text-stone-400 leading-relaxed">
-                The key screen opens your chat with the connection prefilled, or copies the URL or
-                prompt and opens the right settings page.
+                Paste <span className="font-mono text-stone-200">{MCP_ENDPOINT}</span> as a custom
+                remote MCP connector. OAuth discovery handles authentication.
               </p>
             </div>
             <div className="rounded-2xl bg-stone-900 border border-stone-800 p-3 space-y-1.5">
               <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
                 Step 3
               </div>
-              <div className="text-xs font-bold text-white">Test with $1</div>
+              <div className="text-xs font-bold text-white">Approve with Face ID</div>
               <p className="text-[11px] text-stone-400 leading-relaxed">
-                Start a fresh chat, ask for your balance, send $1 to yourself, then raise the limits.
+                UPRAIL opens once to approve limits. Start a fresh chat, ask for your balance, then
+                test with $1.
               </p>
             </div>
           </div>
@@ -689,10 +905,10 @@ export const AgentsPage: React.FC = () => {
         onCancel={() => setShowCreateConfirm(false)}
         onConfirm={() => void performCreate()}
         tone="financial"
-        title="Create AI chat key"
-        description="This key lets an AI chat move money from your UPRAIL account within the limits below."
-        confirmLabel="Create key"
-        warning="Anyone with this key can spend up to these limits until you revoke it. The key is shown only once."
+        title="Create manual Bearer key"
+        description="This key is for OpenAPI Actions, bots, or clients that cannot complete OAuth. It can move money within the limits below."
+        confirmLabel="Create Bearer key"
+        warning="Anyone with this key can spend up to these limits until you revoke it. The key is shown only once. For AI chats, use OAuth instead."
         details={[
           { label: 'Name', value: name.trim() || '—', mono: false, emphasis: true },
           { label: 'App', value: activePlatformObj.label, mono: false },
@@ -707,17 +923,23 @@ export const AgentsPage: React.FC = () => {
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void performDelete()}
         tone="danger"
-        title="Delete AI chat key"
+        title="Delete connection"
         description={
           deleteTarget
             ? `Permanently remove “${deleteTarget.name}” and its spend history from this account.`
             : undefined
         }
         confirmLabel="Delete permanently"
-        warning="This cannot be undone. The key is already revoked or expired; deleting only removes its record."
+        warning="This cannot be undone. The connection is already revoked or expired; deleting only removes its record."
         details={[
           { label: 'Name', value: deleteTarget?.name || '—', mono: false, emphasis: true },
-          { label: 'Key', value: `${deleteTarget?.keyPrefix || ''}…` },
+          {
+            label: deleteTarget?.authMethod === 'oauth' ? 'Connection' : 'Key',
+            value:
+              deleteTarget?.authMethod === 'oauth'
+                ? deleteTarget.oauthClientName || 'OAuth app'
+                : `${deleteTarget?.keyPrefix || ''}…`,
+          },
         ]}
       />
 
@@ -726,27 +948,35 @@ export const AgentsPage: React.FC = () => {
         onCancel={() => setRevokeTarget(null)}
         onConfirm={() => void performRevoke()}
         tone="danger"
-        title="Revoke AI chat key"
+        title={revokeTarget?.authMethod === 'oauth' ? 'Disconnect AI app' : 'Revoke AI chat key'}
         description={
           revokeTarget
-            ? `Any AI chat using “${revokeTarget.name}” loses access immediately.`
+            ? revokeTarget.authMethod === 'oauth'
+              ? `“${revokeTarget.oauthClientName || revokeTarget.name}” loses access immediately and must be authorized again to reconnect.`
+              : `Any AI chat using “${revokeTarget.name}” loses access immediately.`
             : undefined
         }
-        confirmLabel="Revoke key"
-        warning="This cannot be undone. You would need to create a new key and reconnect the AI chat."
+        confirmLabel={revokeTarget?.authMethod === 'oauth' ? 'Disconnect app' : 'Revoke key'}
+        warning={
+          revokeTarget?.authMethod === 'oauth'
+            ? 'The app’s OAuth tokens stop working immediately. Reconnecting requires a fresh Face ID approval.'
+            : 'This cannot be undone. You would need to create a new key and reconnect the AI chat.'
+        }
         details={[
           { label: 'Name', value: revokeTarget?.name || '—', mono: false, emphasis: true },
-          { label: 'Key', value: `${revokeTarget?.keyPrefix || ''}…` },
+          {
+            label: revokeTarget?.authMethod === 'oauth' ? 'Connection' : 'Key',
+            value:
+              revokeTarget?.authMethod === 'oauth'
+                ? revokeTarget.oauthClientName || 'OAuth app'
+                : `${revokeTarget?.keyPrefix || ''}…`,
+          },
         ]}
       />
 
       {/* Created key modal */}
       {created && (
-        <CreatedKeyModal
-          created={created}
-          platform={activePlatformObj.id}
-          onClose={() => setCreated(null)}
-        />
+        <CreatedKeyModal created={created} onClose={() => setCreated(null)} />
       )}
     </div>
   );
@@ -798,20 +1028,13 @@ const CopyBlock: React.FC<{ value: string }> = ({ value }) => {
 
 const CreatedKeyModal: React.FC<{
   created: CreatedAgentKey;
-  platform: PlatformId;
   onClose: () => void;
-}> = ({ created, platform, onClose }) => {
+}> = ({ created, onClose }) => {
   const { toast } = useToast();
   const [copiedKey, setCopiedKey] = useState(false);
   const [ack, setAck] = useState(false);
 
-  const oneClickUrl = buildOneClickMcpUrl(created.key);
   const mcpJson = buildMcpJson(created.key);
-  const claudeInstallUrl = buildClaudeInstallUrl(created.key);
-  const cursorInstallUrl = buildCursorInstallUrl(created.key);
-  const museSetupPrompt = buildMuseSetupPrompt(created.key);
-  const activePlatform = CHAT_PLATFORMS.find((p) => p.id === platform) || CHAT_PLATFORMS[0];
-  const PlatformIcon = activePlatform.icon;
 
   const copy = (value: string, message: string) => {
     navigator.clipboard.writeText(value);
@@ -823,240 +1046,92 @@ const CreatedKeyModal: React.FC<{
     <Portal>
       <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
         <div className="relative w-full max-w-lg rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center space-x-2 text-stone-900">
-          <ShieldCheck className="w-5 h-5 text-emerald-600" />
-          <h3 className="text-lg font-display font-extrabold">{created.name} is ready to connect</h3>
-        </div>
-        <p className="text-xs text-stone-600 leading-relaxed">
-          Copy your secret key, then use the {activePlatform.label} setup action below. For
-          security, this key is shown <strong>only once</strong>.
-        </p>
-
-        <div className="space-y-1.5">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-            1. Your Secret AI Chat Key
-          </span>
-          <div className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-xs break-all select-all">
-            {created.key}
+          <div className="flex items-center space-x-2 text-stone-900">
+            <ShieldCheck className="w-5 h-5 text-emerald-600" />
+            <h3 className="text-lg font-display font-extrabold">{created.name} key is ready</h3>
           </div>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(created.key);
-              setCopiedKey(true);
-              setAck(true);
-              toast('Secret key copied');
-              setTimeout(() => setCopiedKey(false), 1500);
-            }}
-            className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-          >
-            {copiedKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedKey ? 'Key Copied' : 'Copy Secret Key'}</span>
-          </button>
-        </div>
+          <p className="text-xs text-stone-600 leading-relaxed">
+            This is a manual Bearer key for OpenAPI Actions, bots, or clients without OAuth support.
+            For Claude, ChatGPT, Grok, and other MCP apps, use{' '}
+            <strong>Connect AI Chat</strong> instead — it never exposes a secret.
+          </p>
 
-        <div className="space-y-2 pt-2 border-t border-stone-200">
-          <div className="flex items-center space-x-1.5">
-            <PlatformIcon className="w-3.5 h-3.5 text-stone-500" />
+          <div className="space-y-1.5">
             <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-              2. Connect to {activePlatform.label}
+              1. Your secret Bearer key
+            </span>
+            <div className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-xs break-all select-all">
+              {created.key}
+            </div>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(created.key);
+                setCopiedKey(true);
+                setAck(true);
+                toast('Secret key copied');
+                setTimeout(() => setCopiedKey(false), 1500);
+              }}
+              className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
+            >
+              {copiedKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedKey ? 'Key copied' : 'Copy secret key'}</span>
+            </button>
+          </div>
+
+          <div className="space-y-2 pt-2 border-t border-stone-200">
+            <div className="flex items-center space-x-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-stone-500" />
+              <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+                2. Manual setup
+              </span>
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
+              MCP config with Bearer key
+            </div>
+            <CopyBlock value={mcpJson} />
+            <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
+              OAuth MCP URL (recommended, no key)
+            </div>
+            <CopyRow value={MCP_ENDPOINT} />
+            <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
+              OpenAPI import URL
+            </div>
+            <CopyRow value={OPENAPI_SPEC_URL} />
+            <button
+              onClick={() => copy(mcpJson, 'MCP config copied')}
+              className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copy MCP config</span>
+            </button>
+          </div>
+
+          <div className="flex items-start space-x-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            <span>
+              Capped at <strong>${created.perTxLimit}/transaction</strong> and{' '}
+              <strong>${created.dailyLimit}/day</strong>. This key is shown only once. Revoke it
+              anytime from this page.
             </span>
           </div>
 
-          {platform === 'claude' && (
-            <div className="space-y-2">
-              <a
-                href={claudeInstallUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setAck(true)}
-                className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Add UPRAIL to Claude</span>
-              </a>
-              <p className="text-[11px] text-stone-500 leading-relaxed">
-                Claude opens with the UPRAIL connector name and URL prefilled. Review the details,
-                click Connect, then start a fresh chat.
-              </p>
-              <button
-                onClick={() => copy(oneClickUrl, 'Connector URL copied')}
-                className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy connector URL instead</span>
-              </button>
-            </div>
-          )}
+          <a
+            href={DOCS_SETUP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center space-x-1.5 text-[11px] font-mono font-bold text-stone-500 hover:text-stone-900 transition-colors"
+          >
+            <BookOpen className="w-3 h-3" />
+            <span>Setup guide &amp; troubleshooting →</span>
+          </a>
 
-          {platform === 'cursor' && (
-            <div className="space-y-2">
-              <a
-                href={cursorInstallUrl}
-                onClick={() => setAck(true)}
-                className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Terminal className="w-3.5 h-3.5" />
-                <span>Open in Cursor</span>
-              </a>
-              <p className="text-[11px] text-stone-500 leading-relaxed">
-                Cursor prompts you to install the UPRAIL MCP server. Approve it, then start a new
-                chat. Windsurf users can paste the MCP JSON from Advanced setup.
-              </p>
-              <button
-                onClick={() => copy(mcpJson, 'MCP config copied')}
-                className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy MCP config instead</span>
-              </button>
-            </div>
-          )}
-
-          {platform === 'grok' && (
-            <div className="space-y-2">
-              <a
-                href={GROK_CONNECTORS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => copy(oneClickUrl, 'Connector URL copied — paste it in Grok')}
-                className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>Copy URL &amp; open Grok connectors</span>
-              </a>
-              <p className="text-[11px] text-stone-500 leading-relaxed">
-                In Grok, choose <strong>New Connector → Custom</strong>, paste the URL, and connect.
-                The URL is already on your clipboard.
-              </p>
-              <button
-                onClick={() => copy(oneClickUrl, 'Connector URL copied')}
-                className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy connector URL</span>
-              </button>
-            </div>
-          )}
-
-          {platform === 'openai' && (
-            <div className="space-y-2">
-              <a
-                href={CHATGPT_CONNECTORS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => copy(oneClickUrl, 'Connector URL copied — paste it in ChatGPT')}
-                className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>Copy URL &amp; open ChatGPT connectors</span>
-              </a>
-              <p className="text-[11px] text-stone-500 leading-relaxed">
-                In ChatGPT or OpenAI Dot, open <strong>Settings → Connectors</strong>, choose{' '}
-                <strong>Add custom connector</strong>, and paste the URL from your clipboard.
-              </p>
-              <button
-                onClick={() => copy(oneClickUrl, 'Connector URL copied')}
-                className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy connector URL</span>
-              </button>
-            </div>
-          )}
-
-          {platform === 'metamuse' && (
-            <div className="space-y-2">
-              <a
-                href={META_MUSE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => copy(museSetupPrompt, 'Setup prompt copied — paste it in Muse')}
-                className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Compass className="w-3.5 h-3.5" />
-                <span>Copy setup prompt &amp; open Muse</span>
-              </a>
-              <p className="text-[11px] text-stone-500 leading-relaxed">
-                Paste the prompt into your Muse chat. Muse creates the UPRAIL custom connector, then
-                asks you to approve it.
-              </p>
-              <button
-                onClick={() => copy(museSetupPrompt, 'Setup prompt copied')}
-                className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy setup prompt</span>
-              </button>
-            </div>
-          )}
-
-          {platform === 'other' && (
-            <div className="space-y-2">
-              <button
-                onClick={() => copy(oneClickUrl, 'Connector URL copied')}
-                className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy connector URL</span>
-              </button>
-              <p className="text-[11px] text-stone-500 leading-relaxed">
-                Add it as a remote MCP server. If your client asks for a config file, use the MCP
-                JSON under Advanced setup.
-              </p>
-            </div>
-          )}
-
-          <p className="text-[11px] text-amber-700 leading-relaxed">
-            These setup links contain your secret key. Do not share them, and revoke the key if a
-            link is exposed.
-          </p>
-
-          <details className="rounded-xl border border-stone-200 bg-stone-50 p-3">
-            <summary className="cursor-pointer text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-              Advanced setup
-            </summary>
-            <div className="mt-3 space-y-2">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-                Self-authenticated MCP URL
-              </div>
-              <CopyRow value={oneClickUrl} />
-              <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-                MCP config JSON
-              </div>
-              <CopyBlock value={mcpJson} />
-              <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-                OpenAPI import URL
-              </div>
-              <CopyRow value={OPENAPI_SPEC_URL} />
-            </div>
-          </details>
-        </div>
-
-        <div className="flex items-start space-x-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
-          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-          <span>
-            Capped at <strong>${created.perTxLimit}/transaction</strong> and{' '}
-            <strong>${created.dailyLimit}/day</strong>. You can revoke this key anytime.
-          </span>
-        </div>
-
-        <a
-          href={DOCS_SETUP_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center space-x-1.5 text-[11px] font-mono font-bold text-stone-500 hover:text-stone-900 transition-colors"
-        >
-          <BookOpen className="w-3 h-3" />
-          <span>Setup guide &amp; troubleshooting →</span>
-        </a>
-
-        <button
-          onClick={onClose}
-          disabled={!ack}
-          className="w-full py-2.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
-        >
-          {ack ? 'Done' : 'Copy your key or URL above to continue'}
-        </button>
+          <button
+            onClick={onClose}
+            disabled={!ack}
+            className="w-full py-2.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
+          >
+            {ack ? 'Done' : 'Copy your key above to continue'}
+          </button>
         </div>
       </div>
     </Portal>

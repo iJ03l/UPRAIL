@@ -20,6 +20,7 @@ export interface Env {
   // Bindings
   DB: D1Database;
   CACHE: KVNamespace;
+  OAUTH_KV: KVNamespace;
   ASSETS?: Fetcher;
   // Optional: only present in deployments that still run the settlement
   // service as a Worker container. Free-tier deployments leave these unset
@@ -38,6 +39,10 @@ export interface Env {
   WEBAUTHN_RP_ID: string;
   WEBAUTHN_RP_NAME: string;
   WEBAUTHN_ORIGIN: string;
+
+  // OAuth 2.1 issuer + protected MCP resource. Overridable for local dev/tests.
+  OAUTH_ISSUER: string;
+  OAUTH_RESOURCE: string;
 
   // Master Wallet & Custody
   MASTER_ACCOUNT_ID?: string;

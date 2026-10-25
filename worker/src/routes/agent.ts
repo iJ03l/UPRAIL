@@ -11,7 +11,7 @@
  */
 
 import { Context, Hono } from 'hono';
-import type { AppContext } from '../types';
+import type { AppContext, Env } from '../types';
 import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import {
@@ -19,7 +19,15 @@ import {
   authorizeAgentSend,
   authorizeAgentWithdrawal,
 } from '../middleware/agentAuth';
-import { generateAgentKey, currentUtcDay } from '../services/agentKeys';
+import {
+  generateAgentKey,
+  currentUtcDay,
+  parseAgentUsdLimit,
+  AGENT_DEFAULT_PER_TX_USD,
+  AGENT_DEFAULT_DAILY_USD,
+  AGENT_MAX_NAME_LENGTH,
+} from '../services/agentKeys';
+import { getAuthorizationServer } from '../oauth/authorization';
 import {
   claimAgentRequest,
   completeAgentRequest,
@@ -37,11 +45,10 @@ agentRouter.use('*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
 });
 
-const MAX_NAME = 48;
+const MAX_NAME = AGENT_MAX_NAME_LENGTH;
 const MAX_KEY_DAYS = 365;
-const DEFAULT_PER_TX_USD = 25;
-const DEFAULT_DAILY_USD = 100;
-const MAX_LIMIT_USD = 100_000;
+const DEFAULT_PER_TX_USD = AGENT_DEFAULT_PER_TX_USD;
+const DEFAULT_DAILY_USD = AGENT_DEFAULT_DAILY_USD;
 
 interface KeyBody {
   name?: string;
@@ -51,14 +58,6 @@ interface KeyBody {
   perTxLimit?: number | string | null;
   dailyLimit?: number | string | null;
   expiresInDays?: number | string | null;
-}
-
-function parseUsdLimit(value: unknown, fallback: number): number | null {
-  if (value === null || value === undefined || value === '') return fallback;
-  const n = typeof value === 'string' ? parseFloat(value) : Number(value);
-  if (!Number.isFinite(n) || n <= 0 || n > MAX_LIMIT_USD) return null;
-  const rounded = Math.round(n * 100) / 100;
-  return rounded >= 0.01 ? rounded : null;
 }
 
 function shouldReleaseAgentSpend(status: number, code?: string): boolean {
@@ -434,6 +433,32 @@ export async function executeAgentWithdraw(
   }
 }
 
+async function listAllOAuthGrants(env: Env, xId: string): Promise<any[]> {
+  const oauth = getAuthorizationServer(env).getOAuthApi(env);
+  const grants: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await oauth.listUserGrants(xId, { limit: 100, cursor });
+    grants.push(...(page.items || []));
+    cursor = page.cursor;
+  } while (cursor);
+  return grants;
+}
+
+async function revokeOAuthGrantsForAgentKey(
+  env: Env,
+  xId: string,
+  agentKeyId: string
+): Promise<number> {
+  const oauth = getAuthorizationServer(env).getOAuthApi(env);
+  const grants = await listAllOAuthGrants(env, xId);
+  const matching = grants.filter((grant) => grant?.metadata?.agentKeyId === agentKeyId);
+  for (const grant of matching) {
+    await oauth.revokeGrant(grant.id, xId);
+  }
+  return matching.length;
+}
+
 /**
  * POST /api/agent/keys
  * Creates an AI chat key with mandatory USD spend caps. Passkey-gated.
@@ -472,8 +497,8 @@ agentRouter.post('/keys', requireAuth({ passkeyVerified: true }), requirePasskey
     );
   }
 
-  const perTxUsd = parseUsdLimit(body.perTxLimit, DEFAULT_PER_TX_USD);
-  const dailyUsd = parseUsdLimit(body.dailyLimit, DEFAULT_DAILY_USD);
+  const perTxUsd = parseAgentUsdLimit(body.perTxLimit, DEFAULT_PER_TX_USD);
+  const dailyUsd = parseAgentUsdLimit(body.dailyLimit, DEFAULT_DAILY_USD);
   if (perTxUsd === null || dailyUsd === null) {
     return c.json(
       {
@@ -556,6 +581,7 @@ agentRouter.get('/keys', requireAuth({ passkeyVerified: true }), async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT k.id, k.agent_id, k.label, k.key_prefix, k.per_tx_limit, k.daily_limit,
             k.expires_at, k.last_used_at, k.revoked_at, k.created_at,
+            k.auth_method, k.oauth_client_id, k.oauth_client_name,
             a.name
        FROM agent_keys k
        JOIN agents a ON a.id = k.agent_id
@@ -565,20 +591,54 @@ agentRouter.get('/keys', requireAuth({ passkeyVerified: true }), async (c) => {
     .bind(session.x_id)
     .all<any>();
 
-  const keys = (results || []).map((row): any => ({
-    id: row.id,
-    agentId: row.agent_id,
-    name: row.name,
-    label: row.label,
-    keyPrefix: row.key_prefix,
-    perTxLimit: row.per_tx_limit,
-    dailyLimit: row.daily_limit,
-    expiresAt: row.expires_at,
-    lastUsedAt: row.last_used_at,
-    revokedAt: row.revoked_at,
-    createdAt: row.created_at,
-    spentToday: 0,
-  }));
+  let grantsByKey = new Map<string, any>();
+  if ((results || []).some((row) => row.auth_method === 'oauth')) {
+    try {
+      const grants = await listAllOAuthGrants(c.env, session.x_id);
+      grantsByKey = new Map(
+        grants
+          .filter((grant) => typeof grant?.metadata?.agentKeyId === 'string')
+          .map((grant) => [grant.metadata.agentKeyId as string, grant])
+      );
+    } catch (err) {
+      console.warn('[agent] OAuth grant lookup failed:', err);
+    }
+  }
+
+  const now = Date.now();
+  const keys = (results || []).map((row): any => {
+    const grant = grantsByKey.get(row.id);
+    const expiresAtMs = row.expires_at ? Number(row.expires_at) : null;
+    const expired = Boolean(expiresAtMs && expiresAtMs < now);
+    const grantExpired = Boolean(grant?.expiresAt && grant.expiresAt * 1000 < now);
+    const connectionStatus = row.revoked_at
+      ? 'revoked'
+      : expired || grantExpired
+        ? 'expired'
+        : row.auth_method === 'oauth' && !grant
+          ? 'disconnected'
+          : 'active';
+    return {
+      id: row.id,
+      agentId: row.agent_id,
+      name: row.name,
+      label: row.label,
+      keyPrefix: row.key_prefix,
+      perTxLimit: row.per_tx_limit,
+      dailyLimit: row.daily_limit,
+      expiresAt: row.expires_at,
+      lastUsedAt: row.last_used_at,
+      revokedAt: row.revoked_at,
+      createdAt: row.created_at,
+      spentToday: 0,
+      authMethod: row.auth_method === 'oauth' ? 'oauth' : 'key',
+      oauthClientId: row.oauth_client_id,
+      oauthClientName: row.oauth_client_name,
+      oauthGrantId: grant?.id ?? null,
+      oauthConnectedAt: grant?.createdAt ? grant.createdAt * 1000 : null,
+      connectionStatus,
+    };
+  });
 
   if (keys.length) {
     try {
@@ -606,6 +666,15 @@ agentRouter.get('/keys', requireAuth({ passkeyVerified: true }), async (c) => {
 agentRouter.post('/keys/:id/revoke', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   const session = c.get('session')!;
   const id = c.req.param('id');
+  const key = await c.env.DB.prepare(
+    'SELECT auth_method FROM agent_keys WHERE id = ? AND x_id = ?'
+  )
+    .bind(id, session.x_id)
+    .first<{ auth_method: 'key' | 'oauth' }>();
+  if (!key) {
+    return c.json({ error: 'Key not found.', code: 'AGENT_KEY_NOT_FOUND' }, 404);
+  }
+
   const result = await c.env.DB.prepare(
     'UPDATE agent_keys SET revoked_at = ? WHERE id = ? AND x_id = ? AND revoked_at IS NULL'
   )
@@ -613,9 +682,18 @@ agentRouter.post('/keys/:id/revoke', requireAuth({ passkeyVerified: true }), req
     .run();
 
   if (!result.meta?.changes) {
-    return c.json({ error: 'Key not found.', code: 'AGENT_KEY_NOT_FOUND' }, 404);
+    return c.json({ id, revoked: true, oauthGrantsRevoked: 0 });
   }
-  return c.json({ id, revoked: true });
+
+  let oauthGrantsRevoked = 0;
+  if (key.auth_method === 'oauth') {
+    try {
+      oauthGrantsRevoked = await revokeOAuthGrantsForAgentKey(c.env, session.x_id, id);
+    } catch (err) {
+      console.warn('[agent] OAuth grant revoke failed (D1 key is already revoked):', err);
+    }
+  }
+  return c.json({ id, revoked: true, oauthGrantsRevoked });
 });
 
 /**
@@ -627,10 +705,15 @@ agentRouter.post('/keys/:id/delete', requireAuth({ passkeyVerified: true }), req
   const session = c.get('session')!;
   const id = c.req.param('id');
   const key = await c.env.DB.prepare(
-    'SELECT agent_id, revoked_at, expires_at FROM agent_keys WHERE id = ? AND x_id = ?'
+    'SELECT agent_id, revoked_at, expires_at, auth_method FROM agent_keys WHERE id = ? AND x_id = ?'
   )
     .bind(id, session.x_id)
-    .first<{ agent_id: string; revoked_at: number | null; expires_at: number | null }>();
+    .first<{
+      agent_id: string;
+      revoked_at: number | null;
+      expires_at: number | null;
+      auth_method: 'key' | 'oauth';
+    }>();
 
   if (!key) {
     return c.json({ error: 'Key not found.', code: 'AGENT_KEY_NOT_FOUND' }, 404);
@@ -645,6 +728,14 @@ agentRouter.post('/keys/:id/delete', requireAuth({ passkeyVerified: true }), req
       },
       409
     );
+  }
+
+  if (key.auth_method === 'oauth') {
+    try {
+      await revokeOAuthGrantsForAgentKey(c.env, session.x_id, id);
+    } catch (err) {
+      console.warn('[agent] OAuth grant cleanup failed before delete:', err);
+    }
   }
 
   await c.env.DB.batch([
