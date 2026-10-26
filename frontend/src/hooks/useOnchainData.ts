@@ -183,6 +183,16 @@ try {
 } catch {}
 
 const listeners = new Set<() => void>();
+let balancesErrorShared: string | null = null;
+
+function publishBalancesError(message: string | null) {
+  balancesErrorShared = message;
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {}
+  }
+}
 
 export function persistCache(patch: Partial<OnchainCache>) {
   const owner = cacheOwnerId();
@@ -207,6 +217,11 @@ export function persistCache(patch: Partial<OnchainCache>) {
 }
 
 export { globalCache };
+
+let inflightTokens: Promise<void> | null = null;
+let inflightBalances: Promise<void> | null = null;
+let inflightAddresses: Promise<void> | null = null;
+let inflightHistory: Promise<void> | null = null;
 
 export function useOnchainData(): UseOnchainDataResult {
   const [tokens, setTokens] = useState<OnchainToken[]>(globalCache.tokens);
@@ -238,6 +253,7 @@ export function useOnchainData(): UseOnchainDataResult {
       setHasIntentAccount(globalCache.hasIntentAccount);
       setDepositAddresses(globalCache.depositAddresses);
       setTransactions(globalCache.transactions);
+      setBalancesError(balancesErrorShared);
     };
     listeners.add(sync);
     return () => {
@@ -247,94 +263,141 @@ export function useOnchainData(): UseOnchainDataResult {
 
   // ── Load supported tokens (no auth required) ──────────────────────────────
   const loadTokens = useCallback(async () => {
-    try {
-      if (globalCache.tokens.length === 0) setIsLoadingTokens(true);
-      const toks = await fetchOnchainTokens();
-      if (toks.length > 0) {
-        setTokens(toks);
-        persistCache({ tokens: toks });
-      }
-    } catch (err: any) {
-      console.warn('[useOnchainData] tokens:', err);
-      setError(err.message);
-    } finally {
+    if (inflightTokens) {
+      await inflightTokens;
+      setTokens(globalCache.tokens);
       setIsLoadingTokens(false);
+      return;
     }
+    const task = (async () => {
+      try {
+        if (globalCache.tokens.length === 0) setIsLoadingTokens(true);
+        const toks = await fetchOnchainTokens();
+        if (toks.length > 0) {
+          setTokens(toks);
+          persistCache({ tokens: toks });
+        }
+      } catch (err: any) {
+        console.warn('[useOnchainData] tokens:', err);
+        setError(err.message);
+      } finally {
+        inflightTokens = null;
+        setIsLoadingTokens(false);
+      }
+    })();
+    inflightTokens = task;
+    await task;
   }, []);
 
   // ── Load user's intent account balances ───────────────────────────────────
   const loadBalances = useCallback(async () => {
-    try {
-      if (globalCache.balances.length === 0 && !globalCache.hasIntentAccount) {
-        setIsLoadingBalances(true);
-      }
-      setError(null);
-
-      // Check intent account first
-      const account = await fetchIntentAccount();
-      setNearAccount(account.nearAccount);
-      setHasIntentAccount(account.hasIntentAccount);
-      setAccountError(account.hasIntentAccount ? null : (account.provisionError ?? null));
-      persistCache({ nearAccount: account.nearAccount, hasIntentAccount: account.hasIntentAccount });
-
-      if (account.hasIntentAccount && account.nearAccount) {
-        const response = await fetchOnchainBalances();
-        if (response) {
-          setBalances(response.balances);
-          persistCache({ balances: response.balances });
-          setBalancesError(null);
-        } else {
-          // fetchOnchainBalances swallows a 400 into `null`. That is a failed
-          // read, NOT an empty wallet — keeping the previous snapshot with no
-          // marker is what made a just-paid recipient see a confident 0.00.
-          setBalancesError('Could not load your balance.');
-        }
-      } else {
-        // The read SUCCEEDED and says there is no account yet — that is an
-        // onboarding state, not a failure, so it must not look like an error.
-        // A real failure throws above and lands in catch.
-        setBalancesError(account.provisionError || null);
-      }
-    } catch (err: any) {
-      console.warn('[useOnchainData] balances:', err);
-      setBalancesError(err?.message || 'Could not load your balance.');
-    } finally {
+    if (inflightBalances) {
+      await inflightBalances;
+      setBalances(globalCache.balances);
+      setNearAccount(globalCache.nearAccount);
+      setHasIntentAccount(globalCache.hasIntentAccount);
+      setBalancesError(balancesErrorShared);
       setIsLoadingBalances(false);
+      return;
     }
+    const task = (async () => {
+      try {
+        if (globalCache.balances.length === 0 && !globalCache.hasIntentAccount) {
+          setIsLoadingBalances(true);
+        }
+        setError(null);
+
+        // Check intent account first
+        const account = await fetchIntentAccount();
+        setNearAccount(account.nearAccount);
+        setHasIntentAccount(account.hasIntentAccount);
+        setAccountError(account.hasIntentAccount ? null : (account.provisionError ?? null));
+        persistCache({ nearAccount: account.nearAccount, hasIntentAccount: account.hasIntentAccount });
+
+        if (account.hasIntentAccount && account.nearAccount) {
+          const response = await fetchOnchainBalances();
+          if (response) {
+            setBalances(response.balances);
+            balancesErrorShared = null;
+            persistCache({ balances: response.balances });
+          } else {
+            // fetchOnchainBalances swallows a 400 into `null`. That is a failed
+            // read, NOT an empty wallet — keeping the previous snapshot with no
+            // marker is what made a just-paid recipient see a confident 0.00.
+            publishBalancesError('Could not load your balance.');
+          }
+        } else {
+          // The read SUCCEEDED and says there is no account yet — that is an
+          // onboarding state, not a failure, so it must not look like an error.
+          // A real failure throws above and lands in catch.
+          publishBalancesError(account.provisionError || null);
+        }
+      } catch (err: any) {
+        console.warn('[useOnchainData] balances:', err);
+        publishBalancesError(err?.message || 'Could not load your balance.');
+      } finally {
+        inflightBalances = null;
+        setIsLoadingBalances(false);
+      }
+    })();
+    inflightBalances = task;
+    await task;
   }, []);
 
   // ── Load all deposit addresses ─────────────────────────────────────────────
   const loadDepositAddresses = useCallback(async () => {
-    try {
-      if (globalCache.depositAddresses.length === 0) {
-        setIsLoadingAddresses(true);
-      }
-      const addresses = await fetchAllDepositAddresses();
-      if (addresses.length > 0) {
-        setDepositAddresses(addresses);
-        persistCache({ depositAddresses: addresses });
-      }
-    } catch (err: any) {
-      console.warn('[useOnchainData] deposit addresses:', err);
-    } finally {
+    if (inflightAddresses) {
+      await inflightAddresses;
+      setDepositAddresses(globalCache.depositAddresses);
       setIsLoadingAddresses(false);
+      return;
     }
+    const task = (async () => {
+      try {
+        if (globalCache.depositAddresses.length === 0) {
+          setIsLoadingAddresses(true);
+        }
+        const addresses = await fetchAllDepositAddresses();
+        if (addresses.length > 0) {
+          setDepositAddresses(addresses);
+          persistCache({ depositAddresses: addresses });
+        }
+      } catch (err: any) {
+        console.warn('[useOnchainData] deposit addresses:', err);
+      } finally {
+        inflightAddresses = null;
+        setIsLoadingAddresses(false);
+      }
+    })();
+    inflightAddresses = task;
+    await task;
   }, []);
 
   // ── Load transaction history ───────────────────────────────────────────────
   const loadHistory = useCallback(async () => {
-    try {
-      if (globalCache.transactions.length === 0) {
-        setIsLoadingHistory(true);
-      }
-      const response = await fetchOnchainHistory(50);
-      setTransactions(response.transactions);
-      persistCache({ transactions: response.transactions });
-    } catch (err: any) {
-      console.warn('[useOnchainData] history:', err);
-    } finally {
+    if (inflightHistory) {
+      await inflightHistory;
+      setTransactions(globalCache.transactions);
       setIsLoadingHistory(false);
+      return;
     }
+    const task = (async () => {
+      try {
+        if (globalCache.transactions.length === 0) {
+          setIsLoadingHistory(true);
+        }
+        const response = await fetchOnchainHistory(50);
+        setTransactions(response.transactions);
+        persistCache({ transactions: response.transactions });
+      } catch (err: any) {
+        console.warn('[useOnchainData] history:', err);
+      } finally {
+        inflightHistory = null;
+        setIsLoadingHistory(false);
+      }
+    })();
+    inflightHistory = task;
+    await task;
   }, []);
 
   // ── Full refresh ──────────────────────────────────────────────────────────

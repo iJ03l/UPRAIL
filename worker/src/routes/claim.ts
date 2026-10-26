@@ -42,6 +42,7 @@ import {
   getConfidentialAssetBalance,
   getConfidentialBalances,
   isConfidentialRailEnabled,
+  payEscrowPrivate,
   submitPrivateWithdrawal,
   submitEscrowPrivateTransfer,
   waitForSettlement,
@@ -685,30 +686,32 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
             }
             claimResponse = await resp.json();
           }
-        } else if (isConfidentialRailEnabled(c.env) && payment.privacy_rail === 'confidential') {
+        } else if (
+          isConfidentialRailEnabled(c.env) &&
+          payment.privacy_rail === 'confidential' &&
+          (await nearRpc.isOneClickSupportedAsset(c.env, payment.asset).catch(() => true))
+        ) {
           // Private claim: escrow pays the recipient's Confidential Intents
           // account, so the payout is not linkable to the original sender.
-          const privateTransfer = await submitEscrowPrivateTransfer(c.env, {
+          // `payEscrowPrivate` uses escrow's confidential balance first, or
+          // shields from escrow's public/plain balance when claiming creator fees.
+          const payout = await payEscrowPrivate(c.env, {
             asset: payment.asset,
             amount: payment.amount,
             recipientAccount: recipientNearAccount,
           });
-          const settlement = await waitForSettlement(c.env, '', privateTransfer.depositAddress, {
-            signer: 'escrow',
-            timeoutMs: 60_000,
-          }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
-          const normalized = String(settlement.status || 'UNKNOWN').toUpperCase();
+          const normalized = String(payout.status || 'UNKNOWN').toUpperCase();
           if (normalized === 'SUCCESS') {
             claimResponse = {
               payment: {
                 ...payment,
                 status: PaymentStatus.CLAIMED,
-                claim_tx_hash: privateTransfer.intentHash,
-                claim_deposit_address: privateTransfer.depositAddress,
+                claim_tx_hash: payout.intentHash,
+                claim_deposit_address: payout.depositAddress,
                 settlement_status: 'SUCCESS',
                 updated_at: Date.now(),
               },
-              txHash: privateTransfer.intentHash,
+              txHash: payout.intentHash,
             };
           } else if (normalized === 'FAILED' || normalized === 'REFUNDED') {
             throw new Error(`Confidential claim ${normalized.toLowerCase()} — no funds moved to the recipient`);
@@ -719,12 +722,12 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
               payment: {
                 ...payment,
                 status: PaymentStatus.CLAIMED,
-                claim_tx_hash: privateTransfer.intentHash,
-                claim_deposit_address: privateTransfer.depositAddress,
+                claim_tx_hash: payout.intentHash,
+                claim_deposit_address: payout.depositAddress,
                 settlement_status: normalized,
                 updated_at: Date.now(),
               },
-              txHash: privateTransfer.intentHash,
+              txHash: payout.intentHash,
             };
             try {
               await c.env.DB.prepare(
@@ -733,8 +736,8 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
                   WHERE id = ?`
               )
                 .bind(
-                  privateTransfer.intentHash,
-                  privateTransfer.depositAddress,
+                  payout.intentHash,
+                  payout.depositAddress,
                   normalized,
                   Date.now(),
                   paymentId
@@ -1472,9 +1475,12 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
     }
 
     // Confidential rail: spend the user's Confidential Intents balance with a
-    // signed 1Click intent. Native-only assets are explicitly refused here
-    // instead of silently dropping to the public rail.
-    if (isConfidentialRailEnabled(c.env)) {
+    // signed 1Click intent for 1Click-supported assets. Non-1Click native NEAR
+    // launchpad tokens settle via the NEAR onchain/native withdrawal path below.
+    const oneClickSupported = await nearRpc
+      .isOneClickSupportedAsset(c.env, asset)
+      .catch(() => true);
+    if (isConfidentialRailEnabled(c.env) && oneClickSupported) {
       return await handleConfidentialWithdraw(c, session, {
         destinationAddress,
         asset,

@@ -910,8 +910,10 @@ agentRouter.get('/payments', requireAgent(), async (c) => {
     `SELECT id, sender_x_id, sender_x_handle, recipient_handle, asset, amount, memo, status, created_at, expires_at
        FROM payments
       WHERE sender_x_id = ?
-         OR recipient_x_id = ?
-         OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?))
+         OR (
+           (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?)))
+           AND status NOT IN ('PENDING', 'DEPOSIT_WAITING', 'CANCELLED')
+         )
       ORDER BY created_at DESC
       LIMIT 50`
   )

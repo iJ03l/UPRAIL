@@ -53,6 +53,7 @@ export const AppHome: React.FC = () => {
     hasIntentAccount,
     isLoadingBalances,
     accountError,
+    balancesError,
     transactions,
     isLoadingHistory: isLoadingOnchainHistory,
     refreshHistory,
@@ -351,12 +352,7 @@ export const AppHome: React.FC = () => {
 
             {/* Live asset breakdown from onchain */}
             <div className="flex flex-wrap gap-2 pt-2 border-t border-stone-100">
-              {onchainError ? (
-                <span className="text-xs font-mono text-red-500 flex items-center space-x-1">
-                  <AlertCircle className="w-3 h-3" />
-                  <span>{onchainError}</span>
-                </span>
-              ) : balances.length > 0 ? (
+              {balances.length > 0 ? (
                 balances.map((b) => {
                   const usd = hideBalance ? null : balanceUsd(b, tokens);
                   return (
@@ -378,6 +374,18 @@ export const AppHome: React.FC = () => {
                   <Skeleton variant="chip" className="w-20" />
                   <Skeleton variant="chip" className="w-16" />
                 </div>
+              ) : balancesError || onchainError ? (
+                <span className="text-xs font-mono text-red-500 flex items-center space-x-1">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>{balancesError || onchainError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void refreshBalances()}
+                    className="underline underline-offset-2 hover:text-red-700 cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                </span>
               ) : (
                 <span className="text-xs font-mono text-stone-400 py-0.5">
                   {isLoadingBalances ? 'Fetching onchain balances...' : 'No balances yet in your intent account'}

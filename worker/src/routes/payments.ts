@@ -28,6 +28,8 @@ import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { publicErrorMessage } from '../utils/errors';
 import {
+  ensureConfidentialFunds,
+  formatAtomic,
   getConfidentialAssetBalance,
   isConfidentialRailEnabled,
   submitPrivateSendFromPublic,
@@ -713,7 +715,11 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     let feeDispatchStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
     let feeDispatchError: string | null = null;
 
-    if (isConfidentialRailEnabled(c.env) && rail !== 'intents') {
+    const oneClickSupported = await nearRpc
+      .isOneClickSupportedAsset(c.env, body.asset)
+      .catch(() => true);
+
+    if (isConfidentialRailEnabled(c.env) && oneClickSupported && rail !== 'intents') {
       return await failSend(
         'CONFIDENTIAL_UNAVAILABLE',
         'This asset cannot settle privately right now. No funds left your account.',
@@ -725,13 +731,16 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     // (or public Intents balance, shielded in the same signed intent) into the
     // recipient's confidential account. Escrowed sends land in pooled escrow's
     // confidential balance so the eventual claim is private too.
+    // Non-1Click launchpad tokens (`uptober.nearlytrade.near`, etc.) are not in
+    // 1Click's `/v0/tokens` registry and settle via the onchain Intents / native
+    // NEP-141 rail below instead of failing `/v0/quote` with `tokenIn is not valid`.
     let privacyRail: 'public' | 'confidential' = 'public';
     let settlementStatus: string | null = null;
     let claimDepositAddress: string | null = null;
     let confirmedAt: number | null = null;
     let privateRailSettled = false;
 
-    if (isConfidentialRailEnabled(c.env) && rail === 'intents') {
+    if (isConfidentialRailEnabled(c.env) && rail === 'intents' && oneClickSupported) {
       const privateToken =
         nearRpc.resolveTokenForAsset(body.asset, await nearRpc.getSupportedTokens(c.env)) ||
         (await nearRpc.resolveRheaToken(c.env, body.asset));
@@ -743,8 +752,10 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       const senderNear = await nearRpc.resolveUserNearAccount(c.env, session!);
 
       let source: 'confidential' | 'public' = 'public';
+      let confidentialAtomic = 0n;
       try {
         const confidential = await getConfidentialAssetBalance(c.env, session!.x_id, body.asset);
+        confidentialAtomic = confidential.amountAtomic;
         if (confidential.amountAtomic >= grossAtomic) source = 'confidential';
       } catch (confErr) {
         console.warn('[send] confidential balance probe failed:', confErr);
@@ -758,12 +769,27 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
               nearRpc.assetsMatch(b.nearContractId, privateToken.nearContractId)
           )
           .reduce((sum, b) => sum + BigInt(b.amount || '0'), 0n);
-        if (publicAtomic < grossAtomic) {
+        if (confidentialAtomic > 0n && publicAtomic < grossAtomic) {
+          // User's balance is split across Confidential Intents and public/plain;
+          // shield the shortfall into Confidential Intents first, then send from
+          // the combined confidential balance.
+          try {
+            await ensureConfidentialFunds(c.env, session!.x_id, body.asset, grossAtomic);
+            source = 'confidential';
+          } catch (shieldErr: any) {
+            return await failSend(
+              'SETTLEMENT_FAILED',
+              publicErrorMessage(shieldErr, 'Could not shield funds for this send'),
+              502
+            );
+          }
+        } else if (publicAtomic < grossAtomic) {
+          const shortfallAtomic = grossAtomic - publicAtomic;
           const deposit = await nearRpc.depositPlainBalanceToIntents(
             c.env,
             session!.x_id,
             body.asset,
-            body.amount,
+            formatAtomic(shortfallAtomic.toString(), privateToken.decimals),
             senderNear
           );
           if (!deposit.deposited) {
@@ -1225,12 +1251,18 @@ paymentsRouter.get('/payments', requireAuth({ passkeyVerified: true }), async (c
     const session = c.get('session')!;
     const userHandle = session.x_handle.toLowerCase();
 
+    // The sender sees every attempt (including failed ones, so they know why).
+    // A recipient only sees payments that actually reached them: a send that
+    // was still in flight (PENDING / DEPOSIT_WAITING) or never settled
+    // (CANCELLED, e.g. SETTLEMENT_FAILED) never moved funds to them.
     const { results } = await c.env.DB.prepare(
       `
       SELECT * FROM payments
       WHERE sender_x_id = ?
-         OR recipient_x_id = ?
-         OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = ?)
+         OR (
+           (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = ?))
+           AND status NOT IN ('PENDING', 'DEPOSIT_WAITING', 'CANCELLED')
+         )
       ORDER BY created_at DESC
       LIMIT 50
     `
