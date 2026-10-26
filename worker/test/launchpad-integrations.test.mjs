@@ -9,9 +9,13 @@ import {
   verifyLaunchpadProofSignature,
 } from '../dist/launchpadAuth.bundle.mjs';
 import {
+  deniedLaunchpadTarget,
+  launchStepReady,
   parseLaunchpadClaimConfig,
   parseLaunchpadVerificationConfig,
   registerLaunchpadToken,
+  registrationSignerAllowed,
+  tokenSymbolImpersonatesUprail,
 } from '../dist/launchpadIntegrations.bundle.mjs';
 import {
   creatorFeeCardKey,
@@ -24,6 +28,7 @@ import {
   isAccessKeyPermission,
   nep413Serialize,
   parseNearFtEvents,
+  collectFtTransfers,
 } from '../dist/nearRpc.bundle.mjs';
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -137,6 +142,82 @@ describe('launchpad configuration parsing', () => {
     assert.equal(parsed.config.feeArg, 'launch_id');
   });
 
+  it('parses the JustHoot v2 dev check and rejects other factories', () => {
+    const parsed = parseLaunchpadVerificationConfig({
+      kind: 'jh_v2_dev',
+      launchpad: 'v2-launchpad.justhoot.near',
+    });
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.config.launchpad, 'v2-launchpad.justhoot.near');
+    assert.equal(
+      parseLaunchpadVerificationConfig({ kind: 'jh_v2_dev', launchpad: 'launchpad.justhoot.near' }).ok,
+      false
+    );
+  });
+
+  it('lets a Nearly creator sign and only the JustHoot dev sign', () => {
+    assert.equal(
+      registrationSignerAllowed({
+        kind: 'factory',
+        signerId: 'creator.near',
+        parent: 'nearlytrade.near',
+        creator: 'creator.near',
+      }),
+      true
+    );
+    assert.equal(
+      registrationSignerAllowed({
+        kind: 'factory',
+        signerId: 'someone.near',
+        parent: 'nearlytrade.near',
+        creator: 'creator.near',
+      }),
+      false
+    );
+    assert.equal(
+      registrationSignerAllowed({
+        kind: 'jh_v2_dev',
+        signerId: 'dev.near',
+        parent: 'v2-launchpad.justhoot.near',
+        devId: 'dev.near',
+      }),
+      true
+    );
+    assert.equal(
+      registrationSignerAllowed({
+        kind: 'jh_v2_dev',
+        signerId: 'v2-launchpad.justhoot.near',
+        parent: 'v2-launchpad.justhoot.near',
+        devId: 'dev.near',
+      }),
+      false
+    );
+  });
+
+  it('rejects impersonation targets and unfinished launches', () => {
+    assert.equal(deniedLaunchpadTarget('up.v2-launchpad.justhoot.near'), 'up.v2-launchpad.justhoot.near');
+    assert.equal(deniedLaunchpadTarget('za.v2-launchpad.justhoot.near', 'uprailworld.near'), 'uprailworld.near');
+    assert.equal(deniedLaunchpadTarget('za.v2-launchpad.justhoot.near', 'free-name.herewallet.near'), null);
+    assert.equal(tokenSymbolImpersonatesUprail('UPRAIL'), true);
+    assert.equal(tokenSymbolImpersonatesUprail('ZA'), false);
+    assert.equal(launchStepReady({ step: 'Done', creator: 'a.near' }), true);
+    assert.equal(launchStepReady({ step: 'Pool', creator: 'a.near' }), false);
+    assert.equal(launchStepReady({ creator: 'a.near' }), true);
+  });
+
+  it('rejects a denylisted token before proof checks', async () => {
+    const denied = await registerLaunchpadToken(
+      {},
+      {
+        token: 'up.v2-launchpad.justhoot.near',
+        handle: 'alice',
+        launchpad: { id: 'justhoot' },
+      }
+    );
+    assert.equal(denied.ok, false);
+    assert.equal(denied.code, 'DENIED');
+  });
+
   it('rejects malformed verification and claim configs', () => {
     assert.equal(parseLaunchpadVerificationConfig({ kind: 'nope' }).ok, false);
     assert.equal(
@@ -235,6 +316,78 @@ describe('launchpad claim amount parsing', () => {
         amountAtomic: '175',
       },
     ]);
+  });
+
+  it('reads an adapter payout from an inner ft_transfer and from wrap.near logs', () => {
+    const fromReceipt = collectFtTransfers({
+      receipts: [
+        {
+          receipt_id: 'r1',
+          receiver_id: 'wrap.near',
+          receipt: {
+            Action: {
+              actions: [
+                {
+                  FunctionCall: {
+                    method_name: 'ft_transfer',
+                    args: Buffer.from(
+                      JSON.stringify({
+                        receiver_id: 'escrow.uprail.near',
+                        amount: '1000',
+                        memo: 'Fees to @alice via UPRAIL',
+                      })
+                    ).toString('base64'),
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+      receipts_outcome: [
+        {
+          id: 'r1',
+          outcome: {
+            executor_id: 'wrap.near',
+            logs: ['Transfer 1000 from launchpad.near to escrow.uprail.near', 'Memo: Fees to @alice via UPRAIL'],
+          },
+        },
+      ],
+    });
+    assert.equal(fromReceipt.length, 1);
+    assert.equal(fromReceipt[0].memo, 'Fees to @alice via UPRAIL');
+    assert.equal(fromReceipt[0].amountAtomic, '1000');
+
+    const fromLogs = collectFtTransfers({
+      receipts_outcome: [
+        {
+          id: 'r2',
+          outcome: {
+            executor_id: 'wrap.near',
+            logs: [
+              'Transfer 15822714681440443099528 from v2-launchpad.justhoot.near to escrow.uprail.near',
+              'Memo: Fees to @bob via UPRAIL',
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(fromLogs[0].to, 'escrow.uprail.near');
+    assert.equal(fromLogs[0].memo, 'Fees to @bob via UPRAIL');
+    assert.equal(
+      collectFtTransfers({
+        receipts_outcome: [
+          {
+            id: 'r3',
+            outcome: {
+              executor_id: 'wrap.near',
+              logs: ['Memo: {"purpose":"fee_split","role":"token_owner"}'],
+            },
+          },
+        ],
+      }).length,
+      0
+    );
   });
 });
 

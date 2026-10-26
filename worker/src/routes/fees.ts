@@ -7,6 +7,7 @@
  *
  *  - POST /prepare — register escrow storage on a token and start watching it
  *  - POST /route   — sync a token's live escrow balance (or verify one txHash)
+ *  - POST /adapter — credit an X handle from a launchpad ft_transfer memo
  *  - POST /sync    — on-demand RPC scan across tracked / held tokens
  *
  * Every fee is verified against its on-chain transaction or live token balance
@@ -29,6 +30,7 @@ import {
   trackLaunchpadToken,
   syncTokenLaunchpadFees,
   syncAllLaunchpadFees,
+  recordAdapterFees,
 } from '../services/launchpadFees';
 
 export const feesRouter = new Hono<AppContext>();
@@ -182,6 +184,25 @@ feesRouter.post('/route', async (c) => {
     },
     201
   );
+});
+
+/**
+ * POST /api/fees/adapter
+ * Launchpad payout adapter. The launchpad does not change fee_to or dev_id.
+ * It sends ft_transfer to escrow.uprail.near with memo
+ * "Fees to @handle via UPRAIL", then submits that transaction hash.
+ * The handle is taken from the on-chain memo.
+ */
+feesRouter.post('/adapter', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { txHash?: unknown } | null;
+  const txHash = typeof body?.txHash === 'string' ? body.txHash.trim() : '';
+  if (!txHash) return jsonError(c, 400, 'A transaction hash is required.', 'INVALID_TX');
+
+  const result = await recordAdapterFees(c.env, txHash);
+  if (!result.ok) {
+    return jsonError(c, 422, result.error || 'Could not credit this payout.', 'FEE_NOT_ROUTED');
+  }
+  return c.json({ ok: true, legs: result.legs }, 201);
 });
 
 /**

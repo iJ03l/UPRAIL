@@ -29,6 +29,7 @@ export interface OnchainToken {
   chainId?: string;
   priceUsd?: number;
   category?: TokenCategory;
+  oneClickSupported?: boolean;
 }
 
 /**
@@ -289,6 +290,7 @@ export function rheaToOnchainToken(e: RheaTokenEntry): OnchainToken {
     chain: 'near',
     priceUsd: undefined,
     category: isMemeAsset(e.symbol, e.contractId) ? 'memes' : 'all',
+    oneClickSupported: false,
   };
 }
 
@@ -895,7 +897,47 @@ export async function getSupportedTokens(env: Env): Promise<OnchainToken[]> {
  * leaving every token without a price.
  */
 let supportedTokensMem: { at: number; tokens: OnchainToken[] } | null = null;
+let oneClickAssetSetMem: Set<string> | null = null;
 const SUPPORTED_TOKENS_MEM_TTL_MS = 30_000;
+
+/**
+ * Returns true if the asset is listed in 1Click's `/v0/tokens` registry and can
+ * be quoted via `POST /v0/quote` (Confidential Intents / cross-chain swaps).
+ * Native NEAR launchpad tokens merged from Rhea/Ref (`uptober.nearlytrade.near`,
+ * `robin-3.nearlytrade.near`, etc.) are NOT in 1Click's registry and fail with
+ * `400 tokenIn is not valid` on `/v0/quote`, so they must settle on the
+ * on-chain Intents / native NEP-141 rail.
+ */
+export async function isOneClickSupportedAsset(env: Env, asset: string): Promise<boolean> {
+  const raw = (asset || '').trim().toLowerCase();
+  if (!raw) return false;
+  const clean = raw.startsWith('nep141:') ? raw.slice(7) : raw;
+
+  // Populates `oneClickAssetSetMem` from the live 1Click registry on a miss.
+  await getSupportedTokens(env);
+  // Registry unreachable: nothing can be quoted on 1Click right now either,
+  // so the on-chain rail is the only one that can settle.
+  if (!oneClickAssetSetMem) return false;
+
+  if (
+    oneClickAssetSetMem.has(raw) ||
+    oneClickAssetSetMem.has(clean) ||
+    oneClickAssetSetMem.has(`nep141:${clean}`)
+  ) {
+    return true;
+  }
+
+  // Symbol-style input (e.g. "USDC"): resolve via the live merged registry and
+  // re-check the resolved asset id against the 1Click set.
+  const matched = resolveTokenForAsset(asset, supportedTokensMem?.tokens || []);
+  if (!matched) return false;
+  const id = (matched.defuse_asset_id || '').toLowerCase();
+  const contract = (matched.nearContractId || '').toLowerCase();
+  return (
+    (!!id && oneClickAssetSetMem.has(id)) ||
+    (!!contract && oneClickAssetSetMem.has(contract))
+  );
+}
 
 async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
   const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
@@ -927,6 +969,7 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
         const tokens: OnchainToken[] = [];
         const seenAssetKeys = new Set<string>();
         const cgIdByAsset: Record<string, string> = {};
+        const rawOneClickSet = new Set<string>();
 
         for (const t of list) {
           const assetId = t.assetId || t.defuse_asset_id || '';
@@ -936,6 +979,15 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
           const { chain: parsedChain, contractId: parsedContractId } = parseDefuseAssetId(assetId);
           const contractAddress = t.contractAddress || parsedContractId;
           const rawSymbol = (t.symbol || '').trim();
+
+          rawOneClickSet.add(String(assetId).toLowerCase());
+          if (parsedContractId) {
+            rawOneClickSet.add(String(parsedContractId).toLowerCase());
+            rawOneClickSet.add(`nep141:${String(parsedContractId).toLowerCase()}`);
+          }
+          if (contractAddress) {
+            rawOneClickSet.add(String(contractAddress).toLowerCase());
+          }
 
           // Genuine junk still goes: no symbol or an absurdly long one.
           // Memes are no longer treated as spam — they are classified onto the
@@ -1002,8 +1054,10 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
             // whether that means 1.0 (stablecoin) or 0 (unknown).
             priceUsd: typeof t.price === 'number' ? t.price : undefined,
             category,
+            oneClickSupported: true,
           });
         }
+        oneClickAssetSetMem = rawOneClickSet;
 
         // Priority sorting: NEAR, USDC, USDT, ETH, BTC, SOL first
         const priorityOrder: Record<string, number> = {
@@ -1114,45 +1168,9 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
     console.warn('[nearRpc] intents viewFunction failed:', err);
   }
 
-  // Fallback for offline, sandbox, or network partition
-  return [
-    {
-      defuse_asset_id: 'nep141:wrap.near',
-      symbol: 'NEAR',
-      name: 'NEAR Protocol',
-      decimals: 24,
-      icon: getOnchainIcon('near'),
-      chain: 'near',
-      nearContractId: 'wrap.near',
-    },
-    {
-      defuse_asset_id: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-      symbol: 'USDC',
-      name: 'USD Coin',
-      decimals: 6,
-      icon: getOnchainIcon('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'),
-      chain: 'near',
-      nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
-    },
-    {
-      defuse_asset_id: 'nep141:usdt.tether-token.near',
-      symbol: 'USDT',
-      name: 'Tether USD',
-      decimals: 6,
-      icon: getOnchainIcon('usdt.tether-token.near'),
-      chain: 'near',
-      nearContractId: 'usdt.tether-token.near',
-    },
-    {
-      defuse_asset_id: 'nep141:eth.bridge.near',
-      symbol: 'ETH',
-      name: 'Ethereum',
-      decimals: 18,
-      icon: getOnchainIcon('eth.bridge.near'),
-      chain: 'near',
-      nearContractId: 'eth.bridge.near',
-    },
-  ];
+  // No hardcoded fallback: every asset must come from a live registry. An
+  // empty result is not memoised by getSupportedTokens, so the next call retries.
+  return [];
 }
 
 /**
@@ -1517,6 +1535,7 @@ export async function getIntentBalances(
       chunks.push(tokenIds.slice(i, i + chunkSize));
     }
 
+    let batchSucceeded = false;
     await Promise.allSettled(
       chunks.map(async (chunk) => {
       try {
@@ -1526,6 +1545,7 @@ export async function getIntentBalances(
         });
 
         if (Array.isArray(rawAmounts)) {
+          batchSucceeded = true;
           for (let j = 0; j < chunk.length; j++) {
             const assetId = chunk[j];
             const rawAmount = String(rawAmounts[j] ?? '0');
@@ -1562,10 +1582,12 @@ export async function getIntentBalances(
       })
     );
 
-    if (balances.length > 0) {
+    if (batchSucceeded || balances.length > 0) {
       // Registry-backed prices only cover what the registry lists; launchpad
       // rows arrive here unpriced and get their price from their DCL pool.
-      await attachMissingPrices(env, balances);
+      if (balances.length > 0) {
+        await attachMissingPrices(env, balances);
+      }
       return balances;
     }
   } catch (err) {
@@ -2729,6 +2751,101 @@ export interface NearTxProbe {
  * flows use this to read the exact amount a contract moved into escrow, instead
  * of trusting a pre-claim snapshot that fees may have outgrown.
  */
+/**
+ * Fungible transfers inside a finalized transaction, including cross-contract
+ * receipts. Launchpad adapters pay escrow with `ft_transfer` and put the X
+ * handle in `memo`. `ft_transfer_call` is ignored: escrow is a plain account
+ * and that call refunds.
+ */
+export function collectFtTransfers(result: any): NearTxTransfer[] {
+  const out: NearTxTransfer[] = [];
+  const covered = new Set<string>();
+  const receipts = Array.isArray(result?.receipts) ? result.receipts : [];
+  for (const receipt of receipts) {
+    const id = String(receipt?.receipt_id || '');
+    const contract = String(receipt?.receiver_id || '').toLowerCase();
+    const actions =
+      receipt?.receipt?.Action?.actions ||
+      receipt?.receipt?.action?.actions ||
+      [];
+    for (const action of actions) {
+      const call = action?.FunctionCall;
+      if (!call || call.method_name !== 'ft_transfer') continue;
+      try {
+        const args = JSON.parse(decodeB64Utf8(call.args || ''));
+        if (!args?.receiver_id || args.amount === undefined) continue;
+        out.push({
+          kind: 'ft',
+          to: String(args.receiver_id),
+          amountAtomic: String(args.amount),
+          contract: contract || undefined,
+          memo: args.memo == null ? undefined : String(args.memo),
+        });
+        if (id) covered.add(id);
+      } catch {
+        // unreadable args: fall through to logs for this receipt
+      }
+    }
+  }
+
+  const outcomes = Array.isArray(result?.receipts_outcome) ? result.receipts_outcome : [];
+  for (const outcome of outcomes) {
+    const id = String(outcome?.id || '');
+    if (id && covered.has(id)) continue;
+    const contract = String(outcome?.outcome?.executor_id || '').toLowerCase();
+    const logs = Array.isArray(outcome?.outcome?.logs) ? outcome.outcome.logs : [];
+    let sawEvent = false;
+    for (const log of logs) {
+      if (typeof log !== 'string' || !log.startsWith('EVENT_JSON:')) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(log.slice('EVENT_JSON:'.length));
+      } catch {
+        continue;
+      }
+      if (parsed?.standard !== 'nep141' || parsed?.event !== 'ft_transfer') continue;
+      const data = Array.isArray(parsed.data) ? parsed.data : [parsed.data];
+      for (const item of data) {
+        if (!item || item.amount === undefined) continue;
+        const to = item.new_owner_id || item.receiver_id;
+        if (!to) continue;
+        sawEvent = true;
+        out.push({
+          kind: 'ft',
+          to: String(to),
+          amountAtomic: String(item.amount),
+          contract: contract || undefined,
+          memo: item.memo == null ? undefined : String(item.memo),
+        });
+      }
+    }
+    if (sawEvent) continue;
+    let pending: NearTxTransfer | null = null;
+    for (const log of logs) {
+      if (typeof log !== 'string') continue;
+      const transfer = /^Transfer (\d+) from \S+ to (\S+)$/.exec(log);
+      if (transfer) {
+        if (pending) out.push(pending);
+        pending = {
+          kind: 'ft',
+          to: transfer[2],
+          amountAtomic: transfer[1],
+          contract: contract || undefined,
+        };
+        continue;
+      }
+      const memo = /^Memo: (.*)$/.exec(log);
+      if (memo && pending) {
+        pending.memo = memo[1];
+        out.push(pending);
+        pending = null;
+      }
+    }
+    if (pending) out.push(pending);
+  }
+  return out;
+}
+
 export function parseNearFtEvents(result: any): NearFtEvent[] {
   const events: NearFtEvent[] = [];
   const receivers = new Map<string, string>();
@@ -2827,25 +2944,32 @@ export async function probeNearTransaction(
   for (const action of tx.actions || []) {
     if (action?.Transfer?.deposit !== undefined) {
       transfers.push({ kind: 'native', to: executor || '', amountAtomic: String(action.Transfer.deposit) });
-    } else if (action?.FunctionCall) {
-      const method = action.FunctionCall.method_name;
-      if (method === 'ft_transfer' || method === 'ft_transfer_call') {
-        try {
-          const a = JSON.parse(decodeB64Utf8(action.FunctionCall.args || ''));
-          if (a?.receiver_id && a?.amount !== undefined) {
-            transfers.push({
-              kind: 'ft',
-              to: String(a.receiver_id),
-              amountAtomic: String(a.amount),
-              contract: executor || undefined,
-              memo: a.memo ? String(a.memo) : undefined,
-            });
-          }
-        } catch {}
-      }
+    } else if (action?.FunctionCall?.method_name === 'ft_transfer') {
+      try {
+        const a = JSON.parse(decodeB64Utf8(action.FunctionCall.args || ''));
+        if (a?.receiver_id && a?.amount !== undefined) {
+          transfers.push({
+            kind: 'ft',
+            to: String(a.receiver_id),
+            amountAtomic: String(a.amount),
+            contract: executor || undefined,
+            memo: a.memo == null ? undefined : String(a.memo),
+          });
+        }
+      } catch {}
     }
   }
-  return { found: true, success, signer, executor, transfers, events: parseNearFtEvents(result) };
+  const inner = collectFtTransfers(result);
+  const ft = inner.length > 0 ? inner : transfers.filter((t) => t.kind === 'ft');
+  const native = transfers.filter((t) => t.kind === 'native');
+  return {
+    found: true,
+    success,
+    signer,
+    executor,
+    transfers: [...native, ...ft],
+    events: parseNearFtEvents(result),
+  };
 }
 
 /**
@@ -3150,6 +3274,10 @@ async function intentsHasPublicKey(
  * Callers MUST refuse to submit a signed intent when this returns
  * `{ registered: false }` — submitting anyway strands the balance in intents.
  */
+const verifiedIntentsKeyMem = new Map<string, number>();
+const verifiedSubAccountMem = new Map<string, number>();
+const VERIFIED_ACCOUNT_MEM_TTL_MS = 10 * 60 * 1000;
+
 export async function ensureKeyOnIntents(
   env: Env,
   accountId: string,
@@ -3158,11 +3286,17 @@ export async function ensureKeyOnIntents(
 ): Promise<{ registered: boolean; reason?: string }> {
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   const publicKeyB58 = `ed25519:${base58Encode(publicKey)}`;
+  const memoKey = `${rpcUrl}:${accountId}:${publicKeyB58}`;
+  const memoAt = verifiedIntentsKeyMem.get(memoKey);
+  if (memoAt && Date.now() - memoAt < VERIFIED_ACCOUNT_MEM_TTL_MS) {
+    return { registered: true };
+  }
 
   // Already registered? One view call keeps the hot path free for the common
   // case (repeat requests, and a key registered on a previous call).
   try {
     if (await intentsHasPublicKey(rpcUrl, accountId, publicKeyB58)) {
+      verifiedIntentsKeyMem.set(memoKey, Date.now());
       return { registered: true };
     }
   } catch {
@@ -3180,12 +3314,16 @@ export async function ensureKeyOnIntents(
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
     const ok = await registerKeyOnIntents(rpcUrl, accountId, publicKey, privateKey);
-    if (ok) return { registered: true };
+    if (ok) {
+      verifiedIntentsKeyMem.set(memoKey, Date.now());
+      return { registered: true };
+    }
     // registerKeyOnIntents returns false both when the broadcast was rejected
     // pre-inclusion (visibility race) and when the tx landed as a failure;
     // either way, re-read to see whether a concurrent/prior attempt won.
     try {
       if (await intentsHasPublicKey(rpcUrl, accountId, publicKeyB58)) {
+        verifiedIntentsKeyMem.set(memoKey, Date.now());
         return { registered: true };
       }
     } catch {}
@@ -3334,6 +3472,13 @@ export async function createOnchainSubAccount(
   userPrivKey?: Uint8Array
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const pubKeyB58 = userPubKey ? `ed25519:${base58Encode(userPubKey)}` : '';
+  const subMemoKey = `${rpcUrl}:${subAccount}:${pubKeyB58}`;
+  const subMemoAt = verifiedSubAccountMem.get(subMemoKey);
+  if (subMemoAt && Date.now() - subMemoAt < VERIFIED_ACCOUNT_MEM_TTL_MS) {
+    return { success: true };
+  }
+
   // Check if account already exists onchain. A failed RPC read is NOT evidence
   // the account is missing — creating it again would burn a sponsored tx and
   // leave the caller believing provisioning happened. Treat "unknown" as
@@ -3358,7 +3503,11 @@ export async function createOnchainSubAccount(
         console.warn(
           `[nearRpc] intents key unregistered for ${subAccount} after ensure: ${ensure.reason}`
         );
+      } else {
+        verifiedSubAccountMem.set(subMemoKey, Date.now());
       }
+    } else {
+      verifiedSubAccountMem.set(subMemoKey, Date.now());
     }
     return { success: true };
   }
@@ -3455,9 +3604,16 @@ export async function createOnchainSubAccount(
     if (txResult?.result?.status?.SuccessValue !== undefined || txResult?.result?.status?.SuccessReceiptId) {
       const txHash = txResult.result.transaction?.hash || `created_${Date.now()}`;
       if (userPubKey && userPrivKey) {
-        await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch((regErr) =>
-        console.warn('[nearRpc] registerKeyOnIntents (provision) failed:', regErr)
-      );
+        const regOk = await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch((regErr) => {
+          console.warn('[nearRpc] registerKeyOnIntents (provision) failed:', regErr);
+          return false;
+        });
+        if (regOk) {
+          verifiedIntentsKeyMem.set(`${rpcUrl}:${subAccount}:${pubKeyB58}`, Date.now());
+          verifiedSubAccountMem.set(subMemoKey, Date.now());
+        }
+      } else {
+        verifiedSubAccountMem.set(subMemoKey, Date.now());
       }
       return { success: true, txHash };
     }
@@ -3865,6 +4021,32 @@ async function getPlainNearBalanceStrict(
 }
 
 /**
+ * Resolves a token from the curated/Rhea registries, falling back to live
+ * `ft_metadata` for a brand-new launchpad token that neither registry has
+ * indexed yet. Creator-fee payouts must not depend on registry lag.
+ */
+async function resolveTokenWithMetadata(env: Env, asset: string): Promise<OnchainToken | null> {
+  const tokens = await getSupportedTokens(env);
+  const known = resolveTokenForAsset(asset, tokens) || (await resolveRheaToken(env, asset));
+  if (known) return known;
+
+  const contractId = (asset.trim().toLowerCase().startsWith('nep141:')
+    ? asset.trim().slice(7)
+    : asset.trim()).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{1,63}$/.test(contractId)) return null;
+  const meta = await getFtContractMetadata(env, contractId);
+  if (!meta) return null;
+  return {
+    defuse_asset_id: `nep141:${contractId}`,
+    symbol: meta.symbol,
+    name: meta.symbol,
+    decimals: meta.decimals,
+    nearContractId: contractId,
+    chain: 'near',
+  };
+}
+
+/**
  * Onchain intents balance for one asset, in base units. Returns `null` when the
  * balance cannot be read, so callers never mistake an RPC failure for "the
  * intents ledger is empty" and burn gas depositing a duplicate amount.
@@ -3876,9 +4058,7 @@ export async function getIntentAssetBalance(
 ): Promise<{ balance: bigint; decimals: number } | null> {
   try {
     if (!nearAccount) return null;
-    const tokens = await getSupportedTokens(env);
-    let token = resolveTokenForAsset(asset, tokens);
-    if (!token) token = await resolveRheaToken(env, asset);
+    const token = await resolveTokenWithMetadata(env, asset);
     if (!token?.defuse_asset_id) return null;
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
     const contractId = env.INTENTS_CONTRACT_ID || 'intents.near';
@@ -3999,6 +4179,23 @@ async function signAndBroadcastFunctionCall(opts: {
   gas: bigint;
   deposit: bigint;
 }): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+  if (opts.method === 'ft_transfer_call') {
+    let receiver = '';
+    try {
+      const parsed = JSON.parse(opts.args) as { receiver_id?: unknown };
+      receiver = typeof parsed?.receiver_id === 'string' ? parsed.receiver_id.trim().toLowerCase() : '';
+    } catch {
+      receiver = '';
+    }
+    // escrow.uprail.near and the user vaults are plain accounts. A transfer-call
+    // to them fails and refunds. The only allowed receiver is intents.near.
+    if (receiver !== 'intents.near') {
+      return {
+        ok: false,
+        error: 'ft_transfer_call receiver must be intents.near. Plain accounts take ft_transfer.',
+      };
+    }
+  }
   let last: BroadcastAttempt = { ok: false, error: 'not attempted' };
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {
@@ -4548,11 +4745,18 @@ export async function getPlainBalances(
       }
       for (const h of held) pushHeld(h.contractId, h.balance);
 
+      const isNearFtToken = (t: OnchainToken): boolean => {
+        const c = (t.nearContractId || '').trim().toLowerCase();
+        if (!c || c.startsWith('0x')) return false;
+        if (!(t.defuse_asset_id || '').toLowerCase().startsWith('nep141:')) return false;
+        return c.includes('.') || /^[0-9a-f]{64}$/.test(c);
+      };
+
       // Index lag guard: verify a handful of high-value registry assets that
       // FastNEAR has not reported yet, so a just-arrived wNEAR/USDC transfer
       // is not missing for an index cycle. Capped to stay inside the budget.
       const missing = registry
-        .filter((t) => t.nearContractId && !coveredContracts.has(t.nearContractId.toLowerCase()))
+        .filter((t) => isNearFtToken(t) && !coveredContracts.has(t.nearContractId.toLowerCase()))
         .slice(0, PLAIN_MAJOR_SCAN_MAX);
       if (missing.length > 0) {
         const scanned = await Promise.all(
@@ -4567,7 +4771,14 @@ export async function getPlainBalances(
       // FastNEAR unreachable — fall back to a BOUNDED registry scan so the
       // request still returns something instead of exhausting the subrequest
       // budget and reporting an empty balance set.
-      const tokens = registry.filter((t) => t.nearContractId).slice(0, PLAIN_SCAN_FALLBACK_MAX);
+      const tokens = registry
+        .filter((t) => {
+          const c = (t.nearContractId || '').trim().toLowerCase();
+          if (!c || c.startsWith('0x')) return false;
+          if (!(t.defuse_asset_id || '').toLowerCase().startsWith('nep141:')) return false;
+          return c.includes('.') || /^[0-9a-f]{64}$/.test(c);
+        })
+        .slice(0, PLAIN_SCAN_FALLBACK_MAX);
       const scanned = await Promise.all(
         tokens.map((t) => getPlainFtBalance(rpcUrl, t.nearContractId as string, nearAccount))
       );
@@ -5016,6 +5227,57 @@ export async function depositPlainBalanceToIntents(
     }
 
     return { deposited: false, reason: 'INSUFFICIENT_PLAIN_BALANCE' };
+  } catch (err: any) {
+    return { deposited: false, reason: err?.message || String(err) };
+  }
+}
+
+/**
+ * Moves plain NEP-141 creator fees held directly by `escrow.uprail.near` into
+ * the escrow account's public Intents balance. This is the first leg for a
+ * private creator-fee payout: launchpads push fees as ordinary NEP-141, while
+ * Confidential Intents can only spend a public Intents balance.
+ */
+export async function depositEscrowPlainBalanceToIntents(
+  env: Env,
+  asset: string,
+  amount: string
+): Promise<{ deposited: boolean; txHash?: string; reason?: string }> {
+  try {
+    const token = await resolveTokenWithMetadata(env, asset);
+    if (!token?.nearContractId) return { deposited: false, reason: `Unsupported asset: ${asset}` };
+
+    const baseUnits = toBaseUnits(amount, token.decimals);
+    if (!baseUnits || baseUnits === '0') {
+      return { deposited: false, reason: `Invalid amount: ${amount}` };
+    }
+
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const signing = escrowSigningKey(env, rpcUrl);
+    if ('error' in signing) return { deposited: false, reason: signing.error };
+
+    const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+    const contractId = token.nearContractId;
+    const storage = await ensureReceiverStorageRegistered(rpcUrl, contractId, intentsId, signing);
+    if (!storage.registered) {
+      return { deposited: false, reason: storage.reason || `intents is not registered on ${contractId}` };
+    }
+
+    const plain = await getPlainFtBalanceStrict(rpcUrl, contractId, signing.signerId);
+    if (plain === null) return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
+    if (plain < BigInt(baseUnits)) return { deposited: false, reason: 'INSUFFICIENT_PLAIN_BALANCE' };
+
+    const res = await signAndBroadcastFunctionCall({
+      ...signing,
+      receiverId: contractId,
+      method: 'ft_transfer_call',
+      args: JSON.stringify({ receiver_id: intentsId, amount: baseUnits, msg: signing.signerId }),
+      gas: 100_000_000_000_000n,
+      deposit: 1n,
+    });
+    return res.ok
+      ? { deposited: true, txHash: res.txHash }
+      : { deposited: false, reason: res.error || 'ft_transfer_call from escrow failed' };
   } catch (err: any) {
     return { deposited: false, reason: err?.message || String(err) };
   }
@@ -5870,7 +6132,7 @@ export async function resolveUserNearAccount(
   }
 
   // 5. Persist account to x_identities only if it was never set (COALESCE)
-  if (env.DB) {
+  if (!session.near_account && env.DB) {
     try {
       await env.DB.prepare(
         'UPDATE x_identities SET near_account = COALESCE(near_account, ?), updated_at = ? WHERE x_id = ?'
@@ -6023,7 +6285,7 @@ export async function getVirtualBalanceDeltas(
 /**
  * Calculates a user's authoritative available balance for a specific asset,
  * derived from:
- *   (Live onchain balance in intents.near + D1 claimed virtual payments)
+ *   (Live onchain balance in intents.near + Confidential Intents balance + D1 claimed virtual payments)
  *   - (D1 active sent payments + D1 completed/pending withdrawals)
  */
 export async function getUserAvailableBalance(
@@ -6069,6 +6331,23 @@ export async function getUserAvailableBalance(
     }
   } catch (err) {
     console.warn('[getUserAvailableBalance] plain balance query error:', err);
+  }
+
+  // Confidential Intents balances are spendable on the private rail and never
+  // appear in the public intents or plain FT reads above.
+  const railEnabled = ['true', '1', 'yes'].includes(
+    (env.CONFIDENTIAL_RAIL_ENABLED || '').trim().toLowerCase()
+  );
+  if (railEnabled) {
+    try {
+      const { getConfidentialAvailableBalance } = await import('./confidentialRail');
+      const confidentialAmt = await getConfidentialAvailableBalance(env, session.x_id, targetAsset);
+      if (confidentialAmt > 0) {
+        onchainAmount += confidentialAmt;
+      }
+    } catch (confErr) {
+      console.warn('[getUserAvailableBalance] confidential balance query error:', confErr);
+    }
   }
 
   const deltas = await getVirtualBalanceDeltas(env, session, targetAsset);

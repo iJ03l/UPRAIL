@@ -68,8 +68,24 @@ async function resolveToken(env: Env, asset: string): Promise<nearRpc.OnchainTok
   const tokens = await nearRpc.getSupportedTokens(env);
   let token = resolveTokenForAsset(asset, tokens);
   if (!token) token = await nearRpc.resolveRheaToken(env, asset);
-  if (!token) throw new Error(`Unsupported asset: ${asset}`);
-  return token;
+  if (token) return token;
+
+  const contractId = (asset.trim().toLowerCase().startsWith('nep141:')
+    ? asset.trim().slice(7)
+    : asset.trim()).toLowerCase();
+  if (!/^[a-z0-9][a-z0-9._-]{1,63}$/.test(contractId)) {
+    throw new Error(`Unsupported asset: ${asset}`);
+  }
+  const meta = await nearRpc.getFtContractMetadata(env, contractId);
+  if (!meta) throw new Error(`Unsupported asset: ${asset}`);
+  return {
+    defuse_asset_id: `nep141:${contractId}`,
+    symbol: meta.symbol,
+    name: meta.symbol,
+    decimals: meta.decimals,
+    nearContractId: contractId,
+    chain: 'near',
+  };
 }
 
 function findBalance(balances: OneClickBalance[], assetId: string): OneClickBalance | undefined {
@@ -325,6 +341,132 @@ export async function submitEscrowPrivateTransfer(
   }
 ): Promise<{ depositAddress: string; intentHash: string; quote: OneClickQuoteResponse }> {
   return await submitPrivateTransferWithSigner(env, '', params, 'escrow');
+}
+
+/**
+ * Moves funds from escrow's public Intents balance into a recipient's
+ * confidential account. Used when creator fees arrive as plain NEP-141 and
+ * have just been deposited into escrow's public Intents balance.
+ */
+export async function submitEscrowPrivateSendFromPublic(
+  env: Env,
+  params: {
+    asset: string;
+    amount: string;
+    recipientAccount: string;
+    confidentiality?: OneClickConfidentiality;
+  }
+): Promise<{ depositAddress: string; intentHash: string; quote: OneClickQuoteResponse }> {
+  if (!isConfidentialRailEnabled(env)) throw new Error('Confidential rail is disabled');
+  if (!params.recipientAccount.trim()) throw new Error('recipientAccount is required');
+  const token = await resolveToken(env, params.asset);
+  const assetId = token.defuse_asset_id || `nep141:${token.nearContractId}`;
+  const amountAtomic = nearRpc.toBaseUnits(params.amount, token.decimals);
+  if (!amountAtomic || amountAtomic === '0') throw new Error(`Invalid amount: ${params.amount}`);
+
+  const { quote } = await quoteForConfidentialIntents(env, '', {
+    originAsset: assetId,
+    destinationAsset: assetId,
+    amountAtomic,
+    recipient: params.recipientAccount,
+    recipientType: 'CONFIDENTIAL_INTENTS',
+    depositType: 'INTENTS',
+    refundType: 'INTENTS',
+    confidentiality: params.confidentiality,
+    signer: 'escrow',
+  });
+  const submitted = await signAndSubmit(env, '', quote.quote.depositAddress, 'escrow');
+  return {
+    depositAddress: submitted.depositAddress,
+    intentHash: submitted.intentHash,
+    quote,
+  };
+}
+
+export interface EscrowPrivatePayout {
+  status: string;
+  depositAddress: string;
+  intentHash: string;
+  source: 'confidential' | 'public';
+}
+
+/**
+ * Pays a recipient privately from escrow. Prefers escrow's existing
+ * confidential balance; when the funds are still plain NEP-141 creator fees,
+ * deposits the shortfall into escrow's public Intents balance first, then
+ * shields it into the recipient's confidential account in one signed intent.
+ *
+ * Never falls back to a public payout. A quote/deposit failure throws before
+ * funds move; an in-flight settlement is returned as a non-terminal status so
+ * callers can reserve the row and let reconciliation finish it.
+ */
+export async function payEscrowPrivate(
+  env: Env,
+  params: {
+    asset: string;
+    amount: string;
+    recipientAccount: string;
+    confidentiality?: OneClickConfidentiality;
+  }
+): Promise<EscrowPrivatePayout> {
+  if (!isConfidentialRailEnabled(env)) throw new Error('Confidential rail is disabled');
+  if (!params.recipientAccount.trim()) throw new Error('recipientAccount is required');
+
+  const token = await resolveToken(env, params.asset);
+  const assetId = token.defuse_asset_id || `nep141:${token.nearContractId}`;
+  const amountAtomic = nearRpc.toBaseUnits(params.amount, token.decimals);
+  if (!amountAtomic || amountAtomic === '0') throw new Error(`Invalid amount: ${params.amount}`);
+
+  const session = await getEscrowSession(env);
+  const balances = await getAccountBalances(env, session.accessToken);
+  const confidentialAtomic = BigInt(findBalance(balances, assetId)?.available || '0');
+  const amountBig = BigInt(amountAtomic);
+
+  let source: 'confidential' | 'public' = 'confidential';
+  let transfer: { depositAddress: string; intentHash: string };
+
+  if (confidentialAtomic >= amountBig) {
+    transfer = await submitEscrowPrivateTransfer(env, params);
+  } else {
+    source = 'public';
+    const publicBalance =
+      (await nearRpc.getIntentAssetBalance(env, params.asset, session.accountId))?.balance ?? 0n;
+    if (publicBalance < amountBig) {
+      const shortfall = amountBig - publicBalance;
+      const deposited = await nearRpc.depositEscrowPlainBalanceToIntents(
+        env,
+        params.asset,
+        formatAtomic(shortfall.toString(), token.decimals)
+      );
+      if (!deposited.deposited) {
+        throw new Error(
+          `Could not move creator fees into Intents: ${deposited.reason || 'deposit failed'}`
+        );
+      }
+      let ready = false;
+      for (let i = 0; i < 15; i++) {
+        const balance = await nearRpc.getIntentAssetBalance(env, params.asset, session.accountId);
+        if (balance && balance.balance >= amountBig) {
+          ready = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+      if (!ready) throw new Error('Escrow Intents balance is not ready for a private payout');
+    }
+    transfer = await submitEscrowPrivateSendFromPublic(env, params);
+  }
+
+  const settlement = await waitForSettlement(env, '', transfer.depositAddress, {
+    signer: 'escrow',
+    timeoutMs: 60_000,
+  }).catch(() => ({ status: 'UNKNOWN' }));
+  return {
+    status: String(settlement.status || 'UNKNOWN').toUpperCase(),
+    depositAddress: transfer.depositAddress,
+    intentHash: transfer.intentHash,
+    source,
+  };
 }
 
 async function submitPrivateTransferWithSigner(

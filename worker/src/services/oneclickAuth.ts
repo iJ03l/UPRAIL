@@ -274,7 +274,10 @@ async function sessionFromCache(env: Env, cacheKey: string): Promise<{ accessTok
         accessToken: refreshed.accessToken,
         expiresAt: refreshed.expiresAt,
       };
-      const ttl = Math.max(60, Math.floor((next.refreshExpiresAt || next.expiresAt - Date.now()) / 1000));
+      const ttl = Math.max(
+        60,
+        Math.floor(((next.refreshExpiresAt || next.expiresAt) - Date.now()) / 1000)
+      );
       await env.CACHE?.put(cacheKey, JSON.stringify(next), { expirationTtl: ttl });
       return { accessToken: next.accessToken, accountId: next.accountId };
     }
@@ -361,6 +364,8 @@ export async function signGeneratedIntentForEscrow(
   return await signGeneratedIntentWithKey(env, key, generated);
 }
 
+const userSessionInflight = new Map<string, Promise<{ accessToken: string; accountId: string }>>();
+
 /** Returns a valid User-Session token, refreshing or re-signing as needed. */
 export async function getUserSession(
   env: Env,
@@ -371,13 +376,24 @@ export async function getUserSession(
   if (!opts.force) {
     const cached = await sessionFromCache(env, key);
     if (cached) return cached;
+    const inflight = userSessionInflight.get(key);
+    if (inflight) return inflight;
   }
 
-  const signingKey = await deriveSigningKey(env, xId);
-  await ensureSigningKey(env, signingKey);
-  const signedData = await signEmptyIntent(env, signingKey);
-  const session = await authenticateUser(env, signedData);
-  return await cacheSession(env, key, signingKey.accountId, session);
+  const work = (async () => {
+    const signingKey = await deriveSigningKey(env, xId);
+    await ensureSigningKey(env, signingKey);
+    const signedData = await signEmptyIntent(env, signingKey);
+    const session = await authenticateUser(env, signedData);
+    return await cacheSession(env, key, signingKey.accountId, session);
+  })();
+
+  userSessionInflight.set(key, work);
+  const cleanup = () => {
+    if (userSessionInflight.get(key) === work) userSessionInflight.delete(key);
+  };
+  work.then(cleanup, cleanup);
+  return await work;
 }
 
 /** Returns a User-Session for the pooled escrow account. */
@@ -388,18 +404,33 @@ export async function getEscrowSession(
   if (!opts.force) {
     const cached = await sessionFromCache(env, ESCROW_SESSION_CACHE_KEY);
     if (cached) return cached;
+    const inflight = userSessionInflight.get(ESCROW_SESSION_CACHE_KEY);
+    if (inflight) return inflight;
   }
-  const key = await getEscrowSigningKey(env);
-  const ready = await ensureKeyOnIntents(env, key.accountId, key.publicKey, key.privateKey);
-  if (!ready.registered) {
-    throw new Error(`Escrow signing key is not registered on NEAR Intents${ready.reason ? ` (${ready.reason})` : ''}`);
-  }
-  const signedData = await signEmptyIntent(env, key);
-  const session = await authenticateUser(env, signedData);
-  return await cacheSession(env, ESCROW_SESSION_CACHE_KEY, key.accountId, session);
+
+  const work = (async () => {
+    const key = await getEscrowSigningKey(env);
+    const ready = await ensureKeyOnIntents(env, key.accountId, key.publicKey, key.privateKey);
+    if (!ready.registered) {
+      throw new Error(`Escrow signing key is not registered on NEAR Intents${ready.reason ? ` (${ready.reason})` : ''}`);
+    }
+    const signedData = await signEmptyIntent(env, key);
+    const session = await authenticateUser(env, signedData);
+    return await cacheSession(env, ESCROW_SESSION_CACHE_KEY, key.accountId, session);
+  })();
+
+  userSessionInflight.set(ESCROW_SESSION_CACHE_KEY, work);
+  const cleanup = () => {
+    if (userSessionInflight.get(ESCROW_SESSION_CACHE_KEY) === work) {
+      userSessionInflight.delete(ESCROW_SESSION_CACHE_KEY);
+    }
+  };
+  work.then(cleanup, cleanup);
+  return await work;
 }
 
 export async function clearUserSession(env: Env, xId: string): Promise<void> {
+  userSessionInflight.delete(sessionCacheKey(xId));
   try {
     await env.CACHE?.delete(sessionCacheKey(xId));
   } catch {

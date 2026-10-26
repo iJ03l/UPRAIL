@@ -52,7 +52,27 @@ interface FactoryVerification {
   feePath: ConfigPath;
 }
 
-export type LaunchpadVerificationConfig = TokenConfigVerification | FactoryVerification;
+export interface JhV2DevVerification {
+  kind: 'jh_v2_dev';
+  launchpad: string;
+}
+
+export type LaunchpadVerificationConfig =
+  | TokenConfigVerification
+  | FactoryVerification
+  | JhV2DevVerification;
+
+/** JustHoot v2 factory. v1 is not a creator-fee target. */
+export const JUSTHOOT_V2_LAUNCHPAD = 'v2-launchpad.justhoot.near';
+
+const DENIED_ACCOUNTS = new Set(['uprailworld.near', 'uprail-world.near']);
+
+const DENIED_TOKENS = new Set([
+  'up.v2-launchpad.justhoot.near',
+  'up-2.v2-launchpad.justhoot.near',
+  'heating.v2-launchpad.justhoot.near',
+  'uprail.v2-launchpad.justhoot.near',
+]);
 
 export interface LaunchpadClaimConfig {
   kind: 'token_claim';
@@ -68,6 +88,14 @@ export interface LaunchpadClaimConfig {
 interface LaunchpadVerification {
   launchId: string | null;
   feeTo: string;
+  /** Nearly launch record creator, when the factory view returns one. */
+  creator: string | null;
+  /** JustHoot v2 current dev. The only account allowed to sign that binding. */
+  devId: string | null;
+  /** True once dev_id is already escrow. A pending proposal is not enough. */
+  devAccepted: boolean;
+  /** Factory launch exists but step is not Done. */
+  notReady: boolean;
 }
 
 export type LaunchpadRegistrationCode =
@@ -83,6 +111,9 @@ export type LaunchpadRegistrationCode =
   | 'LAUNCH_NOT_FOUND'
   | 'FEE_RECIPIENT_NOT_ESCROW'
   | 'FEE_RECIPIENT_UNVERIFIABLE'
+  | 'LAUNCH_NOT_READY'
+  | 'DEV_TRANSFER_PENDING'
+  | 'DENIED'
   | 'TOKEN_BOUND'
   | 'HANDLE_LOCKED'
   | 'REGISTRATION_CAP_REACHED'
@@ -102,7 +133,7 @@ export type LaunchpadRegistrationResult =
     }
   | {
       ok: false;
-      status: 400 | 401 | 409 | 422 | 429 | 503;
+      status: 400 | 401 | 403 | 409 | 422 | 429 | 503;
       code: LaunchpadRegistrationCode;
       error: string;
     };
@@ -227,7 +258,58 @@ export function parseLaunchpadVerificationConfig(
       },
     };
   }
-  return { ok: false, error: 'verification.kind must be token_config or factory.' };
+  if (obj.kind === 'jh_v2_dev') {
+    const launchpad = validAccount(obj.launchpad);
+    if (launchpad !== JUSTHOOT_V2_LAUNCHPAD) {
+      return { ok: false, error: 'jh_v2_dev.launchpad must be v2-launchpad.justhoot.near.' };
+    }
+    return { ok: true, config: { kind: 'jh_v2_dev', launchpad } };
+  }
+  return { ok: false, error: 'verification.kind must be token_config, factory, or jh_v2_dev.' };
+}
+
+/**
+ * Accounts and tokens that must never be bound or routed. The denylist is
+ * impersonation, not a partner allowlist: free-name relayers are not included.
+ */
+export function deniedLaunchpadTarget(token: string, signerId?: string | null): string | null {
+  const contract = (token || '').trim().toLowerCase();
+  const signer = (signerId || '').trim().toLowerCase();
+  if (DENIED_TOKENS.has(contract)) return contract;
+  if (signer && DENIED_ACCOUNTS.has(signer)) return signer;
+  return null;
+}
+
+/** Name or ticker pretending to be UPRAIL. Description is ignored on purpose. */
+export function tokenSymbolImpersonatesUprail(symbol: string | null | undefined): boolean {
+  return (symbol || '').trim().toLowerCase().includes('uprail');
+}
+
+/**
+ * Parent keys sign a factory binding. Nearly also lets the launch creator sign,
+ * because fee_to is chosen at launch and the factory has no full-access key.
+ * JustHoot v2 has no access keys, so only the current dev_id can sign.
+ */
+export function registrationSignerAllowed(opts: {
+  kind: LaunchpadVerificationConfig['kind'];
+  signerId: string;
+  parent: string;
+  creator?: string | null;
+  devId?: string | null;
+}): boolean {
+  const signer = opts.signerId.trim().toLowerCase();
+  if (!signer) return false;
+  if (opts.kind === 'jh_v2_dev') {
+    return !!opts.devId && signer === opts.devId.trim().toLowerCase();
+  }
+  if (signer === opts.parent.trim().toLowerCase()) return true;
+  return opts.kind === 'factory' && !!opts.creator && signer === opts.creator.trim().toLowerCase();
+}
+
+export function launchStepReady(record: unknown): boolean {
+  const obj = asObject(record);
+  if (!obj || !('step' in obj)) return true;
+  return String(obj.step) === 'Done';
 }
 
 export function parseLaunchpadClaimConfig(
@@ -265,6 +347,18 @@ export function parseLaunchpadClaimConfig(
   };
 }
 
+function emptyVerification(partial: Partial<LaunchpadVerification> = {}): LaunchpadVerification {
+  return {
+    launchId: null,
+    feeTo: '',
+    creator: null,
+    devId: null,
+    devAccepted: true,
+    notReady: false,
+    ...partial,
+  };
+}
+
 async function verifyFeeConfig(
   env: Env,
   token: string,
@@ -275,25 +369,50 @@ async function verifyFeeConfig(
     for (const path of config.paths) {
       const value = readPath(result, path);
       if (typeof value === 'string' && value.trim()) {
-        return { launchId: null, feeTo: value.trim().toLowerCase() };
+        return emptyVerification({ feeTo: value.trim().toLowerCase() });
       }
     }
-    return { launchId: null, feeTo: '' };
+    return emptyVerification();
+  }
+
+  if (config.kind === 'jh_v2_dev') {
+    const state = asObject(
+      await nearRpc.viewContractMethod(env, config.launchpad, 'get_token_fee_state', {
+        token_id: token,
+      })
+    );
+    const devId = typeof state?.dev_id === 'string' ? state.dev_id.trim().toLowerCase() : '';
+    const pending = typeof state?.pending_dev_id === 'string' ? state.pending_dev_id.trim().toLowerCase() : '';
+    const escrow = normalizeAccountId(escrowHoldingAccount(env));
+    const accepted = !!devId && devId === escrow;
+    return emptyVerification({
+      feeTo: accepted || pending === escrow ? escrow : devId,
+      devId,
+      devAccepted: accepted,
+    });
   }
 
   const record = await nearRpc.viewContractMethod(env, config.contract, config.method, {
     [config.tokenArg]: token,
   });
+  if (!launchStepReady(record)) {
+    return emptyVerification({ notReady: true });
+  }
   const launchId = readPath(record, config.launchIdPath);
   if (launchId === null || launchId === undefined) return null;
+  const recordObj = asObject(record);
+  const creator = typeof recordObj?.creator === 'string' ? recordObj.creator.trim().toLowerCase() : null;
+  // get_fee_to returns the account string itself. launch_id must be a string;
+  // the contract rejects a JSON number.
   const fee = await nearRpc.viewContractMethod(env, config.contract, config.feeMethod, {
     [config.feeArg]: String(launchId),
   });
-  const feeTo = readPath(fee, config.feePath);
-  return {
+  const feeValue = typeof fee === 'string' ? fee : readPath(fee, config.feePath);
+  return emptyVerification({
     launchId: String(launchId),
-    feeTo: typeof feeTo === 'string' ? feeTo.trim().toLowerCase() : '',
-  };
+    feeTo: typeof feeValue === 'string' ? feeValue.trim().toLowerCase() : '',
+    creator,
+  });
 }
 
 function verifyFeeRecipient(feeTo: string | null, escrow: string): boolean {
@@ -307,6 +426,9 @@ export async function registerLaunchpadToken(
   const token = contractFromToken(input.token);
   if (!token) {
     return { ok: false, status: 400, code: 'INVALID_TOKEN', error: 'A valid NEP-141 token contract is required.' };
+  }
+  if (deniedLaunchpadTarget(token)) {
+    return { ok: false, status: 403, code: 'DENIED', error: 'This token cannot be bound.' };
   }
   const handle = normalizeHandle(input.handle);
   if (!handle) {
@@ -351,13 +473,8 @@ export async function registerLaunchpadToken(
       error: 'Token must be a subaccount of the launchpad account.',
     };
   }
-  if (signerId !== parent) {
-    return {
-      ok: false,
-      status: 401,
-      code: 'WRONG_SIGNER',
-      error: `Token ${token} must be signed by its parent account ${parent}.`,
-    };
+  if (deniedLaunchpadTarget(token, signerId)) {
+    return { ok: false, status: 403, code: 'DENIED', error: 'This account cannot bind a token.' };
   }
 
   const message = await buildLaunchpadRegistrationMessage({
@@ -414,6 +531,48 @@ export async function registerLaunchpadToken(
       code: 'LAUNCH_NOT_FOUND',
       error: 'No matching launch was found on-chain.',
     };
+  }
+  if (verification.notReady) {
+    return {
+      ok: false,
+      status: 422,
+      code: 'LAUNCH_NOT_READY',
+      error: 'The launch is not finished on-chain.',
+    };
+  }
+  if (
+    !registrationSignerAllowed({
+      kind: verificationParsed.config.kind,
+      signerId,
+      parent,
+      creator: verification.creator,
+      devId: verification.devId,
+    })
+  ) {
+    const expected =
+      verificationParsed.config.kind === 'jh_v2_dev'
+        ? verification.devId || 'the current dev account'
+        : verification.creator
+          ? `${parent} or the launch creator ${verification.creator}`
+          : parent;
+    return {
+      ok: false,
+      status: 401,
+      code: 'WRONG_SIGNER',
+      error: `Token ${token} must be signed by ${expected}.`,
+    };
+  }
+  if (verificationParsed.config.kind === 'jh_v2_dev' && !verification.devAccepted) {
+    return {
+      ok: false,
+      status: 409,
+      code: 'DEV_TRANSFER_PENDING',
+      error:
+        'The dev transfer to escrow is only proposed. The binding is saved after escrow accepts it and dev_id is escrow.',
+    };
+  }
+  if (tokenSymbolImpersonatesUprail(tokenInfo.symbol)) {
+    return { ok: false, status: 403, code: 'DENIED', error: 'This token cannot be bound.' };
   }
   if (!verification.feeTo) {
     return {

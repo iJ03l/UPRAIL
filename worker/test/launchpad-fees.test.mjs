@@ -104,6 +104,14 @@ describe('creator-fee recipient from token description', () => {
     assert.equal(deriveHandleFromDescription('launched for @alice, enjoy'), 'alice');
   });
 
+  it('reads only the canonical adapter memo as a payout handle', async () => {
+    const { deriveHandleFromMemo, uprailFeeMemo } = await import('../dist/launchpadFees.bundle.mjs');
+    assert.equal(deriveHandleFromMemo('Fees to @alice via UPRAIL'), 'alice');
+    assert.equal(deriveHandleFromMemo('{"purpose":"fee_split","role":"token_owner"}'), null);
+    assert.equal(deriveHandleFromMemo('paid @alice somehow'), null);
+    assert.equal(uprailFeeMemo('@Alice'), 'Fees to @alice via UPRAIL');
+  });
+
   it('returns null when there is no handle', () => {
     for (const bad of ['', 'no handles here', null, undefined, 42]) {
       assert.equal(deriveHandleFromDescription(bad), null, `expected null for ${String(bad)}`);

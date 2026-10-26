@@ -22,6 +22,7 @@
 import { PaymentStatus, type Env } from '../types';
 import * as nearRpc from './nearRpc';
 import { getLaunchpadTokenBinding, listLaunchpadTokenBindings } from './launchpadBindings';
+import { isConfidentialRailEnabled, payEscrowPrivate } from './confidentialRail';
 
 /** 2100-01-01. Launchpad fees never expire/refund; this keeps them out of sweeps. */
 export const LAUNCHPAD_FEE_EXPIRES_AT = 4102444800000;
@@ -317,6 +318,22 @@ export function deriveHandleFromDescription(description: unknown): string | null
 }
 
 /**
+ * Handle carried by an adapter payout. Only the canonical memo counts.
+ * A launchpad's own fee memo, such as `{"role":"token_owner"}`, is not a handle.
+ */
+export function deriveHandleFromMemo(memo: unknown): string | null {
+  if (typeof memo !== 'string' || !memo) return null;
+  const canonical = memo.match(/fees\s+to\s+@?([a-z0-9_]{1,15})\s+via\s+uprail/i);
+  return canonical ? normalizeHandle(canonical[1]) : null;
+}
+
+export function uprailFeeMemo(handle: string): string {
+  const normalized = normalizeHandle(handle);
+  if (!normalized) throw new Error('A valid X handle is required.');
+  return `Fees to @${normalized} via UPRAIL`;
+}
+
+/**
  * Escrow registration for the zero-integration path. A token that points its
  * creator fees at escrow can be prepared by anyone. Abuse (a stranger making
  * escrow spend storage gas) is bounded by the same per-contract KV cache plus a
@@ -523,14 +540,19 @@ export async function creditVerifiedFeeAtomic(
   const id = `fee_${crypto.randomUUID()}`;
   const now = Date.now();
   const memo = opts.memo || `${launchpad} creator fees`;
+  const oneClickSupported = isConfidentialRailEnabled(env)
+    ? await nearRpc.isOneClickSupportedAsset(env, token.asset).catch(() => false)
+    : false;
+  const privacyRail = isConfidentialRailEnabled(env) && oneClickSupported ? 'confidential' : 'public';
 
   if (!identity || dustGuard) {
     await env.DB.prepare(
       `INSERT INTO payments (
          id, sender_x_id, sender_x_handle, recipient_handle, recipient_x_id,
          asset, amount, fee, fee_recipient, memo, status, intent_hash,
-         created_at, expires_at, updated_at, origin
-       ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         created_at, expires_at, updated_at, origin, privacy_rail, settlement_status,
+         claim_deposit_address, confirmed_at
+       ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         id,
@@ -547,7 +569,11 @@ export async function creditVerifiedFeeAtomic(
         now,
         LAUNCHPAD_FEE_EXPIRES_AT,
         now,
-        origin
+        origin,
+        privacyRail,
+        null,
+        null,
+        null
       )
       .run();
     return {
@@ -563,35 +589,76 @@ export async function creditVerifiedFeeAtomic(
   }
 
   let claimTxHash: string | undefined;
+  let claimDepositAddress: string | null = null;
+  let settlementStatus: string | null = null;
+  let confirmedAt: number | null = null;
   let settled = false;
-  try {
-    const vault = await nearRpc.resolveUserNearAccount(env, {
-      x_id: identity.x_id,
-      x_handle: identity.x_handle,
-      near_account: identity.near_account,
-    });
-    const payout = await nearRpc.executeEscrowFtTransferByContract(
-      env,
-      token.contractId,
-      vault,
-      netAtomicStr
-    );
-    if (payout.success && payout.txHash) {
-      claimTxHash = payout.txHash;
-      settled = true;
-    } else {
-      console.warn('[launchpadFees] instant credit failed, falling back to escrow:', payout.error);
+
+  if (privacyRail === 'confidential') {
+    try {
+      const vault = await nearRpc.resolveUserNearAccount(env, {
+        x_id: identity.x_id,
+        x_handle: identity.x_handle,
+        near_account: identity.near_account,
+      });
+      const payout = await payEscrowPrivate(env, {
+        asset: token.asset,
+        amount,
+        recipientAccount: vault,
+      });
+      claimDepositAddress = payout.depositAddress;
+      settlementStatus = payout.status;
+      if (payout.status === 'SUCCESS') {
+        claimTxHash = payout.intentHash;
+        confirmedAt = now;
+        settled = true;
+      } else if (payout.status === 'FAILED' || payout.status === 'REFUNDED') {
+        console.warn(
+          `[launchpadFees] private instant credit ${payout.status.toLowerCase()}, holding in escrow`
+        );
+      } else {
+        // Funds may have moved. Reserve the row as CLAIMED so a retry cannot
+        // double-pay; reconciliation resolves the terminal status.
+        claimTxHash = payout.intentHash;
+        settled = true;
+      }
+    } catch (err: any) {
+      console.warn(
+        '[launchpadFees] private instant credit threw, holding in escrow:',
+        err?.message || err
+      );
     }
-  } catch (err: any) {
-    console.warn('[launchpadFees] instant credit threw, falling back to escrow:', err?.message || err);
+  } else {
+    try {
+      const vault = await nearRpc.resolveUserNearAccount(env, {
+        x_id: identity.x_id,
+        x_handle: identity.x_handle,
+        near_account: identity.near_account,
+      });
+      const payout = await nearRpc.executeEscrowFtTransferByContract(
+        env,
+        token.contractId,
+        vault,
+        netAtomicStr
+      );
+      if (payout.success && payout.txHash) {
+        claimTxHash = payout.txHash;
+        settled = true;
+      } else {
+        console.warn('[launchpadFees] instant credit failed, falling back to escrow:', payout.error);
+      }
+    } catch (err: any) {
+      console.warn('[launchpadFees] instant credit threw, falling back to escrow:', err?.message || err);
+    }
   }
 
   await env.DB.prepare(
     `INSERT INTO payments (
        id, sender_x_id, sender_x_handle, recipient_handle, recipient_x_id,
        asset, amount, fee, fee_recipient, memo, status, intent_hash, claim_tx_hash,
-       created_at, expires_at, updated_at, origin
-     ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       created_at, expires_at, updated_at, origin, privacy_rail, settlement_status,
+       claim_deposit_address, confirmed_at
+     ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id,
@@ -607,9 +674,13 @@ export async function creditVerifiedFeeAtomic(
       intentHash,
       claimTxHash ?? null,
       now,
-      settled ? now : LAUNCHPAD_FEE_EXPIRES_AT,
+      LAUNCHPAD_FEE_EXPIRES_AT,
       now,
-      origin
+      origin,
+      privacyRail,
+      settlementStatus,
+      claimDepositAddress,
+      confirmedAt
     )
     .run();
 
@@ -623,6 +694,87 @@ export async function creditVerifiedFeeAtomic(
     status: settled ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED,
     claimTxHash,
   };
+}
+
+export interface AdapterFeeLeg {
+  ok: boolean;
+  handle?: string;
+  token?: string;
+  amount?: string;
+  fee?: string;
+  id?: string;
+  routing?: 'direct' | 'escrow';
+  status?: PaymentStatus;
+  error?: string;
+}
+
+/**
+ * Credits every adapter payout in a finalized transaction.
+ * The launchpad keeps its own fee receiver. Its payout code sends `ft_transfer`
+ * to escrow with memo `Fees to @handle via UPRAIL`. The handle is read from
+ * that memo, never from the API caller, `fee_to`, or `dev_id`.
+ */
+export async function recordAdapterFees(
+  env: Env,
+  txHash: string
+): Promise<{ ok: boolean; legs: AdapterFeeLeg[]; error?: string }> {
+  const hash = (txHash || '').trim();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,128}$/.test(hash)) {
+    return { ok: false, legs: [], error: 'A transaction hash is required.' };
+  }
+  const probe = await nearRpc.probeNearTransaction(env, hash);
+  if (!probe.found) return { ok: false, legs: [], error: probe.error || 'transaction not found' };
+  if (!probe.success) return { ok: false, legs: [], error: 'transaction did not succeed' };
+
+  const escrow = escrowHoldingAccount(env).toLowerCase();
+  const legs: AdapterFeeLeg[] = [];
+  for (const transfer of probe.transfers) {
+    if (transfer.kind !== 'ft') continue;
+    if ((transfer.to || '').toLowerCase() !== escrow) continue;
+    const handle = deriveHandleFromMemo(transfer.memo);
+    const contractId = (transfer.contract || '').toLowerCase();
+    if (!handle || !contractId) continue;
+    let amountAtomic: bigint;
+    try {
+      amountAtomic = BigInt(transfer.amountAtomic || '0');
+    } catch {
+      continue;
+    }
+    if (amountAtomic <= 0n) continue;
+
+    const token = await resolveLaunchpadToken(env, contractId, true);
+    if (!token) {
+      legs.push({ ok: false, handle, token: contractId, error: 'Unknown or non-NEP-141 token contract.' });
+      continue;
+    }
+    const credited = await creditVerifiedFeeAtomic(env, {
+      launchpad: 'adapter',
+      handle,
+      token,
+      grossAtomic: amountAtomic,
+      intentHash: `adapter:${hash}:${contractId}:${handle}:${amountAtomic.toString()}`,
+      memo: uprailFeeMemo(handle),
+    });
+    legs.push({
+      ok: credited.ok,
+      handle,
+      token: contractId,
+      amount: credited.amount,
+      fee: credited.fee,
+      id: credited.id,
+      routing: credited.routing,
+      status: credited.status,
+      error: credited.error,
+    });
+  }
+  if (legs.length === 0) {
+    return {
+      ok: false,
+      legs: [],
+      error: 'No ft_transfer to escrow with memo "Fees to @handle via UPRAIL" was found in that transaction.',
+    };
+  }
+  return { ok: legs.some((leg) => leg.ok), legs };
 }
 
 /**

@@ -7,7 +7,7 @@ export const launchpadsRouter = new Hono<AppContext>();
 
 function jsonError(
   c: Context<AppContext>,
-  status: 400 | 401 | 409 | 422 | 429 | 500 | 503,
+  status: 400 | 401 | 403 | 409 | 422 | 429 | 500 | 503,
   message: string,
   code: string
 ) {
@@ -53,7 +53,7 @@ launchpadsRouter.get('/config', (c) => {
       auth: 'none',
       body: { token: '<registered NEP-141 contract>' },
     },
-    verificationKinds: ['token_config', 'factory'],
+    verificationKinds: ['token_config', 'factory', 'jh_v2_dev'],
     claimKinds: ['token_claim'],
   });
 });

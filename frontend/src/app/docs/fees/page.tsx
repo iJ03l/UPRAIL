@@ -30,11 +30,12 @@ export default function FeesDocsPage() {
             ).
           </li>
           <li>
-            In the creator / fee-recipient field, enter your X handle (e.g.{' '}
-            <code className="font-mono text-[13px]">@yourhandle</code>).
+            The launchpad keeps its own fee receiver. When a payout is for your X handle, its
+            adapter sends that fee to UPRAIL. You do not paste a wallet, and the handle does not
+            have to be the launch creator.
           </li>
           <li>
-            That&apos;s it. Every creator fee the launchpad pays is credited to{' '}
+            Every fee that then arrives is credited to{' '}
             <code className="font-mono text-[13px]">@yourhandle</code> on UPRAIL (net of the 5%
             protocol fee), ready to collect with your passkey at{' '}
             <a className="text-stone-900 underline" href="https://app.uprail.world/claim?view=fees">
@@ -72,9 +73,9 @@ export default function FeesDocsPage() {
           </Field>
         </div>
         <Callout tone="warn">
-          <strong className="text-stone-900">Recipients are verified on-chain.</strong> UPRAIL
-          reads the token&apos;s live fee recipient before accepting a handle. The caller can
-          choose the handle, but never the destination wallet.
+          <strong className="text-stone-900">The handle comes from the transaction.</strong> UPRAIL
+          reads it from the payout memo. The API request cannot choose the handle or the
+          destination wallet.
         </Callout>
       </section>
 
@@ -83,38 +84,59 @@ export default function FeesDocsPage() {
           Integration — for launchpads
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          There is no partner allowlist or API key. Any launchpad can register its own tokens by
-          signing a NEP-413 message from the token&apos;s <strong className="text-stone-900">parent account</strong>{' '}
-          (for example <code className="font-mono text-[13px]">launchpad.justhoot.near</code> signs
-          for <code className="font-mono text-[13px]">*.launchpad.justhoot.near</code>).
+          The launchpad keeps its own fee receiver. <code className="font-mono text-[13px]">fee_to</code>{' '}
+          and <code className="font-mono text-[13px]">dev_id</code> stay as they are. When a payout
+          should reach an X handle, the keeper or contract uses the adapter in{' '}
+          <code className="font-mono text-[13px]">adapters/launchpad</code>. There is no partner
+          allowlist or API key.
         </p>
 
         <ol className="space-y-2 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
           <li>
-            Set the creator fee recipient to{' '}
-            <code className="font-mono text-[13px]">escrow.uprail.near</code>.
+            Send <code className="font-mono text-[13px]">ft_transfer</code> with exactly 1 yoctoNEAR
+            attached. Never <code className="font-mono text-[13px]">ft_transfer_call</code>. Escrow
+            is a plain account, and that call refunds.
           </li>
           <li>
-            After the launch finalizes, build the registration payload and sign its canonical hash
-            with an access key controlled by the launchpad on the token&apos;s parent account.
+            <code className="font-mono text-[13px]">receiver_id</code> is{' '}
+            <code className="font-mono text-[13px]">escrow.uprail.near</code>. The memo is exactly{' '}
+            <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code>.
           </li>
           <li>
-            Call <code className="font-mono text-[13px]">POST /api/launchpads/register</code>.
-            UPRAIL verifies the signature, the on-chain fee recipient, and binds token → handle.
-            The response includes the claim URL to show the creator.
+            A NEAR fee is sent as wNEAR on <code className="font-mono text-[13px]">wrap.near</code>.
+            A native transfer has no memo.
           </li>
           <li>
-            If your token contract accrues fees internally, add a generic{' '}
-            <code className="font-mono text-[13px]">claim</code> config. UPRAIL claims them into
-            escrow and routes them to the creator.
-          </li>
-          <li>
-            Share the returned <code className="font-mono text-[13px]">claimUrl</code> with the
-            creator. It opens their Creator fees tab and renders a personalized preview card with
-            that token&apos;s total earned and pending amount. Each token gets its own link and
-            card.
+            After the transaction is final, call{' '}
+            <code className="font-mono text-[13px]">POST /api/fees/adapter</code> with the hash.
+            UPRAIL reads the handle from the memo, takes 5%, and credits the rest.
           </li>
         </ol>
+        <Code title="adapter">{`ft_transfer on wrap.near, deposit 1 yoctoNEAR
+{
+  "receiver_id": "escrow.uprail.near",
+  "amount": "1000000000000000000000000",
+  "memo": "Fees to @alice via UPRAIL"
+}
+
+POST /api/fees/adapter
+{ "txHash": "..." }
+
+// 201
+{
+  "ok": true,
+  "legs": [
+    {
+      "ok": true,
+      "handle": "alice",
+      "token": "wrap.near",
+      "amount": "0.95",
+      "fee": "0.05",
+      "routing": "direct",
+      "status": "CLAIMED"
+    }
+  ]
+}`}</Code>
 
         <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
           Fees for launchpads
@@ -129,15 +151,15 @@ export default function FeesDocsPage() {
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="font-semibold text-stone-900">What the launchpad sends</span>
             <span className="text-stone-600">
-              100% of creator fees to <code className="font-mono text-[13px]">escrow.uprail.near</code>.
-              Do not pre-deduct the 5%; UPRAIL deducts it once.
+              The X-handle portion, by <code className="font-mono text-[13px]">ft_transfer</code>.
+              Do not change the fee receiver, and do not pre-deduct the 5%.
             </span>
           </div>
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="font-semibold text-stone-900">Gas</span>
             <span className="text-stone-600">
-              Launchpads pay their normal launch and fee-transfer costs. UPRAIL escrow pays its
-              own registration, claim, and routing gas.
+              The launchpad pays the <code className="font-mono text-[13px]">ft_transfer</code>.
+              UPRAIL pays the cost of crediting the handle.
             </span>
           </div>
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -147,7 +169,7 @@ export default function FeesDocsPage() {
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="font-semibold text-stone-900">Settlement asset</span>
             <span className="text-stone-600">
-              The launchpad&apos;s paired token. UPRAIL does not convert it.
+              The token in the transfer. NEAR fees arrive as wNEAR. UPRAIL does not convert it.
             </span>
           </div>
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -163,150 +185,16 @@ export default function FeesDocsPage() {
           escrow results in 50 TOKEN of protocol fee and 950 TOKEN credited to the creator.
         </Callout>
 
-        <Endpoint verb="GET" path="/api/launchpads/config" auth="public" />
-        <Code title="config">{`{
-  "escrowAccount": "escrow.uprail.near",
-  "registration": {
-    "method": "POST",
-    "path": "/api/launchpads/register",
-    "auth": "NEP-413 signature from an access key on the token parent account",
-    "proofRecipient": "uprail.near",
-    "proofTtlSeconds": 300
-  },
-  "verificationKinds": ["token_config", "factory"],
-  "claimKinds": ["token_claim"]
-}`}</Code>
-
-        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          Registration proof
-        </h3>
+        <Endpoint verb="POST" path="/api/fees/adapter" auth="public" />
         <p className="text-sm text-stone-600 leading-relaxed">
-          The signed message is{' '}
-          <code className="font-mono text-[13px]">
-            UPRAIL launchpad registration\n&lt;sha256(canonical-json(payload))&gt;
-          </code>
-          , where canonical JSON sorts object keys recursively. Sign it as NEP-413 with recipient{' '}
-          <code className="font-mono text-[13px]">uprail.near</code>, a 32-byte nonce, and an{' '}
-          <code className="font-mono text-[13px]">issuedAt</code> within 5 minutes. The key must be
-          an access key on the token&apos;s parent account; full-access and function-call keys both
-          work, so use a dedicated launchpad key. Nonces are single-use for 10 minutes, so retries
-          must generate a fresh nonce and signature.
-        </p>
-        <Code title="register">{`POST /api/launchpads/register
-
-{
-  "token": "alice.launchpad.near",
-  "handle": "@alice",
-  "launchpad": { "id": "custom", "name": "Custom Launchpad" },
-  "verification": {
-    "kind": "token_config",
-    "method": "get_config",
-    "paths": [["creator_id"], ["fee_to"], ["owner_id"]]
-  },
-  "claim": {
-    "kind": "token_claim",
-    "owedMethod": "get_owed_fees",
-    "accountArg": "account_id",
-    "owedTokenPath": ["token"],
-    "owedQuotePath": ["quote"],
-    "claimMethod": "claim_owed_fees",
-    "quoteContract": "wrap.near"
-  },
-  "issuedAt": 1800000000000,
-  "proof": {
-    "signerId": "launchpad.near",
-    "publicKey": "ed25519:…",
-    "signature": "base64…",
-    "nonce": "base64…",
-    "recipient": "uprail.near"
-  }
-}
-
-// 201
-{
-  "token": "alice.launchpad.near",
-  "handle": "alice",
-  "launchpad": "custom",
-  "verifiedFeeTo": "escrow.uprail.near",
-  "claimUrl": "https://app.uprail.world/claim?view=fees&handle=alice&asset=nep141:alice.launchpad.near&v=...&k=...",
-  "created": true
-}`}</Code>
-
-        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          Claim link and preview card
-        </h3>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          The returned link is specific to one creator handle and one token asset. Opening it
-          takes them to their Creator fees tab; the same URL serves a preview card to X, Discord,
-          Telegram and other link-preview crawlers. The card shows that asset&apos;s total
-          launchpad creator fees and how many are still pending. Fees that were claimed or routed
-          directly still count toward the total, so the card does not reset when they settle; only
-          the pending amount drops. If the creator earns fees in several tokens, share each
-          token&apos;s link separately so each preview shows only its own total. The{' '}
-          <code className="font-mono text-[13px]">k</code>{' '}
-          parameter authorizes that handle + asset preview, so share the complete URL rather than
-          editing it.
+          Submitting the same hash again is a no-op. A memo that is not{' '}
+          <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> is ignored,
+          including a launchpad&apos;s own role label. If the transfer never lands, nothing is
+          credited: UPRAIL does not watch the launchpad&apos;s existing payout.
         </p>
         <Callout>
-          <strong className="text-stone-900">Social cache:</strong> platforms cache previews per
-          exact URL. Use the latest <code className="font-mono text-[13px]">claimUrl</code> from a
-          fresh registration when re-sharing after the total changes, or append a new{' '}
-          <code className="font-mono text-[13px]">v</code> value to force a re-crawl.
-        </Callout>
-
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Verification supports two generic forms:{' '}
-          <code className="font-mono text-[13px]">token_config</code> reads configured paths from
-          the token contract, and <code className="font-mono text-[13px]">factory</code> looks up a
-          launch id and fee recipient on a factory contract. Claim configs are optional and only
-          needed when fees accrue inside the token.
-        </p>
-
-        <Endpoint verb="POST" path="/api/launchpads/claim" auth="public" />
-        <Code title="claim">{`POST /api/launchpads/claim
-{ "token": "alice.launchpad.near" }
-
-// 200
-{ "token": "alice.launchpad.near", "claimed": true, "pending": false, "txHash": "…" }`}</Code>
-
-        <Callout>
-          <strong className="text-stone-900">Handle corrections.</strong> A launchpad may correct a
-          mistaken handle until the first fee is routed. After that, the binding is locked so an
-          operator cannot redirect a creator&apos;s accrued fees.
-        </Callout>
-
-        <h3 className="text-base font-display font-extrabold text-stone-950 pt-2">
-          Zero-integration fallback
-        </h3>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          A launchpad that cannot call the registration endpoint can still use the description path.
-          Point creator fees at <code className="font-mono text-[13px]">escrow.uprail.near</code>,
-          add <code className="font-mono text-[13px]">Fees to @handle via UPRAIL</code> to the token
-          description, and call{' '}
-          <code className="font-mono text-[13px]">POST /api/fees/prepare</code> once to register
-          escrow storage. UPRAIL then discovers fee transfers over NEAR RPC.
-        </p>
-        <Endpoint verb="POST" path="/api/fees/prepare" auth="public" />
-        <Code title="prepare">{`// request — the recipient comes from the token description
-{ "token": "token.near" }
-
-// response
-{
-  "token": "token.near",
-  "handle": "creator",
-  "address": "escrow.uprail.near",
-  "registered": true,
-  "autoSync": true,
-  "feePercent": 0.05,
-  "minFeeUsd": 1
-}`}</Code>
-        <Endpoint verb="POST" path="/api/fees/sync" auth="public" />
-        <Endpoint verb="POST" path="/api/fees/route" auth="public" />
-
-        <Callout>
-          <strong className="text-stone-900">Launchpads own the setup.</strong> The claim page is
-          receiver-only. Integration belongs in the launch flow or backend, not in a receiver&apos;s
-          wallet.
+          <strong className="text-stone-900">Launchpads own the payout.</strong> The Creator fees
+          page only receives. The adapter belongs in the launchpad keeper or contract.
         </Callout>
 
         <Callout tone="warn">
@@ -320,32 +208,22 @@ export default function FeesDocsPage() {
       <section id="launchpads" className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">Supported launchpads</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Any launchpad whose tokens are subaccounts of an account it controls can integrate. No
-          deployment or allowlist change is required on UPRAIL.
+          Nearly and JustHoot keep their own fee receiver. Their keeper uses the adapter above
+          only for the payout that should reach an X handle.
         </p>
         <div className="rounded-2xl border border-stone-200 px-4 py-1">
-          <Field name="Nearly" type="factory">
-            Uses <code className="font-mono">get_launch_by_token</code> +{' '}
-            <code className="font-mono">get_fee_to</code>; configure a{' '}
-            <code className="font-mono">factory</code> verification.
+          <Field name="Nearly" type="keeper">
+            Their keeper pays the creator with <code className="font-mono">push_creator_fees</code>,
+            a native NEAR transfer. The adapter replaces that payout when the destination is an X
+            handle: wrap the NEAR, <code className="font-mono">ft_transfer</code> it, then submit
+            the hash. <code className="font-mono">fee_to</code> stays unchanged.
           </Field>
-          <Field name="JustHoot" type="token_config">
-            Tokens live under <code className="font-mono">*.launchpad.justhoot.near</code>; configure
-            a <code className="font-mono">token_config</code> verification and the generic claim
-            method.
+          <Field name="JustHoot v2" type="keeper">
+            Their distributor already pays the dev in wNEAR. The adapter is that same{' '}
+            <code className="font-mono">ft_transfer</code> with the UPRAIL memo instead of the dev
+            account. <code className="font-mono">dev_id</code> stays unchanged.
           </Field>
         </div>
-        <Callout tone="warn">
-          <strong className="text-stone-900">JustHoot ownership.</strong> Current JustHoot tokens
-          expose the fee recipient as <code className="font-mono text-[13px]">owner_id</code>, so
-          pointing fees at escrow also makes escrow the token owner. If JustHoot exposes a separate
-          creator-fee field, use that instead.
-        </Callout>
-        <p className="text-sm text-stone-600 leading-relaxed">
-          Building a launchpad? Issue tokens under your own account, point creator fees at escrow,
-          and register with a signed proof. The fallback description path remains available for
-          launches that already shipped.
-        </p>
       </section>
     </article>
   );

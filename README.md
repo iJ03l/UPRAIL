@@ -28,7 +28,7 @@ UPRAIL maps any X handle (`@handle`) to a deterministic, passkey-gated NEAR vaul
 - **Confidential execution & unlinked escrow claims:** When routed through NEAR Confidential Intents, balances and swap legs settle inside the confidential layer. Escrowed claims settle from `escrow.uprail.near`'s confidential balance to the recipient's vault, breaking onchain linkability between sender and recipient.
 - **Cross-chain "Send to Wallet" across 35+ blockchains:** Users can withdraw their balance to any external wallet on NEAR, Ethereum, Base, Arbitrum, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and 25+ other chains via 1Click.
 - **Policy-bounded AI Agent Payments (OAuth 2.1 + MCP):** Users connect Claude, ChatGPT, Grok, or Cursor via OAuth 2.1 + PKCE or scoped Bearer keys with Passkey-approved per-transaction and daily USD spend caps enforced atomically in D1.
-- **Launchpad Creator-Fee Routing:** Token launchpads (Nearly, JustHoot, Meme.cooking, or any NEP-141 factory) route trading/creator fees directly to `@handle` via self-serve NEP-413 signed bindings or zero-integration token metadata.
+- **Launchpad Creator-Fee Routing:** Nearly, JustHoot, and any other launchpad keep their own fee receiver. When a payout should reach an X handle, their adapter sends `ft_transfer` to `escrow.uprail.near` with memo `Fees to @handle via UPRAIL`, then submits the transaction hash to `POST /api/fees/adapter`.
 
 ---
 
@@ -91,9 +91,13 @@ UPRAIL includes a full **OAuth 2.1 Authorization Server** (`worker/src/oauth/`) 
 - **Fail-Closed Spend Policy (`worker/src/services/agentPolicy.ts`):** Prices tokens in USD via the live 1Click `/v0/tokens` oracle (rejecting unpriced assets with `unpriced_asset`), reserves daily spend atomically in D1 `agent_spend` before signing, and enforces `Idempotency-Key` locks (`agent_requests`) so retried LLM tool calls cannot double-pay.
 
 ### 7. Launchpad Creator-Fee Routing
-Token launchpads route creator fees to `@handle` through two onchain-verified paths (`worker/src/services/launchpadIntegrations.ts`, `worker/src/services/launchpadFees.ts`):
-- **Self-Serve NEP-413 Signed Binding (`POST /api/launchpads/register`):** Any launchpad parent account (e.g. `launchpad.justhoot.near`, `nearlytrade.near`) signs a canonical NEP-413 registration payload for `<token>.<parent>`. UPRAIL verifies the parent's access key via NEAR RPC `view_access_key`, queries the token or factory contract onchain (`token_config` or `factory` view methods) to confirm `fee_to == escrow.uprail.near`, and binds the token to `@handle`. For pull-based contracts (`claim_owed_fees`), UPRAIL's hourly cron invokes the claim method from `escrow.uprail.near`, parses the NEP-141 `EVENT_JSON` transfer logs from the receipt, deducts the 5% protocol fee, and credits `@handle`.
-- **Zero-Integration RPC Description Path (`POST /api/fees/route`):** Launchpads set `fee_to = escrow.uprail.near` and include `"Fees to @handle via UPRAIL"` in `ft_metadata.description`. UPRAIL verifies inbound `ft_transfer` receipts onchain, applies a `$1` dust guard (`MIN_FEE_USD`), and routes net fees into the creator's vault or holds them in non-expiring escrow until `@handle` signs in.
+Launchpads keep their own fee receiver (`fee_to`, `dev_id`). When a payout should reach an X handle, they implement the adapter in [`adapters/launchpad`](adapters/launchpad) (`worker/src/routes/fees.ts`, `worker/src/services/launchpadFees.ts`):
+- Call `ft_transfer` with exactly 1 yoctoNEAR attached. Never `ft_transfer_call`. `escrow.uprail.near` is a plain account.
+- `receiver_id` is `escrow.uprail.near`. The memo is exactly `Fees to @handle via UPRAIL`.
+- NEAR fees are sent as wNEAR (`wrap.near`), because a native transfer has no memo.
+- After the transaction is final, `POST /api/fees/adapter` with `{ "txHash" }`.
+
+UPRAIL reads the handle from that on-chain memo, deducts the 5% protocol fee, and credits the rest to the handle: directly when the handle is registered, otherwise into non-expiring escrow until they sign in. A launchpad's own role memo is ignored. The API caller cannot choose the handle.
 
 ---
 
@@ -106,7 +110,7 @@ Token launchpads route creator fees to `@handle` through two onchain-verified pa
 | **Defuse Solver Relay** | `https://solver-relay-v2.chaindefuser.com/rpc` | JSON-RPC 2.0 `publish_intent` relay for signed NEP-413 escrow settlements and refunds. | [`relay.go`](go-near-service/internal/intents/relay.go), [`nearRpc.ts`](worker/src/services/nearRpc.ts) |
 | **Deterministic Sub-Accounts** | `u_<16hex>.escrow.uprail.near` | Per-user NEAR accounts created via atomic `CreateAccount + Transfer + AddKey` Borsh transactions and registered on `intents.near::add_public_key`. | [`nearRpc.ts`](worker/src/services/nearRpc.ts), [`service.go`](go-near-service/internal/account/service.go) |
 | **Gasless Relayer & Storage Sponsor** | `escrow.uprail.near` | Sponsors NEP-145 `storage_deposit` (`register-then-transfer`) and relays `intents.near::execute_intents` so end users never hold NEAR for gas. | [`nearRpc.ts`](worker/src/services/nearRpc.ts) |
-| **Onchain Access-Key & Receipt Verification** | NEAR JSON-RPC (`fastnear`, `lava`, `1rpc`) | Verifies parent-account keys (`view_access_key`) for launchpad bindings and parses NEP-141 `EVENT_JSON` receipt logs (`EXPERIMENTAL_tx_status` / `tx`) for fee attribution. | [`launchpadAuth.ts`](worker/src/services/launchpadAuth.ts), [`launchpadIntegrations.ts`](worker/src/services/launchpadIntegrations.ts) |
+| **Onchain Access-Key & Receipt Verification** | NEAR JSON-RPC (`fastnear`, `lava`, `1rpc`) | Reads an adapter `ft_transfer` memo and NEP-141 receipt logs (`EXPERIMENTAL_tx_status` / `tx`) to credit an X handle. | [`nearRpc.ts`](worker/src/services/nearRpc.ts), [`launchpadFees.ts`](worker/src/services/launchpadFees.ts) |
 
 ---
 
@@ -142,8 +146,9 @@ curl -s https://api.uprail.world/.well-known/oauth-protected-resource/api/mcp | 
 # 4. Inspect the OpenAPI 3.1.0 specification for AI Chat Payment actions
 curl -s https://api.uprail.world/api/agent/openapi.json | jq '{openapi, info, paths: (.paths | keys)}'
 
-# 5. Inspect Launchpad Creator-Fee integration config (escrow account & NEP-413 proof rules)
-curl -s https://api.uprail.world/api/launchpads/config | jq .
+# 5. Launchpad X payouts are credited by POST /api/fees/adapter after
+#    ft_transfer to escrow.uprail.near with memo "Fees to @handle via UPRAIL".
+#    See adapters/launchpad and https://docs.uprail.world/fees
 ```
 
 #### Flow 3: Connect an AI Agent (Claude, ChatGPT, Cursor) via MCP
@@ -196,7 +201,7 @@ go test -v ./...
   - `test/confidential-rail.test.ts` & `test/oneclick-client.test.ts`: Verifies Confidential Intents balance formatting, `ONE_CLICK_PRIVACY_DOWNGRADE` fail-closed rejection, dual-header (`X-API-Key` + `Bearer <userSession>`) auth, and cron status reconciliation.
   - `test/intents-nonce.test.ts`: Verifies the 32-byte versioned NEP-413 nonce layout (`magic[4] || version[1] || salt[4] || deadline_ns_le[8] || random[15]`).
   - `test/oneclick-withdraw.test.mjs`: Verifies 35+ chain withdrawal discovery, wBTC-to-BTC asset mapping, and XRPL/EVM/Solana/BTC address validation.
-  - `test/launchpad-fees.test.mjs` & `test/launchpad-integrations.test.mjs`: Verifies NEP-413 parent-account signature verification, canonical JSON hashing, 5% integer fee math, `$1` dust guard, and NEP-141 `EVENT_JSON` receipt log parsing.
+  - `test/launchpad-fees.test.mjs` & `test/launchpad-integrations.test.mjs`: Verifies the adapter memo, inner `ft_transfer` and wNEAR log parsing, 5% integer fee math, the `$1` dust guard, and NEP-141 `EVENT_JSON` receipt log parsing.
 
 #### Running Local Dev Servers
 
@@ -225,7 +230,7 @@ flowchart TD
     subgraph Client["User / AI Agent Layer"]
         Browser["Browser SPA (app.uprail.world)<br/>X OAuth 2.0 PKCE + WebAuthn P-256 Passkey"]
         AIAgent["AI Clients (Claude, ChatGPT, Cursor)<br/>OAuth 2.1 PKCE / Scoped Bearer Key"]
-        Launchpad["NEAR Token Launchpads<br/>NEP-413 Signed Binding / RPC Metadata"]
+        Launchpad["NEAR Token Launchpads<br/>ft_transfer adapter memo"]
     end
 
     subgraph Edge["Cloudflare Worker Edge (worker/)"]
@@ -284,7 +289,7 @@ All internal settlement calls from the Cloudflare Worker to `go-near-service` (`
 - **Zero-Gas User Experience:** `escrow.uprail.near` sponsors sub-account creation (`u_<16hex>.escrow.uprail.near`), NEP-145 token storage registration, and `intents.near::execute_intents` gas.
 - **Cross-Chain Withdrawals (35+ Chains):** Withdraw from UPRAIL directly to external wallets on NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and more.
 - **AI Chat Payments (OAuth 2.1 + Remote MCP):** Streamable HTTP MCP server (`/api/mcp`) and OpenAPI 3.1.0 spec (`/api/agent/openapi.json`) with Passkey-approved per-tx and daily USD caps, live oracle valuation, and idempotency keys.
-- **Launchpad Creator-Fee Routing:** Self-serve NEP-413 parent-signed token bindings (`/api/launchpads/register`), automated pull-based `claim_owed_fees` cron harvesting, and zero-integration metadata routing (`/api/fees/route`).
+- **Launchpad Creator-Fee Routing:** Payout adapter (`POST /api/fees/adapter`). The launchpad keeps its fee receiver and sends the X-handle portion with `ft_transfer` memo `Fees to @handle via UPRAIL`.
 - **Dynamic Edge OpenGraph Cards:** Generates custom `1200x630` PNG social preview cards at the edge for claim links (`/og/claim/:id.png`), cross-chain receipts (`/og/receipt/:id.png`), invites (`/og/invite/:code.png`), and creator fees (`/og/fees/:handle.png`).
 
 ---
@@ -369,7 +374,7 @@ Local secrets live in `worker/.dev.vars` and `go-near-service/.env` (both gitign
 | `NEAR_RPC_URL` | Worker | Primary NEAR mainnet JSON-RPC endpoint (with automatic multi-provider failover) |
 | `ONE_CLICK_API_KEY` | Worker & Go | 1Click partner API key (`NEAR_PARTNER_API_KEY` in Go) |
 | `CONFIDENTIAL_RAIL_ENABLED` | Worker | Enables the NEAR Confidential Intents execution path (`"true"` / `"false"`) |
-| `CREATOR_FEES_ENABLED` | Worker | Enables RPC balance-delta auto-sync for zero-integration launchpad tokens |
+| `CREATOR_FEES_ENABLED` | Worker | Legacy balance-delta scan. Launchpad X payouts use `POST /api/fees/adapter` |
 
 ---
 
