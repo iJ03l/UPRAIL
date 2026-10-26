@@ -11,6 +11,7 @@ import {
   isSharedPoolContract,
   inferLaunchpadFromContract,
   getAccountedEscrowAtomic,
+  creatorFeesEnabled,
 } from '../dist/launchpadFees.bundle.mjs';
 /**
  * The launchpad fee rail is zero-integration: tokens point creator fees at
@@ -174,5 +175,14 @@ describe('automatic RPC balance-delta helpers', () => {
     );
     // 95 + 5 + 10 = 110 tokens = 110_000_000 atomic units
     assert.equal(accounted, 110000000n);
+  });
+});
+
+describe('creator-fee auto-routing kill switch', () => {
+  it('is off by default and only enabled explicitly', () => {
+    assert.equal(creatorFeesEnabled({}), false);
+    assert.equal(creatorFeesEnabled({ CREATOR_FEES_ENABLED: 'false' }), false);
+    assert.equal(creatorFeesEnabled({ CREATOR_FEES_ENABLED: 'true' }), true);
+    assert.equal(creatorFeesEnabled({ CREATOR_FEES_ENABLED: '1' }), true);
   });
 });

@@ -12,6 +12,7 @@ import { base58Decode, base58Encode } from '../utils/base58';
 import { getOnchainIcon } from './onchainIcons';
 import { getAssetMeta } from './assetMeta';
 import { generate1ClickSwapIntent } from './oneclickWithdraw';
+import { requestQuote } from './oneclickClient';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1984,11 +1985,57 @@ CHAIN_DEPOSIT_CONFIGS['doge'] = CHAIN_DEPOSIT_CONFIGS['doge_doge'];
  * Solvers sweep incoming deposits and route them to recipient intents vault.
  */
 async function fetch1ClickDepositAddress(
-  apiBase: string,
+  env: Env,
   nearAccount: string,
-  cfg: ChainDepositConfig
+  cfg: ChainDepositConfig,
+  opts: { confidential?: boolean; userSession?: string } = {}
 ): Promise<DepositAddress | null> {
+  const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
   const deadline = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
+
+  if (opts.confidential) {
+    if (!opts.userSession) {
+      console.warn('[nearRpc] confidential deposit quote needs a User-Session');
+      return null;
+    }
+    try {
+      const quote = await requestQuote(
+        env,
+        {
+          originAsset: cfg.originAsset,
+          destinationAsset: cfg.destinationAsset,
+          amount: cfg.amount,
+          recipient: nearAccount,
+          recipientType: 'CONFIDENTIAL_INTENTS',
+          refundTo: nearAccount,
+          refundType: 'CONFIDENTIAL_INTENTS',
+          depositType: 'ORIGIN_CHAIN',
+          confidentiality: 'advanced',
+          deadline,
+        },
+        { userSession: opts.userSession }
+      );
+      return {
+        chain: cfg.chain,
+        chainName: cfg.chainName,
+        address: quote.quote.depositAddress,
+        memo: quote.quote.depositMemo || undefined,
+        expiresAt: quote.quote.deadline ? new Date(quote.quote.deadline).getTime() : undefined,
+        token: cfg.token,
+        minAmount: cfg.amount,
+        minAmountFormatted: cfg.minAmountFormatted,
+        minAmountUsd: cfg.minAmountUsd,
+        isOneTime: true,
+      };
+    } catch (err: any) {
+      console.warn(
+        `[nearRpc] confidential deposit quote failed (${cfg.chain}/${cfg.token}):`,
+        err?.message || err
+      );
+      return null;
+    }
+  }
+
   try {
     const resp = await fetch(`${apiBase}/v0/quote`, {
       method: 'POST',
@@ -2118,14 +2165,20 @@ async function getCachedDepositAddress(
       }>();
 
     if (row && row.address) {
-      const cfg = CHAIN_DEPOSIT_CONFIGS[chainKey] || CHAIN_DEPOSIT_CONFIGS[row.chain];
+      // Private rows are keyed `private_base_usdc`; strip the rail prefix
+      // before resolving the network so cached quotes don't come back with
+      // chain="private".
+      const key = chainKey.startsWith('private_')
+        ? chainKey.slice('private_'.length)
+        : chainKey;
+      const cfg = CHAIN_DEPOSIT_CONFIGS[key] || CHAIN_DEPOSIT_CONFIGS[row.chain];
       // The stored key is token-specific (`near_shitzu`), while `chain` must be
       // the network (`near`). Dynamic tokens have no curated config to read it
       // from, so take the prefix of the key.
-      const chainFromKey = chainKey.split('_')[0] || row.chain;
+      const chainFromKey = key.split('_')[0] || row.chain;
       return {
         chain: cfg?.chain || chainFromKey,
-        chainName: cfg?.chainName || row.chain_name || row.chain,
+        chainName: cfg?.chainName || row.chain_name || key,
         address: row.address,
         memo: row.memo || undefined,
         expiresAt: row.expires_at || undefined,
@@ -2358,8 +2411,13 @@ export async function getDepositAddress(
   bypassCache = false,
   tokenSymbol?: string,
   amount?: string,
-  contractId?: string
+  contractId?: string,
+  opts: { xId?: string } = {}
 ): Promise<DepositAddress | null> {
+  const railOn = ['true', '1', 'yes'].includes(
+    (env.CONFIDENTIAL_RAIL_ENABLED || '').trim().toLowerCase()
+  );
+  const confidential = Boolean(railOn && opts.xId);
   const cleanChain = chainId.toLowerCase();
   const cleanToken = (tokenSymbol || '').toLowerCase();
   const cleanContract = (contractId || '').trim().toLowerCase();
@@ -2452,6 +2510,10 @@ export async function getDepositAddress(
     return null;
   }
 
+  // Keep private and public deposit addresses in separate cache rows so a
+  // user who switches rails never receives a previously issued public address.
+  if (confidential) cfg = { ...cfg, key: `private_${cfg.key}` };
+
   // If a custom exact deposit amount is specified, re-calibrate cfg.amount
   if (amount && parseFloat(amount) > 0) {
     const dec = cfg.decimals ?? 6;
@@ -2467,8 +2529,6 @@ export async function getDepositAddress(
     // Always bypass cache when an exact amount quote is requested
     bypassCache = true;
   }
-  const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
-
   // 1. Check D1 cache if not bypassing
   if (!bypassCache) {
     const cached = await getCachedDepositAddress(env.DB, nearAccount, cfg.key);
@@ -2488,7 +2548,20 @@ export async function getDepositAddress(
   }
 
   // 2. Fetch fresh address via 1Click quote
-  const fresh = await fetch1ClickDepositAddress(apiBase, nearAccount, cfg);
+  let userSession: string | undefined;
+  if (confidential) {
+    try {
+      const { getUserSession } = await import('./oneclickAuth');
+      userSession = (await getUserSession(env, opts.xId!)).accessToken;
+    } catch (err: any) {
+      console.warn('[nearRpc] could not mint User-Session for confidential deposit:', err?.message || err);
+      return null;
+    }
+  }
+  const fresh = await fetch1ClickDepositAddress(env, nearAccount, cfg, {
+    confidential,
+    userSession,
+  });
   if (fresh) {
     // NEAR-origin NEP-141 receivers must be storage-registered, otherwise a
     // plain wallet ft_transfer to this one-time implicit address is rejected
@@ -2521,6 +2594,10 @@ export async function getDepositAddress(
       }
     } catch {}
   }
+
+  // Never fall back to a public vault ingress when the confidential rail is
+  // on; the caller must surface the quote failure instead.
+  if (confidential) return null;
 
   // 4. Clean fallback for native NEAR
   if (cfg.chain === 'near' && cfg.token === 'NEAR') {
@@ -2778,9 +2855,13 @@ export async function probeNearTransaction(
 export async function getAllDepositAddresses(
   env: Env,
   nearAccount: string,
-  bypassCache = false
+  bypassCache = false,
+  opts: { xId?: string } = {}
 ): Promise<DepositAddress[]> {
-  const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
+  const railOn = ['true', '1', 'yes'].includes(
+    (env.CONFIDENTIAL_RAIL_ENABLED || '').trim().toLowerCase()
+  );
+  const confidential = Boolean(railOn && opts.xId);
   const uniqueChains = ['eth', 'btc', 'sol', 'base', 'arbitrum', 'near', 'robinhood'];
   const chainMap = new Map<string, DepositAddress>();
 
@@ -2789,7 +2870,9 @@ export async function getAllDepositAddresses(
     try {
       const { results } = await env.DB
         .prepare(
-          'SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses WHERE account_id = ? AND (expires_at IS NULL OR expires_at > ?)'
+          `SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses
+            WHERE account_id = ? AND (expires_at IS NULL OR expires_at > ?)
+              AND chain ${confidential ? "LIKE 'private_%'" : "NOT LIKE 'private_%'"}`
         )
         .bind(nearAccount, Date.now() + 10 * 60 * 1000)
         .all<{
@@ -2802,9 +2885,16 @@ export async function getAllDepositAddresses(
 
       for (const row of results || []) {
         if (row.address) {
-          chainMap.set(row.chain, {
-            chain: row.chain,
-            chainName: row.chain_name || row.chain,
+          // The D1 `chain` column stores the cache key (`base_usdc`,
+          // `private_base_usdc`), not the bare network. Normalize it so cached
+          // rows are actually reused instead of re-quoting every chain.
+          const key = row.chain.startsWith('private_')
+            ? row.chain.slice('private_'.length)
+            : row.chain;
+          const chain = key.split('_')[0] || key;
+          chainMap.set(chain, {
+            chain,
+            chainName: row.chain_name || chain,
             address: row.address,
             memo: row.memo || undefined,
             expiresAt: row.expires_at || undefined,
@@ -2820,15 +2910,30 @@ export async function getAllDepositAddresses(
   const missingConfigs = uniqueChains
     .filter((c) => !chainMap.has(c))
     .map((c) => CHAIN_DEPOSIT_CONFIGS[c])
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((cfg) => (confidential ? { ...cfg, key: `private_${cfg.key}` } : cfg));
+
+  let userSession: string | undefined;
+  if (confidential && missingConfigs.length > 0) {
+    try {
+      const { getUserSession } = await import('./oneclickAuth');
+      userSession = (await getUserSession(env, opts.xId!)).accessToken;
+    } catch (err: any) {
+      console.warn('[nearRpc] could not mint User-Session for confidential deposits:', err?.message || err);
+      return [];
+    }
+  }
 
   if (missingConfigs.length > 0) {
     const fetchPromises = missingConfigs.map(async (cfg) => {
-      const fresh = await fetch1ClickDepositAddress(apiBase, nearAccount, cfg);
+      const fresh = await fetch1ClickDepositAddress(env, nearAccount, cfg, {
+        confidential,
+        userSession,
+      });
       if (fresh) {
         chainMap.set(cfg.chain, fresh);
-        await saveDepositAddress(env.DB, nearAccount, fresh);
-      } else if (cfg.chain === 'near') {
+        await saveDepositAddress(env.DB, nearAccount, fresh, cfg.key);
+      } else if (cfg.chain === 'near' && !confidential) {
         chainMap.set('near', {
           chain: 'near',
           chainName: 'NEAR',
@@ -2846,7 +2951,7 @@ export async function getAllDepositAddresses(
       chainMap.get(sc.chain) || {
         chain: sc.chain,
         chainName: sc.chainName,
-        address: sc.chain === 'near' ? nearAccount : '',
+        address: confidential ? '' : sc.chain === 'near' ? nearAccount : '',
       }
     );
   });
@@ -5888,12 +5993,22 @@ export async function getVirtualBalanceDeltas(
 
     // 3. Withdrawals by user
     const withdrawnRows = await env.DB.prepare(
-      "SELECT asset, amount, status, tx_hash FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
+      "SELECT asset, amount, status, tx_hash, privacy_rail FROM withdrawals WHERE x_id = ? AND status IN ('COMPLETED', 'PENDING')"
     )
       .bind(session.x_id)
-      .all<{ asset: string; amount: string; status: string; tx_hash?: string | null }>();
+      .all<{
+        asset: string;
+        amount: string;
+        status: string;
+        tx_hash?: string | null;
+        privacy_rail?: string | null;
+      }>();
 
     for (const row of withdrawnRows.results || []) {
+      // Confidential withdrawals never touch the public Intents balance read
+      // above; their pending amount is subtracted from the confidential
+      // balance merge instead.
+      if (row.privacy_rail === 'confidential') continue;
       if (row.status === 'PENDING' || isSyntheticTxHash(row.tx_hash)) {
         add(row.asset, -(parseFloat(row.amount) || 0));
       }

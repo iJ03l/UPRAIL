@@ -26,7 +26,8 @@ SETTLEMENT_SERVICE_URL=""
 
 # Escrow root key (`ed25519:...`). Derives every user's vault key via
 # HMAC(ESCROW_PRIVATE_KEY, "near_vault_key:" + x_id). Rotating it invalidates
-# all previously derived vault keys.
+# all previously derived vault keys. Also signs pooled escrow Confidential
+# Intents legs (private claims/refunds) when the rail is enabled.
 ESCROW_PRIVATE_KEY=""
 
 # NEAR JSON-RPC endpoint (contains a provider API token)
@@ -39,3 +40,18 @@ RECOVERY_PEPPER=""
 # Daily cap on self-serve launchpad registrations per parent account per UTC
 # day. Default 100.
 LAUNCHPAD_DAILY_REG_CAP="100"
+
+# 1Click partner API key. Required for confidential quotes and
+# generate-intent/submit-intent. Never expose this to the browser.
+ONE_CLICK_API_KEY=""
+
+# Legacy 1Click partner JWT. Used only when ONE_CLICK_API_KEY is absent.
+ONE_CLICK_JWT=""
+
+# Confidential Intents rail. Off by default: enabling it changes production
+# money movement and requires written founder approval.
+CONFIDENTIAL_RAIL_ENABLED="false"
+
+# Creator-fee balance-delta routing. Off by default because escrow also holds
+# user funds; use a verified transaction hash instead.
+CREATOR_FEES_ENABLED="false"

@@ -36,6 +36,16 @@ import {
 } from '../services/oneclickWithdraw';
 import { publicErrorMessage } from '../utils/errors';
 import { syncAllLaunchpadFees } from '../services/launchpadFees';
+import {
+  ensureConfidentialFunds,
+  formatAtomic,
+  getConfidentialAssetBalance,
+  getConfidentialBalances,
+  isConfidentialRailEnabled,
+  submitPrivateWithdrawal,
+  submitEscrowPrivateTransfer,
+  waitForSettlement,
+} from '../services/confidentialRail';
 
 export const claimRouter = new Hono<AppContext>();
 
@@ -675,6 +685,71 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
             }
             claimResponse = await resp.json();
           }
+        } else if (isConfidentialRailEnabled(c.env) && payment.privacy_rail === 'confidential') {
+          // Private claim: escrow pays the recipient's Confidential Intents
+          // account, so the payout is not linkable to the original sender.
+          const privateTransfer = await submitEscrowPrivateTransfer(c.env, {
+            asset: payment.asset,
+            amount: payment.amount,
+            recipientAccount: recipientNearAccount,
+          });
+          const settlement = await waitForSettlement(c.env, '', privateTransfer.depositAddress, {
+            signer: 'escrow',
+            timeoutMs: 60_000,
+          }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
+          const normalized = String(settlement.status || 'UNKNOWN').toUpperCase();
+          if (normalized === 'SUCCESS') {
+            claimResponse = {
+              payment: {
+                ...payment,
+                status: PaymentStatus.CLAIMED,
+                claim_tx_hash: privateTransfer.intentHash,
+                claim_deposit_address: privateTransfer.depositAddress,
+                settlement_status: 'SUCCESS',
+                updated_at: Date.now(),
+              },
+              txHash: privateTransfer.intentHash,
+            };
+          } else if (normalized === 'FAILED' || normalized === 'REFUNDED') {
+            throw new Error(`Confidential claim ${normalized.toLowerCase()} — no funds moved to the recipient`);
+          } else {
+            // Funds may have moved; keep the CLAIMED reservation so a retry
+            // cannot double-pay. Reconciliation will resolve the status.
+            claimResponse = {
+              payment: {
+                ...payment,
+                status: PaymentStatus.CLAIMED,
+                claim_tx_hash: privateTransfer.intentHash,
+                claim_deposit_address: privateTransfer.depositAddress,
+                settlement_status: normalized,
+                updated_at: Date.now(),
+              },
+              txHash: privateTransfer.intentHash,
+            };
+            try {
+              await c.env.DB.prepare(
+                `UPDATE payments
+                    SET claim_tx_hash = ?, claim_deposit_address = ?, settlement_status = ?, updated_at = ?
+                  WHERE id = ?`
+              )
+                .bind(
+                  privateTransfer.intentHash,
+                  privateTransfer.depositAddress,
+                  normalized,
+                  Date.now(),
+                  paymentId
+                )
+                .run();
+            } catch (dbErr) {
+              console.warn('[claim/execute] could not persist confidential claim state:', dbErr);
+            }
+            results.push({
+              paymentId,
+              status: PaymentStatus.CLAIMED,
+              error: `Confidential claim status is ${normalized} — quote payment id ${paymentId} to support`,
+            });
+            continue;
+          }
         } else {
           // Authentic Onchain settlement: transfer tokens from escrow.uprail.near to recipient on intents.near!
           let txHash: string | null = null;
@@ -855,11 +930,33 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
         // Persist the settlement tx hash on the already-reserved row.
         if (c.env.DB) {
           try {
-            await c.env.DB.prepare(
-              'UPDATE payments SET claim_tx_hash = ?, updated_at = ? WHERE id = ?'
-            )
-              .bind(claimResponse!.txHash, Date.now(), paymentId)
-              .run();
+            if (claimResponse!.payment.settlement_status) {
+              await c.env.DB.prepare(
+                `UPDATE payments
+                    SET claim_tx_hash = ?,
+                        claim_deposit_address = COALESCE(?, claim_deposit_address),
+                        settlement_status = COALESCE(?, settlement_status),
+                        confirmed_at = CASE WHEN ? = 'SUCCESS' THEN ? ELSE confirmed_at END,
+                        updated_at = ?
+                  WHERE id = ?`
+              )
+                .bind(
+                  claimResponse!.txHash,
+                  claimResponse!.payment.claim_deposit_address || null,
+                  claimResponse!.payment.settlement_status || null,
+                  claimResponse!.payment.settlement_status || null,
+                  Date.now(),
+                  Date.now(),
+                  paymentId
+                )
+                .run();
+            } else {
+              await c.env.DB.prepare(
+                'UPDATE payments SET claim_tx_hash = ?, updated_at = ? WHERE id = ?'
+              )
+                .bind(claimResponse!.txHash, Date.now(), paymentId)
+                .run();
+            }
           } catch (dbErr) {
             console.warn('[claim/execute] D1 payment update failed:', dbErr);
           }
@@ -957,6 +1054,39 @@ claimRouter.get('/balance', requireAuth({ passkeyVerified: true }), async (c) =>
       addAmount(asset, delta);
     }
 
+    // 3. Confidential Intents balances are spendable but never appear in the
+    //    public intent/plain reads above. Merge them here, minus any pending
+    //    confidential withdrawal that is already in flight.
+    if (isConfidentialRailEnabled(c.env)) {
+      try {
+        const confidential = await getConfidentialBalances(c.env, session.x_id);
+        let pendingConfidential: Array<{ asset: string; amount: string }> = [];
+        try {
+          const pending = await c.env.DB.prepare(
+            `SELECT asset, amount FROM withdrawals
+              WHERE x_id = ? AND privacy_rail = 'confidential' AND status = 'PENDING'`
+          )
+            .bind(session.x_id)
+            .all<{ asset: string; amount: string }>();
+          pendingConfidential = pending.results || [];
+        } catch {}
+        for (const cb of confidential) {
+          let amount = parseFloat(cb.amountFormatted) || 0;
+          for (const row of pendingConfidential) {
+            if (
+              nearRpc.assetsMatch(row.asset, cb.assetId) ||
+              nearRpc.assetsMatch(row.asset, cb.symbol)
+            ) {
+              amount -= parseFloat(row.amount) || 0;
+            }
+          }
+          if (amount > 0) addAmount(cb.assetId, amount);
+        }
+      } catch (confErr) {
+        console.warn('[claim/balance] confidential balance merge skipped:', confErr);
+      }
+    }
+
     // Cap net balances at 0
     for (const k of Object.keys(netBalances)) {
       netBalances[k] = Math.max(0, netBalances[k]);
@@ -1018,6 +1148,38 @@ claimRouter.get('/balance', requireAuth({ passkeyVerified: true }), async (c) =>
 });
 
 /**
+ * GET /api/claim/confidential-balance
+ * Reads the user's Confidential Intents balances through a User-Session
+ * token. Disabled unless CONFIDENTIAL_RAIL_ENABLED is explicitly on.
+ */
+claimRouter.get('/confidential-balance', requireAuth({ passkeyVerified: true }), async (c) => {
+  if (!isConfidentialRailEnabled(c.env)) {
+    return c.json<ErrorResponse>(
+      { error: 'Confidential balance rail is not enabled', code: 'RAIL_DISABLED' },
+      404
+    );
+  }
+  try {
+    const session = c.get('session')!;
+    const balances = await getConfidentialBalances(c.env, session.x_id);
+    return c.json({
+      balances,
+      source: 'confidential_intents',
+      fetchedAt: Date.now(),
+    });
+  } catch (err: any) {
+    console.error('Confidential balance read error:', err);
+    return c.json<ErrorResponse>(
+      {
+        error: `Failed to read confidential balance: ${publicErrorMessage(err, 'Internal error')}`,
+        code: 'BALANCE_ERROR',
+      },
+      500
+    );
+  }
+});
+
+/**
  * GET /api/claim/withdraw-chains?asset=<defuse id or symbol>
  * Destination networks the asset can settle to, resolved live from 1Click.
  * Drives the Send-screen network picker so it never falls behind what the
@@ -1045,6 +1207,195 @@ claimRouter.get('/withdraw-chains', requireAuth({ passkeyVerified: true }), asyn
 claimRouter.post('/withdraw', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), (c) =>
   handleWithdraw(c)
 );
+
+/**
+ * Confidential withdrawal path: the user's Confidential Intents balance is
+ * spent by a signed 1Click intent, never by a public Intents transfer.
+ */
+async function handleConfidentialWithdraw(
+  c: Context<AppContext>,
+  session: Session,
+  params: {
+    destinationAddress: string;
+    asset: string;
+    destinationChain?: string;
+    amount?: string;
+  }
+): Promise<Response> {
+  const balance = await getConfidentialAssetBalance(c.env, session.x_id, params.asset);
+  const support = await nearRpc.isIntentsSupportedAsset(c.env, balance.contractId);
+  if (support === false) {
+    return c.json<ErrorResponse>(
+      {
+        error: `${balance.symbol} can only be sent on the public rail because its token contract does not support Intents.`,
+        code: 'PRIVATE_RAIL_UNAVAILABLE',
+      },
+      400
+    );
+  }
+  if (support === null) {
+    return c.json<ErrorResponse>(
+      { error: 'Could not verify the private rail for this asset — please try again.', code: 'RAIL_UNAVAILABLE' },
+      503
+    );
+  }
+
+  // Existing balances may still be public (Intents or plain). Read the full
+  // spendable amount so `all` is not limited to the confidential slice, then
+  // shield only the shortfall before signing the withdrawal.
+  const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
+  const publicHolding = await nearRpc.getIntentAssetBalance(c.env, params.asset, nearAccount).catch(
+    () => null
+  );
+  const plainBalances = await nearRpc.getPlainBalances(c.env, nearAccount).catch(() => []);
+  const plainAtomic = plainBalances
+    .filter(
+      (b) =>
+        nearRpc.assetsMatch(b.defuse_asset_id, balance.assetId) ||
+        nearRpc.assetsMatch(b.nearContractId, balance.contractId)
+    )
+    .reduce((sum, b) => sum + BigInt(b.amount || '0'), 0n);
+  const totalAtomic = balance.amountAtomic + (publicHolding?.balance ?? 0n) + plainAtomic;
+
+  let amountStr: string;
+  if (params.amount && params.amount !== 'all') {
+    const raw = params.amount.trim();
+    if (!/^\d{1,15}(\.\d{1,18})?$/.test(raw)) {
+      return c.json<ErrorResponse>({ error: 'Invalid withdrawal amount', code: 'INVALID_AMOUNT' }, 400);
+    }
+    amountStr = raw;
+  } else {
+    if (publicHolding === null) {
+      return c.json<ErrorResponse>(
+        { error: 'Could not read your full balance — please try again.', code: 'RAIL_UNAVAILABLE' },
+        503
+      );
+    }
+    amountStr = formatAtomic(totalAtomic.toString(), balance.decimals);
+  }
+
+  let amountAtomic: bigint;
+  try {
+    amountAtomic = BigInt(nearRpc.toBaseUnits(amountStr, balance.decimals));
+  } catch {
+    return c.json<ErrorResponse>({ error: 'Invalid withdrawal amount', code: 'INVALID_AMOUNT' }, 400);
+  }
+  if (amountAtomic <= 0n) {
+    return c.json<ErrorResponse>({ error: 'Invalid withdrawal amount', code: 'INVALID_AMOUNT' }, 400);
+  }
+  if (publicHolding !== null && amountAtomic > totalAtomic) {
+    return c.json<ErrorResponse>(
+      {
+        error: `Insufficient balance. Available: ${formatAtomic(totalAtomic.toString(), balance.decimals)} ${balance.symbol}`,
+        code: 'INSUFFICIENT_FUNDS',
+      },
+      400
+    );
+  }
+
+  try {
+    await ensureConfidentialFunds(c.env, session.x_id, params.asset, amountAtomic);
+  } catch (fundErr: any) {
+    const message = String(fundErr?.message || fundErr);
+    if (message.startsWith('INSUFFICIENT_FUNDS')) {
+      return c.json<ErrorResponse>(
+        {
+          error: `Insufficient balance. Available: ${formatAtomic(totalAtomic.toString(), balance.decimals)} ${balance.symbol}`,
+          code: 'INSUFFICIENT_FUNDS',
+        },
+        400
+      );
+    }
+    if (message.startsWith('PUBLIC_BALANCE_UNAVAILABLE') || message.startsWith('SHIELD_')) {
+      return c.json<ErrorResponse>(
+        {
+          error: 'Could not shield your balance for a private withdrawal — please try again.',
+          code: 'CONFIDENTIAL_UNAVAILABLE',
+        },
+        503
+      );
+    }
+    throw fundErr;
+  }
+
+  const withdrawalId = 'wth_' + crypto.randomUUID();
+  const now = Date.now();
+  const reserve = await c.env.DB.prepare(
+    `INSERT INTO withdrawals
+       (id, x_id, x_handle, destination_address, asset, amount, tx_hash, status,
+        privacy_rail, settlement_status, rail, created_at, updated_at)
+     SELECT ?, ?, ?, ?, ?, ?, NULL, 'PENDING', 'confidential', 'PENDING', 'confidential', ?, ?
+     WHERE NOT EXISTS (
+       SELECT 1 FROM withdrawals WHERE x_id = ? AND asset = ? AND status = 'PENDING'
+     )`
+  )
+    .bind(
+      withdrawalId,
+      session.x_id,
+      session.x_handle,
+      params.destinationAddress,
+      params.asset,
+      amountStr,
+      now,
+      now,
+      session.x_id,
+      params.asset
+    )
+    .run();
+
+  if ((reserve.meta?.changes ?? 0) === 0) {
+    return c.json<ErrorResponse>(
+      { error: 'A withdrawal for this asset is already in progress', code: 'WITHDRAWAL_IN_PROGRESS' },
+      409
+    );
+  }
+
+  try {
+    const result = await submitPrivateWithdrawal(c.env, session.x_id, {
+      asset: params.asset,
+      amount: amountStr,
+      destinationAddress: params.destinationAddress,
+      destinationChain: params.destinationChain,
+    });
+    await c.env.DB.prepare(
+      `UPDATE withdrawals
+          SET tx_hash = ?, intent_hash = ?, deposit_address = ?, settlement_status = 'SUBMITTED', updated_at = ?
+        WHERE id = ?`
+    )
+      .bind(result.intentHash, result.intentHash, result.depositAddress, Date.now(), withdrawalId)
+      .run();
+    return c.json(
+      {
+        withdrawalId,
+        status: 'PENDING',
+        txHash: result.intentHash,
+        intentHash: result.intentHash,
+        depositAddress: result.depositAddress,
+        privacy: 'confidential',
+      },
+      202
+    );
+  } catch (err: any) {
+    const message = String(err?.message || err).slice(0, 500);
+    console.error(
+      `[Withdrawal] confidential settlement failed id=${withdrawalId} x=${session.x_handle} asset=${params.asset} reason=${message.slice(0, 200)}`
+    );
+    await c.env.DB.prepare(
+      "UPDATE withdrawals SET status = 'FAILED', error = ?, error_code = 'SETTLEMENT_FAILED', settlement_status = 'FAILED', updated_at = ? WHERE id = ? AND status = 'PENDING'"
+    )
+      .bind(message, Date.now(), withdrawalId)
+      .run()
+      .catch(() => {});
+    return c.json<ErrorResponse>(
+      {
+        error: `Confidential withdrawal failed: ${publicErrorMessage(err, 'settlement failed')}`,
+        code: 'SETTLEMENT_FAILED',
+        withdrawalId,
+      } as ErrorResponse,
+      502
+    );
+  }
+}
 
 export async function handleWithdraw(c: Context<AppContext>): Promise<Response> {
   try {
@@ -1118,6 +1469,18 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
           400
         );
       }
+    }
+
+    // Confidential rail: spend the user's Confidential Intents balance with a
+    // signed 1Click intent. Native-only assets are explicitly refused here
+    // instead of silently dropping to the public rail.
+    if (isConfidentialRailEnabled(c.env)) {
+      return await handleConfidentialWithdraw(c, session, {
+        destinationAddress,
+        asset,
+        destinationChain,
+        amount: body.amount,
+      });
     }
 
     // 1. Read-only balance preview (authoritative check happens in the

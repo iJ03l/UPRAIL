@@ -300,10 +300,9 @@ export const InteractiveRailSimulator: React.FC = () => {
                   <span>What The World Sees</span>
                 </div>
                 <div className="text-xs font-mono text-stone-800 bg-white p-2.5 rounded-xl border border-stone-200">
-                  <span className="text-stone-400">STATUS:</span> [SHIELDED]<br />
-                  <span className="text-stone-400">SENDER:</span> HIDDEN<br />
-                  <span className="text-stone-400">RECIPIENT:</span> HIDDEN<br />
-                  <span className="text-stone-400">AMOUNT:</span> 0.00 LEAKED
+                  <span className="text-stone-400">HANDLE:</span> NOT ON-CHAIN<br />
+                  <span className="text-stone-400">PAID TO:</span> UPRAIL SUB-ACCOUNT<br />
+                  <span className="text-stone-400">AMOUNTS:</span> VISIBLE ON-CHAIN
                 </div>
               </div>
 

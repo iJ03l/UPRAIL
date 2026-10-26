@@ -73,11 +73,11 @@ export const LandingPage: React.FC = () => {
             </span>{' '}
             handle
             <br />
-            is now a private bank<span className="text-black">.</span>
+            is now a payment account<span className="text-black">.</span>
           </h1>
 
           <p className="text-sm sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
-            From the web, any AI chat, or launchpad fees. Private by default.
+            From the web, any AI chat, or launchpad fees. Send to a handle, not a wallet.
           </p>
 
           <div className="pt-2 sm:pt-4 flex items-center gap-3">
@@ -363,7 +363,7 @@ export const LandingPage: React.FC = () => {
             </a>
           </span>
           <span className="hidden sm:inline text-stone-300">—</span>
-          <span>crypto payments, not promises · private by default</span>
+          <span>crypto payments, not promises · handles stay off-chain</span>
         </div>
       </footer>
     </div>

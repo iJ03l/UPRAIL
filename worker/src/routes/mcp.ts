@@ -21,6 +21,10 @@ import { requireAgent } from '../middleware/agentAuth';
 import { executeAgentPay, executeAgentWithdraw } from './agent';
 import { publicErrorMessage } from '../utils/errors';
 import * as nearRpc from '../services/nearRpc';
+import {
+  getConfidentialAvailableBalance,
+  isConfidentialRailEnabled,
+} from '../services/confidentialRail';
 
 export const mcpRouter = new Hono<AppContext>();
 
@@ -107,7 +111,7 @@ const TOOLS = [
   {
     name: 'receive_payment',
     description:
-      'Get your UPRAIL @handle for receiving payments, check pending incoming payments, or generate a single-use deposit address to receive crypto from any external blockchain.',
+      'Get your UPRAIL @handle for receiving payments, check pending incoming payments, or generate a single-use confidential deposit address to receive crypto from any external blockchain.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -129,7 +133,8 @@ const TOOLS = [
   },
   {
     name: 'get_balance',
-    description: "Read the owner's available UPRAIL balance for a token (defaults to USDC/NEAR).",
+    description:
+      "Read the owner's public and confidential UPRAIL balances for a token (defaults to NEAR). Returns available, confidential, and total.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -203,10 +208,20 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
     case 'get_balance': {
       const asset = String(args?.asset || 'NEAR').trim();
       const available = await nearRpc.getUserAvailableBalance(c.env, session, asset);
+      let confidential = 0;
+      if (isConfidentialRailEnabled(c.env)) {
+        try {
+          confidential = await getConfidentialAvailableBalance(c.env, session.x_id, asset);
+        } catch (err) {
+          console.warn('[mcp] confidential balance lookup skipped:', err);
+        }
+      }
       return toolText({
         handle: `@${session.x_handle}`,
         asset,
         available,
+        confidential,
+        total: available + confidential,
       });
     }
 

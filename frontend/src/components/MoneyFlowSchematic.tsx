@@ -482,7 +482,7 @@ export const MoneyFlowSchematic: React.FC = () => {
           </div>
 
           <div className="p-2.5 rounded-xl bg-stone-900 text-white text-[11px] font-mono text-center">
-            Absolute Discretion: Illia claims securely with a passkey. Public balance stays $0.00.
+            Handles stay off-chain: Illia claims with a passkey. Payments land in an Uprail sub-account, not a personal wallet.
           </div>
         </div>
       </div>

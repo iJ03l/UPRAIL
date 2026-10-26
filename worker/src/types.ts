@@ -78,6 +78,20 @@ export interface Env {
   SETTLEMENT_SERVICE_URL?: string;
   /** Server-side pepper for one-time passkey recovery-code hashes. */
   RECOVERY_PEPPER?: string;
+  /** 1Click partner API key for quote/generate/submit and auth. */
+  ONE_CLICK_API_KEY?: string;
+  /** Legacy 1Click partner JWT; used only when ONE_CLICK_API_KEY is absent. */
+  ONE_CLICK_JWT?: string;
+  /**
+   * Enables the Confidential Intents balance rail. Defaults off so a deploy
+   * cannot silently switch production money movement without approval.
+   */
+  CONFIDENTIAL_RAIL_ENABLED?: string;
+  /**
+   * Re-enables creator-fee balance-delta routing. Defaults off because escrow
+   * also holds user funds; routing is disabled until attribution is tx-verified.
+   */
+  CREATOR_FEES_ENABLED?: string;
 }
 
 /**
@@ -128,6 +142,11 @@ export interface Payment {
   intent_hash?: string | null;
   claim_tx_hash?: string | null;
   refund_tx_hash?: string | null;
+  /** 'public' | 'confidential' — provenance of the settlement leg. */
+  privacy_rail?: string | null;
+  settlement_status?: string | null;
+  claim_deposit_address?: string | null;
+  confirmed_at?: number | null;
   created_at: number;
   expires_at: number;
   updated_at: number;

@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS payments (
   cancel_code TEXT,
   deposit_address TEXT,
   intent_hash TEXT,
+  -- Privacy provenance: 'public', 'confidential', or 'public_native' for
+  -- assets whose token contract cannot live in Intents.
+  privacy_rail TEXT NOT NULL DEFAULT 'public',
+  settlement_status TEXT,
+  claim_deposit_address TEXT,
+  confirmed_at INTEGER,
   claim_tx_hash TEXT,
   refund_tx_hash TEXT,
   created_at INTEGER NOT NULL,
@@ -88,6 +94,8 @@ CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at);
 CREATE INDEX IF NOT EXISTS idx_payments_invite ON payments(invite_code);
 CREATE INDEX IF NOT EXISTS idx_payments_recipient_x_id ON payments(recipient_x_id, status);
 CREATE INDEX IF NOT EXISTS idx_payments_origin ON payments(recipient_handle, origin);
+CREATE INDEX IF NOT EXISTS idx_payments_privacy_rail ON payments(privacy_rail);
+CREATE INDEX IF NOT EXISTS idx_payments_settlement_status ON payments(settlement_status);
 
 -- Deposit addresses: cached 1Click one-time cross-chain deposit addresses
 CREATE TABLE IF NOT EXISTS deposit_addresses (
@@ -137,6 +145,11 @@ CREATE TABLE IF NOT EXISTS withdrawals (
   error TEXT,
   error_code TEXT,
   rail TEXT,
+  privacy_rail TEXT NOT NULL DEFAULT 'public',
+  settlement_status TEXT,
+  deposit_address TEXT,
+  intent_hash TEXT,
+  confirmed_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL DEFAULT 0
 );
@@ -144,6 +157,31 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 CREATE INDEX IF NOT EXISTS idx_withdrawals_x_id ON withdrawals(x_id);
 CREATE INDEX IF NOT EXISTS idx_withdrawals_created ON withdrawals(created_at);
 CREATE INDEX IF NOT EXISTS idx_withdrawals_x_asset_status ON withdrawals(x_id, asset, status);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_privacy_rail ON withdrawals(privacy_rail);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_settlement_status ON withdrawals(settlement_status);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_deposit_address ON withdrawals(deposit_address);
+
+-- Confidential balance migration attempts (migration 0012). Unique on
+-- (x_id, asset, source_rail) so a resumed migration cannot shield twice.
+CREATE TABLE IF NOT EXISTS confidential_balance_migrations (
+  id TEXT PRIMARY KEY,
+  x_id TEXT NOT NULL,
+  asset TEXT NOT NULL,
+  amount TEXT NOT NULL,
+  source_rail TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  deposit_address TEXT,
+  intent_hash TEXT,
+  error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(x_id, asset, source_rail)
+);
+
+CREATE INDEX IF NOT EXISTS idx_confidential_migrations_status
+  ON confidential_balance_migrations(status);
+CREATE INDEX IF NOT EXISTS idx_confidential_migrations_x_id
+  ON confidential_balance_migrations(x_id);
 
 -- Auth Challenges: Single-use WebAuthn and OAuth challenges (replaces KV writes)
 CREATE TABLE IF NOT EXISTS auth_challenges (

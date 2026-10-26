@@ -46,6 +46,10 @@
     // Daily registration cap per self-serve launchpad parent account.
     "LAUNCHPAD_DAILY_REG_CAP": "100",
     "PAYMENT_EXPIRY_DAYS": "30",
+    // Confidential Intents rail: sends, claims, refunds, and withdrawals settle
+    // through signed intents. Enabled after the 0012 migration and a read-only
+    // audit of every registered identity.
+    "CONFIDENTIAL_RAIL_ENABLED": "true",
     "WEBAUTHN_RP_ID": "uprail.world",
     "WEBAUTHN_RP_NAME": "UPRAIL",
     "WEBAUTHN_ORIGIN": "https://app.uprail.world",
@@ -55,7 +59,8 @@
   },
   // Secrets (set via `wrangler secret put NAME`, never committed):
   //   X_CLIENT_SECRET, SESSION_SECRET, INTERNAL_SERVICE_KEY,
-  //   ESCROW_PRIVATE_KEY, NEAR_RPC_URL, SETTLEMENT_SERVICE_URL
+  //   ESCROW_PRIVATE_KEY, NEAR_RPC_URL, SETTLEMENT_SERVICE_URL,
+  //   ONE_CLICK_API_KEY (or legacy ONE_CLICK_JWT)
   //
   // SETTLEMENT_SERVICE_URL is how the worker reaches the Go settlement
   // service. No durable_objects/containers block is declared: this worker is

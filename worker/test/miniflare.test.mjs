@@ -95,6 +95,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0009_remove_launchpad_partners.sql',
       '0010_launchpad_token_bindings.sql',
       '0011_oauth_connections.sql',
+      '0012_confidential_rail.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');

@@ -37,6 +37,10 @@ import {
 import { paymentsRouter, handleSendPayment } from './payments';
 import { handleWithdraw } from './claim';
 import * as nearRpc from '../services/nearRpc';
+import {
+  getConfidentialAvailableBalance,
+  isConfidentialRailEnabled,
+} from '../services/confidentialRail';
 
 export const agentRouter = new Hono<AppContext>();
 
@@ -875,10 +879,20 @@ agentRouter.get('/balance', requireAgent(), async (c) => {
   const asset = c.req.query('asset') || 'NEAR';
   try {
     const available = await nearRpc.getUserAvailableBalance(c.env, session, asset);
+    let confidential = 0;
+    if (isConfidentialRailEnabled(c.env)) {
+      try {
+        confidential = await getConfidentialAvailableBalance(c.env, session.x_id, asset);
+      } catch (confErr) {
+        console.warn('[agent] confidential balance lookup skipped:', confErr);
+      }
+    }
     return c.json({
       handle: `@${session.x_handle}`,
       asset,
       available,
+      confidential,
+      total: available + confidential,
     });
   } catch (err) {
     console.error('[agent] balance lookup failed:', err);
@@ -1064,7 +1078,9 @@ agentRouter.get('/openapi.json', (c) => {
         get: {
           operationId: 'receivePayment',
           summary:
-            'Get your UPRAIL @handle, view pending incoming payments, or generate a deposit address for any chain',
+            'Get your UPRAIL @handle, view pending incoming payments, or generate a confidential deposit address for any chain',
+          description:
+            'When the confidential rail is enabled, generated deposit addresses settle into Confidential Intents.',
           parameters: [
             {
               name: 'chain',
@@ -1099,7 +1115,9 @@ agentRouter.get('/openapi.json', (c) => {
       '/api/agent/balance': {
         get: {
           operationId: 'getBalance',
-          summary: 'Check available UPRAIL vault balance for a token',
+          summary: 'Check public and confidential UPRAIL balances for a token',
+          description:
+            'Returns available (public Intents/plain/virtual), confidential, and total spendable balance. Confidential is included when the private rail is enabled.',
           parameters: [
             {
               name: 'asset',
@@ -1110,7 +1128,32 @@ agentRouter.get('/openapi.json', (c) => {
             },
           ],
           responses: {
-            '200': { description: 'Available token balance' },
+            '200': {
+              description: 'Available public and confidential token balance',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      handle: { type: 'string' },
+                      asset: { type: 'string' },
+                      available: {
+                        type: 'number',
+                        description: 'Public Intents/plain/virtual balance',
+                      },
+                      confidential: {
+                        type: 'number',
+                        description: 'Confidential Intents balance',
+                      },
+                      total: {
+                        type: 'number',
+                        description: 'available + confidential',
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },

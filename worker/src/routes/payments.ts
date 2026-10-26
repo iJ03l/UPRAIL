@@ -27,6 +27,13 @@ import { createPaymentInvite } from '../services/inviteService';
 import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { publicErrorMessage } from '../utils/errors';
+import {
+  getConfidentialAssetBalance,
+  isConfidentialRailEnabled,
+  submitPrivateSendFromPublic,
+  submitPrivateTransfer,
+  waitForSettlement,
+} from '../services/confidentialRail';
 
 export const paymentsRouter = new Hono<AppContext>();
 
@@ -706,7 +713,144 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     let feeDispatchStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
     let feeDispatchError: string | null = null;
 
-    if (rail === 'native' && isRecipientRegistered && recipientNearAccount) {
+    if (isConfidentialRailEnabled(c.env) && rail !== 'intents') {
+      return await failSend(
+        'CONFIDENTIAL_UNAVAILABLE',
+        'This asset cannot settle privately right now. No funds left your account.',
+        502
+      );
+    }
+
+    // Confidential send: move value from the sender's confidential balance
+    // (or public Intents balance, shielded in the same signed intent) into the
+    // recipient's confidential account. Escrowed sends land in pooled escrow's
+    // confidential balance so the eventual claim is private too.
+    let privacyRail: 'public' | 'confidential' = 'public';
+    let settlementStatus: string | null = null;
+    let claimDepositAddress: string | null = null;
+    let confirmedAt: number | null = null;
+    let privateRailSettled = false;
+
+    if (isConfidentialRailEnabled(c.env) && rail === 'intents') {
+      const privateToken =
+        nearRpc.resolveTokenForAsset(body.asset, await nearRpc.getSupportedTokens(c.env)) ||
+        (await nearRpc.resolveRheaToken(c.env, body.asset));
+      if (!privateToken) {
+        return await failSend('UNSUPPORTED_ASSET', `Unsupported asset: ${body.asset}`, 400);
+      }
+      const grossAtomic = BigInt(nearRpc.toBaseUnits(body.amount, privateToken.decimals));
+      const feeAtomic = BigInt(nearRpc.toBaseUnits(protocolFee, privateToken.decimals));
+      const senderNear = await nearRpc.resolveUserNearAccount(c.env, session!);
+
+      let source: 'confidential' | 'public' = 'public';
+      try {
+        const confidential = await getConfidentialAssetBalance(c.env, session!.x_id, body.asset);
+        if (confidential.amountAtomic >= grossAtomic) source = 'confidential';
+      } catch (confErr) {
+        console.warn('[send] confidential balance probe failed:', confErr);
+      }
+      if (source === 'public') {
+        const publicBalances = await nearRpc.getIntentBalances(c.env, senderNear).catch(() => []);
+        const publicAtomic = publicBalances
+          .filter(
+            (b) =>
+              nearRpc.assetsMatch(b.defuse_asset_id, privateToken.defuse_asset_id) ||
+              nearRpc.assetsMatch(b.nearContractId, privateToken.nearContractId)
+          )
+          .reduce((sum, b) => sum + BigInt(b.amount || '0'), 0n);
+        if (publicAtomic < grossAtomic) {
+          const deposit = await nearRpc.depositPlainBalanceToIntents(
+            c.env,
+            session!.x_id,
+            body.asset,
+            body.amount,
+            senderNear
+          );
+          if (!deposit.deposited) {
+            return await failSend(
+              'SETTLEMENT_FAILED',
+              publicErrorMessage(
+                new Error(deposit.reason || 'Could not shield funds for this send'),
+                'Onchain settlement failed'
+              ),
+              502
+            );
+          }
+        }
+      }
+
+      const privateRecipient =
+        isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
+      const sendPrivate = source === 'confidential' ? submitPrivateTransfer : submitPrivateSendFromPublic;
+      const transferAmount = isRecipientRegistered ? recipientAmount : body.amount;
+
+      try {
+        const transfer = await sendPrivate(c.env, session!.x_id, {
+          asset: body.asset,
+          amount: transferAmount,
+          recipientAccount: privateRecipient,
+        });
+        const settlement = await waitForSettlement(c.env, session!.x_id, transfer.depositAddress, {
+          timeoutMs: 45_000,
+        }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
+        settlementStatus = String(settlement.status || 'UNKNOWN').toUpperCase();
+        if (settlementStatus === 'FAILED' || settlementStatus === 'REFUNDED') {
+          return await failSend(
+            'SETTLEMENT_FAILED',
+            `Confidential settlement ${settlementStatus.toLowerCase()} — no funds were delivered.`,
+            502
+          );
+        }
+        confirmedAt = settlementStatus === 'SUCCESS' ? Date.now() : null;
+        privacyRail = 'confidential';
+
+        if (isRecipientRegistered) {
+          claimTxHash = transfer.intentHash;
+          claimDepositAddress = transfer.depositAddress;
+        } else {
+          escrowDepositTxHash = transfer.intentHash;
+          payment.deposit_address = transfer.depositAddress;
+        }
+
+        if (isRecipientRegistered && feeAtomic > 0n) {
+          try {
+            const feeTransfer = await sendPrivate(c.env, session!.x_id, {
+              asset: body.asset,
+              amount: protocolFee,
+              recipientAccount: feeRecipient,
+            });
+            const feeSettlement = await waitForSettlement(
+              c.env,
+              session!.x_id,
+              feeTransfer.depositAddress,
+              { timeoutMs: 30_000 }
+            ).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
+            const feeStatus = String(feeSettlement.status || 'UNKNOWN').toUpperCase();
+            feeDispatchStatus = feeStatus === 'SUCCESS' ? 'sent' : 'failed';
+            feeDispatchError = feeStatus === 'SUCCESS' ? null : `fee settlement ${feeStatus}`;
+          } catch (feeErr: any) {
+            feeDispatchStatus = 'failed';
+            feeDispatchError = feeErr?.message || String(feeErr);
+            console.warn('[FeeRouting] confidential fee dispatch failed:', feeErr);
+          }
+        } else {
+          feeDispatchStatus = 'skipped';
+          feeDispatchError = isRecipientRegistered ? 'no fee' : 'held in escrow until claim';
+        }
+        privateRailSettled = true;
+      } catch (privateErr: any) {
+        console.error('[send] confidential settlement failed:', privateErr);
+        return await failSend(
+          'SETTLEMENT_FAILED',
+          publicErrorMessage(privateErr, 'Confidential settlement failed'),
+          502
+        );
+      }
+    }
+
+    if (privateRailSettled) {
+      // Already settled by the confidential branch above.
+    } else if (rail === 'native' && isRecipientRegistered && recipientNearAccount) {
       // NEAR-native asset, recipient already registered: two plain NEP-141
       // transfers straight out of the sender's own account — net to the
       // recipient, fee to the fee account. The old path locked the gross
@@ -909,21 +1053,43 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     // ── 3. Finalize the record with the settlement hashes ──────────────────
     const paymentStatus = isRecipientRegistered ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED;
     try {
-      const finalize = await c.env.DB.prepare(
-        `UPDATE payments
-            SET status = ?, deposit_address = ?, intent_hash = ?, claim_tx_hash = ?, updated_at = ?
-          WHERE id = ? AND status = ?`
-      )
-        .bind(
-          paymentStatus,
-          escrowDepositTxHash || payment.deposit_address,
-          escrowDepositTxHash,
-          claimTxHash,
-          Date.now(),
-          paymentId,
-          PaymentStatus.PENDING
-        )
-        .run();
+      const finalize =
+        privacyRail === 'confidential'
+          ? await c.env.DB.prepare(
+              `UPDATE payments
+                  SET status = ?, deposit_address = ?, intent_hash = ?, claim_tx_hash = ?,
+                      privacy_rail = 'confidential', settlement_status = ?,
+                      claim_deposit_address = ?, confirmed_at = ?, updated_at = ?
+                WHERE id = ? AND status = ?`
+            )
+              .bind(
+                paymentStatus,
+                payment.deposit_address,
+                escrowDepositTxHash,
+                claimTxHash,
+                settlementStatus,
+                claimDepositAddress,
+                confirmedAt,
+                Date.now(),
+                paymentId,
+                PaymentStatus.PENDING
+              )
+              .run()
+          : await c.env.DB.prepare(
+              `UPDATE payments
+                  SET status = ?, deposit_address = ?, intent_hash = ?, claim_tx_hash = ?, updated_at = ?
+                WHERE id = ? AND status = ?`
+            )
+              .bind(
+                paymentStatus,
+                escrowDepositTxHash || payment.deposit_address,
+                escrowDepositTxHash,
+                claimTxHash,
+                Date.now(),
+                paymentId,
+                PaymentStatus.PENDING
+              )
+              .run();
       if ((finalize.meta?.changes ?? 0) === 0) {
         console.error(
           `[send] CRITICAL: settlement ${claimTxHash || escrowDepositTxHash} succeeded but ${paymentId} was no longer PENDING`
@@ -961,7 +1127,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     // through two claimed payments.
     // The native direct branch already dispatched (or recorded the failure
     // of) its own plain fee transfer — do not retry it through intents.
-    if (!nativeFeeHandled && isRecipientRegistered && parseFloat(protocolFee) > 0) {
+    if (!privateRailSettled && !nativeFeeHandled && isRecipientRegistered && parseFloat(protocolFee) > 0) {
       try {
         const feeDeposit = await nearRpc.depositPlainBalanceToIntents(
           c.env,
@@ -992,7 +1158,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         feeDispatchError = feeErr?.message || String(feeErr);
         console.warn('[FeeRouting] Direct-send fee dispatch failed:', feeErr);
       }
-    } else if (!nativeFeeHandled && parseFloat(protocolFee) > 0) {
+    } else if (!privateRailSettled && !nativeFeeHandled && parseFloat(protocolFee) > 0) {
       feeDispatchStatus = 'skipped';
       feeDispatchError = 'held in escrow until claim';
     }

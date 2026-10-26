@@ -17,6 +17,8 @@ import { Hono } from 'hono';
 import type { AppContext, ErrorResponse, Session } from '../types';
 import { requireAuth } from '../middleware/session';
 import * as nearRpc from '../services/nearRpc';
+import { isConfidentialRailEnabled, getConfidentialBalances } from '../services/confidentialRail';
+import { getUserSession } from '../services/oneclickAuth';
 import { publicErrorMessage } from '../utils/errors';
 
 export const onchainRouter = new Hono<AppContext>();
@@ -137,6 +139,81 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
       console.warn('[onchain/balances] plain balance merge skipped:', plainErr);
     }
 
+    const tokens = await nearRpc.getSupportedTokens(c.env).catch(
+      () => [] as nearRpc.OnchainToken[]
+    );
+
+    // Confidential Intents balances are held off the public ledger. Merge them
+    // in so the dashboard and Receive tab show the same spendable total the
+    // send/withdraw paths use.
+    if (isConfidentialRailEnabled(c.env)) {
+      try {
+        const confidential = await getConfidentialBalances(c.env, session.x_id);
+        let pendingConfidential: Array<{ asset: string; amount: string }> = [];
+        if (c.env.DB) {
+          try {
+            const pending = await c.env.DB.prepare(
+              `SELECT asset, amount FROM withdrawals
+                WHERE x_id = ? AND privacy_rail = 'confidential' AND status = 'PENDING'`
+            )
+              .bind(session.x_id)
+              .all<{ asset: string; amount: string }>();
+            pendingConfidential = pending.results || [];
+          } catch {}
+        }
+        for (const cb of confidential) {
+          const token = nearRpc.resolveTokenForAsset(cb.assetId, tokens);
+          const decimals = cb.decimals ?? token?.decimals ?? 6;
+          let amount = parseFloat(cb.amountFormatted) || 0;
+          for (const row of pendingConfidential) {
+            if (
+              nearRpc.assetsMatch(row.asset, cb.assetId) ||
+              nearRpc.assetsMatch(row.asset, cb.symbol)
+            ) {
+              amount -= parseFloat(row.amount) || 0;
+            }
+          }
+          if (amount <= 0) continue;
+
+          const existing = balances.find(
+            (b) =>
+              nearRpc.assetsMatch(b.defuse_asset_id, cb.assetId) ||
+              nearRpc.assetsMatch(b.nearContractId, token?.nearContractId) ||
+              nearRpc.assetsMatch(b.symbol, cb.symbol)
+          );
+          if (existing) {
+            const current = BigInt(existing.amount || '0');
+            const add = BigInt(
+              nearRpc.toBaseUnits(amount.toFixed(Math.min(decimals, 18)), decimals) || '0'
+            );
+            existing.amount = (current + add).toString();
+            existing.amountFormatted = nearRpc.formatAmount(
+              existing.amount,
+              existing.decimals ?? decimals
+            );
+          } else {
+            const baseUnits = nearRpc.toBaseUnits(
+              amount.toFixed(Math.min(decimals, 18)),
+              decimals
+            );
+            const price = nearRpc.tokenUsdPrice(token?.symbol || cb.symbol, token?.priceUsd);
+            balances.push({
+              defuse_asset_id: cb.assetId,
+              symbol: cb.symbol,
+              amount: baseUnits,
+              amountFormatted: nearRpc.formatAmount(baseUnits, decimals),
+              decimals,
+              nearContractId: token?.nearContractId || '',
+              ...(token?.icon ? { icon: token.icon } : {}),
+              ...(price !== null ? { priceUsd: price } : {}),
+            });
+          }
+        }
+      } catch (confErr) {
+        console.warn('[onchain/balances] confidential balance merge skipped:', confErr);
+      }
+    }
+
     // Include virtual escrow balances claimed by user, minus active sent payments
     // and withdrawals — same canonical algorithm as getUserAvailableBalance.
     if (c.env.DB) {
@@ -145,7 +222,6 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
 
         // Virtual balances must carry the SAME id/symbol/decimals as the real
         // onchain entry, otherwise the asset shows up twice.
-        const tokens = await nearRpc.getSupportedTokens(c.env).catch(() => [] as nearRpc.OnchainToken[]);
         for (const [asset, netAmt] of Object.entries(netVirtual)) {
           if (netAmt === 0) continue;
           const token = nearRpc.resolveTokenForAsset(asset, tokens);
@@ -248,7 +324,8 @@ onchainRouter.get('/deposit-address', requireAuth({ passkeyVerified: true }), as
         bypassCache,
         token,
         amount,
-        contract
+        contract,
+        { xId: session.x_id }
       );
       if (!address) {
         return c.json<ErrorResponse>(
@@ -259,7 +336,9 @@ onchainRouter.get('/deposit-address', requireAuth({ passkeyVerified: true }), as
       return c.json({ address, nearAccount, source: 'onchain', fetchedAt: Date.now() });
     } else {
       // All chains
-      const addresses = await nearRpc.getAllDepositAddresses(c.env, nearAccount, bypassCache);
+      const addresses = await nearRpc.getAllDepositAddresses(c.env, nearAccount, bypassCache, {
+        xId: session.x_id,
+      });
       return c.json({ addresses, nearAccount, source: 'onchain', fetchedAt: Date.now() });
     }
   } catch (err: any) {
@@ -315,7 +394,28 @@ onchainRouter.get('/deposit-status', requireAuth({ passkeyVerified: true }), asy
       );
     }
 
-    return await probeDepositStatus(address);
+    let authToken: string | undefined;
+    if (isConfidentialRailEnabled(c.env)) {
+      try {
+        authToken = (await getUserSession(c.env, session.x_id)).accessToken;
+      } catch (sessionErr) {
+        console.warn('[onchain/deposit-status] could not mint User-Session:', sessionErr);
+      }
+    }
+
+    const memoRow = await c.env.DB.prepare(
+      'SELECT memo FROM deposit_addresses WHERE address = ? AND account_id = ? LIMIT 1'
+    )
+      .bind(address, nearAccount)
+      .first<{ memo: string | null }>()
+      .catch(() => null);
+
+    return await probeDepositStatus(
+      address,
+      authToken,
+      c.env.ONE_CLICK_API_KEY || c.env.ONE_CLICK_JWT,
+      memoRow?.memo || undefined
+    );
   } catch (err: any) {
     // A lookup failure is not "still pending" — masking it here made the UI
     // sit on PENDING_DEPOSIT forever while the backend was actually broken.
@@ -365,17 +465,26 @@ async function callerOwnsDepositAddress(
 }
 
 /** Queries 1Click for the deposit status of an already-authorized address. */
-async function probeDepositStatus(address: string): Promise<Response> {
+async function probeDepositStatus(
+  address: string,
+  authToken?: string,
+  apiKey?: string,
+  depositMemo?: string
+): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 4000);
   try {
+    const params = new URLSearchParams({ depositAddress: address });
+    if (depositMemo) params.set('depositMemo', depositMemo);
     const resp = await fetch(
-      `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(address)}`,
+      `https://1click.chaindefuser.com/v0/status?${params.toString()}`,
       {
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
           Accept: 'application/json',
+          ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
       }
     );
@@ -455,10 +564,19 @@ onchainRouter.get('/history', requireAuth({ passkeyVerified: true }), async (c) 
     if (c.env.DB) {
       try {
         const depositRows = await c.env.DB.prepare(
-          'SELECT address, chain FROM deposit_addresses WHERE account_id = ? ORDER BY updated_at DESC LIMIT 15'
+          'SELECT address, chain, memo FROM deposit_addresses WHERE account_id = ? ORDER BY updated_at DESC LIMIT 15'
         )
           .bind(nearAccount)
-          .all<{ address: string; chain: string }>();
+          .all<{ address: string; chain: string; memo: string | null }>();
+
+        let authToken: string | undefined;
+        if (isConfidentialRailEnabled(c.env)) {
+          try {
+            authToken = (await getUserSession(c.env, session.x_id)).accessToken;
+          } catch (sessionErr) {
+            console.warn('[onchain/history] could not mint User-Session:', sessionErr);
+          }
+        }
 
         // Probe all deposit addresses in parallel — sequential fetches here
         // used to stack up to ~52s of timeouts on one request.
@@ -469,13 +587,19 @@ onchainRouter.get('/history', requireAuth({ passkeyVerified: true }), async (c) 
               try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 3500);
+                const statusParams = new URLSearchParams({ depositAddress: dep.address });
+                if (dep.memo) statusParams.set('depositMemo', dep.memo);
                 const statusResp = await fetch(
-                  `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(dep.address)}`,
+                  `https://1click.chaindefuser.com/v0/status?${statusParams.toString()}`,
                   {
                     signal: controller.signal,
                     headers: {
                       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
                       Accept: 'application/json',
+                      ...(c.env.ONE_CLICK_API_KEY || c.env.ONE_CLICK_JWT
+                        ? { 'X-API-Key': c.env.ONE_CLICK_API_KEY || c.env.ONE_CLICK_JWT! }
+                        : {}),
+                      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
                     },
                   }
                 );

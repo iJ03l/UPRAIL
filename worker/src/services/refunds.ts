@@ -14,6 +14,11 @@
 import type { Env, Payment, PaymentStatus } from '../types';
 import { PaymentStatus as Status } from '../types';
 import * as nearRpc from './nearRpc';
+import {
+  isConfidentialRailEnabled,
+  submitEscrowPrivateTransfer,
+  waitForSettlement,
+} from './confidentialRail';
 
 export interface RefundResult {
   /** True when the onchain transfer landed and the row is REFUNDED. */
@@ -137,6 +142,10 @@ export async function refundEscrowedPayment(env: Env, payment: Payment): Promise
     return { refunded: false, error: 'sender account could not be resolved' };
   }
 
+  if (isConfidentialRailEnabled(env) && payment.privacy_rail === 'confidential') {
+    return await refundConfidentialPayment(env, payment, senderAccount, gross);
+  }
+
   let result = await nearRpc.executeTransferFromEscrowIntent(env, senderAccount, payment.asset, gross);
   if (!result.success && !result.ambiguous) {
     // A NEAR-native asset (launchpad meme) was locked into escrow as a plain
@@ -193,6 +202,78 @@ export async function refundEscrowedPayment(env: Env, payment: Payment): Promise
   }
 
   return { refunded: true, txHash: result.txHash };
+}
+
+/**
+ * Returns a confidential escrow refund to the sender's confidential account.
+ * The row was already reserved REFUNDED by the caller. At-most-once semantics
+ * match the public path: an indeterminate status moves to REFUND_REVIEW rather
+ * than risking a second private transfer.
+ */
+async function refundConfidentialPayment(
+  env: Env,
+  payment: Payment,
+  senderAccount: string,
+  gross: string
+): Promise<RefundResult> {
+  let submitted: { depositAddress: string; intentHash: string };
+  try {
+    submitted = await submitEscrowPrivateTransfer(env, {
+      asset: payment.asset,
+      amount: gross,
+      recipientAccount: senderAccount,
+    });
+  } catch (err: any) {
+    console.error(`[refund] confidential submit failed for ${payment.id}:`, err);
+    await revertToEscrowed(env, payment.id);
+    return { refunded: false, error: err?.message || 'confidential refund failed' };
+  }
+
+  const settlement = await waitForSettlement(env, '', submitted.depositAddress, {
+    signer: 'escrow',
+    timeoutMs: 60_000,
+  }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
+  const status = String(settlement.status || 'UNKNOWN').toUpperCase();
+
+  if (status === 'SUCCESS') {
+    try {
+      await env.DB.prepare(
+        `UPDATE payments
+            SET refund_tx_hash = ?, settlement_status = 'SUCCESS', confirmed_at = ?, updated_at = ?
+          WHERE id = ? AND status = ?`
+      )
+        .bind(submitted.intentHash, Date.now(), Date.now(), payment.id, Status.REFUNDED)
+        .run();
+    } catch (err) {
+      console.error(`[refund] CRITICAL: confidential refund landed but write failed for ${payment.id}:`, err);
+    }
+    return { refunded: true, txHash: submitted.intentHash };
+  }
+
+  if (status === 'FAILED' || status === 'REFUNDED') {
+    try {
+      await env.DB.prepare(
+        `UPDATE payments SET settlement_status = ?, updated_at = ? WHERE id = ?`
+      )
+        .bind(status, Date.now(), payment.id)
+        .run();
+    } catch {}
+    await revertToEscrowed(env, payment.id);
+    return { refunded: false, error: `confidential refund ${status.toLowerCase()}` };
+  }
+
+  try {
+    await env.DB.prepare(
+      `UPDATE payments
+          SET status = ?, settlement_status = ?, updated_at = ?
+        WHERE id = ? AND status = ?`
+    )
+      .bind(Status.REFUND_REVIEW, status, Date.now(), payment.id, Status.REFUNDED)
+      .run();
+  } catch (err) {
+    console.error(`[refund] CRITICAL: could not mark ${payment.id} REFUND_REVIEW:`, err);
+  }
+  return { refunded: false, error: 'confidential refund status unknown' };
 }
 
 async function revertToEscrowed(env: Env, paymentId: string): Promise<void> {

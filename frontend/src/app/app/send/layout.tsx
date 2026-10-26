@@ -2,10 +2,10 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'UPRAIL — Send Confidentially',
-  description: 'Send confidential payments to any X handle on NEAR Confidential Intents or to any external wallet.',
+  description: 'Send payments to any X handle or external wallet. The handle is not recorded on-chain.',
   openGraph: {
     title: 'UPRAIL — Send Confidentially',
-    description: 'Send confidential payments to any X handle on NEAR Confidential Intents or to any external wallet.',
+    description: 'Send payments to any X handle or external wallet. The handle is not recorded on-chain.',
     images: [
       {
         url: 'https://app.uprail.world/og/og-send.png',
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     site: '@uprailworld',
     creator: '@uprailworld',
     title: 'UPRAIL — Send Confidentially',
-    description: 'Send confidential payments to any X handle on NEAR Confidential Intents or to any external wallet.',
+    description: 'Send payments to any X handle or external wallet. The handle is not recorded on-chain.',
     images: ['https://app.uprail.world/og/og-send.png'],
   },
 };

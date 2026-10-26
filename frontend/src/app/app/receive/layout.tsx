@@ -2,10 +2,10 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'UPRAIL — Receive from Any Chain',
-  description: 'Receive confidential payments from any chain. Get your unified receive address for NEAR, Ethereum, Solana, and more.',
+  description: 'Receive payments from any chain. Get your unified receive address for NEAR, Ethereum, Solana, and more.',
   openGraph: {
     title: 'UPRAIL — Receive from Any Chain',
-    description: 'Receive confidential payments from any chain. Get your unified receive address for NEAR, Ethereum, Solana, and more.',
+    description: 'Receive payments from any chain. Get your unified receive address for NEAR, Ethereum, Solana, and more.',
     images: [
       {
         url: 'https://app.uprail.world/og/og-receive.png',
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     site: '@uprailworld',
     creator: '@uprailworld',
     title: 'UPRAIL — Receive from Any Chain',
-    description: 'Receive confidential payments from any chain. Get your unified receive address for NEAR, Ethereum, Solana, and more.',
+    description: 'Receive payments from any chain. Get your unified receive address for NEAR, Ethereum, Solana, and more.',
     images: ['https://app.uprail.world/og/og-receive.png'],
   },
 };

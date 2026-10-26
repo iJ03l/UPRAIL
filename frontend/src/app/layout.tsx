@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://app.uprail.world'),
   title: 'UPRAIL — The Confidential Value Railway for X',
   description:
-    'Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion.',
+    'Send payments to any X handle. The handle is not recorded on-chain, and payments go to an Uprail sub-account, not your personal wallet. Claim instantly with passkeys on app.uprail.world.',
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'UPRAIL — The Confidential Value Railway for X',
     description:
-      'Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion.',
+      'Send payments to any X handle. The handle is not recorded on-chain, and payments go to an Uprail sub-account, not your personal wallet. Claim instantly with passkeys on app.uprail.world.',
     url: 'https://app.uprail.world',
     siteName: 'UPRAIL',
     images: [
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'UPRAIL — The Confidential Value Railway for X',
     description:
-      'Send confidential payments to any X handle on NEAR Confidential Intents. Claim instantly with passkeys on app.uprail.world — zero mempools, absolute discretion.',
+      'Send payments to any X handle. The handle is not recorded on-chain, and payments go to an Uprail sub-account, not your personal wallet. Claim instantly with passkeys on app.uprail.world.',
     site: '@uprailworld',
     creator: '@uprailworld',
     images: ['https://app.uprail.world/og/og-landing.png'],

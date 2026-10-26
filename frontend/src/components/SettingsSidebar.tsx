@@ -620,7 +620,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                 Sign Out?
               </h3>
               <p className="text-xs text-stone-600 leading-relaxed">
-                Are you sure you want to disconnect <span className="font-mono font-bold text-stone-900">@{user?.handle}</span>? You will need to authenticate again to access your confidential payments.
+                Are you sure you want to disconnect <span className="font-mono font-bold text-stone-900">@{user?.handle}</span>? You will need to authenticate again to access your payments.
               </p>
             </div>
 

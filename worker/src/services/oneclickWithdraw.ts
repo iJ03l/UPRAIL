@@ -381,7 +381,7 @@ export function chainMatchesAddress(chain: string, address: string): boolean {
   return isNearAccountAddress(clean);
 }
 
-async function resolveAssetPair(
+export async function resolveWithdrawalAssetPair(
   env: Env,
   asset: string,
   destinationAddress: string,
@@ -484,7 +484,7 @@ export async function get1ClickWithdrawalQuote(
   env: Env,
   params: CrossChainQuoteParams
 ): Promise<CrossChainQuoteResult> {
-  const { originAsset, destinationAsset, decimals, symbol } = await resolveAssetPair(
+  const { originAsset, destinationAsset, decimals, symbol } = await resolveWithdrawalAssetPair(
     env,
     params.asset,
     params.destinationAddress,

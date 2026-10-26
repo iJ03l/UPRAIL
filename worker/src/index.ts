@@ -35,6 +35,10 @@ import { publicErrorMessage } from './utils/errors';
 import { plainAmount, resolveShareTicker } from './services/share';
 import { refundEscrowedPayment } from './services/refunds';
 import { syncAllLaunchpadFees } from './services/launchpadFees';
+import {
+  reconcileConfidentialPayments,
+  reconcileConfidentialWithdrawals,
+} from './services/confidentialRail';
 import { syncAllLaunchpadClaims } from './services/launchpadIntegrations';
 import { pruneExpiredAuthChallenges } from './services/maintenance';
 import {
@@ -682,7 +686,32 @@ export default {
       console.warn('[cron] interrupted-refund recovery failed:', e);
     }
 
-    // 5. Auto-discover and route incoming launchpad creator fees on escrow.uprail.near
+    // 5. Reconcile submitted confidential withdrawals with 1Click. Only a
+    //    terminal SUCCESS marks the withdrawal COMPLETED.
+    try {
+      const reconciled = await reconcileConfidentialWithdrawals(env, { limit: 25 });
+      if (reconciled.completed > 0 || reconciled.failed > 0) {
+        console.log(
+          `[cron] confidential withdrawals checked=${reconciled.checked} completed=${reconciled.completed} failed=${reconciled.failed}`
+        );
+      }
+    } catch (e) {
+      console.warn('[cron] confidential withdrawal reconciliation failed:', e);
+    }
+
+    // 5b. Reconcile confidential send/claim legs whose status poll timed out.
+    try {
+      const reconciled = await reconcileConfidentialPayments(env, { limit: 25 });
+      if (reconciled.completed > 0 || reconciled.failed > 0) {
+        console.log(
+          `[cron] confidential payments checked=${reconciled.checked} completed=${reconciled.completed} failed=${reconciled.failed}`
+        );
+      }
+    } catch (e) {
+      console.warn('[cron] confidential payment reconciliation failed:', e);
+    }
+
+    // 6. Auto-discover and route incoming launchpad creator fees on escrow.uprail.near
     //    via NEAR_RPC_URL (zero-API / no-txHash launchpad fee routing).
     try {
       const feeSync = await syncAllLaunchpadFees(env, { maxTokens: 15 });
@@ -693,7 +722,7 @@ export default {
       console.warn('[cron] launchpad fee auto-sync failed:', e);
     }
 
-    // 6. Claim launchpad creator fees. Token and quote amounts are attributed
+    // 7. Claim launchpad creator fees. Token and quote amounts are attributed
     //    from the escrow-signed claim transaction, never from shared balances.
     try {
       const claims = await syncAllLaunchpadClaims(env, { maxTokens: 10 });
@@ -704,7 +733,7 @@ export default {
       console.warn('[cron] launchpad claim sync failed:', e);
     }
 
-    // 7. Prune expired WebAuthn/OAuth challenges. They are single-use and
+    // 8. Prune expired WebAuthn/OAuth challenges. They are single-use and
     //    rejected once expired, so a day of rows is enough for debugging.
     try {
       const pruned = await pruneExpiredAuthChallenges(env, now);

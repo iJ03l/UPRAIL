@@ -54,6 +54,16 @@ export function minFeeUsd(env: Env): number {
 }
 
 /**
+ * Balance-delta creator-fee routing is disabled until attribution is verified
+ * against a transaction. Escrow also holds user funds, so a surplus can never
+ * be assumed to be a creator fee. Default off.
+ */
+export function creatorFeesEnabled(env: Env): boolean {
+  const value = (env.CREATOR_FEES_ENABLED || '').trim().toLowerCase();
+  return value === 'true' || value === '1' || value === 'yes';
+}
+
+/**
  * Splits a gross atomic amount into (net, fee) using integer math only, so no
  * wei is ever lost to float rounding. The fee is floored; the net absorbs the
  * remainder. Returns fee 0n when the rate is zero.
@@ -736,6 +746,14 @@ export async function syncTokenLaunchpadFees(
   rawToken: unknown,
   opts?: { launchpad?: string; memo?: string }
 ): Promise<RecordFeeResult & { synced: boolean; handle?: string }> {
+  if (!creatorFeesEnabled(env)) {
+    return {
+      ok: false,
+      synced: false,
+      error:
+        'Creator-fee balance-delta routing is disabled. Send a verified transaction hash instead.',
+    };
+  }
   const contractId = contractFromToken(rawToken);
   if (!contractId) {
     return { ok: false, synced: false, error: 'A valid NEP-141 token contract is required.' };
@@ -814,6 +832,9 @@ export async function syncAllLaunchpadFees(
   env: Env,
   opts?: { handle?: string; maxTokens?: number }
 ): Promise<{ checked: number; routed: number; results: Array<RecordFeeResult & { token: string; handle?: string }> }> {
+  if (!creatorFeesEnabled(env)) {
+    return { checked: 0, routed: 0, results: [] };
+  }
   const filterHandle = normalizeHandle(opts?.handle);
   const maxTokens = opts?.maxTokens ?? (filterHandle ? 8 : 15);
   const candidates = new Map<string, string | null>(); // contractId -> known handle

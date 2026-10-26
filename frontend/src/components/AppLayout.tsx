@@ -135,7 +135,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           </a>
         </span>
         <span className="hidden sm:inline text-stone-300">—</span>
-        <span>crypto payments, not promises · private by default</span>
+        <span>crypto payments, not promises · handles stay off-chain</span>
       </footer>
 
       {/* Slide-over Settings Sidebar */}

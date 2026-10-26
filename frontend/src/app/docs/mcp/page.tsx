@@ -77,8 +77,8 @@ export default function McpDocsPage() {
           {[
             ['pay_handle', 'Send to an X @handle within your USD limits.'],
             ['withdraw_to_wallet', 'Withdraw an explicit amount to a supported wallet address.'],
-            ['receive_payment', 'Show your handle, pending payments, or a deposit address.'],
-            ['get_balance', 'Check the available balance for one named asset.'],
+            ['receive_payment', 'Show your handle, pending payments, or a confidential deposit address.'],
+            ['get_balance', 'Check public, confidential, and total balance for one asset.'],
             ['list_payments', 'Show your 25 most recent sent and received payments.'],
             ['resolve_handle', 'Check whether an X handle is registered on UPRAIL.'],
           ].map(([tool, detail]) => (
