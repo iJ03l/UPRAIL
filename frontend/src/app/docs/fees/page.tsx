@@ -77,6 +77,12 @@ export default function FeesDocsPage() {
           reads it from the payout memo. The API request cannot choose the handle or the
           destination wallet.
         </Callout>
+        <Callout>
+          <strong className="text-stone-900">Private by default.</strong> Creator fees settle over
+          the same Confidential Intents rail as peer sends. If the token cannot be quoted privately,
+          UPRAIL holds the fee in escrow instead of falling back to a public transfer. It is never
+          paid out over a public rail.
+        </Callout>
       </section>
 
       <section className="space-y-3">

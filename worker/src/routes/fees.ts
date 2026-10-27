@@ -31,6 +31,7 @@ import {
   syncTokenLaunchpadFees,
   syncAllLaunchpadFees,
   recordAdapterFees,
+  creatorFeesEnabled,
 } from '../services/launchpadFees';
 
 export const feesRouter = new Hono<AppContext>();
@@ -97,16 +98,19 @@ feesRouter.post('/prepare', async (c) => {
     }
   } catch {}
 
+  const autoSync = creatorFeesEnabled(c.env);
   return c.json({
     token: contractId,
     handle,
     address: escrowHoldingAccount(c.env),
     registered: true,
-    autoSync: true,
+    autoSync,
     feePercent: protocolFeePercent(c.env),
     minFeeUsd: minFeeUsd(c.env),
     ...(syncedFee ? { routed: syncedFee } : {}),
-    note: `Escrow is registered and automatic RPC fee routing is active for @${handle}. Any ${contractId} sent to ${escrowHoldingAccount(c.env)} is routed automatically.`,
+    note: autoSync
+      ? `Escrow is registered and automatic RPC fee routing is active for @${handle}. Any ${contractId} sent to ${escrowHoldingAccount(c.env)} is routed automatically.`
+      : `Escrow is registered for @${handle}. Automatic RPC fee routing is disabled; submit a verified transaction hash to /api/fees/adapter or /api/fees/route.`,
   });
 });
 

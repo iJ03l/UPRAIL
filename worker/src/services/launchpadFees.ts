@@ -540,10 +540,7 @@ export async function creditVerifiedFeeAtomic(
   const id = `fee_${crypto.randomUUID()}`;
   const now = Date.now();
   const memo = opts.memo || `${launchpad} creator fees`;
-  const oneClickSupported = isConfidentialRailEnabled(env)
-    ? await nearRpc.isOneClickSupportedAsset(env, token.asset).catch(() => false)
-    : false;
-  const privacyRail = isConfidentialRailEnabled(env) && oneClickSupported ? 'confidential' : 'public';
+  const privacyRail = isConfidentialRailEnabled(env) ? 'confidential' : 'public';
 
   if (!identity || dustGuard) {
     await env.DB.prepare(

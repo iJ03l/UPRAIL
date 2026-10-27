@@ -137,7 +137,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.escrowAccount, 'escrow.uprail.near');
     assert.equal(body.registration.proofRecipient, 'uprail.near');
     assert.equal(body.registration.auth, 'NEP-413 signature from an access key on the token parent account');
-    assert.deepEqual(body.verificationKinds, ['token_config', 'factory']);
+    assert.deepEqual(body.verificationKinds, ['token_config', 'factory', 'jh_v2_dev']);
     assert.deepEqual(body.claimKinds, ['token_claim']);
   });
 
@@ -158,7 +158,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.code, 'PROOF_REQUIRED');
   });
 
-  it('POST /api/launchpads/register rejects a proof from the wrong signer', async () => {
+  it('POST /api/launchpads/register rejects an invalid proof before signer checks', async () => {
     const res = await mf.dispatchFetch('http://localhost/api/launchpads/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -179,7 +179,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     });
     assert.equal(res.status, 401);
     const body = await res.json();
-    assert.equal(body.code, 'WRONG_SIGNER');
+    assert.equal(body.code, 'INVALID_PROOF');
   });
 
   it('POST /api/resolve validates handle correctly', async () => {

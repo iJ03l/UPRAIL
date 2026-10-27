@@ -688,8 +688,7 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
           }
         } else if (
           isConfidentialRailEnabled(c.env) &&
-          payment.privacy_rail === 'confidential' &&
-          (await nearRpc.isOneClickSupportedAsset(c.env, payment.asset).catch(() => true))
+          payment.privacy_rail === 'confidential'
         ) {
           // Private claim: escrow pays the recipient's Confidential Intents
           // account, so the payout is not linkable to the original sender.

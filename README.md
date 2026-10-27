@@ -97,7 +97,7 @@ Launchpads keep their own fee receiver (`fee_to`, `dev_id`). When a payout shoul
 - NEAR fees are sent as wNEAR (`wrap.near`), because a native transfer has no memo.
 - After the transaction is final, `POST /api/fees/adapter` with `{ "txHash" }`.
 
-UPRAIL reads the handle from that on-chain memo, deducts the 5% protocol fee, and credits the rest to the handle: directly when the handle is registered, otherwise into non-expiring escrow until they sign in. A launchpad's own role memo is ignored. The API caller cannot choose the handle.
+UPRAIL reads the handle from that on-chain memo, deducts the 5% protocol fee, and credits the rest to the handle: directly over the confidential rail when the handle is registered, otherwise into non-expiring escrow until they sign in. If the asset cannot be quoted privately, the fee stays in escrow rather than falling back to a public payout. A launchpad's own role memo is ignored. The API caller cannot choose the handle.
 
 ---
 
