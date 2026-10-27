@@ -6,6 +6,7 @@ import {
   isConfidentialRailEnabled,
   reconcileConfidentialPayments,
   reconcileConfidentialWithdrawals,
+  scrubSettledPaymentLinks,
 } from '../src/services/confidentialRail';
 
 const originalFetch = globalThis.fetch;
@@ -236,5 +237,99 @@ describe('confidential payment reconciliation', () => {
     const result = await reconcileConfidentialPayments({ ...env, DB: db } as any);
     assert.deepEqual(result, { checked: 1, completed: 0, failed: 1 });
     assert.match(db.updates[0].sql, /status = 'ESCROWED'/);
+  });
+});
+
+describe('settled payment link scrub', () => {
+  function scrubDb(changes: number, fail = false) {
+    const calls: Array<{ sql: string; args: unknown[] }> = [];
+    return {
+      calls,
+      prepare(sql: string) {
+        return {
+          bind(...args: unknown[]) {
+            return {
+              async run() {
+                if (fail) throw new Error('d1 down');
+                calls.push({ sql, args });
+                return { meta: { changes } };
+              },
+            };
+          },
+        };
+      },
+    };
+  }
+
+  it('clears every leg identifier, guarded to delivered confidential payments', async () => {
+    const db = scrubDb(1);
+    assert.equal(await scrubSettledPaymentLinks({ DB: db } as any, 'pay_1'), true);
+    const { sql, args } = db.calls[0];
+    for (const col of ['deposit_address', 'intent_hash', 'claim_deposit_address', 'claim_tx_hash']) {
+      assert.match(sql, new RegExp(`${col} = NULL`));
+    }
+    assert.match(sql, /privacy_rail = 'confidential'/);
+    assert.match(sql, /status = 'CLAIMED'/);
+    assert.match(sql, /= 'SUCCESS'/);
+    assert.deepEqual(args, ['pay_1']);
+  });
+
+  it('reports false when the guard matched no row (escrowed or in flight)', async () => {
+    assert.equal(await scrubSettledPaymentLinks({ DB: scrubDb(0) } as any, 'pay_2'), false);
+  });
+
+  it('never throws: a D1 failure must not break a settled send or claim', async () => {
+    assert.equal(await scrubSettledPaymentLinks({ DB: scrubDb(1, true) } as any, 'pay_3'), false);
+    assert.equal(await scrubSettledPaymentLinks({} as any, 'pay_4'), false);
+  });
+
+  it('reconciliation scrubs after confirming SUCCESS', async () => {
+    globalThis.fetch = (async () => statusResponse('SUCCESS')) as any;
+    const sqls: string[] = [];
+    const db = {
+      prepare(sql: string) {
+        const st: any = {
+          bind() {
+            return st;
+          },
+          async all() {
+            return {
+              results: [
+                {
+                  id: 'pay_9',
+                  sender_x_id: 'x-9',
+                  status: 'CLAIMED',
+                  settlement_status: 'PROCESSING',
+                  deposit_address: null,
+                  claim_deposit_address: 'claim-dep',
+                  intent_hash: 'esc-hash',
+                  claim_tx_hash: 'c-hash',
+                },
+              ],
+            };
+          },
+          async run() {
+            sqls.push(sql);
+            return { meta: { changes: 1 } };
+          },
+        };
+        return st;
+      },
+    };
+    const env = {
+      CONFIDENTIAL_RAIL_ENABLED: 'true',
+      NEAR_API_BASE: 'https://1click.example',
+      ONE_CLICK_API_KEY: 'partner-key',
+      CACHE: {
+        async get() {
+          return { accessToken: 's', accountId: 'a.near', expiresAt: Date.now() + 600_000 };
+        },
+        async put() {},
+        async delete() {},
+      },
+      DB: db,
+    } as any;
+    await reconcileConfidentialPayments(env);
+    assert.ok(sqls.some((s) => /claim_tx_hash = NULL/.test(s)), 'scrub statement ran');
   });
 });

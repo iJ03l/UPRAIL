@@ -21,6 +21,7 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
   - 1Click confidential quotes with `"advanced"` confidentiality
   - Only real onchain transaction hashes are persisted — settlement responses without a hash fail loudly
   - The hourly cron expires unsettled sends, refunds `ESCROWED` payments past their expiry back to the sender (gross = amount + fee), and retries interrupted refunds (`src/index.ts`)
+  - Confidential-rail sends are a single full-amount transfer into pooled escrow with no separate fee leg; a registered recipient is paid the net amount by escrow immediately (otherwise the payment stays `ESCROWED`). Settled confidential payments have their leg identifiers cleared by `scrubSettledPaymentLinks` (`src/services/confidentialRail.ts`).
 
 ## Routes
 

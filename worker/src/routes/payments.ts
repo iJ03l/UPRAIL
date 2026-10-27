@@ -35,6 +35,8 @@ import {
   submitPrivateSendFromPublic,
   submitPrivateTransfer,
   waitForSettlement,
+  payEscrowPrivate,
+  scrubSettledPaymentLinks,
 } from '../services/confidentialRail';
 
 export const paymentsRouter = new Hono<AppContext>();
@@ -712,7 +714,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     let nativeFeeHandled = false;
     // Declared here because the native direct branch dispatches the fee
     // itself; the intents block below only fills these in when it ran.
-    let feeDispatchStatus: 'sent' | 'skipped' | 'failed' = 'skipped';
+    let feeDispatchStatus: 'sent' | 'skipped' | 'failed' | 'retained' = 'skipped';
     let feeDispatchError: string | null = null;
 
     const oneClickSupported = await nearRpc
@@ -739,6 +741,9 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     let claimDepositAddress: string | null = null;
     let confirmedAt: number | null = null;
     let privateRailSettled = false;
+    // True only when escrow actually paid a registered recipient during this
+    // request; otherwise the gross sits in escrow and the payment is ESCROWED.
+    let recipientPaidAtSend = false;
 
     if (isConfidentialRailEnabled(c.env) && rail === 'intents' && oneClickSupported) {
       const privateToken =
@@ -805,16 +810,18 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         }
       }
 
-      const privateRecipient =
-        isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
       const sendPrivate = source === 'confidential' ? submitPrivateTransfer : submitPrivateSendFromPublic;
-      const transferAmount = isRecipientRegistered ? recipientAmount : body.amount;
 
       try {
+        // ONE transfer, always the full gross, always into the pooled escrow
+        // account. There is deliberately no second "fee" transfer: a fee leg
+        // is an exact 5% of the gross and ties both legs to this sender. The
+        // fee is simply the part of the gross escrow does not pay out, so it
+        // never travels anywhere and nothing is ever owed/unreserved.
         const transfer = await sendPrivate(c.env, session!.x_id, {
           asset: body.asset,
-          amount: transferAmount,
-          recipientAccount: privateRecipient,
+          amount: body.amount,
+          recipientAccount: holdingAccount,
         });
         const settlement = await waitForSettlement(c.env, session!.x_id, transfer.depositAddress, {
           timeoutMs: 45_000,
@@ -829,40 +836,38 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         }
         confirmedAt = settlementStatus === 'SUCCESS' ? Date.now() : null;
         privacyRail = 'confidential';
+        escrowDepositTxHash = transfer.intentHash;
+        payment.deposit_address = transfer.depositAddress;
 
-        if (isRecipientRegistered) {
-          claimTxHash = transfer.intentHash;
-          claimDepositAddress = transfer.depositAddress;
-        } else {
-          escrowDepositTxHash = transfer.intentHash;
-          payment.deposit_address = transfer.depositAddress;
-        }
-
-        if (isRecipientRegistered && feeAtomic > 0n) {
+        if (isRecipientRegistered && recipientNearAccount && settlementStatus === 'SUCCESS') {
+          // Registered recipient: escrow pays the net amount immediately.
+          // If this step fails the gross is still safely in escrow and the
+          // payment simply stays ESCROWED, so the recipient can claim it (or
+          // it refunds on expiry) exactly like an unregistered send. Funds
+          // are never left without a claimable record.
           try {
-            const feeTransfer = await sendPrivate(c.env, session!.x_id, {
+            const payout = await payEscrowPrivate(c.env, {
               asset: body.asset,
-              amount: protocolFee,
-              recipientAccount: feeRecipient,
+              amount: recipientAmount,
+              recipientAccount: recipientNearAccount,
             });
-            const feeSettlement = await waitForSettlement(
-              c.env,
-              session!.x_id,
-              feeTransfer.depositAddress,
-              { timeoutMs: 30_000 }
-            ).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
-            const feeStatus = String(feeSettlement.status || 'UNKNOWN').toUpperCase();
-            feeDispatchStatus = feeStatus === 'SUCCESS' ? 'sent' : 'failed';
-            feeDispatchError = feeStatus === 'SUCCESS' ? null : `fee settlement ${feeStatus}`;
-          } catch (feeErr: any) {
-            feeDispatchStatus = 'failed';
-            feeDispatchError = feeErr?.message || String(feeErr);
-            console.warn('[FeeRouting] confidential fee dispatch failed:', feeErr);
+            const payoutStatus = String(payout.status || 'UNKNOWN').toUpperCase();
+            if (payoutStatus !== 'FAILED' && payoutStatus !== 'REFUNDED') {
+              claimTxHash = payout.intentHash;
+              claimDepositAddress = payout.depositAddress;
+              settlementStatus = payoutStatus;
+              confirmedAt = payoutStatus === 'SUCCESS' ? Date.now() : null;
+              recipientPaidAtSend = true;
+            } else {
+              console.warn(`[send] immediate escrow payout ${payoutStatus}; payment stays ESCROWED`);
+            }
+          } catch (payoutErr) {
+            console.warn('[send] immediate escrow payout failed; payment stays ESCROWED:', payoutErr);
           }
-        } else {
-          feeDispatchStatus = 'skipped';
-          feeDispatchError = isRecipientRegistered ? 'no fee' : 'held in escrow until claim';
         }
+
+        feeDispatchStatus = feeAtomic > 0n ? 'retained' : 'skipped';
+        feeDispatchError = feeAtomic > 0n ? null : 'no fee';
         privateRailSettled = true;
       } catch (privateErr: any) {
         console.error('[send] confidential settlement failed:', privateErr);
@@ -1077,7 +1082,10 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     } // end empirical rail (probe could not answer)
 
     // ── 3. Finalize the record with the settlement hashes ──────────────────
-    const paymentStatus = isRecipientRegistered ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED;
+    const paymentStatus =
+      isRecipientRegistered && (!privateRailSettled || recipientPaidAtSend)
+        ? PaymentStatus.CLAIMED
+        : PaymentStatus.ESCROWED;
     try {
       const finalize =
         privacyRail === 'confidential'
@@ -1137,6 +1145,14 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         },
         500
       );
+    }
+
+    // A registered-recipient send that finalized as CLAIMED + SUCCESS is
+    // already delivered: drop the leg identifiers right away. The helper's SQL
+    // guard makes this a no-op for escrowed or still-settling payments, which
+    // keep them for claim, refund and reconciliation.
+    if (privacyRail === 'confidential') {
+      await scrubSettledPaymentLinks(c.env, paymentId);
     }
 
     // ── 4. Protocol fee ────────────────────────────────────────────────────
@@ -1221,7 +1237,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         recipientAmount,
         feeRecipient,
         inviteCode: inviteCode || undefined,
-        isDirect: isRecipientRegistered,
+        isDirect: isRecipientRegistered && (!privateRailSettled || recipientPaidAtSend),
       },
       201
     );

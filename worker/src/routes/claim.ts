@@ -46,6 +46,7 @@ import {
   submitPrivateWithdrawal,
   submitEscrowPrivateTransfer,
   waitForSettlement,
+  scrubSettledPaymentLinks,
 } from '../services/confidentialRail';
 
 export const claimRouter = new Hono<AppContext>();
@@ -963,6 +964,11 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
             console.warn('[claim/execute] D1 payment update failed:', dbErr);
           }
         }
+
+        // A confidential claim that settled is final: drop the identifiers that
+        // would tie the escrow deposit leg to this payout leg. No-op unless
+        // the row is a CLAIMED, SUCCESS confidential payment.
+        await scrubSettledPaymentLinks(c.env, paymentId);
 
         results.push({
           paymentId,

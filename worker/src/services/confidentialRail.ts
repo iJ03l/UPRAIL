@@ -659,6 +659,35 @@ export async function ensureConfidentialFunds(
 }
 
 /**
+ * Clears the ledger identifiers that tie a confidential payment's two legs
+ * (sender→escrow and escrow→recipient) together, the moment the payment is
+ * delivered and settled. The guard lives in the SQL itself so no caller can
+ * scrub a payment that is still in flight, escrowed, or on another rail:
+ * those rows still need the identifiers to be claimed, refunded or reconciled.
+ * Returns true when a row was scrubbed.
+ */
+export async function scrubSettledPaymentLinks(env: Env, paymentId: string): Promise<boolean> {
+  if (!env.DB) return false;
+  try {
+    const result = await env.DB.prepare(
+      `UPDATE payments
+          SET deposit_address = NULL, intent_hash = NULL,
+              claim_deposit_address = NULL, claim_tx_hash = NULL
+        WHERE id = ?
+          AND privacy_rail = 'confidential'
+          AND status = 'CLAIMED'
+          AND UPPER(COALESCE(settlement_status, '')) = 'SUCCESS'`
+    )
+      .bind(paymentId)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
+  } catch (err) {
+    console.warn(`[confidentialRail] could not scrub settled links for ${paymentId}:`, err);
+    return false;
+  }
+}
+
+/**
  * Reconciles confidential send/claim legs whose synchronous status poll timed
  * out. Claim legs are escrow-signed; direct sends and escrowed sends are
  * sender-signed. A failed direct send is cancelled, a failed claim returns to
@@ -738,6 +767,7 @@ export async function reconcileConfidentialPayments(
         )
           .bind(Date.now(), Date.now(), row.id)
           .run();
+        await scrubSettledPaymentLinks(env, row.id);
         completed++;
       } else if (normalized === 'FAILED' || normalized === 'REFUNDED') {
         if (isClaim) {
