@@ -260,7 +260,10 @@ paymentsRouter.post('/quote', async (c) => {
     }
     const cleanHandle = recipient.value;
 
-    if (isNaN(Number(body.amount)) || Number(body.amount) <= 0) {
+    const cleanAmount = String(body.amount ?? '')
+      .trim()
+      .replace(/^["']|["']$/g, '');
+    if (isNaN(Number(cleanAmount)) || Number(cleanAmount) <= 0) {
       return c.json<ErrorResponse>(
         { error: 'Amount must be a positive numeric value', code: 'INVALID_AMOUNT' },
         400
@@ -296,13 +299,14 @@ paymentsRouter.post('/quote', async (c) => {
     // Convert to base units with the token's decimals. Integer-looking values
     // must not be treated as already-converted base units: "5" used to be
     // passed through verbatim and quote 5e-6 tokens instead of 5.
-    const amountStr = String(body.amount ?? '').trim();
+    const amountStr = cleanAmount;
     if (!/^\d{1,15}(\.\d{1,15})?$/.test(amountStr) || Number(amountStr) <= 0) {
       return c.json<ErrorResponse>(
         { error: 'Invalid amount: expected a positive decimal number', code: 'INVALID_AMOUNT' },
         400
       );
     }
+    body.amount = amountStr;
 
     let baseUnitsAmount: string;
     // 'intents' until proven otherwise — null from the probe (RPC outage)
@@ -459,13 +463,16 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
 
     // Amount is stored and signed as a human-readable decimal; reject anything
     // that would turn into NaN/Infinity downstream (fee math, base-unit math).
-    const amountStr = String(body.amount ?? '').trim();
+    const amountStr = String(body.amount ?? '')
+      .trim()
+      .replace(/^["']|["']$/g, '');
     if (!/^\d{1,15}(\.\d{1,15})?$/.test(amountStr) || Number(amountStr) <= 0) {
       return c.json<ErrorResponse>(
         { error: 'Invalid amount: expected a positive decimal number', code: 'INVALID_AMOUNT' },
         400
       );
     }
+    body.amount = amountStr;
 
     // Cryptographically verify quote signature authenticity and exact binding
     const quoteSecret = requireQuoteSecret(c.env);

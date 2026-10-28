@@ -1267,7 +1267,7 @@ async function handleConfidentialWithdraw(
 
   let amountStr: string;
   if (params.amount && params.amount !== 'all') {
-    const raw = params.amount.trim();
+    const raw = String(params.amount).trim().replace(/^["']|["']$/g, '');
     if (!/^\d{1,15}(\.\d{1,18})?$/.test(raw)) {
       return c.json<ErrorResponse>({ error: 'Invalid withdrawal amount', code: 'INVALID_AMOUNT' }, 400);
     }
@@ -1504,7 +1504,7 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
     // transfer.
     let amountStr: string;
     if (body.amount && body.amount !== 'all') {
-      const raw = body.amount.trim();
+      const raw = String(body.amount).trim().replace(/^["']|["']$/g, '');
       // Plain decimal only — parseFloat alone accepted "1e5", "12abc", "Infinity".
       if (!/^\d{1,15}(\.\d{1,18})?$/.test(raw)) {
         return c.json<ErrorResponse>(

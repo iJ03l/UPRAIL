@@ -23,6 +23,7 @@ import { publicErrorMessage } from '../utils/errors';
 import * as nearRpc from '../services/nearRpc';
 import {
   getConfidentialAvailableBalance,
+  getConfidentialBalances,
   isConfidentialRailEnabled,
 } from '../services/confidentialRail';
 
@@ -134,13 +135,14 @@ const TOOLS = [
   {
     name: 'get_balance',
     description:
-      "Read the owner's public and confidential UPRAIL balances for a token (defaults to NEAR). Returns available, confidential, and total.",
+      "Read the owner's public and confidential UPRAIL balances. If asset is omitted or 'all', returns balances for all held tokens (USDC, NEAR, USDT, etc.).",
     inputSchema: {
       type: 'object',
       properties: {
         asset: {
           type: 'string',
-          description: 'Asset symbol, e.g. USDC, USDT, or NEAR (defaults to NEAR)',
+          description:
+            'Optional asset symbol, e.g. USDC, USDT, or NEAR. Omit or pass "all" to list all balances.',
         },
       },
     },
@@ -206,29 +208,84 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
     }
 
     case 'get_balance': {
-      const asset = String(args?.asset || 'NEAR').trim();
-      const available = await nearRpc.getUserAvailableBalance(c.env, session, asset);
-      let confidential = 0;
+      const requestedAsset = args?.asset ? String(args.asset).trim() : null;
+      if (requestedAsset && requestedAsset.toLowerCase() !== 'all') {
+        const available = await nearRpc.getUserAvailableBalance(c.env, session, requestedAsset);
+        let confidential = 0;
+        if (isConfidentialRailEnabled(c.env)) {
+          try {
+            confidential = await getConfidentialAvailableBalance(c.env, session.x_id, requestedAsset);
+          } catch (err) {
+            console.warn('[mcp] confidential balance lookup skipped:', err);
+          }
+        }
+        return toolText({
+          handle: `@${session.x_handle}`,
+          asset: requestedAsset.toUpperCase(),
+          available,
+          confidential,
+          total: available + confidential,
+        });
+      }
+
+      // If no specific asset was requested (or 'all'), return all held assets
+      const assetSet = new Set<string>(['USDC', 'NEAR', 'USDT']);
       if (isConfidentialRailEnabled(c.env)) {
         try {
-          confidential = await getConfidentialAvailableBalance(c.env, session.x_id, asset);
+          const confList = await getConfidentialBalances(c.env, session.x_id);
+          for (const cb of confList) {
+            if (parseFloat(cb.amountFormatted || '0') > 0 && cb.symbol) {
+              assetSet.add(cb.symbol.toUpperCase());
+            }
+          }
         } catch (err) {
-          console.warn('[mcp] confidential balance lookup skipped:', err);
+          console.warn('[mcp] confidential balances lookup skipped:', err);
         }
       }
+      if (c.env.DB) {
+        try {
+          const deltas = await nearRpc.getVirtualBalanceDeltas(c.env, session);
+          for (const [sym, amt] of Object.entries(deltas)) {
+            if (amt > 0) assetSet.add(sym.toUpperCase());
+          }
+        } catch {}
+      }
+
+      const balances = await Promise.all(
+        Array.from(assetSet).map(async (asset) => {
+          let available = 0;
+          let confidential = 0;
+          try {
+            available = await nearRpc.getUserAvailableBalance(c.env, session, asset);
+          } catch {}
+          if (isConfidentialRailEnabled(c.env)) {
+            try {
+              confidential = await getConfidentialAvailableBalance(c.env, session.x_id, asset);
+            } catch {}
+          }
+          return {
+            asset,
+            available,
+            confidential,
+            total: available + confidential,
+          };
+        })
+      );
+
+      const nonZeroOrStandard = balances.filter(
+        (b) => ['USDC', 'NEAR', 'USDT'].includes(b.asset) || b.total > 0
+      );
+
       return toolText({
         handle: `@${session.x_handle}`,
-        asset,
-        available,
-        confidential,
-        total: available + confidential,
+        balances: nonZeroOrStandard,
       });
     }
 
     case 'pay_handle': {
       const response = await executeAgentPay(c, {
-        recipientHandle: args?.recipientHandle,
-        asset: args?.asset,
+        recipientHandle: args?.recipientHandle ?? args?.recipient ?? args?.handle,
+        asset: args?.asset ?? args?.token,
         amount: args?.amount,
         memo: args?.memo,
         idempotencyKey: args?.idempotencyKey,
@@ -239,9 +296,10 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
 
     case 'withdraw_to_wallet': {
       const response = await executeAgentWithdraw(c, {
-        destinationAddress: args?.destinationAddress,
+        destinationAddress:
+          args?.destinationAddress ?? args?.address ?? args?.recipient ?? args?.to,
         destinationChain: args?.chain ?? args?.destinationChain,
-        asset: args?.asset,
+        asset: args?.asset ?? args?.token,
         amount: args?.amount,
         idempotencyKey: args?.idempotencyKey,
       });

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { assetsMatch } from '../dist/nearRpc.bundle.mjs';
+import { assetsMatch, toBaseUnits } from '../dist/nearRpc.bundle.mjs';
 
 /**
  * `assetsMatch` decides whether two asset strings denote the same token. It
@@ -48,5 +48,25 @@ describe('assetsMatch', () => {
     assert.equal(assetsMatch('', 'nep141:wrap.near'), false);
     assert.equal(assetsMatch('nep141:wrap.near', null), false);
     assert.equal(assetsMatch(undefined, undefined), false);
+  });
+});
+
+describe('toBaseUnits amount handling', () => {
+  it('handles standard string amounts', () => {
+    assert.equal(toBaseUnits('0.1', 6), '100000');
+    assert.equal(toBaseUnits('1', 6), '1000000');
+    assert.equal(toBaseUnits('10.5', 6), '10500000');
+  });
+
+  it('handles numeric amounts without calling .trim() on number', () => {
+    assert.equal(toBaseUnits(0.1, 6), '100000');
+    assert.equal(toBaseUnits(1, 6), '1000000');
+    assert.equal(toBaseUnits(5.25, 6), '5250000');
+  });
+
+  it('handles quoted string amounts from LLM / MCP calls', () => {
+    assert.equal(toBaseUnits('"0.1"', 6), '100000');
+    assert.equal(toBaseUnits("'0.1'", 6), '100000');
+    assert.equal(toBaseUnits(' "0.1" ', 6), '100000');
   });
 });

@@ -793,8 +793,11 @@ export function formatAmount(raw: string, decimals: number): string {
   return `${intPart}.${displayFrac}`;
 }
 
-export function toBaseUnits(amountStr: string, decimals: number): string {
-  const parts = amountStr.trim().split('.');
+export function toBaseUnits(amountStr: string | number, decimals: number): string {
+  const parts = String(amountStr ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .split('.');
   const intPart = parts[0] || '0';
   let fracPart = parts[1] || '';
   if (fracPart.length > decimals) {

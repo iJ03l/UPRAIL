@@ -84,12 +84,17 @@ export async function executeAgentPay(
   rawBody: Record<string, any>
 ): Promise<Response> {
   const agent = c.get('agent')!;
-  const recipientHandle = String(rawBody?.recipientHandle || '').trim();
-  const asset = String(rawBody?.asset || '').trim();
+  const recipientHandle = String(
+    rawBody?.recipientHandle || rawBody?.recipient || rawBody?.handle || ''
+  ).trim();
+  const asset = String(rawBody?.asset || rawBody?.token || '').trim();
+  const rawAmount = String(rawBody?.amount ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '');
   const amount =
     typeof rawBody?.amount === 'number'
       ? rawBody.amount
-      : parseFloat(String(rawBody?.amount ?? ''));
+      : parseFloat(rawAmount);
   const memo = typeof rawBody?.memo === 'string' ? rawBody.memo.trim() : undefined;
 
   if (!recipientHandle || !asset || !Number.isFinite(amount) || amount <= 0) {
@@ -188,7 +193,7 @@ export async function executeAgentPay(
         const quoteReq = new Request('https://uprail.internal/quote', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recipientHandle, asset, amount }),
+          body: JSON.stringify({ recipientHandle, asset, amount: rawAmount }),
         });
         quoteRes = await paymentsRouter.fetch(quoteReq, c.env, c.executionCtx);
       } catch (err) {
@@ -227,7 +232,7 @@ export async function executeAgentPay(
     c.set('parsedBody' as any, {
       recipientHandle,
       asset,
-      amount,
+      amount: rawAmount,
       memo,
       quoteSignature,
       depositAddress,
@@ -283,13 +288,17 @@ export async function executeAgentWithdraw(
   rawBody: Record<string, any>
 ): Promise<Response> {
   const agent = c.get('agent')!;
-  const destinationAddress = String(rawBody?.destinationAddress || '').trim();
+  const destinationAddress = String(
+    rawBody?.destinationAddress || rawBody?.address || rawBody?.recipient || ''
+  ).trim();
   const destinationChain =
     String(rawBody?.destinationChain || rawBody?.chain || '')
       .trim()
       .toLowerCase() || undefined;
-  const asset = String(rawBody?.asset || 'usdc').trim().toLowerCase();
-  const amountStr = String(rawBody?.amount ?? '').trim();
+  const asset = String(rawBody?.asset || rawBody?.token || 'usdc').trim().toLowerCase();
+  const amountStr = String(rawBody?.amount ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '');
 
   if (!destinationAddress) {
     return c.json(
