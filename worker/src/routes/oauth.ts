@@ -213,20 +213,20 @@ approve.addEventListener('click',async()=>{
        <li><span class="tick">✓</span><span>Check balances and recent payments</span></li>
        <li><span class="tick">✓</span><span>Generate deposit addresses and withdraw to a wallet</span></li>
      </ul>
-     <div class="limits">
-       <div><label for="per_tx_limit">Max per payment</label><div class="input"><span>$</span><input id="per_tx_limit" name="per_tx_limit" type="number" min="0.01" max="100000" step="0.01" value="${perTx}"></div></div>
-       <div><label for="daily_limit">Max per day</label><div class="input"><span>$</span><input id="daily_limit" name="daily_limit" type="number" min="0.01" max="100000" step="0.01" value="${daily}"></div></div>
-     </div>
-     <div class="field">
-       <label for="connection_days">Connection expires in days</label>
-       <div class="input"><input id="connection_days" name="connection_days" type="number" min="1" max="${OAUTH_MAX_CONNECTION_DAYS}" step="1" value="${connectionDays}"></div>
-     </div>
-     <p class="hint">Choose 1–${OAUTH_MAX_CONNECTION_DAYS} days. You can disconnect sooner in AI Chat settings. Every payment is checked against these limits.</p>
-     ${redirectIsLoopback ? `<div class="notice">This connection returns to an app on this computer (${escapeHtml(redirectHost)}). Only continue if you started it.</div>` : ''}
-     ${error ? `<div class="error" style="display:block">${escapeHtml(error)}</div>` : `<div class="error" id="error"></div>`}
      <form id="consent-form" method="post" action="/authorize/approve">
        <input type="hidden" name="handle" value="${escapeHtml(handle)}">
        <input type="hidden" name="passkeyAssertion" id="passkeyAssertion" value="">
+       <div class="limits">
+         <div><label for="per_tx_limit">Max per payment</label><div class="input"><span>$</span><input id="per_tx_limit" name="per_tx_limit" form="consent-form" type="number" min="0.01" max="100000" step="0.01" value="${perTx}"></div></div>
+         <div><label for="daily_limit">Max per day</label><div class="input"><span>$</span><input id="daily_limit" name="daily_limit" form="consent-form" type="number" min="0.01" max="100000" step="0.01" value="${daily}"></div></div>
+       </div>
+       <div class="field">
+         <label for="connection_days">Connection expires in days</label>
+         <div class="input"><input id="connection_days" name="connection_days" form="consent-form" type="number" min="1" max="${OAUTH_MAX_CONNECTION_DAYS}" step="1" value="${connectionDays}"></div>
+       </div>
+       <p class="hint">Choose 1–${OAUTH_MAX_CONNECTION_DAYS} days. You can disconnect sooner in AI Chat settings. Every payment is checked against these limits.</p>
+       ${redirectIsLoopback ? `<div class="notice">This connection returns to an app on this computer (${escapeHtml(redirectHost)}). Only continue if you started it.</div>` : ''}
+       ${error ? `<div class="error" style="display:block">${escapeHtml(error)}</div>` : `<div class="error" id="error"></div>`}
        <div class="actions">
          <button class="approve" id="approve" type="submit">${recentPasskey ? 'Allow access' : 'Confirm with Face ID'}</button>
          <button class="deny" type="submit" formaction="/authorize/deny" formnovalidate>Deny</button>

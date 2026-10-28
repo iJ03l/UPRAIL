@@ -431,6 +431,7 @@ paymentsRouter.post('/quote', async (c) => {
  * This ensures every fund movement is authorized by the user's physical device.
  */
 export async function handleSendPayment(c: Context<AppContext>): Promise<Response> {
+  let paymentId: string | null = null;
   try {
     // Body was already parsed and validated by requirePasskeyAuth() (human
     // flow) or by agentAuth() (agent flow). Both cache it as `parsedBody`.
@@ -494,7 +495,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     }
 
     const session = c.get('session');
-    const paymentId = crypto.randomUUID();
+    paymentId = crypto.randomUUID();
     const now = Date.now();
     const expiryDays = parseInt(c.env.PAYMENT_EXPIRY_DAYS || '30', 10);
     const expiresAt = now + expiryDays * 86400 * 1000;
@@ -1250,6 +1251,26 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     );
   } catch (err: any) {
     console.error('Send payment error:', err);
+    if (paymentId) {
+      try {
+        await c.env.DB.prepare(
+          `UPDATE payments
+              SET status = ?, cancel_reason = ?, cancel_code = ?, updated_at = ?
+            WHERE id = ? AND status = ?`
+        )
+          .bind(
+            PaymentStatus.CANCELLED,
+            publicErrorMessage(err, 'Internal error'),
+            'SEND_PAYMENT_ERROR',
+            Date.now(),
+            paymentId,
+            PaymentStatus.PENDING
+          )
+          .run();
+      } catch (cancelErr) {
+        console.error(`[send] failed to cancel orphaned payment ${paymentId}:`, cancelErr);
+      }
+    }
     return c.json<ErrorResponse>(
       {
         error: `Failed to create payment: ${publicErrorMessage(err, 'Internal error')}`,

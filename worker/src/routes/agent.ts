@@ -66,7 +66,7 @@ interface KeyBody {
 
 function shouldReleaseAgentSpend(status: number, code?: string): boolean {
   if (status >= 400 && status < 500) return true;
-  return code === 'PAYMENT_RECORD_FAILED';
+  return code === 'PAYMENT_RECORD_FAILED' || code === 'SEND_PAYMENT_ERROR';
 }
 
 /**
