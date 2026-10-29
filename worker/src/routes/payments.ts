@@ -38,6 +38,7 @@ import {
   payEscrowPrivate,
   scrubSettledPaymentLinks,
 } from '../services/confidentialRail';
+import { background } from '../utils/background';
 
 export const paymentsRouter = new Hono<AppContext>();
 
@@ -831,7 +832,8 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
           amount: body.amount,
           recipientAccount: holdingAccount,
         });
-        const settlementTimeoutMs = c.get('agent') ? 6_000 : 25_000;
+        const isAgent = Boolean(c.get('agent'));
+        const settlementTimeoutMs = isAgent ? 2_000 : 25_000;
         const settlement = await waitForSettlement(c.env, session!.x_id, transfer.depositAddress, {
           timeoutMs: settlementTimeoutMs,
         }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
@@ -848,31 +850,60 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         escrowDepositTxHash = transfer.intentHash;
         payment.deposit_address = transfer.depositAddress;
 
-        if (isRecipientRegistered && recipientNearAccount && settlementStatus === 'SUCCESS') {
-          // Registered recipient: escrow pays the net amount immediately.
-          // If this step fails the gross is still safely in escrow and the
-          // payment simply stays ESCROWED, so the recipient can claim it (or
-          // it refunds on expiry) exactly like an unregistered send. Funds
-          // are never left without a claimable record.
-          try {
-            const payout = await payEscrowPrivate(c.env, {
-              asset: body.asset,
-              amount: recipientAmount,
-              recipientAccount: recipientNearAccount,
-              timeoutMs: c.get('agent') ? 6_000 : 15_000,
-            });
-            const payoutStatus = String(payout.status || 'UNKNOWN').toUpperCase();
-            if (payoutStatus !== 'FAILED' && payoutStatus !== 'REFUNDED') {
-              claimTxHash = payout.intentHash;
-              claimDepositAddress = payout.depositAddress;
-              settlementStatus = payoutStatus;
-              confirmedAt = payoutStatus === 'SUCCESS' ? Date.now() : null;
-              recipientPaidAtSend = true;
-            } else {
-              console.warn(`[send] immediate escrow payout ${payoutStatus}; payment stays ESCROWED`);
+        if (isRecipientRegistered && recipientNearAccount) {
+          if (settlementStatus === 'SUCCESS') {
+            // Registered recipient & already confirmed: escrow pays the net amount immediately.
+            try {
+              const payout = await payEscrowPrivate(c.env, {
+                asset: body.asset,
+                amount: recipientAmount,
+                recipientAccount: recipientNearAccount,
+                timeoutMs: isAgent ? 2_000 : 15_000,
+              });
+              const payoutStatus = String(payout.status || 'UNKNOWN').toUpperCase();
+              if (payoutStatus !== 'FAILED' && payoutStatus !== 'REFUNDED') {
+                claimTxHash = payout.intentHash;
+                claimDepositAddress = payout.depositAddress;
+                settlementStatus = payoutStatus;
+                confirmedAt = payoutStatus === 'SUCCESS' ? Date.now() : null;
+                recipientPaidAtSend = true;
+              } else {
+                console.warn(`[send] immediate escrow payout ${payoutStatus}; payment stays ESCROWED`);
+              }
+            } catch (payoutErr) {
+              console.warn('[send] immediate escrow payout failed; payment stays ESCROWED:', payoutErr);
             }
-          } catch (payoutErr) {
-            console.warn('[send] immediate escrow payout failed; payment stays ESCROWED:', payoutErr);
+          } else if (isAgent && paymentId) {
+            // For fast agent sends where settlement is still in-flight, background the payout once settled!
+            const pid = paymentId;
+            const senderXId = session!.x_id;
+            background(
+              c.executionCtx,
+              (async () => {
+                const bgSettlement = await waitForSettlement(c.env, senderXId, transfer.depositAddress, {
+                  timeoutMs: 45_000,
+                }).catch(() => null);
+                if (bgSettlement && String(bgSettlement.status).toUpperCase() === 'SUCCESS') {
+                  const bgPayout = await payEscrowPrivate(c.env, {
+                    asset: body.asset,
+                    amount: recipientAmount,
+                    recipientAccount: recipientNearAccount,
+                    timeoutMs: 30_000,
+                  }).catch(() => null);
+                  if (bgPayout && bgPayout.status !== 'FAILED' && bgPayout.status !== 'REFUNDED') {
+                    await c.env.DB.prepare(
+                      `UPDATE payments
+                          SET status = 'CLAIMED', settlement_status = ?, claim_tx_hash = ?,
+                              claim_deposit_address = ?, confirmed_at = ?, updated_at = ?
+                        WHERE id = ? AND status = 'ESCROWED'`
+                    )
+                      .bind(bgPayout.status, bgPayout.intentHash, bgPayout.depositAddress, Date.now(), Date.now(), pid)
+                      .run();
+                  }
+                }
+              })(),
+              `agent-settle-payout-${pid}`
+            );
           }
         }
 
