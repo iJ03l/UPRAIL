@@ -28,6 +28,7 @@ import { feesRouter } from './routes/fees';
 import { launchpadsRouter } from './routes/launchpads';
 import { ogRouter } from './routes/og';
 import { oauthRouter } from './routes/oauth';
+import { approvalRouter } from './routes/approval';
 import { getAuthorizationServer } from './oauth/authorization';
 import { getResourceServer } from './oauth/resource';
 import { issueTxChallenge } from './middleware/passkeyAuth';
@@ -168,8 +169,9 @@ app.route('/health', healthRouter);
 app.route('/auth/x', authRouter);
 app.route('/auth', authRouter);
 
-// 3. OAuth 2.1 authorization server for MCP clients
+// 3. OAuth 2.1 authorization server and instant passkey approvals
 app.route('/', oauthRouter);
+app.route('/', approvalRouter);
 app.all('/.well-known/oauth-authorization-server', (c) =>
   getAuthorizationServer(c.env).fetch(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext)
 );

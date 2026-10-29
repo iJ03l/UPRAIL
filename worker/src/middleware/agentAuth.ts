@@ -91,6 +91,7 @@ export async function resolveAgentPrincipal(
     key_id: row.id,
     agent_id: row.agent_id,
     x_id: row.x_id,
+    label: row.label,
     per_tx_limit_usd: Number.isFinite(perTx) && perTx > 0 ? perTx : DEFAULT_PER_TX_USD,
     daily_limit_usd: Number.isFinite(daily) && daily > 0 ? daily : DEFAULT_DAILY_USD,
   };
@@ -169,7 +170,7 @@ export type AgentSendAuthorization =
   | { allowed: true; reservedUsd: number; release: () => Promise<void> }
   | { allowed: false; response: Response };
 
-async function reserveAgentBudget(
+export async function reserveAgentBudget(
   c: Context<AppContext>,
   principal: AgentPrincipal,
   usd: number

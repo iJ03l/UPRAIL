@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS agent_approvals (
   payload TEXT NOT NULL,
   -- 'PENDING' | 'APPROVED' | 'DENIED' | 'EXPIRED'
   status TEXT NOT NULL DEFAULT 'PENDING',
+  result TEXT,
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   decided_at INTEGER

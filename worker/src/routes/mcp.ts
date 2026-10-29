@@ -26,6 +26,7 @@ import {
   getConfidentialBalances,
   isConfidentialRailEnabled,
 } from '../services/confidentialRail';
+import { resolveOrigin } from '../services/webauthnConfig';
 
 export const mcpRouter = new Hono<AppContext>();
 
@@ -48,13 +49,22 @@ const TOOLS = [
   {
     name: 'pay_handle',
     description:
-      'Send a confidential payment to an X (Twitter) @handle on UPRAIL. Subject to the key’s per-transaction and daily USD spend caps.',
+      'Send a confidential payment to one or more X (Twitter) handles on UPRAIL. ALWAYS display the returned claimLink / shareLink and xShareUrl to the user so they can share it on X/Twitter. If a single or multi-account send exceeds guardrail limits, returns an instant passkey authorization link (approvalUrl) for the user to sign with Touch ID/Face ID.',
     inputSchema: {
       type: 'object',
       properties: {
         recipientHandle: {
           type: 'string',
-          description: 'Recipient X handle, e.g. @alice or alice',
+          description:
+            'Recipient X handle(s). Can be a single handle (e.g. "@alice"), comma-separated handles (e.g. "@alice, @bob"), or an array of handles.',
+        },
+        recipients: {
+          type: 'array',
+          description:
+            'Optional array of recipient handles (e.g. ["@alice", "@bob"]) or recipient objects ({ recipientHandle, amount }).',
+          items: {
+            type: ['string', 'object'],
+          },
         },
         asset: {
           type: 'string',
@@ -62,7 +72,7 @@ const TOOLS = [
         },
         amount: {
           type: ['string', 'number'],
-          description: 'Human-readable token amount to send',
+          description: 'Human-readable token amount to send per recipient (or default amount)',
         },
         memo: {
           type: 'string',
@@ -74,7 +84,22 @@ const TOOLS = [
             'Optional unique key. Retrying with the same key never sends a second payment.',
         },
       },
-      required: ['recipientHandle', 'asset', 'amount'],
+      required: ['asset', 'amount'],
+    },
+  },
+  {
+    name: 'check_approval',
+    description:
+      'Check the status of an instant passkey payment authorization request (created when a payment exceeds guardrail limits). If approved by the user, returns confirmed payment details and share links.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        approvalId: {
+          type: 'string',
+          description: 'The approval ID returned by pay_handle (e.g. appr_...)',
+        },
+      },
+      required: ['approvalId'],
     },
   },
   {
@@ -285,13 +310,68 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
     case 'pay_handle': {
       const response = await executeAgentPay(c, {
         recipientHandle: args?.recipientHandle ?? args?.recipient ?? args?.handle,
+        recipients: args?.recipients,
         asset: args?.asset ?? args?.token,
         amount: args?.amount,
         memo: args?.memo,
         idempotencyKey: args?.idempotencyKey,
       });
-      const payload = await response.json().catch(() => ({}));
-      return toolText(payload, response.status !== 201);
+      const payload = (await response.json().catch(() => ({}))) as any;
+      const isError =
+        response.status !== 201 &&
+        response.status !== 200 &&
+        payload?.status !== 'REQUIRES_PASSKEY_APPROVAL';
+      return toolText(payload, isError);
+    }
+
+    case 'check_approval': {
+      const approvalId = String(args?.approvalId || '').trim();
+      if (!approvalId) return toolText({ error: 'approvalId is required.' }, true);
+      const row = await c.env.DB.prepare(
+        'SELECT id, x_id, agent_key_id, payload, status, result, created_at, expires_at, decided_at FROM agent_approvals WHERE id = ?'
+      )
+        .bind(approvalId)
+        .first<any>();
+      if (!row) return toolText({ error: 'Approval request not found.', status: 'NOT_FOUND' }, true);
+
+      let payloadData: any = {};
+      try {
+        payloadData = JSON.parse(row.payload);
+      } catch {}
+
+      let resultData: any = null;
+      if (row.result) {
+        try {
+          resultData = JSON.parse(row.result);
+        } catch {}
+      }
+
+      const appOrigin = resolveOrigin(c.env);
+      if (row.status === 'APPROVED' && resultData) {
+        return toolText({
+          status: 'APPROVED',
+          approvalId: row.id,
+          decidedAt: row.decided_at,
+          ...resultData,
+          message:
+            'Payment has been approved and delivered with the user’s Passkey! Share links:\n' +
+            (resultData.shareLinks || []).join('\n'),
+        });
+      }
+
+      return toolText({
+        status: row.status,
+        approvalId: row.id,
+        approvalUrl: `${appOrigin}/approve?id=${row.id}`,
+        expiresAt: row.expires_at,
+        isExpired: row.expires_at < Date.now(),
+        decidedAt: row.decided_at,
+        request: payloadData,
+        message:
+          row.status === 'PENDING'
+            ? `Approval is still pending. The user can sign with their Passkey at: ${appOrigin}/approve?id=${row.id}`
+            : `Approval status: ${row.status}`,
+      });
     }
 
     case 'withdraw_to_wallet': {

@@ -1233,11 +1233,18 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     const shareLink = recipient.isAddress
       ? ''
       : `${appOrigin}/claim/${paymentId}${inviteCode ? `?invite=${inviteCode}` : ''}`;
+    const cleanHandleDisplay = cleanHandle.replace(/^@+/, '');
+    const tweetText = `Hey @${cleanHandleDisplay}, I sent you ${body.amount} ${body.asset} on UPRAIL: ${shareLink}`;
+    const xShareUrl = shareLink ? `https://x.com/intent/post?text=${encodeURIComponent(tweetText)}` : undefined;
+    const tweetIntentUrl = shareLink ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}` : undefined;
 
     return c.json<SendResponse>(
       {
         paymentId,
         shareLink,
+        claimLink: shareLink || undefined,
+        xShareUrl,
+        tweetIntentUrl,
         status: paymentStatus,
         depositAddress: body.depositAddress,
         expiresAt,

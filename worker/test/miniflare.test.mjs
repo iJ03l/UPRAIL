@@ -664,7 +664,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(listed.status, 200);
     const listedBody = await listed.json();
     const names = listedBody.result.tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ['get_balance', 'list_payments', 'pay_handle', 'receive_payment', 'resolve_handle', 'withdraw_to_wallet']);
+    assert.deepEqual(names, ['check_approval', 'get_balance', 'list_payments', 'pay_handle', 'receive_payment', 'resolve_handle', 'withdraw_to_wallet']);
 
     const resolved = await mf.dispatchFetch('http://localhost/api/mcp', {
       method: 'POST',
@@ -712,10 +712,25 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         amount: '50',
       }),
     });
-    assert.equal(overLimitWithdraw.status, 403);
-    const overLimitWithdrawBody = await overLimitWithdraw.json();
-    assert.equal(overLimitWithdrawBody.code, 'AGENT_POLICY_DENIED');
-    assert.equal(overLimitWithdrawBody.reason, 'per_tx_limit');
+    // Multiple accounts exceeding guardrail limit requests an instant passkey authorization
+    const batchOverLimit = await mf.dispatchFetch('http://localhost/api/agent/pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rawKey}` },
+      body: JSON.stringify({
+        recipients: [
+          { handle: '@alice', amount: 20 },
+          { handle: '@bob', amount: 20 },
+        ],
+        asset: 'USDC',
+      }),
+    });
+    assert.equal(batchOverLimit.status, 403);
+    const batchBody = await batchOverLimit.json();
+    assert.equal(batchBody.status, 'REQUIRES_PASSKEY_APPROVAL');
+    assert.equal(batchBody.code, 'APPROVAL_REQUIRED');
+    assert.ok(batchBody.approvalId);
+    assert.ok(batchBody.approvalUrl.includes(batchBody.approvalId));
+    assert.equal(batchBody.totalUsd, 40);
   });
 
   it('OAuth metadata, DCR, consent, token exchange, and MCP access work end to end', async () => {
@@ -861,7 +876,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 30, method: 'tools/list' }),
     });
     assert.equal(mcp.status, 200);
-    assert.equal((await mcp.json()).result.tools.length, 6);
+    assert.equal((await mcp.json()).result.tools.length, 7);
 
     const listed = await mf.dispatchFetch('http://localhost/api/agent/keys', {
       headers: { Cookie: sessionCookie },

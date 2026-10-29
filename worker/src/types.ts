@@ -202,6 +202,7 @@ export interface AgentPrincipal {
   key_id: string;
   agent_id: string;
   x_id: string;
+  label?: string | null;
   per_tx_limit_usd: number | null;
   daily_limit_usd: number | null;
 }
@@ -304,6 +305,9 @@ export interface SendRequest {
 export interface SendResponse {
   paymentId: string;
   shareLink: string;
+  claimLink?: string;
+  xShareUrl?: string;
+  tweetIntentUrl?: string;
   status: PaymentStatus;
   depositAddress: string;
   expiresAt: number;

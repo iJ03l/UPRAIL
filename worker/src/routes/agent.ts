@@ -18,7 +18,14 @@ import {
   requireAgent,
   authorizeAgentSend,
   authorizeAgentWithdrawal,
+  reserveAgentBudget,
 } from '../middleware/agentAuth';
+import {
+  agentUsdValue,
+  evaluateAgentSpendPolicy,
+  isValidAgentHandle,
+} from '../services/agentPolicy';
+import { resolveOrigin } from '../services/webauthnConfig';
 import {
   generateAgentKey,
   currentUtcDay,
@@ -79,25 +86,68 @@ function shouldReleaseAgentSpend(status: number, code?: string): boolean {
  * ambiguous settlement failures stay charged to keep the daily cap fail-closed.
  */
 
+export interface ParsedAgentRecipient {
+  handle: string;
+  amount: string;
+}
+
+export function parseAgentRecipients(rawBody: Record<string, any>): ParsedAgentRecipient[] {
+  const defaultAmount = String(rawBody?.amount ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '');
+
+  if (Array.isArray(rawBody?.recipients) && rawBody.recipients.length > 0) {
+    const list: ParsedAgentRecipient[] = [];
+    for (const item of rawBody.recipients) {
+      if (typeof item === 'string') {
+        const h = item.trim().replace(/^@+/, '');
+        if (h) list.push({ handle: h, amount: defaultAmount });
+      } else if (item && typeof item === 'object') {
+        const h = String(item.recipientHandle || item.handle || item.recipient || '')
+          .trim()
+          .replace(/^@+/, '');
+        const a = String(item.amount ?? defaultAmount)
+          .trim()
+          .replace(/^["']|["']$/g, '');
+        if (h) list.push({ handle: h, amount: a });
+      }
+    }
+    if (list.length > 0) return list;
+  }
+
+  const rawTarget = rawBody?.recipientHandle ?? rawBody?.recipient ?? rawBody?.handle;
+  if (Array.isArray(rawTarget)) {
+    return rawTarget
+      .map((t) => String(t || '').trim().replace(/^@+/, ''))
+      .filter(Boolean)
+      .map((handle) => ({ handle, amount: defaultAmount }));
+  }
+
+  const rawStr = String(rawTarget || '').trim();
+  if (rawStr.includes(',') || rawStr.includes(';') || (rawStr.includes(' ') && rawStr.includes('@'))) {
+    const parts = rawStr
+      .split(/[,;\s]+/)
+      .map((s) => s.trim().replace(/^@+/, ''))
+      .filter(Boolean);
+    if (parts.length > 0) {
+      return parts.map((handle) => ({ handle, amount: defaultAmount }));
+    }
+  }
+
+  const single = rawStr.replace(/^@+/, '');
+  return single ? [{ handle: single, amount: defaultAmount }] : [];
+}
+
 export async function executeAgentPay(
   c: Context<AppContext>,
   rawBody: Record<string, any>
 ): Promise<Response> {
   const agent = c.get('agent')!;
-  const recipientHandle = String(
-    rawBody?.recipientHandle || rawBody?.recipient || rawBody?.handle || ''
-  ).trim();
+  const recipients = parseAgentRecipients(rawBody);
   const asset = String(rawBody?.asset || rawBody?.token || '').trim();
-  const rawAmount = String(rawBody?.amount ?? '')
-    .trim()
-    .replace(/^["']|["']$/g, '');
-  const amount =
-    typeof rawBody?.amount === 'number'
-      ? rawBody.amount
-      : parseFloat(rawAmount);
   const memo = typeof rawBody?.memo === 'string' ? rawBody.memo.trim() : undefined;
 
-  if (!recipientHandle || !asset || !Number.isFinite(amount) || amount <= 0) {
+  if (recipients.length === 0 || !asset) {
     return c.json(
       {
         error: 'recipientHandle, asset, and a positive amount are required.',
@@ -105,6 +155,30 @@ export async function executeAgentPay(
       },
       400
     );
+  }
+
+  for (const r of recipients) {
+    if (!isValidAgentHandle(r.handle)) {
+      return c.json(
+        {
+          error:
+            'AI chat payments go to X handles only (e.g. @alice). Use the withdrawal tool for a wallet address.',
+          code: 'AGENT_POLICY_DENIED',
+          reason: 'recipient_not_handle',
+        },
+        403
+      );
+    }
+    const parsedAmt = parseFloat(r.amount);
+    if (!Number.isFinite(parsedAmt) || parsedAmt <= 0) {
+      return c.json(
+        {
+          error: `Invalid amount: "${r.amount}". A positive number is required.`,
+          code: 'INVALID_REQUEST',
+        },
+        400
+      );
+    }
   }
 
   const idempotency = normalizeIdempotencyKey(
@@ -170,111 +244,246 @@ export async function executeAgentPay(
     if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'UNKNOWN');
   };
 
-  const auth = await authorizeAgentSend(c, agent, {
-    recipientHandle,
-    asset,
-    amount,
-    memo,
-  });
+  // Evaluate total USD value and spend guardrails
+  const recipientsWithUsd: Array<{ handle: string; amount: string; amountNum: number; usd: number | null }> = [];
+  let totalUsd = 0;
+  let hasUnpriced = false;
+  for (const r of recipients) {
+    const amountNum = parseFloat(r.amount);
+    const usd = await agentUsdValue(c.env, asset, amountNum);
+    if (usd === null) hasUnpriced = true;
+    else totalUsd += usd;
+    recipientsWithUsd.push({ handle: r.handle, amount: r.amount, amountNum, usd });
+  }
+
+  const perTxLimit = agent.per_tx_limit_usd ?? 0;
+  const dailyLimit = agent.daily_limit_usd ?? 0;
+
+  // Check against remaining daily limit
+  const today = new Date().toISOString().slice(0, 10);
+  const spendRow = await c.env.DB.prepare(
+    'SELECT spent FROM agent_spend WHERE agent_key_id = ? AND day = ?'
+  )
+    .bind(agent.key_id, today)
+    .first<{ spent?: string }>();
+  const currentSpent = parseFloat(spendRow?.spent || '0') || 0;
+  const remainingDaily = Math.max(0, dailyLimit - currentSpent);
+
+  const exceedsPerTx =
+    perTxLimit > 0 &&
+    (totalUsd > perTxLimit + 1e-9 ||
+      recipientsWithUsd.some((r) => (r.usd ?? 0) > perTxLimit + 1e-9));
+  const exceedsDaily = dailyLimit > 0 && totalUsd > remainingDaily + 1e-9;
+
+  // Guardrail limits exceeded -> create instant passkey authorization for multiple accounts (or explicit approval)
+  if (exceedsPerTx || exceedsDaily || hasUnpriced) {
+    await markFailed();
+    const reason = exceedsDaily ? 'daily_limit' : exceedsPerTx ? 'per_tx_limit' : 'unpriced_asset';
+    const limitUsd = exceedsDaily ? remainingDaily : perTxLimit;
+
+    if (recipients.length > 1 || rawBody?.requestApproval === true) {
+      const approvalId = `appr_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+      const now = Date.now();
+      const expiresAt = now + 15 * 60 * 1000;
+      const payload = JSON.stringify({
+        asset,
+        recipients: recipientsWithUsd.map((r) => ({
+          recipientHandle: r.handle,
+          amount: r.amount,
+          usd: r.usd,
+        })),
+        totalAmount: recipientsWithUsd
+          .reduce((sum, r) => sum + r.amountNum, 0)
+          .toFixed(6)
+          .replace(/\.?0+$/, ''),
+        totalUsd,
+        memo,
+        agentName: agent.label || 'AI Agent',
+        exceededReason: reason,
+        limitUsd,
+      });
+
+      await c.env.DB.prepare(
+        `INSERT INTO agent_approvals (id, x_id, agent_key_id, payload, status, created_at, expires_at)
+         VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
+      )
+        .bind(approvalId, agent.x_id, agent.key_id, payload, now, expiresAt)
+        .run();
+
+      const appOrigin = resolveOrigin(c.env);
+      const approvalUrl = `${appOrigin}/approve?id=${approvalId}`;
+
+      return c.json(
+        {
+          status: 'REQUIRES_PASSKEY_APPROVAL',
+          code: 'APPROVAL_REQUIRED',
+          approvalId,
+          approvalUrl,
+          expiresAt,
+          totalUsd: Number(totalUsd.toFixed(2)),
+          recipients: recipientsWithUsd.map((r) => ({
+            recipientHandle: `@${r.handle}`,
+            amount: r.amount,
+            asset,
+          })),
+          message: `This batch payment (${recipientsWithUsd.length} accounts, ~$${totalUsd.toFixed(2)}) exceeds your spend guardrail. Please sign with your Passkey to authorize: ${approvalUrl}`,
+        },
+        403
+      );
+    }
+
+    // Single recipient standard policy denial
+    const errorMsg = exceedsDaily
+      ? `This transfer (~$${totalUsd.toFixed(2)}) exceeds your remaining daily limit ($${remainingDaily.toFixed(2)} left of $${dailyLimit}).`
+      : exceedsPerTx
+      ? `This transfer (~$${totalUsd.toFixed(2)}) exceeds your per-transaction limit ($${perTxLimit}).`
+      : `Cannot calculate USD value for asset "${asset}". Set a price or use USDC/USDT/NEAR.`;
+
+    return c.json(
+      {
+        error: errorMsg,
+        code: 'AGENT_POLICY_DENIED',
+        reason,
+        perTxLimitUsd: perTxLimit,
+        dailyLimitUsd: dailyLimit,
+        totalUsd: Number(totalUsd.toFixed(2)),
+      },
+      403
+    );
+  }
+
+  // Within limits: atomically reserve totalUsd
+  const auth = await reserveAgentBudget(c, agent, totalUsd);
   if (!auth.allowed) {
     await markFailed();
     return auth.response;
   }
 
   try {
-    let quoteSignature =
-      typeof rawBody?.quoteSignature === 'string' ? rawBody.quoteSignature.trim() : '';
-    let depositAddress =
-      typeof rawBody?.depositAddress === 'string' ? rawBody.depositAddress.trim() : '';
+    if (recipients.length === 1) {
+      const r = recipients[0];
+      const singleRes = await executeSingleSend(c, r.handle, asset, r.amount, memo, rawBody);
+      const payload = (await singleRes.clone().json().catch(() => null)) as any;
+      const code = typeof payload?.code === 'string' ? payload.code : undefined;
 
-    if (!quoteSignature || !depositAddress) {
-      let quoteRes: Response;
-      try {
-        const quoteReq = new Request('https://uprail.internal/quote', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recipientHandle, asset, amount: rawAmount }),
-        });
-        quoteRes = await paymentsRouter.fetch(quoteReq, c.env, c.executionCtx);
-      } catch (err) {
+      if (singleRes.status === 201) {
+        if (idempotencyKey && payload?.paymentId) {
+          await completeAgentRequest(c.env, agent.key_id, idempotencyKey, payload.paymentId);
+        }
+      } else if (shouldReleaseAgentSpend(singleRes.status, code)) {
         await auth.release();
         await markFailed();
-        console.error('[agent] quote request failed:', err);
-        return c.json(
-          { error: 'Failed to prepare payment quote.', code: 'QUOTE_FAILED' },
-          502
-        );
+      } else {
+        await markUnknown();
       }
+      return singleRes;
+    }
 
-      if (!quoteRes.ok) {
+    const results: any[] = [];
+    for (const r of recipients) {
+      const singleRes = await executeSingleSend(c, r.handle, asset, r.amount, memo, {});
+      if (singleRes.status !== 201) {
+        const errJson = (await singleRes.json().catch(() => ({}))) as any;
         await auth.release();
         await markFailed();
-        const errData = (await quoteRes.json().catch(() => ({}))) as {
-          error?: string;
-          code?: string;
-        };
         return c.json(
           {
-            error: errData.error || 'Failed to prepare payment quote.',
-            code: errData.code || 'QUOTE_FAILED',
+            error: errJson.error || `Payment to @${r.handle} failed.`,
+            code: 'BATCH_SEND_ERROR',
+            partialResults: results,
           },
-          quoteRes.status as any
+          singleRes.status as any
         );
       }
-      const quote = (await quoteRes.json()) as {
-        quoteSignature?: string;
-        depositAddress?: string;
-      };
-      quoteSignature = quote.quoteSignature || '';
-      depositAddress = quote.depositAddress || '';
+      const data = (await singleRes.json()) as any;
+      results.push({
+        recipientHandle: r.handle,
+        amount: r.amount,
+        asset,
+        paymentId: data.paymentId,
+        shareLink: data.shareLink,
+        claimLink: data.claimLink || data.shareLink,
+        xShareUrl: data.xShareUrl,
+        tweetIntentUrl: data.tweetIntentUrl,
+        status: data.status,
+      });
     }
 
-    c.set('parsedBody' as any, {
-      recipientHandle,
-      asset,
-      amount: rawAmount,
-      memo,
-      quoteSignature,
-      depositAddress,
-    });
-
-    const response = await handleSendPayment(c);
-
-    const payload = (await response.clone().json().catch(() => null)) as {
-      paymentId?: unknown;
-      code?: unknown;
-    } | null;
-    const code = typeof payload?.code === 'string' ? payload.code : undefined;
-
-    if (response.status === 201) {
-      if (idempotencyKey) {
-        const paymentId = typeof payload?.paymentId === 'string' ? payload.paymentId : null;
-        if (paymentId) {
-          const recorded = await completeAgentRequest(
-            c.env,
-            agent.key_id,
-            idempotencyKey,
-            paymentId
-          );
-          if (!recorded) {
-            console.error('[agent] payment settled but idempotency row was not completed');
-          }
-        } else {
-          await markUnknown();
-        }
-      }
-    } else if (shouldReleaseAgentSpend(response.status, code)) {
-      await auth.release();
-      await markFailed();
-    } else {
-      await markUnknown();
+    if (idempotencyKey && results[0]?.paymentId) {
+      await completeAgentRequest(c.env, agent.key_id, idempotencyKey, results[0].paymentId);
     }
 
-    return response;
+    return c.json(
+      {
+        status: 'CLAIMED',
+        success: true,
+        asset,
+        totalSent: results.length,
+        payments: results,
+        shareLinks: results.map((p) => p.shareLink).filter(Boolean),
+        message:
+          `Payments delivered to ${results.length} accounts! Links to share:\n` +
+          results.map((p) => `@${p.recipientHandle}: ${p.shareLink}`).join('\n'),
+      },
+      201
+    );
   } catch (err) {
     await markUnknown();
     throw err;
   }
+}
+
+async function executeSingleSend(
+  c: Context<AppContext>,
+  recipientHandle: string,
+  asset: string,
+  rawAmount: string,
+  memo: string | undefined,
+  rawBody: Record<string, any>
+): Promise<Response> {
+  let quoteSignature =
+    typeof rawBody?.quoteSignature === 'string' ? rawBody.quoteSignature.trim() : '';
+  let depositAddress =
+    typeof rawBody?.depositAddress === 'string' ? rawBody.depositAddress.trim() : '';
+
+  if (!quoteSignature || !depositAddress) {
+    const quoteReq = new Request('https://uprail.internal/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientHandle, asset, amount: rawAmount }),
+    });
+    const quoteRes = await paymentsRouter.fetch(quoteReq, c.env, c.executionCtx);
+    if (!quoteRes.ok) {
+      const errData = (await quoteRes.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+      };
+      return new Response(
+        JSON.stringify({
+          error: errData.error || 'Failed to prepare payment quote.',
+          code: errData.code || 'QUOTE_FAILED',
+        }),
+        { status: quoteRes.status, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    const quote = (await quoteRes.json()) as {
+      quoteSignature?: string;
+      depositAddress?: string;
+    };
+    quoteSignature = quote.quoteSignature || '';
+    depositAddress = quote.depositAddress || '';
+  }
+
+  c.set('parsedBody' as any, {
+    recipientHandle,
+    asset,
+    amount: rawAmount,
+    memo,
+    quoteSignature,
+    depositAddress,
+  });
+
+  return await handleSendPayment(c);
 }
 
 /**
