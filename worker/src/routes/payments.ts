@@ -831,7 +831,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
           amount: body.amount,
           recipientAccount: holdingAccount,
         });
-        const settlementTimeoutMs = c.get('agent') ? 14_000 : 45_000;
+        const settlementTimeoutMs = c.get('agent') ? 6_000 : 25_000;
         const settlement = await waitForSettlement(c.env, session!.x_id, transfer.depositAddress, {
           timeoutMs: settlementTimeoutMs,
         }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
@@ -859,6 +859,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
               asset: body.asset,
               amount: recipientAmount,
               recipientAccount: recipientNearAccount,
+              timeoutMs: c.get('agent') ? 6_000 : 15_000,
             });
             const payoutStatus = String(payout.status || 'UNKNOWN').toUpperCase();
             if (payoutStatus !== 'FAILED' && payoutStatus !== 'REFUNDED') {

@@ -407,6 +407,7 @@ export async function payEscrowPrivate(
     amount: string;
     recipientAccount: string;
     confidentiality?: OneClickConfidentiality;
+    timeoutMs?: number;
   }
 ): Promise<EscrowPrivatePayout> {
   if (!isConfidentialRailEnabled(env)) throw new Error('Confidential rail is disabled');
@@ -459,7 +460,7 @@ export async function payEscrowPrivate(
 
   const settlement = await waitForSettlement(env, '', transfer.depositAddress, {
     signer: 'escrow',
-    timeoutMs: 60_000,
+    timeoutMs: params.timeoutMs ?? 15_000,
   }).catch(() => ({ status: 'UNKNOWN' }));
   return {
     status: String(settlement.status || 'UNKNOWN').toUpperCase(),
