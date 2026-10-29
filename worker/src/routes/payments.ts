@@ -831,8 +831,9 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
           amount: body.amount,
           recipientAccount: holdingAccount,
         });
+        const settlementTimeoutMs = c.get('agent') ? 14_000 : 45_000;
         const settlement = await waitForSettlement(c.env, session!.x_id, transfer.depositAddress, {
-          timeoutMs: 45_000,
+          timeoutMs: settlementTimeoutMs,
         }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
         settlementStatus = String(settlement.status || 'UNKNOWN').toUpperCase();
         if (settlementStatus === 'FAILED' || settlementStatus === 'REFUNDED') {

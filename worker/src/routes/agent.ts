@@ -370,6 +370,11 @@ export async function executeAgentPay(
         if (idempotencyKey && payload?.paymentId) {
           await completeAgentRequest(c.env, agent.key_id, idempotencyKey, payload.paymentId);
         }
+        if (payload && payload.shareLink) {
+          payload.shareLinks = [payload.shareLink];
+          payload.message = `Payment of ${r.amount} ${asset} sent to @${r.handle}! Share link: ${payload.shareLink}`;
+          return c.json(payload, 201);
+        }
       } else if (shouldReleaseAgentSpend(singleRes.status, code)) {
         await auth.release();
         await markFailed();

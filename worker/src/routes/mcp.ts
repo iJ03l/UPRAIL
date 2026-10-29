@@ -469,18 +469,26 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
         .bind(session.x_id, session.x_id, session.x_handle)
         .all<any>();
 
-      const payments = (results || []).map((row) => ({
-        id: row.id,
-        direction: row.sender_x_id === session.x_id ? 'sent' : 'received',
-        senderHandle: row.sender_x_handle ? `@${row.sender_x_handle}` : null,
-        recipientHandle: `@${String(row.recipient_handle || '').replace(/^@/, '')}`,
-        asset: row.asset,
-        amount: row.amount,
-        memo: row.memo || null,
-        status: row.status,
-        created_at: row.created_at,
-        expires_at: row.expires_at,
-      }));
+      const appOrigin = resolveOrigin(c.env);
+      const payments = (results || []).map((row) => {
+        const recipientHandle = `@${String(row.recipient_handle || '').replace(/^@/, '')}`;
+        const shareLink = `${appOrigin}/claim/${row.id}`;
+        return {
+          id: row.id,
+          direction: row.sender_x_id === session.x_id ? 'sent' : 'received',
+          senderHandle: row.sender_x_handle ? `@${row.sender_x_handle}` : null,
+          recipientHandle,
+          asset: row.asset,
+          amount: row.amount,
+          memo: row.memo || null,
+          status: row.status,
+          shareLink,
+          claimLink: shareLink,
+          xShareUrl: `https://x.com/intent/post?text=${encodeURIComponent(`Hey ${recipientHandle}, I sent you ${row.amount} ${row.asset} on UPRAIL: ${shareLink}`)}`,
+          created_at: row.created_at,
+          expires_at: row.expires_at,
+        };
+      });
       return toolText({ payments });
     }
 
