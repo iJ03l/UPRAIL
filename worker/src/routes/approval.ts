@@ -37,28 +37,23 @@ function page(title: string, body: string, status = 200): Response {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#0A0807">
+<meta name="theme-color" content="#f7f5f0">
 <title>${escapeHtml(title)} — UPRAIL</title>
 <link rel="preconnect" href="https://api.fontshare.com">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=cabinet-grotesk@500,700,800,900&display=swap" rel="stylesheet">
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=cabinet-grotesk@500,700,800&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  color-scheme: dark;
-  --bg: #0A0807;
-  --elevated: #120E0C;
-  --chassis: rgba(24, 19, 16, 0.9);
-  --line: rgba(44, 34, 29, 0.9);
-  --line-highlight: rgba(224, 83, 38, 0.45);
-  --text: #F5F2EF;
-  --muted: #A8A29E;
-  --subtle: #78716C;
-  --accent: #E05326;
-  --flame: #FF5722;
-  --near-green: #00EC97;
-  --near-cyan: #00C1DE;
+  --bg: #f7f5f0;
+  --card: #ffffff;
+  --line: #e7e5e4;
+  --line-strong: #d6d3d1;
+  --fg: #1c1917;
+  --muted: #78716c;
+  --subtle: #a8a29e;
+  --accent: #e05326;
   --font-display: "Clash Display", "Syne", -apple-system, sans-serif;
   --font-sans: "Cabinet Grotesk", "Space Grotesk", -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
@@ -68,12 +63,8 @@ body {
   margin: 0;
   min-height: 100vh;
   background-color: var(--bg);
-  background-image: 
-    radial-gradient(1000px 520px at 50% -10%, rgba(224, 83, 38, 0.22) 0%, rgba(255, 87, 34, 0.08) 35%, transparent 75%),
-    radial-gradient(rgba(224, 83, 38, 0.1) 1px, transparent 1px);
-  background-size: 100% 100%, 24px 24px;
-  color: var(--text);
-  font: 15px/1.55 var(--font-sans);
+  color: var(--fg);
+  font: 14px/1.5 var(--font-sans);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -82,104 +73,65 @@ body {
 }
 .card {
   width: 100%;
-  max-width: 550px;
-  background: linear-gradient(180deg, rgba(28, 22, 19, 0.88) 0%, rgba(18, 14, 12, 0.96) 100%);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
+  max-width: 440px;
+  background: var(--card);
   border: 1px solid var(--line);
-  border-top: 1px solid var(--line-highlight);
-  border-radius: 28px;
-  padding: 34px;
-  box-shadow: 0 35px 90px -25px #000, 0 0 50px -10px rgba(224, 83, 38, 0.15);
-  position: relative;
-  overflow: hidden;
-}
-.card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 20%;
-  right: 20%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, #FF5722, transparent);
-  opacity: 0.9;
+  border-radius: 24px;
+  padding: 28px 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 20px -6px rgba(0, 0, 0, 0.04);
 }
 .brand-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   text-decoration: none;
 }
-.brand-icon-wrap {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: #181310;
-  border: 1px solid rgba(224, 83, 38, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 16px rgba(224, 83, 38, 0.35);
-  overflow: hidden;
-}
-.brand-icon-wrap img {
-  width: 18px;
-  height: 18px;
+.brand img {
+  width: 20px;
+  height: 20px;
   object-fit: contain;
 }
 .brand-name {
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.14em;
-  color: var(--text);
+  letter-spacing: 0.12em;
+  color: var(--fg);
   text-transform: uppercase;
 }
-.protocol-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.badge {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(0, 236, 151, 0.08);
-  border: 1px solid rgba(0, 236, 151, 0.25);
-  color: #00EC97;
+  background: #f5f5f4;
+  border: 1px solid var(--line);
+  color: var(--muted);
 }
-.pulse-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #00EC97;
-  box-shadow: 0 0 8px #00EC97;
-  animation: pulse 2s infinite ease-in-out;
-}
-@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }
-
 h1 {
   font-family: var(--font-display);
-  font-size: 26px;
-  line-height: 1.18;
-  letter-spacing: -0.03em;
-  margin: 12px 0 8px;
-  color: var(--text);
+  font-size: 21px;
   font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  color: var(--fg);
 }
-p {
+p.desc {
   margin: 0 0 16px;
   color: var(--muted);
-  font-size: 13.5px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
 }
 .agent-tag {
   display: inline-flex;
@@ -189,194 +141,229 @@ p {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 4px 10px;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
   border-radius: 999px;
-  background: #2a1a12;
-  border: 1px solid #4a2a1b;
-  color: #f0a07e;
-  margin-bottom: 8px;
+  background: #f5f5f4;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  margin-bottom: 12px;
 }
 .summary-box {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  padding: 16px 18px;
+  background: #fafaf9;
   border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(14, 11, 9, 0.85);
-  margin: 18px 0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
 }
 .summary-amount {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 20px;
   font-weight: 700;
+  color: var(--fg);
   letter-spacing: -0.02em;
-  color: var(--text);
 }
 .summary-usd {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--muted);
   font-weight: 700;
 }
 .notice {
-  border: 1px solid #4a2a1b;
-  background: #23140e;
-  color: #fdba74;
-  border-radius: 14px;
-  padding: 12px 14px;
-  font-size: 12.5px;
-  margin: 16px 0;
-  line-height: 1.45;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+  border-radius: 12px;
+  padding: 9px 12px;
+  font-size: 11.5px;
+  margin: 12px 0;
+  line-height: 1.4;
+}
+.recipients-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 12px 0 6px;
 }
 .recipients {
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 14px;
   overflow: hidden;
-  margin: 16px 0;
-  background: rgba(14, 11, 9, 0.7);
+  background: #fafaf9;
+  margin-bottom: 12px;
 }
 .recipient-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
 }
-.recipient-row:last-child { border-bottom: 0; }
+.recipient-row:last-child {
+  border-bottom: 0;
+}
 .recipient-name {
   font-weight: 700;
-  color: var(--text);
-  font-size: 14px;
+  color: var(--fg);
 }
 .recipient-amount {
   font-family: var(--font-mono);
   font-weight: 700;
-  color: #d6d3d1;
-  font-size: 13.5px;
+  color: var(--fg);
+}
+.memo-box {
+  background: #fafaf9;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+.memo-box strong {
+  color: var(--fg);
 }
 .actions {
   display: flex;
-  gap: 12px;
-  margin-top: 22px;
+  gap: 10px;
+  margin-top: 16px;
 }
 button, .btn {
   font: inherit;
   font-family: var(--font-display);
+  font-size: 12px;
   font-weight: 700;
-  font-size: 14px;
-  border-radius: 16px;
-  padding: 14px 20px;
-  border: 1px solid transparent;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 14px;
+  padding: 12px 16px;
   cursor: pointer;
-  text-align: center;
-  text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  gap: 6px;
+  transition: all 0.15s ease;
+  text-decoration: none;
 }
 .approve {
   flex: 1;
-  background: linear-gradient(135deg, #E05326 0%, #FF5722 100%);
-  color: #FFFFFF;
-  box-shadow: 0 0 28px -4px rgba(224, 83, 38, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #000000;
+  color: #ffffff;
+  border: 1px solid #000000;
 }
 .approve:hover {
-  filter: brightness(1.1);
-  transform: translateY(-1px);
-  box-shadow: 0 0 36px -2px rgba(224, 83, 38, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  background: #292524;
+  border-color: #292524;
 }
 .deny {
-  background: rgba(28, 22, 19, 0.7);
+  background: #ffffff;
   color: var(--muted);
   border: 1px solid var(--line);
 }
 .deny:hover {
-  background: rgba(38, 30, 26, 0.9);
-  color: var(--text);
-  border-color: rgba(64, 50, 44, 0.9);
-}
-.btn-tweet {
-  background: #1d9bf0;
-  color: #fff;
-  font-size: 12px;
-  padding: 9px 15px;
-  border-radius: 12px;
-}
-.btn-copy {
-  background: #231b16;
-  color: #d6d3d1;
-  font-size: 12px;
-  padding: 9px 15px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
+  color: var(--fg);
+  border-color: var(--line-strong);
+  background: #fafaf9;
 }
 button:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: wait;
 }
 .error {
-  border: 1px solid #5b1f1f;
-  background: #2a1111;
-  color: #fca5a5;
-  border-radius: 14px;
-  padding: 12px 14px;
-  font-size: 12.5px;
-  margin: 14px 0;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  margin: 12px 0;
   display: none;
 }
 .success-card {
-  background: rgba(17, 27, 21, 0.85);
-  border: 1px solid rgba(28, 56, 38, 0.9);
-  color: #86efac;
-  border-radius: 18px;
-  padding: 16px 18px;
-  margin: 16px 0;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.success-card strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-bottom: 2px;
 }
 .links-list {
   display: grid;
-  gap: 12px;
-  margin: 18px 0;
+  gap: 10px;
+  margin: 14px 0;
 }
 .link-item {
-  background: rgba(14, 11, 9, 0.85);
+  background: #fafaf9;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 15px;
+  border-radius: 14px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .link-url {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #a8a29e;
+  color: var(--muted);
+  background: #ffffff;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
   word-break: break-all;
-  background: #171412;
-  padding: 9px 11px;
-  border-radius: 10px;
-  border: 1px solid #2b2521;
 }
-.link-actions { display: flex; gap: 8px; }
-.foot {
+.link-actions {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  font-size: 11px;
-  color: var(--subtle);
-  margin: 20px 0 0;
-  text-align: center;
-  font-family: var(--font-sans);
+  gap: 8px;
 }
-.foot svg { width: 13px; height: 13px; fill: currentColor; opacity: 0.7; }
-@media(max-width:480px){
-  .card { padding: 22px 18px; }
-  h1 { font-size: 22px; }
+.btn-copy {
+  background: #ffffff;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+.btn-copy:hover {
+  border-color: var(--line-strong);
+  background: #fafaf9;
+}
+.btn-tweet {
+  background: #000000;
+  color: #ffffff;
+  border: 1px solid #000000;
+  font-size: 11px;
+  padding: 8px 12px;
+  border-radius: 10px;
+}
+.btn-tweet:hover {
+  background: #292524;
+}
+.foot {
+  font-size: 10.5px;
+  color: var(--subtle);
+  margin: 16px 0 0;
+  text-align: center;
+  line-height: 1.4;
+}
+@media (max-width: 480px) {
+  .card { padding: 22px 18px; border-radius: 20px; }
+  h1 { font-size: 19px; }
 }
 </style>
 </head>
@@ -397,17 +384,17 @@ function errorScreen(title: string, message: string, status = 400): Response {
     title,
     `<div class="brand-bar">
        <div class="brand">
-         <div class="brand-icon-wrap"><img src="/brand/uprail-icon.png" alt="UPRAIL"></div>
+         <img src="/brand/uprail-icon.png" alt="UPRAIL">
          <span class="brand-name">UPRAIL</span>
        </div>
-       <div class="protocol-badge"><span class="pulse-dot"></span><span>NEAR INTENTS</span></div>
+       <span class="badge">ERROR</span>
      </div>
      <h1>${escapeHtml(title)}</h1>
-     <p>${escapeHtml(message)}</p>
+     <p class="desc">${escapeHtml(message)}</p>
      <div class="actions">
-       <a href="https://app.uprail.world" class="btn approve" style="text-decoration:none;width:100%">Return to Dashboard</a>
+       <a href="https://app.uprail.world" class="btn approve" style="width:100%">Return to App</a>
      </div>
-     <p class="foot">Return to your AI app or UPRAIL dashboard.</p>`,
+     <div class="foot">Return to your AI app or UPRAIL dashboard.</div>`,
     status
   );
 }
@@ -449,10 +436,19 @@ async function handleGetApproval(c: Context<AppContext>): Promise<Response> {
   if (row.status === 'DENIED') {
     return page(
       'Payment Request Denied',
-      `<div class="brand"><span class="dot"></span>UPRAIL</div>
+      `<div class="brand-bar">
+         <div class="brand">
+           <img src="/brand/uprail-icon.png" alt="UPRAIL">
+           <span class="brand-name">UPRAIL</span>
+         </div>
+         <span class="badge">DENIED</span>
+       </div>
        <h1>Request Denied</h1>
-       <p>This payment authorization request was rejected. No funds were moved from your vault.</p>
-       <p class="foot">Return to your AI chat app.</p>`
+       <p class="desc">This payment authorization request was rejected. No funds were moved from your vault.</p>
+       <div class="actions">
+         <a href="https://app.uprail.world" class="btn approve" style="width:100%">Return to App</a>
+       </div>
+       <div class="foot">Return to your AI app or close this page.</div>`
     );
   }
 
@@ -557,31 +553,31 @@ approve.addEventListener('click',async()=>{
     'Authorize AI Payment',
     `<div class="brand-bar">
        <div class="brand">
-         <div class="brand-icon-wrap"><img src="/brand/uprail-icon.png" alt="UPRAIL"></div>
+         <img src="/brand/uprail-icon.png" alt="UPRAIL">
          <span class="brand-name">UPRAIL</span>
        </div>
-       <div class="protocol-badge"><span class="pulse-dot"></span><span>NEAR INTENTS</span></div>
+       <span class="badge">NEAR INTENTS</span>
      </div>
      
      <div class="agent-tag">🤖 ${escapeHtml(payload.agentName || 'AI Agent')}</div>
      <h1>Authorize ${isMultiple ? `${recipientCount} Payments` : 'Payment'}</h1>
-     <p>${escapeHtml(payload.agentName || 'AI Agent')} requested a confidential payment that exceeds your guardrail limit.</p>
+     <p class="desc">${escapeHtml(payload.agentName || 'AI Agent')} requested a confidential payment exceeding your guardrail.</p>
      
      <div class="summary-box">
        <div>
-         <span style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;font-family:var(--font-mono)">Total Payment</span>
+         <span style="display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;font-family:var(--font-mono);margin-bottom:2px">Total Payment</span>
          <div class="summary-amount">${escapeHtml(payload.totalAmount)} ${escapeHtml(payload.asset)}</div>
        </div>
        <div class="summary-usd">~$${escapeHtml(payload.totalUsd.toFixed(2))} USD</div>
      </div>
 
      <div class="notice">
-       ⚠️ This payment exceeds your ${payload.exceededReason === 'daily_limit' ? 'daily limit' : 'per-payment limit'}${typeof payload.limitUsd === 'number' ? ` ($${payload.limitUsd.toFixed(2)})` : ''}. Confirming with your Passkey will authorize and execute the transfer immediately.
+       Payment exceeds your ${payload.exceededReason === 'daily_limit' ? 'daily limit' : 'per-payment limit'}${typeof payload.limitUsd === 'number' ? ` ($${payload.limitUsd.toFixed(2)})` : ''}. Confirming with Passkey will execute the transfer immediately.
      </div>
 
-     <label style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-family:var(--font-mono);font-weight:700;margin-bottom:6px">Recipient${isMultiple ? 's' : ''}</label>
+     <div class="recipients-label">Recipient${isMultiple ? 's' : ''}</div>
      <div class="recipients">${recipientsHtml}</div>
-     ${payload.memo ? `<p style="font-size:13px;color:#a8a29e;margin:12px 0"><strong>Memo:</strong> ${escapeHtml(payload.memo)}</p>` : ''}
+     ${payload.memo ? `<div class="memo-box"><strong>Memo:</strong> ${escapeHtml(payload.memo)}</div>` : ''}
 
      <div class="error" id="error"></div>
 
@@ -590,15 +586,13 @@ approve.addEventListener('click',async()=>{
        <input type="hidden" name="passkeyAssertion" id="passkeyAssertion" value="">
        <div class="actions">
          <button class="approve" id="approve" type="button">
-           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 0 0-10 10c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
-           <span>${recentPasskey ? 'Approve & Send' : 'Confirm with Passkey (Touch / Face ID)'}</span>
+           ${recentPasskey ? 'Approve & Send' : 'Confirm with Passkey'}
          </button>
          <button class="deny" type="submit" formaction="/approve/deny" formnovalidate>Reject</button>
        </div>
      </form>
      <div class="foot">
-       <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-       <span>Authorized using WebAuthn Passkeys · Funds transferred from UPRAIL vault</span>
+       Authorized using WebAuthn passkeys · Sent from UPRAIL vault
      </div>
      <script>${script}</script>`
   );
@@ -777,10 +771,19 @@ approvalRouter.post('/approve/deny', async (c) => {
 
   return page(
     'Payment Request Denied',
-    `<div class="brand"><span class="dot"></span>UPRAIL</div>
-     <h1>Payment Denied</h1>
-     <p>You rejected this payment request. No funds left your account.</p>
-     <p class="foot">Return to your AI app or close this page.</p>`
+    `<div class="brand-bar">
+       <div class="brand">
+         <img src="/brand/uprail-icon.png" alt="UPRAIL">
+         <span class="brand-name">UPRAIL</span>
+       </div>
+       <span class="badge">DENIED</span>
+     </div>
+     <h1>Payment Rejected</h1>
+     <p class="desc">You rejected this payment request. No funds left your account.</p>
+     <div class="actions">
+       <a href="https://app.uprail.world" class="btn approve" style="width:100%">Return to App</a>
+     </div>
+     <div class="foot">Return to your AI app or close this page.</div>`
   );
 });
 
@@ -823,8 +826,8 @@ function renderSuccessScreen(payload: ApprovalPayload, payments: any[]): Respons
       return `
       <div class="link-item">
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <strong style="color:var(--text);font-size:14px">@${escapeHtml(handle)}</strong>
-          <span style="color:#86efac;font-weight:700;font-size:13px">${escapeHtml(p.amount)} ${escapeHtml(p.asset)}</span>
+          <strong style="color:var(--fg);font-size:13.5px">@${escapeHtml(handle)}</strong>
+          <span style="color:#059669;font-weight:700;font-size:13px;font-family:var(--font-mono)">${escapeHtml(p.amount)} ${escapeHtml(p.asset)}</span>
         </div>
         <div class="link-url">${escapeHtml(shareUrl)}</div>
         <div class="link-actions">
@@ -839,21 +842,20 @@ function renderSuccessScreen(payload: ApprovalPayload, payments: any[]): Respons
     'Payment Authorized & Sent',
     `<div class="brand-bar">
        <div class="brand">
-         <div class="brand-icon-wrap"><img src="/brand/uprail-icon.png" alt="UPRAIL"></div>
+         <img src="/brand/uprail-icon.png" alt="UPRAIL">
          <span class="brand-name">UPRAIL</span>
        </div>
-       <div class="protocol-badge"><span class="pulse-dot"></span><span>CONFIRMED</span></div>
+       <span class="badge">CONFIRMED</span>
      </div>
      <div class="success-card">
-       <strong style="display:block;font-size:15px;margin-bottom:4px;font-family:var(--font-display)">✓ Payment Authorized & Settled</strong>
-       <span style="font-size:12.5px;opacity:.9">Your passkey signed the transfer. Funds have left your vault.</span>
+       <strong>Payment Authorized & Settled</strong>
+       <span>Your passkey signed the transfer. Funds have left your vault.</span>
      </div>
      <h1>Share Claim Links</h1>
-     <p>Share these links with each recipient on X so they can claim or view the confidential receipt:</p>
+     <p class="desc">Share these links with each recipient on X to view the confidential receipt:</p>
      <div class="links-list">${linksHtml}</div>
      <div class="foot">
-       <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
-       <span>Your AI agent can also read these confirmed links via UPRAIL MCP.</span>
+       Your AI agent can also read these confirmed links via UPRAIL MCP.
      </div>`
   );
 }
