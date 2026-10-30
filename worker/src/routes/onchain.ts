@@ -376,11 +376,12 @@ onchainRouter.get('/deposit-status', requireAuth({ passkeyVerified: true }), asy
 
   try {
     const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
-    if (contract && nearAccount && address.toLowerCase() === nearAccount.toLowerCase()) {
+    const effectiveContract = contract || (tokenSymbol?.toUpperCase() === 'NEAR' ? 'wrap.near' : '');
+    if (effectiveContract && nearAccount && address.toLowerCase() === nearAccount.toLowerCase()) {
       const native = await nearRpc.probeNativeFtDeposit(
         c.env,
         nearAccount,
-        contract,
+        effectiveContract,
         tokenSymbol
       );
       if (native) return c.json(native as any);

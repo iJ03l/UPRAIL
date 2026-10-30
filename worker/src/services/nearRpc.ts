@@ -2620,9 +2620,11 @@ export async function getDepositAddress(
     } catch {}
   }
 
-  // Never fall back to a public vault ingress when the confidential rail is
-  // on; the caller must surface the quote failure instead.
-  if (confidential) return null;
+  // Never fall back to an unshielded address on foreign chains when the confidential rail
+  // is on; fail closed so cross-chain privacy is strictly preserved.
+  // For NEAR-native and launchpad meme assets that 1Click cannot quote, permit direct ingress
+  // to the user's dedicated NEAR vault (u_<hex>.escrow.uprail.near).
+  if (confidential && cfg.chain !== 'near') return null;
 
   // 4. Clean fallback for native NEAR
   if (cfg.chain === 'near' && cfg.token === 'NEAR') {
@@ -2692,11 +2694,35 @@ export async function probeNativeFtDeposit(
     }
   } catch {}
 
+  const isNearNative = cleanContract === 'wrap.near' || symbol === 'NEAR';
+  if (isNearNative) {
+    decimals = 24;
+    symbol = 'NEAR';
+  }
+
   let raw = 0n;
   try {
     raw = await getPlainFtBalance(rpcUrl, cleanContract, nearAccount);
   } catch (err) {
     console.warn('[nearRpc] probeNativeFtDeposit balance check failed:', err);
+  }
+
+  if (isNearNative && raw === 0n) {
+    try {
+      const plainNear = await getPlainNearBalanceStrict(rpcUrl, nearAccount);
+      if (plainNear !== null) {
+        // Vault accounts hold ~0.01 NEAR for account storage + gas.
+        // If native balance exceeds 0.01 NEAR, count the net deposited native NEAR.
+        const seedReserve = 10000000000000000000000n; // 0.01 NEAR
+        if (plainNear > seedReserve) {
+          raw = plainNear - seedReserve;
+        } else if (plainNear > 5000000000000000000000n) {
+          raw = plainNear - 5000000000000000000000n;
+        }
+      }
+    } catch (err) {
+      console.warn('[nearRpc] probeNativeFtDeposit plain near check failed:', err);
+    }
   }
 
   const amountFormatted = formatAmount(raw.toString(), decimals);
@@ -3421,11 +3447,8 @@ export async function registerKeyOnIntents(
     w.writeU32(args.length);
     w.writeBytes(args);
     // 40 TGas: ample for the key-mapping write with headroom for gas-price
-    // drift. The gas is escrow-sponsored (see ensureRegistrationGas) — the
-    // registration is a platform integration cost, so it is not charged to the
-    // user's own balance. Without that grant NEAR rejected this pre-flight
-    // (NotEnoughBalance): the sub-account is seeded with exactly 0.05 NEAR and
-    // 50 TGas costs ~0.0509 NEAR.
+    // drift (actual execution burns ~0.0003 NEAR; 40 TGas limit requires 0.004 NEAR).
+    // The gas is escrow-sponsored (see ensureRegistrationGas).
     w.writeU64(40000000000000n); // 40 TGas
     w.writeU128(1n); // 1 yoctoNEAR
 
@@ -3561,7 +3584,7 @@ export async function createOnchainSubAccount(
     // 3. Public key for new sub-account
     const newPubKey = userPubKey || ed25519.getPublicKey(crypto.getRandomValues(new Uint8Array(32)));
 
-    // 4. Encode NEAR transaction (actions: CreateAccount, Transfer 0.05 NEAR for storage/gas, AddKey FullAccess)
+    // 4. Encode NEAR transaction (actions: CreateAccount, Transfer 0.01 NEAR for storage/gas, AddKey FullAccess)
     const w = new BorshWriter();
     w.writeString(escrowId);
     w.writePublicKey(escrowPubKey);
@@ -3572,7 +3595,7 @@ export async function createOnchainSubAccount(
     w.writeU32(3); // 3 actions
     w.writeU8(0);  // action 0: CreateAccount
     w.writeU8(3);  // action 1: Transfer
-    w.writeU128(50000000000000000000000n); // 0.05 NEAR for storage and gas
+    w.writeU128(10000000000000000000000n); // 0.01 NEAR (ample for 0.00264 NEAR storage + 0.004 NEAR gas limit + 50% buffer)
     w.writeU8(5);  // action 2: AddKey
     w.writePublicKey(newPubKey);
     w.writeU64(0n); // nonce = 0
@@ -5191,7 +5214,7 @@ export async function depositPlainBalanceToIntents(
       if (plainNear === null) {
         return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
       }
-      const gasReserve = 30000000000000000000000n; // 0.03 NEAR
+      const gasReserve = 10000000000000000000000n; // 0.01 NEAR
       if (plainNear >= BigInt(baseUnits) + gasReserve) {
         const wrap = await signAndBroadcastFunctionCall({
           ...senderKey,
@@ -5304,9 +5327,9 @@ function escrowSigningKey(
 }
 
 // Gas the user's own account must hold to broadcast its add_public_key tx.
-// 40 TGas costs ~0.041 NEAR at ~1.0e9 yocto/Gas; 0.06 NEAR leaves headroom for
-// gas-price drift.
-const INTENTS_KEY_REGISTRATION_GAS = 60000000000000000000000n; // 0.06 NEAR
+// 40 TGas costs 0.004 NEAR at 10^8 yocto/Gas on mainnet; 0.01 NEAR leaves ample headroom
+// for account storage (0.00264 NEAR) and gas with a 50% safety cushion.
+const INTENTS_KEY_REGISTRATION_GAS = 10000000000000000000000n; // 0.01 NEAR
 
 /**
  * Guarantees the user's own account can pay for its `intents.near.add_public_key`
