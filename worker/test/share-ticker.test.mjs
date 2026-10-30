@@ -29,6 +29,22 @@ describe('share card ticker resolution', () => {
         await resolveShareTicker(env, 'nep141:uptober.nearlytrade.near'),
         'UPTOBER'
       );
+      assert.equal(
+        await resolveShareTicker(env, 'nep141:raen-e1328c.launchpad.justhoot.near'),
+        'RAEN'
+      );
+      assert.equal(
+        await resolveShareTicker(env, 'RAEN-E1328C'),
+        'RAEN'
+      );
+      assert.equal(
+        await resolveShareTicker(env, 'nep141:abg-966.meme-cooking.near'),
+        'ABG'
+      );
+      assert.equal(
+        await resolveShareTicker(env, 'nep141:uptober-2.nearlytrade.near'),
+        'UPTOBER'
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

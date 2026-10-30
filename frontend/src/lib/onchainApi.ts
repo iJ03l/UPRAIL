@@ -109,6 +109,7 @@ export interface OnchainTx {
   block_height: number;
   block_timestamp: number;
   status: 'success' | 'pending' | 'failed';
+  symbol?: string;
 }
 
 export interface OnchainHistoryResponse {

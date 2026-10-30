@@ -15,7 +15,7 @@ import {
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
-import { formatRecipientDisplay, formatTokenAmount, formatUsd } from '../lib/api';
+import { cleanMemeSymbol, formatRecipientDisplay, formatTokenAmount, formatUsd } from '../lib/api';
 import { ShareModal } from '../components/ShareModal';
 import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
@@ -30,6 +30,7 @@ export const HistoryPage: React.FC = () => {
   const {
     transactions,
     tokens,
+    balances,
     isLoadingHistory: isLoadingOnchain,
     refreshHistory: loadOnchainHistory,
   } = useOnchainData();
@@ -124,24 +125,26 @@ export const HistoryPage: React.FC = () => {
           (!!t.nearContractId &&
             txAssetLower.endsWith(`:${t.nearContractId.toLowerCase()}`))
       );
+      const balanceToken = balances.find(
+        (b) =>
+          b.defuse_asset_id?.toLowerCase() === txAssetLower ||
+          (b.nearContractId &&
+            txAssetLower.endsWith(`:${b.nearContractId.toLowerCase()}`))
+      );
       const rawAssetId = txAssetLower;
       const symbol =
-        assetToken?.symbol ||
+        (tx.symbol ? cleanMemeSymbol(tx.symbol) : '') ||
+        (assetToken?.symbol ? cleanMemeSymbol(assetToken.symbol) : '') ||
+        (balanceToken?.symbol ? cleanMemeSymbol(balanceToken.symbol) : '') ||
         (rawAssetId.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')
           ? 'USDC'
           : rawAssetId.includes('wrap.near')
           ? 'NEAR'
           : rawAssetId.includes('usdc')
           ? 'USDC'
-          : // Registry miss: derive the symbol from the NEP-141 contract id
-            // ("nep141:uptober.nearlytrade.near" -> "UPTOBER"). Dumping the raw
-            // id is unreadable, and defaulting to NEAR mislabels every meme the
-            // registry does not carry.
-            (rawAssetId.startsWith('nep141:')
-              ? rawAssetId.split(':').pop()!.split('.')[0]!.toUpperCase()
-              : txAssetId.toUpperCase()) || '—');
+          : cleanMemeSymbol(rawAssetId) || '—');
       const amt = tx.amount_in || tx.amount_out || '0';
-      const price = assetToken?.priceUsd;
+      const price = assetToken?.priceUsd || balanceToken?.priceUsd;
       const amountUsd = price ? (parseFloat(amt) || 0) * price : null;
 
       const shortId = tx.id ? `${tx.id.slice(0, 8)}...${tx.id.slice(-6)}` : '';
@@ -174,7 +177,7 @@ export const HistoryPage: React.FC = () => {
 
     list.sort((a, b) => b.timestamp - a.timestamp);
     return list;
-  }, [history, transactions, user?.handle, tokens]);
+  }, [history, transactions, user?.handle, tokens, balances]);
 
   const filteredHistory = useMemo(() => {
     return unifiedHistory.filter((item) => {

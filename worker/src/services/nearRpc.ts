@@ -13,6 +13,7 @@ import { getOnchainIcon } from './onchainIcons';
 import { getAssetMeta } from './assetMeta';
 import { generate1ClickSwapIntent } from './oneclickWithdraw';
 import { requestQuote } from './oneclickClient';
+import { cleanMemeSymbol } from '../utils/token';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -516,6 +517,7 @@ export interface IntentTx {
   block_height: number;
   block_timestamp: number;
   status: 'success' | 'pending' | 'failed';
+  symbol?: string;
 }
 
 
@@ -2681,18 +2683,21 @@ export async function probeNativeFtDeposit(
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
 
   let decimals = 18;
-  let symbol = (tokenSymbol || '').toUpperCase();
+  let symbol = cleanMemeSymbol(tokenSymbol || '');
   let icon: string | undefined;
   let defuseAssetId = `nep141:${cleanContract}`;
   try {
     const meta = await getHeldTokenMeta(env, cleanContract);
     if (meta) {
       decimals = meta.decimals;
-      symbol = symbol || meta.symbol.toUpperCase();
+      symbol = cleanMemeSymbol(meta.symbol || meta.name || symbol);
       icon = meta.icon || undefined;
       defuseAssetId = `nep141:${meta.contractId}`;
     }
   } catch {}
+  if (!symbol) {
+    symbol = cleanMemeSymbol(cleanContract);
+  }
 
   const isNearNative = cleanContract === 'wrap.near' || symbol === 'NEAR';
   if (isNearNative) {
@@ -3152,6 +3157,7 @@ export async function getIntentHistory(
               : tx.status === 'FAILED' || tx.status === 'failed'
                 ? 'failed'
                 : 'pending',
+          symbol: cleanMemeSymbol(tx.symbol || tx.asset_in || tx.defuse_asset_id_in || tx.asset_out || tx.defuse_asset_id_out || ''),
         }))
         .filter((tx: any) => !!tx.id) as IntentTx[];
     }
@@ -4555,6 +4561,8 @@ export async function recordPlainFtDepositEvents(
       intent_type: 'deposit',
       defuse_asset_id_in: `nep141:${h.contractId}`,
       amount_in: formatAmount(delta, meta.decimals),
+      amount_source: 'human',
+      symbol: cleanMemeSymbol(meta.symbol || meta.name || h.contractId),
       receiver_id: nearAccount,
       block_height: height,
       block_timestamp: now,

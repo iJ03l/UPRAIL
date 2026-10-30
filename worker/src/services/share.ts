@@ -1,20 +1,8 @@
 import type { AppContext } from '../types';
 import * as nearRpc from './nearRpc';
+import { cleanMemeSymbol, NATIVE_NEAR_ALIASES } from '../utils/token';
 
-/**
- * Every representation of native NEAR that can reach a stored payment. NEAR is
- * wrapped for settlement (`nep141:wrap.near`) but must never render as
- * "WRAP" — and `native:near` must not fall through to the generic `.near`
- * suffix match, which could pick an unrelated NEP-141 token.
- */
-const NATIVE_NEAR_ALIASES = new Set([
-  'near',
-  'wnear',
-  'wrap.near',
-  'native:near',
-  'nep141:near',
-  'nep141:wrap.near',
-]);
+export { cleanMemeSymbol };
 
 /** Resolves a stored asset id to a plain-English ticker (never `nep141:…`). */
 export async function resolveShareTicker(
@@ -28,23 +16,21 @@ export async function resolveShareTicker(
     const tokens = await nearRpc.getSupportedTokens(env);
     ticker = nearRpc.resolveTokenForAsset(asset, tokens)?.symbol || '';
   } catch {}
-  // Launchpad tokens (e.g. `uptober.nearlytrade.near`) live outside the curated
-  // registry head, so the lookup above misses them and the title used to fall
-  // back to the literal `'crypto'`. Resolve them from the full Rhea list.
+  // Launchpad tokens (e.g. `uptober.nearlytrade.near`, `raen-e1328c.launchpad.justhoot.near`)
+  // live outside the curated registry head, so the lookup above misses them and the title
+  // used to fall back to the literal `'crypto'`. Resolve them from the full Rhea list / RPC metadata.
   if (!ticker) {
     try {
       ticker = (await nearRpc.resolveRheaToken(env, asset))?.symbol || '';
     } catch {}
   }
-  if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset.toUpperCase();
+  if (!ticker && /^[a-z0-9]{2,14}$/i.test(asset)) ticker = asset;
   // Last resort: derive the ticker from the NEP-141 contract label
-  // ("nep141:uptober.nearlytrade.near" -> "UPTOBER"). A hex contract address is
-  // 64 chars and fails the length guard, so it is never shown as a ticker.
+  // ("nep141:uptober.nearlytrade.near" -> "UPTOBER", "nep141:raen-e1328c.launchpad.justhoot.near" -> "RAEN").
   if (!ticker && asset.startsWith('nep141:')) {
-    const label = (asset.slice(7).split('.')[0] || '').trim();
-    if (/^[a-z0-9_-]{1,14}$/i.test(label)) ticker = label.toUpperCase();
+    ticker = asset.slice(7);
   }
-  return ticker;
+  return cleanMemeSymbol(ticker || asset);
 }
 
 /** Token amounts in shared cards/links get two decimals; sub-cent stays visible. */

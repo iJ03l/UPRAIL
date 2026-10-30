@@ -20,6 +20,7 @@ import * as nearRpc from '../services/nearRpc';
 import { isConfidentialRailEnabled, getConfidentialBalances } from '../services/confidentialRail';
 import { getUserSession } from '../services/oneclickAuth';
 import { publicErrorMessage } from '../utils/errors';
+import { cleanMemeSymbol } from '../utils/token';
 
 export const onchainRouter = new Hono<AppContext>();
 
@@ -653,6 +654,7 @@ onchainRouter.get('/history', requireAuth({ passkeyVerified: true }), async (c) 
                 amount_in: depAmt,
                 // Human-readable: taken from the API's *Formatted field.
                 amount_source: 'human',
+                symbol: cleanMemeSymbol(originAsset),
                 sender_id: dep.address,
                 receiver_id: nearAccount,
                 block_height: 0,
@@ -696,6 +698,7 @@ onchainRouter.get('/history', requireAuth({ passkeyVerified: true }), async (c) 
               amount_in: w.amount,
               // Human-readable: straight from this worker's own D1 row.
               amount_source: 'human',
+              symbol: cleanMemeSymbol(w.asset),
               sender_id: nearAccount,
               receiver_id: w.destination_address,
               block_height: 0,
@@ -711,6 +714,18 @@ onchainRouter.get('/history', requireAuth({ passkeyVerified: true }), async (c) 
         // never swallow it either — a silent drop here looks like the user
         // simply has no local deposit/withdraw history.
         console.warn('[onchain/history] local history enrichment failed:', enrichErr);
+      }
+    }
+
+    // Ensure all transactions report a clean token name/symbol (e.g. "RAEN" instead of "RAEN-E1328C")
+    for (const tx of transactions as any[]) {
+      if (tx.symbol) {
+        tx.symbol = cleanMemeSymbol(tx.symbol);
+      } else {
+        const asset = tx.defuse_asset_id_in || tx.defuse_asset_id_out;
+        if (asset) {
+          tx.symbol = cleanMemeSymbol(asset);
+        }
       }
     }
 

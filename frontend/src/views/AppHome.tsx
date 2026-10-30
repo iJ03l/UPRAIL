@@ -21,6 +21,7 @@ import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData, balanceUsd } from '../hooks/useOnchainData';
 import {
   api,
+  cleanMemeSymbol,
   formatCompactAmount,
   formatTokenAmount,
   formatRecipientDisplay,
@@ -211,22 +212,24 @@ export const AppHome: React.FC = () => {
           (!!t.nearContractId &&
             txAssetLower.endsWith(`:${t.nearContractId.toLowerCase()}`))
       );
+      const balanceToken = balances.find(
+        (b) =>
+          b.defuse_asset_id?.toLowerCase() === txAssetLower ||
+          (b.nearContractId &&
+            txAssetLower.endsWith(`:${b.nearContractId.toLowerCase()}`))
+      );
       const rawAssetId = txAssetLower;
       const symbol =
-        assetToken?.symbol ||
+        (tx.symbol ? cleanMemeSymbol(tx.symbol) : '') ||
+        (assetToken?.symbol ? cleanMemeSymbol(assetToken.symbol) : '') ||
+        (balanceToken?.symbol ? cleanMemeSymbol(balanceToken.symbol) : '') ||
         (rawAssetId.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')
           ? 'USDC'
           : rawAssetId.includes('wrap.near')
           ? 'NEAR'
           : rawAssetId.includes('usdc')
           ? 'USDC'
-          : // Registry miss: derive the symbol from the NEP-141 contract id
-            // ("nep141:uptober.nearlytrade.near" -> "UPTOBER"). Dumping the raw
-            // id is unreadable, and defaulting to NEAR mislabels every meme the
-            // registry does not carry.
-            (rawAssetId.startsWith('nep141:')
-              ? rawAssetId.split(':').pop()!.split('.')[0]!.toUpperCase()
-              : txAssetId.toUpperCase()) || '—');
+          : cleanMemeSymbol(rawAssetId) || '—');
       const amt = tx.amount_in || tx.amount_out || '0';
 
       const shortId = tx.id ? `${tx.id.slice(0, 6)}...${tx.id.slice(-4)}` : '';
@@ -256,7 +259,7 @@ export const AppHome: React.FC = () => {
 
     list.sort((a, b) => b.timestamp - a.timestamp);
     return list;
-  }, [history, transactions, user?.handle, tokens]);
+  }, [history, transactions, user?.handle, tokens, balances]);
 
   return (
     <div className="w-full">
