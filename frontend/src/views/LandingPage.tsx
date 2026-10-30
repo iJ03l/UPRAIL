@@ -210,7 +210,7 @@ export const LandingPage: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {['Nearly', 'JustHoot'].map((tag) => (
+                  {['Nearly', 'JustHoot', 'Intear'].map((tag) => (
                     <span
                       key={tag}
                       className="px-2.5 py-1 rounded-lg bg-white border border-stone-200 text-[11px] font-mono text-stone-700"

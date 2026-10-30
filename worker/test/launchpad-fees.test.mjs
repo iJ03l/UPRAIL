@@ -141,6 +141,7 @@ describe('automatic RPC balance-delta helpers', () => {
     assert.equal(inferLaunchpadFromContract('uptober.nearlytrade.near'), 'nearly');
     assert.equal(inferLaunchpadFromContract('owl.launchpad.justhoot.near'), 'justhoot');
     assert.equal(inferLaunchpadFromContract('cat.meme-cooking.near'), 'meme-cooking');
+    assert.equal(inferLaunchpadFromContract('tear.launch.intear.near'), 'intear');
     assert.equal(inferLaunchpadFromContract('custom.token.near'), 'direct');
   });
 

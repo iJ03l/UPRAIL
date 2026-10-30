@@ -79,7 +79,7 @@ UPRAIL includes a full **OAuth 2.1 Authorization Server** and **Streamable HTTP 
 - **Fail-Closed Spend Policy:** Prices tokens in USD via a live oracle, reserves daily spend atomically before signing, and enforces idempotency locks so retried agent tool calls cannot double-pay.
 
 ### 7. Launchpad Creator-Fee Routing
-Launchpads keep their own fee receiver. When a payout should reach an X handle, their adapter sends the transfer to escrow with the target handle memo, and UPRAIL automatically verifies the onchain receipt and credits the creator's vault.
+Launchpads and DEX pools (Nearly, JustHoot v2, and Intear Launchpad on `launch.intear.near` / `dex.intear.near`) keep their own fee receiver. When a payout should reach an X handle, their adapter or keeper sends the transfer to escrow with the target handle memo (`Fees to @handle via UPRAIL`), and UPRAIL automatically verifies the onchain receipt and credits the creator's vault.
 
 ---
 
@@ -261,7 +261,7 @@ flowchart TD
 - **Zero-Gas User Experience:** Protocol relayer sponsors sub-account creation, NEP-145 token storage registration, and `intents.near::execute_intents` gas.
 - **Cross-Chain Withdrawals (35+ Chains):** Withdraw from UPRAIL directly to external wallets on NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and more.
 - **AI Chat Payments (OAuth 2.1 + Remote MCP):** Streamable HTTP MCP server (`/api/mcp`) and OpenAPI 3.1.0 spec (`/api/agent/openapi.json`) with Passkey-approved per-tx and daily USD caps, live oracle valuation, and idempotency keys.
-- **Launchpad Creator-Fee Routing:** Payout adapter (`POST /api/fees/adapter`). Launchpads keep their fee receiver and direct creator fees to an X handle onchain.
+- **Launchpad Creator-Fee Routing:** Payout adapter (`POST /api/fees/adapter`) supporting Nearly, JustHoot v2, and Intear Launchpad (`launch.intear.near` / `dex.intear.near`). Launchpads keep their fee receiver and direct creator fees to an X handle onchain.
 - **Dynamic Edge OpenGraph Cards:** Generates custom `1200x630` PNG social preview cards at the edge for claim links, receipts, and creator fees.
 
 ---

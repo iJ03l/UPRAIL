@@ -214,8 +214,8 @@ POST /api/fees/adapter
       <section id="launchpads" className="space-y-3">
         <h2 className="text-xl font-display font-extrabold text-stone-950">Supported launchpads</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Nearly and JustHoot keep their own fee receiver. Their keeper uses the adapter above
-          only for the payout that should reach an X handle.
+          Nearly, JustHoot, and Intear keep their own fee receiver or DEX liquidity pools. Their keeper,
+          distributor, or forwarder uses the adapter above only for the payout that should reach an X handle.
         </p>
         <div className="rounded-2xl border border-stone-200 px-4 py-1">
           <Field name="Nearly" type="keeper">
@@ -228,6 +228,18 @@ POST /api/fees/adapter
             Their distributor already pays the dev in wNEAR. The adapter is that same{' '}
             <code className="font-mono">ft_transfer</code> with the UPRAIL memo instead of the dev
             account. <code className="font-mono">dev_id</code> stays unchanged.
+          </Field>
+          <Field name="Intear Launchpad" type="dex keeper / forwarder">
+            Tokens launched under <code className="font-mono">*.launch.intear.near</code> trade on
+            Intear DEX (<code className="font-mono">dex.intear.near</code>) using the Plach XYK engine.
+            Trading fees accrue in the internal DEX ledger for{' '}
+            <code className="font-mono">FeeReceiver::Account</code>. When claiming fees with{' '}
+            <code className="font-mono">withdraw_fees</code>, forward the collected wNEAR or token
+            via <code className="font-mono">ft_transfer</code> to{' '}
+            <code className="font-mono">escrow.uprail.near</code> with the memo{' '}
+            <code className="font-mono">Fees to @handle via UPRAIL</code>. Creator X handles are
+            stored directly on-chain and verified via{' '}
+            <code className="font-mono">launch.intear.near.get_launch_data</code>.
           </Field>
         </div>
       </section>

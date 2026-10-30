@@ -196,6 +196,7 @@ export function inferLaunchpadFromContract(contractId: string): string {
   if (c.includes('nearlytrade') || c.includes('nearlypad') || c.includes('nearly')) return 'nearly';
   if (c.includes('justhoot')) return 'justhoot';
   if (c.includes('meme-cooking') || c.includes('cookinglabs')) return 'meme-cooking';
+  if (c.includes('launch.intear.near') || c.includes('intear')) return 'intear';
   return 'direct';
 }
 
