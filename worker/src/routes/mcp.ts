@@ -49,7 +49,7 @@ const TOOLS = [
   {
     name: 'pay_handle',
     description:
-      'Send a confidential payment to one or more X (Twitter) handles on UPRAIL. If the payment completes, ALWAYS display the returned claimLink / shareLink and xShareUrl so the user can share it on X/Twitter. If the payment requires passkey approval (status: REQUIRES_PASSKEY_APPROVAL), you MUST display the clickable markdown link [Confirm & Authorize with Passkey](approvalUrl) so the user can tap to approve with Touch ID / Face ID.',
+      'Send a confidential payment to one or more X (Twitter) handles on UPRAIL. If the payment completes, ALWAYS display the returned claimLink / shareLink and xShareUrl so the user can share it on X/Twitter. If the payment requires passkey approval (status: REQUIRES_PASSKEY_APPROVAL), you MUST display the clickable markdown link [Confirm & Authorize with Passkey](approvalUrl) so the user can tap to approve with Touch ID / Face ID. IMPORTANT: Never retry with a modified idempotencyKey if a call fails or times out; if retryable is false or the outcome is uncertain, call list_payments first to verify whether the payment already went through.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -81,7 +81,7 @@ const TOOLS = [
         idempotencyKey: {
           type: 'string',
           description:
-            'Optional unique key. Retrying with the same key never sends a second payment.',
+            'Optional unique key. Retrying with the same key never sends a second payment. Never invent a new key when retrying the same user request.',
         },
       },
       required: ['asset', 'amount'],
@@ -105,7 +105,7 @@ const TOOLS = [
   {
     name: 'withdraw_to_wallet',
     description:
-      'Withdraw funds from your confidential UPRAIL vault to an external wallet address. Subject to the key’s per-payment and daily USD spend caps. Requires an explicit amount; “all” is not accepted.',
+      'Withdraw funds from your confidential UPRAIL vault to an external wallet address. Subject to the key’s per-payment and daily USD spend caps. Requires an explicit amount; “all” is not accepted. Never retry with a modified idempotencyKey if a call fails or times out.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -128,7 +128,7 @@ const TOOLS = [
         idempotencyKey: {
           type: 'string',
           description:
-            'Optional unique key. Retrying with the same key never sends a second withdrawal.',
+            'Optional unique key. Retrying with the same key never sends a second withdrawal. Never invent a new key when retrying the same user request.',
         },
       },
       required: ['destinationAddress', 'asset', 'amount'],

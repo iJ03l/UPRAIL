@@ -36,6 +36,10 @@ import {
 } from '../services/agentKeys';
 import { getAuthorizationServer } from '../oauth/authorization';
 import {
+  AGENT_FINGERPRINT_UNKNOWN_WINDOW_MS,
+  AGENT_FINGERPRINT_WINDOW_MS,
+  buildAgentPayFingerprint,
+  buildAgentWithdrawFingerprint,
   claimAgentRequest,
   completeAgentRequest,
   failAgentRequest,
@@ -194,24 +198,50 @@ export async function executeAgentPay(
     );
   }
   const idempotencyKey = idempotency.key;
+  const allowDuplicate = rawBody?.allowDuplicate === true;
+  const fingerprintKey = allowDuplicate
+    ? null
+    : await buildAgentPayFingerprint(recipients, asset);
+
+  const buildReplayResponse = (paymentId: string | null, isFingerprint: boolean) => {
+    const appOrigin = resolveOrigin(c.env);
+    const shareLink = paymentId ? `${appOrigin}/claim/${paymentId}` : null;
+    return c.json(
+      {
+        error: isFingerprint
+          ? 'An identical payment to this recipient for the same amount already completed moments ago. Do NOT retry.'
+          : 'This idempotency key already completed a payment.',
+        code: 'AGENT_REQUEST_ALREADY_COMPLETED',
+        alreadyCompleted: true,
+        retryable: false,
+        paymentId,
+        ...(shareLink
+          ? {
+              shareLink,
+              claimLink: shareLink,
+              shareLinks: [shareLink],
+              message: `No second payment was sent because this transfer already went through (paymentId: ${paymentId}). Share link: ${shareLink}`,
+            }
+          : {
+              message:
+                'No second payment was sent because this transfer already went through. Do NOT retry.',
+            }),
+      },
+      409
+    );
+  };
 
   if (idempotencyKey) {
     const claim = await claimAgentRequest(c.env, agent.key_id, idempotencyKey);
     if (claim.state === 'replay') {
-      return c.json(
-        {
-          error: 'This idempotency key already completed a payment.',
-          code: 'AGENT_REQUEST_ALREADY_COMPLETED',
-          paymentId: claim.paymentId,
-        },
-        409
-      );
+      return buildReplayResponse(claim.paymentId, false);
     }
     if (claim.state === 'in_progress') {
       return c.json(
         {
-          error: 'A payment with this idempotency key is already in progress.',
+          error: 'A payment with this idempotency key is already in progress. Do NOT retry.',
           code: 'AGENT_REQUEST_IN_PROGRESS',
+          retryable: false,
         },
         409
       );
@@ -220,8 +250,9 @@ export async function executeAgentPay(
       return c.json(
         {
           error:
-            'A previous payment with this idempotency key has an unknown outcome. Check your payment history before retrying.',
+            'A previous payment with this idempotency key has an unknown outcome. Check list_payments before retrying.',
           code: 'AGENT_REQUEST_UNKNOWN',
+          retryable: false,
         },
         409
       );
@@ -231,17 +262,73 @@ export async function executeAgentPay(
         {
           error: 'Could not safely record the idempotency key. Try again later.',
           code: 'AGENT_REQUEST_UNAVAILABLE',
+          retryable: true,
         },
         503
       );
     }
   }
 
+  if (fingerprintKey) {
+    const fpClaim = await claimAgentRequest(c.env, agent.key_id, fingerprintKey, {
+      windowMs: AGENT_FINGERPRINT_WINDOW_MS,
+      unknownWindowMs: AGENT_FINGERPRINT_UNKNOWN_WINDOW_MS,
+    });
+    if (fpClaim.state !== 'new') {
+      if (idempotencyKey) {
+        await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'FAILED');
+      }
+      if (fpClaim.state === 'replay') {
+        return buildReplayResponse(fpClaim.paymentId, true);
+      }
+      if (fpClaim.state === 'in_progress') {
+        return c.json(
+          {
+            error:
+              'An identical payment to this recipient for the same amount is already in progress. Do NOT retry.',
+            code: 'AGENT_REQUEST_IN_PROGRESS',
+            retryable: false,
+          },
+          409
+        );
+      }
+      if (fpClaim.state === 'unknown') {
+        return c.json(
+          {
+            error:
+              'A recent identical payment has an ambiguous outcome. Call list_payments to verify whether it already settled before retrying.',
+            code: 'AGENT_REQUEST_UNKNOWN',
+            retryable: false,
+          },
+          409
+        );
+      }
+      return c.json(
+        {
+          error: 'Could not safely record the payment lock. Try again later.',
+          code: 'AGENT_REQUEST_UNAVAILABLE',
+          retryable: true,
+        },
+        503
+      );
+    }
+  }
+
+  const markCompleted = async (paymentId: string) => {
+    if (idempotencyKey) {
+      await completeAgentRequest(c.env, agent.key_id, idempotencyKey, paymentId);
+    }
+    if (fingerprintKey) {
+      await completeAgentRequest(c.env, agent.key_id, fingerprintKey, paymentId);
+    }
+  };
   const markFailed = async () => {
     if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'FAILED');
+    if (fingerprintKey) await failAgentRequest(c.env, agent.key_id, fingerprintKey, 'FAILED');
   };
   const markUnknown = async () => {
     if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'UNKNOWN');
+    if (fingerprintKey) await failAgentRequest(c.env, agent.key_id, fingerprintKey, 'UNKNOWN');
   };
 
   // Evaluate total USD value and spend guardrails
@@ -367,8 +454,8 @@ export async function executeAgentPay(
       const code = typeof payload?.code === 'string' ? payload.code : undefined;
 
       if (singleRes.status === 201) {
-        if (idempotencyKey && payload?.paymentId) {
-          await completeAgentRequest(c.env, agent.key_id, idempotencyKey, payload.paymentId);
+        if (payload?.paymentId) {
+          await markCompleted(payload.paymentId);
         }
         if (payload && payload.shareLink) {
           payload.shareLinks = [payload.shareLink];
@@ -380,6 +467,17 @@ export async function executeAgentPay(
         await markFailed();
       } else {
         await markUnknown();
+        if (payload && typeof payload === 'object') {
+          return c.json(
+            {
+              ...payload,
+              retryable: false,
+              instruction:
+                'DO NOT RETRY pay_handle automatically. Settlement outcome is ambiguous or still processing — call list_payments first to verify whether the transfer already went through.',
+            },
+            singleRes.status as any
+          );
+        }
       }
       return singleRes;
     }
@@ -389,13 +487,27 @@ export async function executeAgentPay(
       const singleRes = await executeSingleSend(c, r.handle, asset, r.amount, memo, {});
       if (singleRes.status !== 201) {
         const errJson = (await singleRes.json().catch(() => ({}))) as any;
-        await auth.release();
-        await markFailed();
+        if (results.length === 0) {
+          await auth.release();
+          await markFailed();
+        } else {
+          // At least one recipient already settled onchain: never mark FAILED,
+          // otherwise an automatic retry of the batch would pay the completed
+          // recipients a second time.
+          await markUnknown();
+        }
         return c.json(
           {
             error: errJson.error || `Payment to @${r.handle} failed.`,
             code: 'BATCH_SEND_ERROR',
+            retryable: false,
+            completedRecipients: results.map((p) => `@${p.recipientHandle}`),
+            failedRecipient: `@${r.handle}`,
             partialResults: results,
+            instruction:
+              results.length > 0
+                ? `DO NOT RETRY this batch — ${results.length} recipient(s) were ALREADY paid (${results.map((p) => `@${p.recipientHandle}`).join(', ')}). Only @${r.handle} failed.`
+                : undefined,
           },
           singleRes.status as any
         );
@@ -414,8 +526,8 @@ export async function executeAgentPay(
       });
     }
 
-    if (idempotencyKey && results[0]?.paymentId) {
-      await completeAgentRequest(c.env, agent.key_id, idempotencyKey, results[0].paymentId);
+    if (results[0]?.paymentId) {
+      await markCompleted(results[0].paymentId);
     }
 
     return c.json(
@@ -550,6 +662,15 @@ export async function executeAgentWithdraw(
     );
   }
   const idempotencyKey = idempotency.key;
+  const allowDuplicate = rawBody?.allowDuplicate === true;
+  const fingerprintKey = allowDuplicate
+    ? null
+    : await buildAgentWithdrawFingerprint(
+        destinationAddress,
+        destinationChain,
+        asset,
+        amountStr
+      );
 
   if (idempotencyKey) {
     const claim = await claimAgentRequest(c.env, agent.key_id, idempotencyKey);
@@ -558,6 +679,8 @@ export async function executeAgentWithdraw(
         {
           error: 'This idempotency key already completed a withdrawal.',
           code: 'AGENT_REQUEST_ALREADY_COMPLETED',
+          alreadyCompleted: true,
+          retryable: false,
           withdrawalId: claim.paymentId,
         },
         409
@@ -566,8 +689,9 @@ export async function executeAgentWithdraw(
     if (claim.state === 'in_progress') {
       return c.json(
         {
-          error: 'A withdrawal with this idempotency key is already in progress.',
+          error: 'A withdrawal with this idempotency key is already in progress. Do NOT retry.',
           code: 'AGENT_REQUEST_IN_PROGRESS',
+          retryable: false,
         },
         409
       );
@@ -578,6 +702,7 @@ export async function executeAgentWithdraw(
           error:
             'A previous withdrawal with this idempotency key has an unknown outcome. Check your history before retrying.',
           code: 'AGENT_REQUEST_UNKNOWN',
+          retryable: false,
         },
         409
       );
@@ -587,17 +712,90 @@ export async function executeAgentWithdraw(
         {
           error: 'Could not safely record the idempotency key. Try again later.',
           code: 'AGENT_REQUEST_UNAVAILABLE',
+          retryable: true,
         },
         503
       );
     }
   }
 
+  if (fingerprintKey) {
+    const fpClaim = await claimAgentRequest(c.env, agent.key_id, fingerprintKey, {
+      windowMs: AGENT_FINGERPRINT_WINDOW_MS,
+      unknownWindowMs: AGENT_FINGERPRINT_UNKNOWN_WINDOW_MS,
+    });
+    if (fpClaim.state !== 'new') {
+      if (idempotencyKey) {
+        await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'FAILED');
+      }
+      if (fpClaim.state === 'replay') {
+        return c.json(
+          {
+            error:
+              'An identical withdrawal to this address for the same amount already completed moments ago. Do NOT retry.',
+            code: 'AGENT_REQUEST_ALREADY_COMPLETED',
+            alreadyCompleted: true,
+            retryable: false,
+            withdrawalId: fpClaim.paymentId,
+          },
+          409
+        );
+      }
+      if (fpClaim.state === 'in_progress') {
+        return c.json(
+          {
+            error: 'An identical withdrawal is already in progress. Do NOT retry.',
+            code: 'AGENT_REQUEST_IN_PROGRESS',
+            retryable: false,
+          },
+          409
+        );
+      }
+      if (fpClaim.state === 'unknown') {
+        return c.json(
+          {
+            error:
+              'A recent identical withdrawal has an ambiguous outcome. Check your history before retrying.',
+            code: 'AGENT_REQUEST_UNKNOWN',
+            retryable: false,
+          },
+          409
+        );
+      }
+      return c.json(
+        {
+          error: 'Could not safely record the withdrawal lock. Try again later.',
+          code: 'AGENT_REQUEST_UNAVAILABLE',
+          retryable: true,
+        },
+        503
+      );
+    }
+  }
+
+  const markCompleted = async (withdrawalId: string) => {
+    if (idempotencyKey) {
+      const recorded = await completeAgentRequest(
+        c.env,
+        agent.key_id,
+        idempotencyKey,
+        withdrawalId
+      );
+      if (!recorded) {
+        console.error('[agent] withdrawal settled but idempotency row was not completed');
+      }
+    }
+    if (fingerprintKey) {
+      await completeAgentRequest(c.env, agent.key_id, fingerprintKey, withdrawalId);
+    }
+  };
   const markFailed = async () => {
     if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'FAILED');
+    if (fingerprintKey) await failAgentRequest(c.env, agent.key_id, fingerprintKey, 'FAILED');
   };
   const markUnknown = async () => {
     if (idempotencyKey) await failAgentRequest(c.env, agent.key_id, idempotencyKey, 'UNKNOWN');
+    if (fingerprintKey) await failAgentRequest(c.env, agent.key_id, fingerprintKey, 'UNKNOWN');
   };
 
   const auth = await authorizeAgentWithdrawal(c, agent, {
@@ -627,20 +825,10 @@ export async function executeAgentWithdraw(
       typeof payload?.withdrawalId === 'string' ? payload.withdrawalId : null;
 
     if (response.ok) {
-      if (idempotencyKey) {
-        if (withdrawalId) {
-          const recorded = await completeAgentRequest(
-            c.env,
-            agent.key_id,
-            idempotencyKey,
-            withdrawalId
-          );
-          if (!recorded) {
-            console.error('[agent] withdrawal settled but idempotency row was not completed');
-          }
-        } else {
-          await markUnknown();
-        }
+      if (withdrawalId) {
+        await markCompleted(withdrawalId);
+      } else {
+        await markUnknown();
       }
     } else if (
       (response.status >= 400 && response.status < 500) ||

@@ -1002,6 +1002,47 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(inProgress.status, 409);
     assert.equal((await inProgress.json()).code, 'AGENT_REQUEST_IN_PROGRESS');
 
+    // Server-side intent fingerprint catches LLM retries that mutate or omit Idempotency-Key
+    const fpHash = createHash('sha256').update('pay|USDC|alice:1').digest('hex');
+    const fpKey = `fp:${fpHash.slice(0, 48)}`;
+    await db
+      .prepare(
+        `INSERT INTO agent_requests (id, agent_key_id, idempotency_key, payment_id, status, created_at)
+         VALUES (?, ?, ?, ?, 'COMPLETED', ?)`
+      )
+      .bind('req_fp_completed_1', 'key_audit_1', fpKey, 'pay_fp_completed', now)
+      .run();
+
+    const mutatedKeyRetry = await mf.dispatchFetch('http://localhost/api/agent/pay', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${rawKey}`,
+        'Idempotency-Key': 'usdc-1-alice-retry-2',
+      },
+      body: JSON.stringify({ recipientHandle: '@alice', asset: 'USDC', amount: '1.00' }),
+    });
+    assert.equal(mutatedKeyRetry.status, 409);
+    const mutatedBody = await mutatedKeyRetry.json();
+    assert.equal(mutatedBody.code, 'AGENT_REQUEST_ALREADY_COMPLETED');
+    assert.equal(mutatedBody.alreadyCompleted, true);
+    assert.equal(mutatedBody.retryable, false);
+    assert.equal(mutatedBody.paymentId, 'pay_fp_completed');
+    assert.ok(mutatedBody.shareLink.endsWith('/claim/pay_fp_completed'));
+
+    const omittedKeyRetry = await mf.dispatchFetch('http://localhost/api/agent/pay', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${rawKey}`,
+      },
+      body: JSON.stringify({ recipientHandle: '@ALICE', asset: 'usdc', amount: 1 }),
+    });
+    assert.equal(omittedKeyRetry.status, 409);
+    const omittedBody = await omittedKeyRetry.json();
+    assert.equal(omittedBody.code, 'AGENT_REQUEST_ALREADY_COMPLETED');
+    assert.equal(omittedBody.paymentId, 'pay_fp_completed');
+
     await db
       .prepare(
         `INSERT INTO payments
