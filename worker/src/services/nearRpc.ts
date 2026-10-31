@@ -3452,10 +3452,11 @@ export async function registerKeyOnIntents(
     const args = new TextEncoder().encode(JSON.stringify({ public_key: userPubKeyB58 }));
     w.writeU32(args.length);
     w.writeBytes(args);
-    // 40 TGas: ample for the key-mapping write with headroom for gas-price
-    // drift (actual execution burns ~0.0003 NEAR; 40 TGas limit requires 0.004 NEAR).
-    // The gas is escrow-sponsored (see ensureRegistrationGas).
-    w.writeU64(40000000000000n); // 40 TGas
+    // 5 TGas: add_public_key burns ~2.5 TGas; at 10^9 yocto/gas (0.001 NEAR/TGas),
+    // 5 TGas + 0.92 TGas action fee requires ~0.0059 NEAR upfront, fitting inside
+    // the 0.01 NEAR initial sub-account balance after the 0.00182 NEAR storage lock
+    // (whereas 40 TGas required 0.0409 NEAR and was rejected with NotEnoughBalance).
+    w.writeU64(5000000000000n); // 5 TGas
     w.writeU128(1n); // 1 yoctoNEAR
 
     const txBytes = w.toBytes();
