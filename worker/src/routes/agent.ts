@@ -326,7 +326,7 @@ export async function executeAgentPay(
             amount: r.amount,
             asset,
           })),
-          message: `This batch payment (${recipientsWithUsd.length} accounts, ~$${totalUsd.toFixed(2)}) exceeds your spend guardrail. Please sign with your Passkey to authorize: ${approvalUrl}`,
+          message: `${recipientsWithUsd.length > 1 ? `This batch payment (${recipientsWithUsd.length} accounts, ` : 'This payment ('}~$${totalUsd.toFixed(2)}) exceeds your spend guardrail. Tap below to authorize with Touch ID / Face ID on your device:\n\n[Confirm & Authorize with Passkey](${approvalUrl})\n\nOnce approved, the payment will execute immediately.`,
         },
         403
       );
@@ -1232,6 +1232,11 @@ agentRouter.get('/openapi.json', (c) => {
                       description:
                         'Optional unique key for retry safety; the Idempotency-Key header takes precedence.',
                     },
+                    requestApproval: {
+                      type: 'boolean',
+                      description:
+                        'Optional. When true (default for chat), returns an instant passkey authorization link (approvalUrl) if spend limits are exceeded.',
+                    },
                   },
                 },
               },
@@ -1239,7 +1244,10 @@ agentRouter.get('/openapi.json', (c) => {
           },
           responses: {
             '201': { description: 'Payment sent and escrowed for recipient' },
-            '403': { description: 'Blocked by USD spend limit' },
+            '403': {
+              description:
+                'Requires passkey authorization (status: REQUIRES_PASSKEY_APPROVAL with approvalUrl) or blocked by policy',
+            },
             '409': { description: 'Idempotency key already used or still in progress' },
           },
         },

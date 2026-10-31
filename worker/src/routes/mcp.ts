@@ -49,7 +49,7 @@ const TOOLS = [
   {
     name: 'pay_handle',
     description:
-      'Send a confidential payment to one or more X (Twitter) handles on UPRAIL. ALWAYS display the returned claimLink / shareLink and xShareUrl to the user so they can share it on X/Twitter. If a single or multi-account send exceeds guardrail limits, returns an instant passkey authorization link (approvalUrl) for the user to sign with Touch ID/Face ID.',
+      'Send a confidential payment to one or more X (Twitter) handles on UPRAIL. If the payment completes, ALWAYS display the returned claimLink / shareLink and xShareUrl so the user can share it on X/Twitter. If the payment requires passkey approval (status: REQUIRES_PASSKEY_APPROVAL), you MUST display the clickable markdown link [Confirm & Authorize with Passkey](approvalUrl) so the user can tap to approve with Touch ID / Face ID.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -315,6 +315,7 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
         amount: args?.amount,
         memo: args?.memo,
         idempotencyKey: args?.idempotencyKey,
+        requestApproval: args?.requestApproval !== false,
       });
       const payload = (await response.json().catch(() => ({}))) as any;
       const isError =

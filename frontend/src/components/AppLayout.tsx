@@ -65,14 +65,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0 min-w-0">
             {user ? (
               <>
-                {/* AI Chat Payments Link */}
+                {/* Agent Payments Link */}
                 <Link
                   to="/app/agents"
                   className="flex items-center justify-center gap-1.5 h-9 sm:h-10 px-2.5 sm:px-3.5 rounded-full bg-stone-100 hover:bg-stone-200 border border-stone-200 transition-colors cursor-pointer text-xs font-mono font-bold text-stone-900 group flex-shrink-0"
-                  title="Send & receive payments in ChatGPT, Claude & Cursor"
+                  title="Send & receive payments with AI Agents (ChatGPT, Claude & Cursor)"
                 >
                   <Bot className="w-4 h-4 text-stone-700 group-hover:text-black flex-shrink-0" />
-                  <span className="hidden md:inline">AI Chat</span>
+                  <span className="hidden md:inline">Agent</span>
                 </Link>
 
                 <button
