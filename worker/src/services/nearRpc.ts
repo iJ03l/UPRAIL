@@ -6248,12 +6248,15 @@ export async function getVirtualBalanceDeltas(
   try {
     // 1. Claimed payments received by user (synthetic claims only)
     const claimedRows = await env.DB.prepare(
-      "SELECT asset, amount, claim_tx_hash FROM payments WHERE (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?))) AND status = 'CLAIMED'"
+      "SELECT asset, amount, claim_tx_hash, privacy_rail FROM payments WHERE (recipient_x_id = ? OR (recipient_x_id IS NULL AND LOWER(recipient_handle) = LOWER(?))) AND status = 'CLAIMED'"
     )
       .bind(session.x_id, session.x_handle)
-      .all<{ asset: string; amount: string; claim_tx_hash?: string | null }>();
+      .all<{ asset: string; amount: string; claim_tx_hash?: string | null; privacy_rail?: string | null }>();
 
     for (const row of claimedRows.results || []) {
+      // Confidential claims settle in Confidential Intents (already reflected in
+      // getConfidentialBalances) and have claim_tx_hash scrubbed to NULL.
+      if (row.privacy_rail === 'confidential') continue;
       if (isSyntheticTxHash(row.claim_tx_hash)) {
         add(row.asset, parseFloat(row.amount) || 0);
       }
@@ -6261,7 +6264,7 @@ export async function getVirtualBalanceDeltas(
 
     // 2. Sent active payments by user (debited from balance)
     const sentRows = await env.DB.prepare(
-      "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash FROM payments WHERE (sender_x_id = ? OR (sender_x_id IS NULL AND LOWER(sender_x_handle) = LOWER(?))) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
+      "SELECT asset, amount, fee, status, claim_tx_hash, intent_hash, privacy_rail FROM payments WHERE (sender_x_id = ? OR (sender_x_id IS NULL AND LOWER(sender_x_handle) = LOWER(?))) AND status IN ('PENDING', 'DEPOSIT_WAITING', 'ESCROWED', 'CLAIMED')"
     )
       .bind(session.x_id, session.x_handle)
       .all<{
@@ -6271,9 +6274,19 @@ export async function getVirtualBalanceDeltas(
         status: string;
         claim_tx_hash?: string | null;
         intent_hash?: string | null;
+        privacy_rail?: string | null;
       }>();
 
     for (const row of sentRows.results || []) {
+      // Confidential sends that reached ESCROWED or CLAIMED have already debited
+      // the sender's Confidential Intents balance (and scrubSettledPaymentLinks
+      // zeroes out claim_tx_hash / intent_hash).
+      if (
+        row.privacy_rail === 'confidential' &&
+        (row.status === 'ESCROWED' || row.status === 'CLAIMED')
+      ) {
+        continue;
+      }
       // ESCROWED with a real escrow intent and CLAIMED with a real claim tx
       // are already debited from the onchain balance read above — counting
       // them again double-deducts (app shows 0 while the chain shows funds).

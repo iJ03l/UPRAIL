@@ -1289,21 +1289,15 @@ agentRouter.get('/balance', requireAgent(), async (c) => {
   const session = c.get('session')!;
   const asset = c.req.query('asset') || 'NEAR';
   try {
-    const available = await nearRpc.getUserAvailableBalance(c.env, session, asset);
-    let confidential = 0;
-    if (isConfidentialRailEnabled(c.env)) {
-      try {
-        confidential = await getConfidentialAvailableBalance(c.env, session.x_id, asset);
-      } catch (confErr) {
-        console.warn('[agent] confidential balance lookup skipped:', confErr);
-      }
-    }
+    const balance = Number(
+      (await nearRpc.getUserAvailableBalance(c.env, session, asset)).toFixed(6)
+    );
     return c.json({
       handle: `@${session.x_handle}`,
       asset,
-      available,
-      confidential,
-      total: available + confidential,
+      balance,
+      available: balance,
+      total: balance,
     });
   } catch (err) {
     console.error('[agent] balance lookup failed:', err);
@@ -1536,9 +1530,9 @@ agentRouter.get('/openapi.json', (c) => {
       '/api/agent/balance': {
         get: {
           operationId: 'getBalance',
-          summary: 'Check public and confidential UPRAIL balances for a token',
+          summary: 'Check available UPRAIL balance for a token',
           description:
-            'Returns available (public Intents/plain/virtual), confidential, and total spendable balance. Confidential is included when the private rail is enabled.',
+            'Returns the unified spendable balance for the requested asset.',
           parameters: [
             {
               name: 'asset',
@@ -1550,7 +1544,7 @@ agentRouter.get('/openapi.json', (c) => {
           ],
           responses: {
             '200': {
-              description: 'Available public and confidential token balance',
+              description: 'Available token balance',
               content: {
                 'application/json': {
                   schema: {
@@ -1558,17 +1552,17 @@ agentRouter.get('/openapi.json', (c) => {
                     properties: {
                       handle: { type: 'string' },
                       asset: { type: 'string' },
+                      balance: {
+                        type: 'number',
+                        description: 'Spendable token balance',
+                      },
                       available: {
                         type: 'number',
-                        description: 'Public Intents/plain/virtual balance',
-                      },
-                      confidential: {
-                        type: 'number',
-                        description: 'Confidential Intents balance',
+                        description: 'Spendable token balance',
                       },
                       total: {
                         type: 'number',
-                        description: 'available + confidential',
+                        description: 'Spendable token balance',
                       },
                     },
                   },

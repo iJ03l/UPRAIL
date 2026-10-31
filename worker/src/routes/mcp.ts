@@ -160,7 +160,7 @@ const TOOLS = [
   {
     name: 'get_balance',
     description:
-      "Read the owner's public and confidential UPRAIL balances. If asset is omitted or 'all', returns balances for all held tokens (USDC, NEAR, USDT, etc.).",
+      "Read the owner's available UPRAIL token balances. If asset is omitted or 'all', returns balances for all held tokens (USDC, NEAR, USDT, etc.).",
     inputSchema: {
       type: 'object',
       properties: {
@@ -235,21 +235,12 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
     case 'get_balance': {
       const requestedAsset = args?.asset ? String(args.asset).trim() : null;
       if (requestedAsset && requestedAsset.toLowerCase() !== 'all') {
-        const available = await nearRpc.getUserAvailableBalance(c.env, session, requestedAsset);
-        let confidential = 0;
-        if (isConfidentialRailEnabled(c.env)) {
-          try {
-            confidential = await getConfidentialAvailableBalance(c.env, session.x_id, requestedAsset);
-          } catch (err) {
-            console.warn('[mcp] confidential balance lookup skipped:', err);
-          }
-        }
+        const balance = await nearRpc.getUserAvailableBalance(c.env, session, requestedAsset);
         return toolText({
           handle: `@${session.x_handle}`,
           asset: requestedAsset.toUpperCase(),
-          available,
-          confidential,
-          total: available + confidential,
+          balance: Number(balance.toFixed(6)),
+          available: Number(balance.toFixed(6)),
         });
       }
 
@@ -278,27 +269,21 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
 
       const balances = await Promise.all(
         Array.from(assetSet).map(async (asset) => {
-          let available = 0;
-          let confidential = 0;
+          let balance = 0;
           try {
-            available = await nearRpc.getUserAvailableBalance(c.env, session, asset);
+            balance = await nearRpc.getUserAvailableBalance(c.env, session, asset);
           } catch {}
-          if (isConfidentialRailEnabled(c.env)) {
-            try {
-              confidential = await getConfidentialAvailableBalance(c.env, session.x_id, asset);
-            } catch {}
-          }
+          const rounded = Number(balance.toFixed(6));
           return {
             asset,
-            available,
-            confidential,
-            total: available + confidential,
+            balance: rounded,
+            available: rounded,
           };
         })
       );
 
       const nonZeroOrStandard = balances.filter(
-        (b) => ['USDC', 'NEAR', 'USDT'].includes(b.asset) || b.total > 0
+        (b) => ['USDC', 'NEAR', 'USDT'].includes(b.asset) || b.balance > 0
       );
 
       return toolText({
