@@ -3637,11 +3637,11 @@ export async function createOnchainSubAccount(
     if (txResult?.result?.status?.SuccessValue !== undefined || txResult?.result?.status?.SuccessReceiptId) {
       const txHash = txResult.result.transaction?.hash || `created_${Date.now()}`;
       if (userPubKey && userPrivKey) {
-        const regOk = await registerKeyOnIntents(rpcUrl, subAccount, userPubKey, userPrivKey).catch((regErr) => {
-          console.warn('[nearRpc] registerKeyOnIntents (provision) failed:', regErr);
-          return false;
+        const reg = await ensureKeyOnIntents(env, subAccount, userPubKey, userPrivKey).catch((regErr) => {
+          console.warn('[nearRpc] ensureKeyOnIntents (provision) failed:', regErr);
+          return { registered: false };
         });
-        if (regOk) {
+        if (reg.registered) {
           verifiedIntentsKeyMem.set(`${rpcUrl}:${subAccount}:${pubKeyB58}`, Date.now());
           verifiedSubAccountMem.set(subMemoKey, Date.now());
         }
@@ -5203,12 +5203,15 @@ export async function depositPlainBalanceToIntents(
       return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
     }
     if (plainFt >= BigInt(baseUnits)) {
+      // 45 TGas at 10^9 yocto/gas requires ~0.046 NEAR upfront plus ~0.002 NEAR storage;
+      // top up the user's sub-account from escrow if it only holds the initial 0.01 NEAR.
+      await ensureRegistrationGas(env, senderAccountId, 52000000000000000000000n);
       const res = await signAndBroadcastFunctionCall({
         ...senderKey,
         receiverId: contractId,
         method: 'ft_transfer_call',
         args: JSON.stringify({ receiver_id: intentsId, amount: baseUnits, msg: creditAddress }),
-        gas: 100_000_000_000_000n,
+        gas: 45_000_000_000_000n,
         deposit: 1n,
       });
       return res.ok
@@ -5236,12 +5239,13 @@ export async function depositPlainBalanceToIntents(
         if (!wrap.ok) {
           return { deposited: false, reason: wrap.error || 'near_deposit (wrap.near) failed' };
         }
+        await ensureRegistrationGas(env, senderAccountId, 52000000000000000000000n);
         const res = await signAndBroadcastFunctionCall({
           ...senderKey,
           receiverId: 'wrap.near',
           method: 'ft_transfer_call',
           args: JSON.stringify({ receiver_id: intentsId, amount: baseUnits, msg: creditAddress }),
-          gas: 100_000_000_000_000n,
+          gas: 45_000_000_000_000n,
           deposit: 1n,
         });
         return res.ok
@@ -5336,22 +5340,26 @@ function escrowSigningKey(
 }
 
 // Gas the user's own account must hold to broadcast its add_public_key tx.
-// 40 TGas costs 0.004 NEAR at 10^8 yocto/Gas on mainnet; 0.01 NEAR leaves ample headroom
-// for account storage (0.00264 NEAR) and gas with a 50% safety cushion.
+// 5 TGas + 0.92 TGas action fee costs ~0.0059 NEAR at 10^9 yocto/Gas on mainnet;
+// 0.01 NEAR leaves ample headroom for account storage (0.00182 NEAR) and gas.
 const INTENTS_KEY_REGISTRATION_GAS = 10000000000000000000000n; // 0.01 NEAR
 
 /**
  * Guarantees the user's own account can pay for its `intents.near.add_public_key`
- * registration transaction. The registration is a platform integration cost, so
+ * (or plain FT transfer) transaction. The gas is a platform integration cost, so
  * any shortfall is transferred in from the escrow wallet rather than being
  * charged against the user's balance. No-op once the account is already funded.
  */
-export async function ensureRegistrationGas(env: Env, accountId: string): Promise<boolean> {
+export async function ensureRegistrationGas(
+  env: Env,
+  accountId: string,
+  requiredNear: bigint = INTENTS_KEY_REGISTRATION_GAS
+): Promise<boolean> {
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   try {
     const balance = await getPlainNearBalanceStrict(rpcUrl, accountId);
     if (balance === null) return false;
-    if (balance >= INTENTS_KEY_REGISTRATION_GAS) return true;
+    if (balance >= requiredNear) return true;
 
     const sponsor = escrowSigningKey(env, rpcUrl);
     if ('error' in sponsor) {
@@ -5361,7 +5369,7 @@ export async function ensureRegistrationGas(env: Env, accountId: string): Promis
     const res = await signAndBroadcastNearTransfer({
       ...sponsor,
       receiverId: accountId,
-      amount: INTENTS_KEY_REGISTRATION_GAS - balance,
+      amount: requiredNear - balance,
     });
     if (!res.ok) {
       console.warn(`[ensureRegistrationGas] top-up failed for ${accountId}:`, res.error);
@@ -5439,12 +5447,13 @@ export async function depositPlainBalanceToEscrow(
       return { deposited: false, reason: storage.reason || `escrow is not registered on ${contractId}` };
     }
 
+    await ensureRegistrationGas(env, senderAccountId, 20000000000000000000000n);
     const res = await signAndBroadcastFunctionCall({
       ...senderKey,
       receiverId: contractId,
       method: 'ft_transfer',
       args: JSON.stringify({ receiver_id: escrowId, amount: baseUnits }),
-      gas: 30_000_000_000_000n,
+      gas: 15_000_000_000_000n,
       deposit: 1n,
     });
     return res.ok
@@ -5643,6 +5652,7 @@ export async function executeDirectFtWithdraw(
       };
     }
 
+    await ensureRegistrationGas(env, senderAccountId, 20000000000000000000000n);
     const res = await signAndBroadcastFunctionCall({
       rpcUrl,
       signerId: senderAccountId,
@@ -5651,7 +5661,7 @@ export async function executeDirectFtWithdraw(
       receiverId: contractId,
       method: 'ft_transfer',
       args: JSON.stringify({ receiver_id: destinationAddress, amount: baseUnits }),
-      gas: 30_000_000_000_000n,
+      gas: 15_000_000_000_000n,
       deposit: 1n,
     });
     return res.ok
