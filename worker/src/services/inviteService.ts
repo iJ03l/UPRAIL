@@ -42,7 +42,7 @@ export function isValidInviteCodeFormat(code: string): boolean {
  * Seeds genesis bootstrap invite codes if not already present.
  */
 export async function ensureGenesisInvites(env: Env): Promise<void> {
-  const genesisCodes = ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET'];
+  const genesisCodes = ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET', 'TRENCH'];
   const now = Date.now();
 
   // Schema is owned by worker/src/db/migrations — never CREATE TABLE here.
@@ -161,7 +161,7 @@ export async function redeemInvite(
   }
 
   // 1. Mark invite as USED (user-generated personal invites are single-use; system bootstrap codes remain active)
-  const isSystemGenesis = check.invite.creator_x_handle === 'system' || ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET'].includes(code);
+  const isSystemGenesis = check.invite.creator_x_handle === 'system' || ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET', 'TRENCH'].includes(code);
   if (!isSystemGenesis) {
     const claimResult = await env.DB.prepare(
       `UPDATE invites
