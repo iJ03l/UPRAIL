@@ -236,9 +236,10 @@ export const AppHome: React.FC = () => {
       const amt = tx.amount_in || tx.amount_out || '0';
 
       const shortId = tx.id ? `${tx.id.slice(0, 6)}...${tx.id.slice(-4)}` : '';
-      const explorerUrl = tx.id && !tx.id.startsWith('0x') && tx.id.length > 20
-        ? `https://nearblocks.io/txns/${tx.id}`
-        : undefined;
+      const explorerUrl =
+        !isWithdrawal && tx.id && !tx.id.startsWith('0x') && tx.id.length > 20
+          ? `https://nearblocks.io/txns/${tx.id}`
+          : undefined;
 
       list.push({
         id: tx.id,

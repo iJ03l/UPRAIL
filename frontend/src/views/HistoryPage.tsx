@@ -148,9 +148,10 @@ export const HistoryPage: React.FC = () => {
       const amountUsd = price ? (parseFloat(amt) || 0) * price : null;
 
       const shortId = tx.id ? `${tx.id.slice(0, 8)}...${tx.id.slice(-6)}` : '';
-      const explorerUrl = tx.id && !tx.id.startsWith('0x') && tx.id.length > 20
-        ? `https://nearblocks.io/txns/${tx.id}`
-        : undefined;
+      const explorerUrl =
+        !isWithdrawal && tx.id && !tx.id.startsWith('0x') && tx.id.length > 20
+          ? `https://nearblocks.io/txns/${tx.id}`
+          : undefined;
 
       list.push({
         id: tx.id,
