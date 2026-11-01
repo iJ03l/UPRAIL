@@ -191,11 +191,11 @@ export const SendPage: React.FC = () => {
       setShowShareModal(true);
       if (payment.isDirect || payment.status === 'claimed') {
         setSuccessToast(
-          `Successfully sent ${formatTokenAmount(payment.amount)} ${payment.token.symbol} directly to @${payment.recipientHandle}'s UPRAIL account!`
+          `Successfully sent ${formatTokenAmount(payment.grossAmount || payment.amount)} ${payment.token.symbol} directly to @${payment.recipientHandle}'s UPRAIL account!`
         );
       } else {
         setSuccessToast(
-          `Payment sent to @${payment.recipientHandle} — ${formatTokenAmount(payment.amount)} ${payment.token.symbol} waiting.`
+          `Payment sent to @${payment.recipientHandle} — ${formatTokenAmount(payment.grossAmount || payment.amount)} ${payment.token.symbol} waiting.`
         );
       }
       setRecipient('');

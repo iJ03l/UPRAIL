@@ -52,6 +52,15 @@ function formatShareAmount(amount: string): string {
   return formatted === '0' ? '<0.00000001' : formatted;
 }
 
+/** Calculates the gross payment amount sent by the user before fees (net + protocol fee). */
+export function grossPaymentAmount(netAmount: string, fee?: string | null): string {
+  if (!netAmount) return '';
+  const net = parseFloat(netAmount) || 0;
+  const f = parseFloat(fee || '0') || 0;
+  if (f <= 0) return netAmount;
+  return Number((net + f).toFixed(8)).toString();
+}
+
 /** "12.34 USDC" — degrades gracefully when amount or ticker is missing. */
 export function plainAmount(amount: string, ticker: string): string {
   if (amount && ticker) return `${formatShareAmount(amount)} ${ticker}`;

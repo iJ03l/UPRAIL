@@ -33,7 +33,7 @@ import { getAuthorizationServer } from './oauth/authorization';
 import { getResourceServer } from './oauth/resource';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
-import { plainAmount, resolveShareTicker } from './services/share';
+import { grossPaymentAmount, plainAmount, resolveShareTicker } from './services/share';
 import { refundEscrowedPayment } from './services/refunds';
 import { syncAllLaunchpadFees } from './services/launchpadFees';
 import {
@@ -434,13 +434,13 @@ app.notFound(async (c) => {
         if (c.env.DB) {
           try {
             const p = await c.env.DB.prepare(
-              'SELECT sender_x_handle, amount, asset FROM payments WHERE id = ?'
+              'SELECT sender_x_handle, amount, fee, asset FROM payments WHERE id = ?'
             )
               .bind(paymentId)
-              .first<{ sender_x_handle: string | null; amount: string; asset: string }>();
+              .first<{ sender_x_handle: string | null; amount: string; fee: string | null; asset: string }>();
             if (p) {
               sender = p.sender_x_handle || '';
-              amount = p.amount;
+              amount = grossPaymentAmount(p.amount, p.fee);
               asset = p.asset || '';
             }
           } catch {}
@@ -547,12 +547,12 @@ app.notFound(async (c) => {
               const paymentId = inv.payment_id || url.searchParams.get('payment') || '';
               if (paymentId) {
                 const p = await c.env.DB.prepare(
-                  'SELECT amount, asset FROM payments WHERE id = ?'
+                  'SELECT amount, fee, asset FROM payments WHERE id = ?'
                 )
                   .bind(paymentId)
-                  .first<{ amount: string; asset: string }>();
+                  .first<{ amount: string; fee: string | null; asset: string }>();
                 if (p) {
-                  amount = p.amount;
+                  amount = grossPaymentAmount(p.amount, p.fee);
                   asset = p.asset || '';
                 }
               }

@@ -33,6 +33,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   if (!isOpen || !payment) return null;
 
   const isDirect = payment.isDirect || payment.status === 'claimed';
+  const displayAmount = payment.grossAmount || (() => {
+    const net = parseFloat(payment.amount) || 0;
+    const fee = parseFloat(payment.fee || '0') || 0;
+    return fee > 0 ? Number((net + fee).toFixed(8)).toString() : payment.amount;
+  })();
+  const displayAmountUsd = payment.grossAmountUsd ?? (() => {
+    if (payment.amountUsd == null) return null;
+    return payment.amountUsd + (payment.feeUsd || 0);
+  })();
 
   const handleCopy = () => {
     if (payment.claimLink) {
@@ -48,7 +57,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       ? [
           `Hey @${payment.recipientHandle},`,
           '',
-          `I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL — it’s already in your account.`,
+          `I sent you ${formatTokenAmount(displayAmount)} ${payment.token.symbol} on UPRAIL — it’s already in your account.`,
           '',
           'Open the receipt — no wallet needed:',
           '',
@@ -57,7 +66,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       : [
           `Hey @${payment.recipientHandle},`,
           '',
-          `I sent you ${formatTokenAmount(payment.amount)} ${payment.token.symbol} on UPRAIL — it’s waiting for you.`,
+          `I sent you ${formatTokenAmount(displayAmount)} ${payment.token.symbol} on UPRAIL — it’s waiting for you.`,
           '',
           'Sign in with X, then confirm with your passkey — no crypto wallet needed.',
           '',
@@ -120,10 +129,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             />
             <div>
               <span className="text-sm font-extrabold text-stone-950 font-mono">
-                {formatTokenAmount(payment.amount)} {payment.token.symbol}
+                {formatTokenAmount(displayAmount)} {payment.token.symbol}
               </span>
               <span className="text-xs text-stone-500 block font-mono">
-                ≈ {formatUsd(payment.amountUsd)} USD
+                ≈ {formatUsd(displayAmountUsd)} USD
               </span>
             </div>
           </div>

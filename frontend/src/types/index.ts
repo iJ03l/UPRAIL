@@ -54,7 +54,9 @@ export interface PaymentIntent {
   recipientHandle: string;
   token: Token;
   amount: string;
+  grossAmount?: string;
   amountUsd: number | null;
+  grossAmountUsd?: number | null;
   fee: string;
   feeUsd: number | null;
   feeRecipient?: string;

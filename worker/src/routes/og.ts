@@ -12,7 +12,7 @@
  */
 import { Hono, type Context } from 'hono';
 import type { AppContext } from '../types';
-import { plainAmount, resolveShareTicker } from '../services/share';
+import { grossPaymentAmount, plainAmount, resolveShareTicker } from '../services/share';
 import { renderOgCard } from '../services/ogCard';
 import {
   creatorFeeCardKeyValid,
@@ -62,19 +62,20 @@ ogRouter.get('/claim/:file', (c) => {
     let asset = '';
     try {
       const row = await c.env.DB.prepare(
-        'SELECT sender_x_handle, recipient_handle, amount, asset FROM payments WHERE id = ?'
+        'SELECT sender_x_handle, recipient_handle, amount, fee, asset FROM payments WHERE id = ?'
       )
         .bind(id)
         .first<{
           sender_x_handle: string | null;
           recipient_handle: string | null;
           amount: string;
+          fee: string | null;
           asset: string;
         }>();
       if (row) {
         sender = row.sender_x_handle || '';
         recipient = row.recipient_handle || '';
-        amount = row.amount || '';
+        amount = grossPaymentAmount(row.amount || '', row.fee);
         asset = row.asset || '';
       }
     } catch {}
@@ -109,11 +110,11 @@ ogRouter.get('/invite/:file', (c) => {
       if (inv) {
         creator = inv.creator_x_handle || '';
         if (inv.payment_id) {
-          const p = await c.env.DB.prepare('SELECT amount, asset FROM payments WHERE id = ?')
+          const p = await c.env.DB.prepare('SELECT amount, fee, asset FROM payments WHERE id = ?')
             .bind(inv.payment_id)
-            .first<{ amount: string; asset: string }>();
+            .first<{ amount: string; fee: string | null; asset: string }>();
           if (p) {
-            amount = p.amount || '';
+            amount = grossPaymentAmount(p.amount || '', p.fee);
             asset = p.asset || '';
           }
         }

@@ -244,6 +244,9 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
   const token = resolveTokenForAsset(p.asset, tokens);
   const numAmount = parseFloat(p.amount) || 0;
   const fee = p.fee != null && p.fee !== '' ? String(p.fee) : '0';
+  const numFee = parseFloat(fee) || 0;
+  const grossAmount = numFee > 0 ? Number((numAmount + numFee).toFixed(8)).toString() : p.amount;
+  const numGross = numFee > 0 ? numAmount + numFee : numAmount;
   const price = tokenUsdPrice(token);
   // Launchpad creator fees are reported with origin 'launchpad:<name>' and a
   // namespaced sender handle ('launchpad:nearly'). Present them as a fee from
@@ -265,9 +268,11 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
     recipientHandle: p.recipient_handle || '',
     token,
     amount: p.amount,
+    grossAmount,
     amountUsd: price === null ? null : numAmount * price,
+    grossAmountUsd: price === null ? null : numGross * price,
     fee,
-    feeUsd: price === null ? null : (parseFloat(fee) || 0) * price,
+    feeUsd: price === null ? null : numFee * price,
     feeRecipient: p.fee_recipient || 'escrow.uprail.near',
     origin,
     isCreatorFee,
@@ -1131,6 +1136,10 @@ export const api = {
       // (amount − fee); the fee column carries the carved-out protocol fee.
       const netAmount = backendData.recipientAmount || params.amount;
       const numNet = parseFloat(netAmount) || 0;
+      const grossAmount = params.amount || netAmount;
+      const numGross = parseFloat(grossAmount) || numNet;
+      const feeVal = backendData.fee || '0';
+      const numFee = parseFloat(feeVal) || 0;
       return {
         id: backendData.paymentId,
         claimCode: backendData.paymentId,
@@ -1138,9 +1147,11 @@ export const api = {
         recipientHandle: cleanHandle,
         token,
         amount: netAmount,
+        grossAmount,
         amountUsd: price === null ? null : numNet * price,
-        fee: backendData.fee || '0',
-        feeUsd: price === null ? null : (parseFloat(backendData.fee || '0')) * price,
+        grossAmountUsd: price === null ? null : numGross * price,
+        fee: feeVal,
+        feeUsd: price === null ? null : numFee * price,
         feeRecipient: backendData.feeRecipient || 'escrow.uprail.near',
         inviteCode: backendData.inviteCode,
         memo: params.memo || '',
