@@ -36,7 +36,7 @@ export default function FeesDocsPage() {
           </li>
           <li>
             Every fee that then arrives is credited to{' '}
-            <code className="font-mono text-[13px]">@yourhandle</code> on UPRAIL (net of the 5%
+            <code className="font-mono text-[13px]">@yourhandle</code> on UPRAIL (net of the 1%
             protocol fee), ready to collect with your passkey at{' '}
             <a className="text-stone-900 underline" href="https://app.uprail.world/claim?view=fees">
               Creator fees in your UPRAIL account
@@ -51,7 +51,7 @@ export default function FeesDocsPage() {
         </Callout>
         <Callout>
           Because fees are paid in the launchpad&apos;s <strong className="text-stone-900">paired token</strong>,
-          they arrive as that token. The standard <strong className="text-stone-900">5% protocol fee</strong>{' '}
+          they arrive as that token. The standard <strong className="text-stone-900">1% protocol fee</strong>{' '}
           is carved out at source, exactly like a peer send; the rest is yours to hold on UPRAIL or
           cash out to any chain from your vault.
         </Callout>
@@ -115,7 +115,7 @@ export default function FeesDocsPage() {
           <li>
             After the transaction is final, call{' '}
             <code className="font-mono text-[13px]">POST /api/fees/adapter</code> with the hash.
-            UPRAIL reads the handle from the memo, takes 5%, and credits the rest.
+            UPRAIL reads the handle from the memo, takes 1%, and credits the rest.
           </li>
         </ol>
         <Code title="adapter">{`ft_transfer on wrap.near, deposit 1 yoctoNEAR
@@ -136,8 +136,8 @@ POST /api/fees/adapter
       "ok": true,
       "handle": "alice",
       "token": "wrap.near",
-      "amount": "0.95",
-      "fee": "0.05",
+      "amount": "0.99",
+      "fee": "0.01",
       "routing": "direct",
       "status": "CLAIMED"
     }
@@ -151,14 +151,14 @@ POST /api/fees/adapter
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="font-semibold text-stone-900">UPRAIL protocol fee</span>
             <span className="text-stone-600">
-              5% of gross routed creator fees, deducted when the fee is routed.
+              1% of gross routed creator fees, deducted when the fee is routed.
             </span>
           </div>
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="font-semibold text-stone-900">What the launchpad sends</span>
             <span className="text-stone-600">
               The X-handle portion, by <code className="font-mono text-[13px]">ft_transfer</code>.
-              Do not change the fee receiver, and do not pre-deduct the 5%.
+              Do not change the fee receiver, and do not pre-deduct the 1%.
             </span>
           </div>
           <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -188,7 +188,7 @@ POST /api/fees/adapter
         </div>
         <Callout>
           <strong className="text-stone-900">Example:</strong> a 1,000 TOKEN creator fee sent to
-          escrow results in 50 TOKEN of protocol fee and 950 TOKEN credited to the creator.
+          escrow results in 10 TOKEN of protocol fee and 990 TOKEN credited to the creator.
         </Callout>
 
         <Endpoint verb="POST" path="/api/fees/adapter" auth="public" />

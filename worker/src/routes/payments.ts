@@ -387,7 +387,7 @@ paymentsRouter.post('/quote', async (c) => {
       }
     }
 
-    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
+    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.01');
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
     const numAmount = parseFloat(body.amount) || 0;
     const protocolFee = (numAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
@@ -528,11 +528,11 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
 
     const memo = typeof (body as any).memo === 'string' ? (body as any).memo.trim().slice(0, 280) : null;
 
-    // Protocol fee on every send (FEE_PERCENT, 5%), routed to the escrow
+    // Protocol fee on every send (FEE_PERCENT, 1%), routed to the escrow
     // holding account. The fee is carved out of the amount being sent: the
     // recipient claims amount − fee and the sender is only ever debited
     // `amount`.
-    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.05');
+    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.01');
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
     const grossAmount = parseFloat(body.amount) || 0;
     const protocolFee = (grossAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
@@ -824,7 +824,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       try {
         // ONE transfer, always the full gross, always into the pooled escrow
         // account. There is deliberately no second "fee" transfer: a fee leg
-        // is an exact 5% of the gross and ties both legs to this sender. The
+        // is an exact 1% of the gross and ties both legs to this sender. The
         // fee is simply the part of the gross escrow does not pay out, so it
         // never travels anywhere and nothing is ever owed/unreserved.
         const transfer = await sendPrivate(c.env, session!.x_id, {

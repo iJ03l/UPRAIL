@@ -63,30 +63,30 @@ describe('atomic → decimal conversion', () => {
 });
 
 describe('protocol fee split', () => {
-  it('carves 5% with integer math and never loses wei', () => {
-    const { netAtomic, feeAtomic } = splitProtocolFee(1000000n, 0.05);
-    assert.equal(feeAtomic, 50000n);
-    assert.equal(netAtomic, 950000n);
+  it('carves 1% with integer math and never loses wei', () => {
+    const { netAtomic, feeAtomic } = splitProtocolFee(1000000n, 0.01);
+    assert.equal(feeAtomic, 10000n);
+    assert.equal(netAtomic, 990000n);
     assert.equal(netAtomic + feeAtomic, 1000000n);
   });
 
   it('floors the fee and leaves the remainder in the net', () => {
-    const { netAtomic, feeAtomic } = splitProtocolFee(3n, 0.05);
+    const { netAtomic, feeAtomic } = splitProtocolFee(3n, 0.01);
     assert.equal(feeAtomic, 0n);
     assert.equal(netAtomic, 3n);
   });
 
   it('is a no-op at 0% and for non-positive amounts', () => {
     assert.deepEqual(splitProtocolFee(12345n, 0), { netAtomic: 12345n, feeAtomic: 0n });
-    assert.deepEqual(splitProtocolFee(0n, 0.05), { netAtomic: 0n, feeAtomic: 0n });
+    assert.deepEqual(splitProtocolFee(0n, 0.01), { netAtomic: 0n, feeAtomic: 0n });
   });
 
-  it('reads FEE_PERCENT with a 5% fallback', () => {
-    assert.equal(protocolFeePercent({}), 0.05);
-    assert.equal(protocolFeePercent({ FEE_PERCENT: '0.05' }), 0.05);
+  it('reads FEE_PERCENT with a 1% fallback', () => {
+    assert.equal(protocolFeePercent({}), 0.01);
+    assert.equal(protocolFeePercent({ FEE_PERCENT: '0.01' }), 0.01);
     assert.equal(protocolFeePercent({ FEE_PERCENT: '0' }), 0);
-    assert.equal(protocolFeePercent({ FEE_PERCENT: 'nonsense' }), 0.05);
-    assert.equal(protocolFeePercent({ FEE_PERCENT: '1' }), 0.05);
+    assert.equal(protocolFeePercent({ FEE_PERCENT: 'nonsense' }), 0.01);
+    assert.equal(protocolFeePercent({ FEE_PERCENT: '1' }), 0.01);
   });
 });
 

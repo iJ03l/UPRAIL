@@ -59,7 +59,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
           SOLVER_RELAY_URL: 'https://solver-relay-v2.chaindefuser.com/rpc',
           ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
           FEE_ACCOUNT_ID: 'fees.uprail.near',
-          FEE_PERCENT: '0.05',
+          FEE_PERCENT: '0.01',
           PAYMENT_EXPIRY_DAYS: '30',
           WEBAUTHN_RP_ID: 'uprail.world',
           WEBAUTHN_RP_NAME: 'UPRAIL',
@@ -463,8 +463,8 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.recipientHandle, '@illia');
     assert.equal(body.asset, 'nep141:wrap.near');
     assert.equal(body.amount, '1.5');
-    assert.equal(body.protocolFee, '0.075', 'Must calculate the 5% send fee (1.5 * 0.05 = 0.075)');
-    assert.equal(body.recipientAmount, '1.425', 'Fee is carved out of the amount (1.5 - 0.075)');
+    assert.equal(body.protocolFee, '0.015', 'Must calculate the 1% send fee (1.5 * 0.01 = 0.015)');
+    assert.equal(body.recipientAmount, '1.485', 'Fee is carved out of the amount (1.5 - 0.015)');
     assert.equal(body.feeRecipient, 'fees.uprail.near', 'Must route send fee to fees.uprail.near');
     assert.ok(body.quoteId, 'Must include quoteId');
     assert.ok(body.depositAddress, 'Must include depositAddress');

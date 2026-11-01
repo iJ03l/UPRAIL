@@ -290,7 +290,7 @@ function mapPaymentRow(p: any, tokens: Token[]): PaymentIntent {
  * Used only when the backend quote is unreachable — the backend's own number
  * always wins when it is available.
  */
-export const PROTOCOL_FEE_RATE = 0.05;
+export const PROTOCOL_FEE_RATE = 0.01;
 
 /**
  * Live USD price for a token, or null when the registry gave us none.

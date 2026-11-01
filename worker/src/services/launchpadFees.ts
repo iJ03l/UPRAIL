@@ -10,9 +10,9 @@
  *   - unknown handle → held as an ESCROWED receivable, claimable the moment the
  *                      handle signs up (via the normal claim flow)
  *
- * The standard protocol fee (FEE_PERCENT, 5%) is carved out at source, exactly
+ * The standard protocol fee (FEE_PERCENT, 1%) is carved out at source, exactly
  * like a peer send: the launchpad pushes the gross token amount and the creator
- * is credited the net, with the 5% left in escrow (which is also the fee
+ * is credited the net, with the 1% left in escrow (which is also the fee
  * account). A known-price fee below MIN_FEE_USD is held rather than settled
  * immediately, so escrow gas is never spent settling dust. Launchpad-sourced
  * rows carry `origin = 'launchpad:<name>'`, and are stamped with a far-future
@@ -42,10 +42,10 @@ export function feeAccount(env: Env): string {
   return env.FEE_ACCOUNT_ID || escrowHoldingAccount(env);
 }
 
-/** The protocol fee rate as a percent float (FEE_PERCENT, default 5%). */
+/** The protocol fee rate as a percent float (FEE_PERCENT, default 1%). */
 export function protocolFeePercent(env: Env): number {
-  const p = parseFloat(env.FEE_PERCENT ?? '0.05');
-  return Number.isFinite(p) && p >= 0 && p < 1 ? p : 0.05;
+  const p = parseFloat(env.FEE_PERCENT ?? '0.01');
+  return Number.isFinite(p) && p >= 0 && p < 1 ? p : 0.01;
 }
 
 /** Creator-fee dust guard in USD (MIN_FEE_USD, default 1). */
