@@ -602,7 +602,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
           {/* Footer info */}
           <div className="pt-4 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-400">
             <span>UPRAIL Protocol</span>
-            <span>v1.0 • Non-custodial</span>
+            <span>v1.1 • Non-custodial</span>
           </div>
         </div>
       </div>

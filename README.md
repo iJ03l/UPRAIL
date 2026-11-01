@@ -1,7 +1,8 @@
-# UPRAIL
+# UPRAIL (v1.1)
 
 **The public identity & universal deposit ingress layer for near.com: Private value transfers to any X (Twitter) handle, policy-bounded AI agent payment rails, and 35+ chain wallet routing built on NEAR Intents + confidential execution.**
 
+- **Version:** v1.1.0 (1% Protocol Fee, Passkey-Gated near.com Internal Rail, Universal Ingress)
 - **Hackathon Tracks:** Privacy & Private AI · Social Money · Unstoppable DeFi
 - **Live Application:** [https://app.uprail.world](https://app.uprail.world)
 - **Marketing & Interactive Preview:** [https://uprail.world](https://uprail.world)
@@ -106,9 +107,7 @@ Launchpads and DEX pools (Nearly, JustHoot v2, and Intear Launchpad on `launch.i
 
 ## Quick Demo (For Human & AI Judges)
 
-### Option A – Live Product (Recommended: "Do X → See Y")
-
-#### Flow 1: Send & Claim Privately by `@handle`
+### Flow 1: Send & Claim Privately by `@handle`
 1. **Sign In & Provision Vault:** Go to [https://app.uprail.world](https://app.uprail.world), sign in with X, and register a device Passkey (Touch ID / Face ID).
    - **Expected result:** UPRAIL deterministically provisions your vault, registers its key on `intents.near`, and displays your recovery codes.
 2. **Deposit or Check Balance:** Open **Receive** (`/app/receive`) to copy your `@handle` payment link or generate a cross-chain deposit address (e.g., USDC from Base, Arbitrum, Solana, or NEAR).
@@ -159,63 +158,6 @@ curl -s https://api.uprail.world/api/agent/openapi.json | jq '{openapi, info, pa
      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq .
    ```
    - **Expected result:** Returns all 7 MCP tools (`pay_handle`, `check_approval`, `withdraw_to_wallet`, `receive_payment`, `get_balance`, `list_payments`, `resolve_handle`) scoped to your key's USD spend caps.
-
----
-
-### Option B – Local Setup & Automated Test Suite
-
-Node.js `>=22.23.4` (`.nvmrc` specifies `24.22.1`) and Go `>=1.25` are required.
-
-```bash
-# 1. Clone the repository
-git clone <REPO_URL> uprail
-cd uprail
-
-# 2. Run the Cloudflare Worker + Miniflare integration & unit test suites (14 test files)
-cd worker
-npm install
-npm run typecheck
-npm test
-
-# 3. Build & typecheck the Next.js 16 static frontend
-cd ../frontend
-npm install
-npm run typecheck
-npm run build        # Emits static export to frontend/out and syncs to frontend/dist
-
-# 4. Build, vet, and test the Go NEAR settlement microservice
-cd ../go-near-service
-go build ./...
-go vet ./...
-go test -v ./...
-```
-
-**Expected result when running `npm test` in `worker/`:**
-- Bundles the Worker (`dist/worker.js`) and service modules via `esbuild`.
-- Runs **14 automated test suites** (Miniflare v4 end-to-end integration + unit tests):
-  - `test/miniflare.test.mjs`: Verifies quote HMAC signing, protocol fee splits, anti-IDOR access controls, Passkey cross-account mismatch guards, MCP `tools/list` & `pay_handle` USD policy enforcement, replay blocking, full OAuth 2.1 PKCE + DCR + `/authorize` + `/oauth/token` flow, and dynamic PNG OpenGraph card rendering.
-  - `test/confidential-rail.test.ts` & `test/oneclick-client.test.ts`: Verifies Confidential Intents balance formatting, privacy downgrade fail-closed rejection, authenticated execution, and cron status reconciliation.
-  - `test/intents-nonce.test.ts`: Verifies versioned NEP-413 nonce and deadline structure.
-  - `test/oneclick-withdraw.test.mjs`: Verifies 35+ chain withdrawal discovery, asset mapping, and address validation across EVM, Solana, Bitcoin, TON, and XRPL.
-  - `test/launchpad-fees.test.mjs` & `test/launchpad-integrations.test.mjs`: Verifies adapter memos, log parsing, integer fee calculations, and NEP-141 receipt validation.
-
-#### Running Local Dev Servers
-
-```bash
-# Terminal 1: Go settlement service (:8080)
-cd go-near-service
-cp .env.example .env
-go run ./cmd/server
-
-# Terminal 2: Cloudflare Worker (:8787)
-cd worker
-cp .dev.vars.example .dev.vars
-npm run dev
-
-# Terminal 3: Next.js Frontend (:3000, proxies /api and /auth to :8787)
-cd frontend
-npm run dev
-```
 
 ---
 

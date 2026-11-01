@@ -4,32 +4,57 @@ vendor/
 
 # Cloudflare & Wrangler
 .wrangler/
+**/.wrangler/
 .mf/
+**/.mf/
 
-# Build artifacts
+# Build artifacts & caches
 dist/
 dist-test/
 build/
 .next/
+**/.next/
 frontend/out/
 next-env.d.ts
 *.exe
+*.tsbuildinfo
 
-# Logs & temp
+# Secret, Environment & Dot files (NEVER commit secrets or real env files)
+.env
+.env.*
+*.env
+*.env.*
+.dev.vars
+.dev.vars.*
+*.dev.vars
+*.dev.vars.*
+.freebuff/
+**/.freebuff/
+
+# Whitelist safe configuration templates
+!.env.example
+!*.env.example
+!.dev.vars.example
+!*.dev.vars.example
+
+# Cryptographic Keys & Local databases
+*.pem
+*.key
+*.cert
+*.crt
+*.sqlite
+*.sqlite-*
+
+# System & OS logs
 *.log
 .DS_Store
-*.env
-*.env.local
-.dev.vars
-worker/.dev.vars
-go-near-service/.env
+Thumbs.db
 
 # Go binaries
 cmd/server/server
 go-near-service/server
 go-near-service/bin/
 bin/
-*.tsbuildinfo
 
 # UPRAIL Motion Studio (motion framework & AI generation assets)
 motion-studio/

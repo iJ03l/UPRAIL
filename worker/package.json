@@ -1,6 +1,6 @@
 {
   "name": "uprail-worker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Confidential payment system for X (Twitter) handles using NEAR and WebAuthn",
   "main": "src/index.ts",
   "type": "module",
