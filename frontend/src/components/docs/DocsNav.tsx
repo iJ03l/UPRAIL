@@ -5,6 +5,7 @@ import { Link, useLocation } from '@/lib/router';
 
 const LINKS: { to: string; label: string }[] = [
   { to: '/docs', label: 'Overview' },
+  { to: '/docs/near', label: 'near.com Integration' },
   { to: '/docs/agents', label: 'AI Chat payments' },
   { to: '/docs/mcp', label: 'Connect a chat' },
   { to: '/docs/fees', label: 'Creator fees' },

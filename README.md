@@ -69,9 +69,15 @@ When a sender initiates a transfer, the system generates a cryptographically sig
 - **Atomic Claim Reservation:** Claims execute using atomic conditional state updates to guarantee at-most-once payouts and eliminate race conditions.
 - **At-Most-Once Refunds:** Senders can cancel unclaimed transfers, and expired escrowed funds (>30 days) automatically refund the full gross amount to the original sender.
 
-### 5. Universal Ingress to near.com & Cross-Chain Withdrawals ("Send to Wallet")
-- **Universal Ingress for near.com:** Replaces ephemeral deposit sessions with persistent public routing. Anyone can deposit into a user's NEAR Intents vault from 35+ chains by simply sending to their `@handle`.
-- **Cross-Chain Withdrawals:** Users can withdraw any asset from their vault to an external address across **35+ blockchains** (NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Stellar, Dogecoin, Litecoin, Zcash, Starknet, Hyperliquid, Monad, Berachain, etc.) with chain-specific address validation and atomic state reservation.
+### 5. Universal Ingress to near.com & Internal Withdrawal Rail
+- **Universal Ingress for near.com (Solving the Rotating Address Barrier):** On `near.com` (and Defuse / 1Click), cross-chain deposit addresses are ephemeral, session-bound, and rotating. Only the authenticated owner at their terminal can generate a quote to fund their account. UPRAIL solves this by giving every user a persistent public identity (`@handle`) mapped to a NEAR Intents vault: anyone in the world can deposit from 35+ chains directly to `@handle` without requiring a live session quote from the recipient.
+- **Passkey-Gated `near.com` Internal Withdrawal Rail:** Once funds settle into the user's UPRAIL vault, users can withdraw directly into their personal `near.com` wallet in one tap:
+  - **Zero Bridge Fees & 1:1 Routing:** Bypasses external chain bridges and routing fees by transferring internally inside the Confidential Intents layer (`submitPrivateTransfer`) to the recipient's NEP-518 internal address (`nearcom:0x...`).
+  - **Two-Step Passkey Security:**
+    1. **Address Setup & Verification:** Users paste their internal address from `near.com` (Account Menu → *My address* → copy internal address like `nearcom:0xb137a2f1054b5de422a8df801613d6722701163c`). The address is validated, stripped of the URI scheme, and cryptographically bound to the user's identity via a WebAuthn passkey challenge.
+    2. **Withdrawal Execution:** Selecting an Intents-supported asset and amount opens a detailed confirmation modal. The user signs with their hardware passkey (`Touch ID` / `Face ID`), the worker reserves the withdrawal in D1, shields any plain balance shortfall via `ensureConfidentialFunds`, and submits the private transfer to `intents.near` with instant settlement.
+  - **Edit Protection:** Updating or replacing the saved `near.com` withdrawal destination is strictly gated by a fresh passkey challenge to protect against unauthorized modification.
+- **Cross-Chain Withdrawals ("Send to Wallet"):** In addition to internal `near.com` routing, users can withdraw any asset from their vault to an external address across **35+ blockchains** (NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Stellar, Dogecoin, Litecoin, Zcash, Starknet, Hyperliquid, Monad, Berachain, etc.) with chain-specific address validation and atomic state reservation.
 
 ### 6. AI Agent Payment Rail & OAuth 2.1 Remote MCP Server
 UPRAIL includes a full **OAuth 2.1 Authorization Server** and **Streamable HTTP MCP Server** (`2025-06-18`) at `https://api.uprail.world/api/mcp`:
@@ -111,7 +117,19 @@ Launchpads and DEX pools (Nearly, JustHoot v2, and Intear Launchpad on `launch.i
 4. **Claim with X + Passkey:** Open the claim link as the recipient `@handle`, sign in with X, and confirm with your Passkey (or click **Send to Wallet** on `/app/claim` to withdraw directly to an external wallet across 35+ chains).
    - **Expected result:** The payment is atomically claimed and settled into the recipient's vault (or bridged cross-chain via 1Click).
 
-#### Flow 2: Verify Live API, OAuth 2.1 & MCP Endpoints via `curl`
+#### Flow 2: 1-Tap Internal Withdrawal to near.com (0% Bridge Fee)
+1. **Open Withdraw:** On the Dashboard ([https://app.uprail.world/app](https://app.uprail.world/app)), click the **Withdraw** button (`near.com`).
+2. **First-Time Setup (Passkey Gated):**
+   - In `near.com`, tap your account menu → click **My address** → copy your internal address (e.g. `nearcom:0xb137a2f1054b5de422a8df801613d6722701163c`).
+   - Paste it into the setup modal and click **Save & Verify with Passkey** (Touch ID / Face ID).
+   - UPRAIL validates the NEP-518 account, strips the scheme, and binds it securely to your verified identity in D1.
+3. **Withdraw Assets:**
+   - Tap any Intents asset (USDC, NEAR, USDT, ETH, BTC, SOL) and enter or select the amount (`25%`, `50%`, `75%`, `MAX`).
+   - Click **Review Withdrawal** to verify the confirmation modal breakdown (`Fee: 0.00 Sponsored`, `Route: Confidential Intents → near.com Internal`).
+   - Confirm with your Passkey: the transfer settles directly into your `near.com` internal balance with zero bridge fees.
+   - You can edit your saved destination at any time by clicking **Edit** (also passkey-gated).
+
+#### Flow 3: Verify Live API, OAuth 2.1 & MCP Endpoints via `curl`
 Judges and automated agents can inspect the live production endpoints directly:
 
 ```bash
@@ -129,7 +147,7 @@ curl -s https://api.uprail.world/.well-known/oauth-protected-resource/api/mcp | 
 curl -s https://api.uprail.world/api/agent/openapi.json | jq '{openapi, info, paths: (.paths | keys)}'
 ```
 
-#### Flow 3: Connect an AI Agent (Claude, ChatGPT, Cursor) via MCP
+#### Flow 4: Connect an AI Agent (Claude, ChatGPT, Cursor) via MCP
 1. Go to [https://app.uprail.world/app/agents](https://app.uprail.world/app/agents) and either:
    - Add `https://api.uprail.world/api/mcp` as a remote MCP server in Claude / ChatGPT / Cursor (triggers the OAuth 2.1 + Passkey consent screen where you set per-tx and daily USD caps), **or**
    - Click **New Key**, approve with your Passkey, and copy the `up_agent_...` Bearer token.

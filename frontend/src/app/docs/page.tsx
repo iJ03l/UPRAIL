@@ -21,6 +21,25 @@ export default function DocsOverviewPage() {
 
       <section className="grid sm:grid-cols-2 gap-4">
         <a
+          href="/docs/near"
+          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase tracking-wider">
+              near.com Rail
+            </span>
+          </div>
+          <h2 className="font-display font-extrabold text-stone-950">near.com Integration</h2>
+          <p className="text-sm text-stone-600">
+            How to copy your internal address from near.com, bind it to your passkey, and withdraw
+            Intents assets with zero bridge fees.
+          </p>
+          <span className="text-[11px] font-mono font-bold text-stone-500">
+            /docs/near →
+          </span>
+        </a>
+
+        <a
           href="/docs/agents"
           className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
         >
@@ -50,7 +69,7 @@ export default function DocsOverviewPage() {
 
         <a
           href="/docs/fees"
-          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2 sm:col-span-2"
+          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
         >
           <h2 className="font-display font-extrabold text-stone-950">Creator fees</h2>
           <p className="text-sm text-stone-600">
