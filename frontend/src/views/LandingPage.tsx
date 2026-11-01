@@ -79,7 +79,7 @@ export const LandingPage: React.FC = () => {
           </h1>
 
           <p className="text-sm sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
-            From the web, any AI chat, or launchpad fees. Send to a handle, not a wallet.
+            From the web, any AI chat, or launchpad fees. Send to a handle, near.com and a wallet.
           </p>
 
           <div className="pt-2 sm:pt-4 flex items-center gap-3">
@@ -107,7 +107,7 @@ export const LandingPage: React.FC = () => {
               className="text-2xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.12] sm:leading-[0.98]"
               accentWords={['leak', 'near', 'intents', 'confidential', 'uprail']}
             >
-              Public blockchains leak your wealth. NEAR Intents made confidential transfers possible. UPRAIL streams private value to 𝕏 handles.
+              Public blockchains leak your wealth. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to 𝕏 handles.
             </TextReveal>
           </div>
         </section>

@@ -16,7 +16,7 @@ export const TextReveal: React.FC<TextRevealProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
 
-  const words = children.split(' ');
+  const words = children.trim().split(/\s+/);
 
   useEffect(() => {
     const handleScroll = () => {
