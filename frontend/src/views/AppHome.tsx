@@ -52,7 +52,6 @@ export const AppHome: React.FC = () => {
     tokens,
     totalBalanceUsd,
     unpricedBalanceCount,
-    nearAccount,
     hasIntentAccount,
     isLoadingBalances,
     accountError,
@@ -278,11 +277,6 @@ export const AppHome: React.FC = () => {
               <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5 min-w-0">
                 <Shield className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
                 <span className="truncate">UPRAIL Account</span>
-                {nearAccount && (
-                  <span className="hidden sm:inline ml-1 text-stone-400 font-normal normal-case truncate max-w-[140px]">
-                    · {nearAccount}
-                  </span>
-                )}
               </span>
               <div className="flex items-center space-x-1 flex-shrink-0">
                 <button
@@ -460,30 +454,30 @@ export const AppHome: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
             <Link
               to="/app/send"
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!bg-orange-500 dark:hover:!border-orange-500 dark:hover:shadow-[0_4px_20px_rgba(249,115,22,0.35)] text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!bg-black/20 dark:group-hover:!text-white flex items-center justify-center group-hover:scale-105 transition-all">
                 <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-white transition-colors">
                 Send
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-white/80 transition-colors">
                 𝕏 & Wallets
               </span>
             </Link>
 
             <Link
               to="/app/receive"
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!bg-orange-500 dark:hover:!border-orange-500 dark:hover:shadow-[0_4px_20px_rgba(249,115,22,0.35)] text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!bg-black/20 dark:group-hover:!text-white flex items-center justify-center group-hover:scale-105 transition-all">
                 <ArrowDownLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-white transition-colors">
                 Receive
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-white/80 transition-colors">
                 Any Chain
               </span>
             </Link>
@@ -491,35 +485,35 @@ export const AppHome: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsWithdrawModalOpen(true)}
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!bg-orange-500 dark:hover:!border-orange-500 dark:hover:shadow-[0_4px_20px_rgba(249,115,22,0.35)] text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!bg-black/20 dark:group-hover:!text-white flex items-center justify-center group-hover:scale-105 transition-all">
                 <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-white transition-colors">
                 Withdraw
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-white/80 transition-colors">
                 near.com
               </span>
             </button>
 
             <Link
               to="/app/claim"
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer relative"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!bg-orange-500 dark:hover:!border-orange-500 dark:hover:shadow-[0_4px_20px_rgba(249,115,22,0.35)] text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer relative"
             >
               {pendingPayments.length > 0 && (
-                <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-stone-900 text-white text-[9px] font-mono font-bold animate-pulse">
+                <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-stone-900 text-white dark:group-hover:!bg-black/40 text-[9px] font-mono font-bold animate-pulse">
                   {pendingPayments.length}
                 </span>
               )}
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!bg-black/20 dark:group-hover:!text-white flex items-center justify-center group-hover:scale-105 transition-all">
                 <Fingerprint className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-white transition-colors">
                 Payments
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-white/80 transition-colors">
                 {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Passkey'}
               </span>
             </Link>
