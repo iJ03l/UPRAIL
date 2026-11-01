@@ -36,12 +36,14 @@ UPRAIL bridges this gap by mapping any X handle (`@handle`) to a deterministic, 
 
 ## How It Works (Technical)
 
-### 1. Deterministic Per-User NEAR Vaults & Zero-Gas Provisioning
-Every X account is mapped to a dedicated NEAR sub-account without requiring a browser wallet extension:
+### 1. Deterministic Per-User NEAR Vaults & 100% Gas-Sponsored Execution
+Every X account is mapped to a dedicated NEAR sub-account (`u_<hex>.escrow.uprail.near`) without requiring a browser wallet extension or any native gas balance:
 
-1. **Sub-Account Derivation & Registration:**
-   - Dedicated onchain sub-accounts are deterministically provisioned and registered on `intents.near` with full intent-signing capabilities.
-   - Gas sponsorship: Sub-account creation, storage requirements, and NEP-145 token storage registrations are sponsored by the protocol relayer so end users never need to acquire native gas tokens.
+1. **100% Sponsored Gas (Zero Gas Required from Users):**
+   - **Sub-Account Creation & Storage:** `escrow.uprail.near` sponsors onchain sub-account creation (`CreateAccount` + `AddKey`) and funds the `0.01 NEAR` storage/execution reserve automatically.
+   - **NEAR Intents Key Registration (`5 TGas`):** Every user vault's Ed25519 public key is registered on `intents.near::add_public_key` (`5 TGas`), with [`ensureRegistrationGas`](worker/src/services/nearRpc.ts) automatically topping up any gas shortfall from `escrow.uprail.near`.
+   - **Token Storage Sponsorship (NEP-145):** `escrow.uprail.near` sponsors `storage_deposit` on NEP-141 token contracts for `intents.near`, user vaults, and destination wallets before transfers or withdrawals execute.
+   - **Gasless Intent Relaying & FT Top-Ups:** Signed NEP-413 intents are relayed and gas-sponsored by `escrow.uprail.near` (`execute_intents`), and direct NEP-141 transfers from user sub-accounts automatically receive sponsored gas reserves beforehand.
 2. **Self-Custody Key Export:**
    - With a fresh WebAuthn passkey assertion, any user can export their raw Ed25519 private key and sub-account ID at any time, maintaining complete non-custodial ownership and portability.
 

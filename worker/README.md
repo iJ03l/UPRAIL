@@ -16,8 +16,9 @@ Cloudflare Worker component for **UPRAIL.app** — a confidential payment system
   - X OAuth 2.0 PKCE (Free tier — `/2/users/me`)
   - WebAuthn (P-256 / ES256, COSE alg `-7`); rpId/origin resolved from `WEBAUTHN_RP_ID`/`WEBAUTHN_ORIGIN` via `src/services/webauthnConfig.ts`
 - **Secrets:** Never committed. Set with `wrangler secret put <NAME>` (see `.dev.vars.example`); required secrets fail closed when missing (`src/utils/secrets.ts`).
-- **NEAR Settlement:**
+- **NEAR Settlement & 100% Gas Sponsorship:**
   - Escrow transfers/refunds are signed by the Worker itself (escrow key in `ESCROW_PRIVATE_KEY`); 1Click quotes are proxied to the Go settlement service when configured (HMAC-signed internal auth, `src/utils/internalAuth.ts`)
+  - User sub-account provisioning (`u_<hex>.escrow.uprail.near`), `intents.near::add_public_key` (`5 TGas`), NEP-145 token `storage_deposit`, and plain FT transfer gas reserves (`ensureRegistrationGas`) are 100% sponsored by `escrow.uprail.near` — users never need NEAR for gas
   - 1Click confidential quotes with `"advanced"` confidentiality
   - Only real onchain transaction hashes are persisted — settlement responses without a hash fail loudly
   - The hourly cron expires unsettled sends, refunds `ESCROWED` payments past their expiry back to the sender (gross = amount + fee), and retries interrupted refunds (`src/index.ts`)
