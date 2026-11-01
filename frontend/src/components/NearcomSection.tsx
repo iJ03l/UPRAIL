@@ -1,0 +1,430 @@
+'use client';
+
+import React from 'react';
+import {
+  ShieldCheck,
+  ExternalLink,
+  ArrowRight,
+  Lock,
+  Check,
+  X,
+  Fingerprint,
+  Zap,
+  Cpu,
+  Layers,
+  ArrowUpRight,
+} from 'lucide-react';
+
+export const NearcomSection: React.FC = () => {
+  return (
+    <section id="nearcom" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24 space-y-10">
+      {/* Section Header */}
+      <div className="space-y-3 text-left">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold">
+            // The near.com Sovereign Gateway
+          </span>
+          <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold">
+            Zero Bridge Fees
+          </span>
+        </div>
+        <h2 className="text-3xl sm:text-5xl font-display font-extrabold tracking-tight text-stone-950 dark:text-white leading-[1.06]">
+          Opening near.com to the World.
+          <br className="hidden sm:inline" /> Confidentially. Zero Compromise.
+        </h2>
+        <p className="text-sm sm:text-base text-stone-600 dark:text-stone-400 max-w-3xl leading-relaxed">
+          On near.com, cross-chain deposit addresses are ephemeral 15-minute session quotes that require
+          you to be logged in at your keyboard. UPRAIL turns your 𝕏 handle into a permanent universal
+          gateway—settling confidentially on NEAR Intents with zero-loss escrow protection and
+          one-tap withdrawal straight into your personal near.com wallet.
+        </p>
+      </div>
+
+      {/* 
+        ASCII Hardware Schematic: Chord Plugging into near.com Socket Box
+      */}
+      <div className="rounded-3xl border border-stone-800 bg-[#0A0807] p-5 sm:p-7 space-y-4 shadow-2xl overflow-hidden relative">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-800/80 pb-3 text-xs font-mono">
+          <div className="flex items-center space-x-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-stone-300 font-bold tracking-wider uppercase text-[11px]">
+              Hardware Schematic // Universal Ingress Bus
+            </span>
+          </div>
+          <span className="text-stone-400 text-[10px]">
+            ASCII ARCHITECTURE: PUBLIC RAIL &rarr; near.com ADAPTER
+          </span>
+        </div>
+
+        {/* The Monospace ASCII Illustration */}
+        <pre className="font-mono text-[10px] sm:text-[11.5px] leading-tight text-stone-300 overflow-x-auto py-2 select-all scrollbar-thin scrollbar-thumb-stone-800">
+{`========================================================================================================================
+[ PUBLIC VALUE BUS (35+ CHAINS) ]               [ UPRAIL ADAPTER PLUG ]             [ near.com SOVEREIGN SOCKET BOX ]
+========================================================================================================================
+
+ 35+ BLOCKCHAINS (EVM, SVM, UTXO)                 ┌─────────────┐
+ Base · Solana · BTC · ETH · Arbitrum ─────────┐  │   UPRAIL    │       ┌──────────────────────────────────────────────┐
+ Tron · Sui · Aptos · TON · Polygon ───────────┼──┤   ADAPTER   ├───┐   │ [●] RECEPTACLE PORT: nearcom:0x...           │
+                                               │  │    CHORD    │   │   │ -------------------------------------------- │
+ UNIVERSAL PUBLIC IDENTITY                     │  │    PLUG     │   └──►│  PIN 01: [NEP-518 SHIELD] ──► ACTIVE [100%]  │
+ @handle (No Expiring Session Quotes) ─────────┴──┤             │       │  PIN 02: [SOLVER INTENTS] ──► ATOMIC ROUTE   │
+                                                  │  [=======]  ├──────►│  PIN 03: [BRIDGE TARIFF]  ──► $0.00 / 0%     │
+ CONFIDENTIAL EXECUTION CONDUIT                   │  [▓▓▓▓▓▓▓]  │       │  PIN 04: [ESCROW SAFETY]  ──► 30-DAY REFUND  │
+ intents.near · Zero Seed Phrase Custody ─────────┤  [=======]  │   ┌──►│ -------------------------------------------- │
+                                                  │             │   │   │  COUPLING: [ ENGAGED // WEBAUTHN P-256 ARMED]│
+ PASSKEY HARDWARE BIOMETRIC GROUND ───────────────┴─────────────┘───┘   └──────────────────────────────────────────────┘
+ Touch ID / Face ID / YubiKey ES256                      ▲                                     ▲
+                                                [ CHORD ENGAGED ]                     [ SOVEREIGN RECEPTACLE LOCKED ]
+========================================================================================================================`}
+        </pre>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-stone-800/80 text-[11px] font-mono text-stone-400">
+          <div className="flex items-center space-x-3">
+            <span className="text-emerald-400 font-bold">● PROTOCOL PINOUT ACTIVE</span>
+            <span className="hidden sm:inline text-stone-400">|</span>
+            <span className="text-stone-300">Target: <code className="text-[#E05326] font-bold">nearcom:0x...</code></span>
+          </div>
+          <span className="text-stone-400">Zero Bridge Fee · 100% Sponsored Execution Gas</span>
+        </div>
+      </div>
+
+      {/* 
+        Writeup: The Public Adapter to Privacy
+      */}
+      <div className="rounded-3xl bg-white dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-6 sm:p-9 space-y-8 shadow-xs">
+        <div className="space-y-3">
+          <div className="flex items-center space-x-2">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[#E05326] font-bold px-2 py-0.5 rounded bg-orange-50 dark:bg-orange-950/60 border border-orange-200 dark:border-orange-900">
+              Architecture Analysis
+            </span>
+            <span className="text-xs font-mono text-stone-400">
+              The Public Adapter to Privacy
+            </span>
+          </div>
+
+          <h3 className="text-2xl sm:text-3xl font-display font-black text-stone-950 dark:text-white tracking-tight">
+            The Public Adapter to Privacy
+          </h3>
+
+          <p className="text-sm sm:text-base text-stone-600 dark:text-stone-400 leading-relaxed max-w-3xl font-sans">
+            Public blockchains are radical transparency machines: every send permanently records the sender,
+            recipient, token balance, and transaction history on public explorers. Meanwhile,{' '}
+            <strong className="text-stone-900 dark:text-white">near.com</strong> built a sovereign account
+            abstraction model, but cross-chain ingress still relies on ephemeral, 15-minute rotating session quotes
+            that require the recipient to be online at the keyboard.
+          </p>
+          <p className="text-sm text-stone-600 dark:text-stone-400 leading-relaxed max-w-3xl font-sans">
+            UPRAIL operates as the physical adapter chord between the open, chaotic public web and near.com&apos;s
+            private sovereign account layer. It bridges the impedance mismatch between public identity and
+            cryptographic privacy with zero compromise and zero risk of loss.
+          </p>
+        </div>
+
+        {/* 4 Architectural Pillars of the Adapter */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6 pt-2">
+          {/* 1. Eliminating the Rotating Address Barrier */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-stone-50 dark:bg-stone-900/40 border border-stone-200/80 dark:border-stone-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono font-bold text-stone-900 dark:text-white">
+                01 / Universal Ingress vs Rotating Quotes
+              </span>
+              <Layers className="w-4 h-4 text-[#E05326]" />
+            </div>
+            <h4 className="font-display font-extrabold text-base text-stone-950 dark:text-white">
+              Permanent Asynchronous Identity
+            </h4>
+            <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed font-sans">
+              On near.com, you cannot print a deposit address on an invoice, paste it into your 𝕏 bio, or give it to an
+              autonomous AI agent: cross-chain deposit quotes expire after 15 minutes. UPRAIL eliminates this barrier by
+              mapping your 𝕏 handle to a persistent NEAR Intents vault. Anyone on 35+ chains sends to your handle at any
+              time—quotes are resolved dynamically upon execution.
+            </p>
+          </div>
+
+          {/* 2. Cryptographic Isolation */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-stone-50 dark:bg-stone-900/40 border border-stone-200/80 dark:border-stone-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono font-bold text-stone-900 dark:text-white">
+                02 / Shielded Confidential Conduit
+              </span>
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            </div>
+            <h4 className="font-display font-extrabold text-base text-stone-950 dark:text-white">
+              Zero Counterparty Leakage (NEP-518)
+            </h4>
+            <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed font-sans">
+              When value passes through the adapter, it does not broadcast an unshielded public transfer. Funds clear
+              through the NEAR Confidential Intents layer (<code className="text-xs font-mono text-stone-900 dark:text-stone-200">intents.near</code> + NEP-518).
+              Block explorers display only the solver contract pool—counterparty handles, amounts, and memos stay
+              isolated inside zero-knowledge shielded state.
+            </p>
+          </div>
+
+          {/* 3. 1-Tap Zero-Fee Settlement */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-stone-50 dark:bg-stone-900/40 border border-stone-200/80 dark:border-stone-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono font-bold text-stone-900 dark:text-white">
+                03 / Internal Receptacle
+              </span>
+              <Cpu className="w-4 h-4 text-blue-500" />
+            </div>
+            <h4 className="font-display font-extrabold text-base text-stone-950 dark:text-white">
+              1-Tap Zero-Fee Settlement to near.com
+            </h4>
+            <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed font-sans">
+              Once value settles into your vault, moving it into your personal near.com wallet (<code className="text-xs font-mono text-stone-900 dark:text-stone-200">nearcom:0x...</code>)
+              involves zero cross-chain bridge fees and zero slippage. Because your vault and near.com account reside within
+              the same NEAR Intents liquidity layer, withdrawals execute with a single passkey tap at{' '}
+              <strong className="text-stone-900 dark:text-white">100% sponsored gas and $0.00 bridge cost</strong>.
+            </p>
+          </div>
+
+          {/* 4. Escrowed Zero-Loss Guarantee */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-stone-50 dark:bg-stone-900/40 border border-stone-200/80 dark:border-stone-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono font-bold text-stone-900 dark:text-white">
+                04 / Fail-Closed Guarantee
+              </span>
+              <Lock className="w-4 h-4 text-amber-500" />
+            </div>
+            <h4 className="font-display font-extrabold text-base text-stone-950 dark:text-white">
+              Escrow-Enforced Zero Risk of Loss
+            </h4>
+            <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed font-sans">
+              In standard crypto, sending funds to an expired deposit quote or an unclaimed address burns capital.
+              UPRAIL operates fail-closed: transfers to unregistered handles sit in a pooled smart-contract escrow. Senders
+              can cancel anytime, and unclaimed funds auto-refund after 30 days. No user funds are ever stranded.
+            </p>
+          </div>
+        </div>
+
+        <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-stone-200/80 dark:border-stone-800 text-xs font-mono">
+          <a
+            href="https://docs.uprail.world/docs/near"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-stone-600 dark:text-stone-400 hover:text-stone-950 dark:hover:text-white transition-colors inline-flex items-center gap-1 font-bold"
+          >
+            <span>Read full near.com technical integration guide</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+          <a
+            href="https://app.uprail.world/app"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#E05326] hover:underline inline-flex items-center gap-1 font-bold"
+          >
+            <span>Configure near.com withdrawal destination &rarr;</span>
+          </a>
+        </div>
+      </div>
+
+      {/* Side-by-Side Comparison: The Broken Way vs The UPRAIL Sovereign Gateway */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+        {/* Left: Traditional near.com Limitations */}
+        <div className="rounded-3xl bg-white dark:bg-stone-950 p-6 sm:p-8 border border-stone-200 dark:border-stone-800 space-y-6 flex flex-col justify-between shadow-xs">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-rose-600 dark:text-rose-400 font-bold px-2.5 py-1 rounded-full bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900">
+                Traditional near.com Deposit
+              </span>
+              <X className="w-4 h-4 text-rose-500" />
+            </div>
+
+            <h3 className="text-xl sm:text-2xl font-display font-extrabold text-stone-950 dark:text-white">
+              The Rotating Address Barrier
+            </h3>
+
+            <ul className="space-y-3 text-xs sm:text-sm text-stone-600 dark:text-stone-400 font-sans">
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-300 text-[10px] font-bold">
+                  ✕
+                </span>
+                <span>
+                  <strong className="text-stone-900 dark:text-white">15-Minute Rotating Quotes:</strong> Deposit
+                  addresses expire quickly. If a sender submits funds after the quote window closes, assets risk getting
+                  stranded or lost.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-300 text-[10px] font-bold">
+                  ✕
+                </span>
+                <span>
+                  <strong className="text-stone-900 dark:text-white">Interactive Session Required:</strong> You must
+                  be actively online at your terminal to generate a quote. You cannot post a static deposit address on your
+                  social bio or invoice.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-300 text-[10px] font-bold">
+                  ✕
+                </span>
+                <span>
+                  <strong className="text-stone-900 dark:text-white">Public Wallet Surveillance:</strong> Standard
+                  transfers expose both sender and recipient addresses, tokens, and balances to public block explorers.
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-stone-50 dark:bg-stone-900/40 border border-stone-200/80 dark:border-stone-800 text-[11px] font-mono text-stone-500">
+            Result: Cannot receive funds asynchronously from clients, friends, or autonomous AI agents.
+          </div>
+        </div>
+
+        {/* Right: The UPRAIL Sovereign Gateway */}
+        <div className="rounded-3xl bg-stone-950 text-white p-6 sm:p-8 border border-stone-800 space-y-6 flex flex-col justify-between shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-[#E05326]/10 rounded-full blur-3xl pointer-events-none" />
+
+          <div className="space-y-4 relative z-10">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[#00EC97] font-bold px-2.5 py-1 rounded-full bg-emerald-950 border border-emerald-800">
+                UPRAIL Sovereign Gateway
+              </span>
+              <Check className="w-4 h-4 text-[#00EC97]" />
+            </div>
+
+            <h3 className="text-xl sm:text-2xl font-display font-extrabold text-white">
+              Permanent Identity &amp; Zero Risk
+            </h3>
+
+            <ul className="space-y-3 text-xs sm:text-sm text-stone-300 font-sans">
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-950 text-[#00EC97] text-[10px] font-bold">
+                  ✓
+                </span>
+                <span>
+                  <strong className="text-white">Permanent Universal Identity:</strong> Your 𝕏 handle is your
+                  permanent deposit address. Anyone across 35+ blockchains can send crypto to you anytime without live quote sessions.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-950 text-[#00EC97] text-[10px] font-bold">
+                  ✓
+                </span>
+                <span>
+                  <strong className="text-white">Confidential Execution (NEP-518):</strong> Balances and transfers settle
+                  inside NEAR Confidential Intents. Block explorers see only solver liquidity pools—your identity stays shielded.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-950 text-[#00EC97] text-[10px] font-bold">
+                  ✓
+                </span>
+                <span>
+                  <strong className="text-white">1-Tap Withdrawal to <code className="text-xs text-amber-400">nearcom:0x...</code>:</strong> Withdraw
+                  instantly from your vault into your personal near.com wallet at <strong>$0 bridge fee</strong> with 100% sponsored gas.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-950 text-[#00EC97] text-[10px] font-bold">
+                  ✓
+                </span>
+                <span>
+                  <strong className="text-white">Escrowed Zero-Loss Guarantee:</strong> Funds to unclaimed handles rest in pooled
+                  escrow. Senders can cancel anytime, or unclaimed transfers auto-refund after 30 days. No risk of loss.
+                </span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="pt-2 border-t border-stone-800/80 flex items-center justify-between text-xs font-mono relative z-10">
+            <a
+              href="https://docs.uprail.world/docs/near"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-stone-400 hover:text-white transition-colors inline-flex items-center gap-1"
+            >
+              <span>near.com Integration Guide</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+            <a
+              href="https://app.uprail.world/app"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 rounded-xl bg-white text-stone-950 font-display font-extrabold text-[11px] uppercase tracking-wider inline-flex items-center gap-1.5 hover:bg-stone-200 transition-all"
+            >
+              <span>Connect Wallet</span>
+              <ArrowRight className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* 4-Step Settlement Architecture Conduit */}
+      <div className="rounded-3xl bg-white dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-5 sm:p-8 space-y-5 shadow-xs">
+        <div className="space-y-1">
+          <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#E05326]">
+            End-to-End Pipeline
+          </span>
+          <h3 className="text-xl font-display font-extrabold text-stone-950 dark:text-white">
+            How Value Moves Confidentially from Foreign Chains to near.com
+          </h3>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900/50 border border-stone-200/80 dark:border-stone-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-900 text-white dark:bg-white dark:text-stone-950 text-xs font-mono font-bold">
+                1
+              </span>
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+            </div>
+            <div className="text-xs font-display font-bold text-stone-950 dark:text-white">
+              Foreign Chain Ingress
+            </div>
+            <p className="text-[11px] text-stone-600 dark:text-stone-400 font-sans leading-relaxed">
+              Sender deposits USDC, SOL, or BTC from Base, Solana, or Bitcoin directly addressed to <code className="font-mono text-stone-900 dark:text-stone-200">@handle</code>.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900/50 border border-stone-200/80 dark:border-stone-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-900 text-white dark:bg-white dark:text-stone-950 text-xs font-mono font-bold">
+                2
+              </span>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            </div>
+            <div className="text-xs font-display font-bold text-stone-950 dark:text-white">
+              Confidential Settlement
+            </div>
+            <p className="text-[11px] text-stone-600 dark:text-stone-400 font-sans leading-relaxed">
+              Funds clear through <code className="font-mono text-stone-900 dark:text-stone-200">intents.near</code>. Counterparties, amounts, and memos remain cryptographically shielded.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900/50 border border-stone-200/80 dark:border-stone-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-900 text-white dark:bg-white dark:text-stone-950 text-xs font-mono font-bold">
+                3
+              </span>
+              <Lock className="w-3.5 h-3.5 text-blue-500" />
+            </div>
+            <div className="text-xs font-display font-bold text-stone-950 dark:text-white">
+              Escrowed Zero-Loss Guarantee
+            </div>
+            <p className="text-[11px] text-stone-600 dark:text-stone-400 font-sans leading-relaxed">
+              Unclaimed funds lock in pooled escrow with atomic sender cancellation and guaranteed 30-day auto-refund.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-stone-50 dark:bg-stone-900/50 border border-stone-200/80 dark:border-stone-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-900 text-white dark:bg-white dark:text-stone-950 text-xs font-mono font-bold">
+                4
+              </span>
+              <Fingerprint className="w-3.5 h-3.5 text-[#E05326]" />
+            </div>
+            <div className="text-xs font-display font-bold text-stone-950 dark:text-white">
+              1-Tap near.com Withdrawal
+            </div>
+            <p className="text-[11px] text-stone-600 dark:text-stone-400 font-sans leading-relaxed">
+              Confirm with Face ID or Touch ID to route funds straight into <code className="font-mono text-stone-900 dark:text-stone-200">nearcom:0x...</code> with $0 bridge fee.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};

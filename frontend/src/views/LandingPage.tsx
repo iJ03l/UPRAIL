@@ -8,6 +8,8 @@ import { MoneyFlowSchematic } from '../components/MoneyFlowSchematic';
 import { InteractiveRailSimulator } from '../components/InteractiveRailSimulator';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { useTheme } from '../components/ThemeProvider';
+import { MultiChainSection } from '../components/MultiChainSection';
+import { NearcomSection } from '../components/NearcomSection';
 
 const getAppSubdomainUrl = () => {
   if (typeof window !== 'undefined') {
@@ -125,7 +127,17 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* 
-          5. AI Chat & Creator Fees — Stark Architectural Split
+          5. The near.com Sovereign Gateway (Universal Ingress & Zero Risk)
+        */}
+        <NearcomSection />
+
+        {/* 
+          6. Multi-Chain Scale (35+ Blockchains, 50+ Assets)
+        */}
+        <MultiChainSection />
+
+        {/* 
+          7. AI Chat & Creator Fees — Stark Architectural Split
         */}
         <section id="coming-soon" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24 space-y-5">
           <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
@@ -311,6 +323,15 @@ export const LandingPage: React.FC = () => {
               {isDark ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
               <span>{isDark ? 'Light' : 'Dark'}</span>
             </button>
+            <a
+              href="https://docs.uprail.world/docs/near"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-black transition-colors flex items-center"
+            >
+              <span>near.com Rail</span>
+              <ExternalLink className="w-3 h-3 ml-1" />
+            </a>
             <a
               href="https://docs.uprail.world"
               target="_blank"
