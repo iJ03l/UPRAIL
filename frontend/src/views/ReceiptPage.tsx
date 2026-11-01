@@ -10,13 +10,19 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Link } from '../lib/router';
-import { api, formatTokenAmount } from '../lib/api';
+import { api, formatTokenAmount, cleanMemeSymbol } from '../lib/api';
 import { GlitchLogo } from '../components/GlitchLogo';
 import type { WithdrawalReceipt } from '../types';
 
 function shortenAddress(addr: string): string {
+  if (!addr) return '';
+  if (addr.startsWith('nearcom:')) {
+    const raw = addr.slice(8);
+    if (raw.length <= 16) return addr;
+    return `nearcom:${raw.slice(0, 6)}…${raw.slice(-4)}`;
+  }
   if (addr.length <= 16) return addr;
-  return `${addr.slice(0, 10)}…${addr.slice(-8)}`;
+  return `${addr.slice(0, 8)}…${addr.slice(-6)}`;
 }
 
 function formatDate(iso: string): string {
@@ -122,29 +128,29 @@ export const ReceiptPage: React.FC<ReceiptPageProps> = ({ id }) => {
               <h3 className="text-xl font-extrabold text-stone-950 font-display">
                 {statusBadge.label === 'Failed' ? 'Withdrawal Failed' : 'Payment Sent'}
               </h3>
-              <div className="text-3xl font-display font-extrabold text-stone-950 tracking-tight font-mono">
-                {formatTokenAmount(receipt.amount)} {receipt.asset}
+              <div className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950 tracking-tight font-mono break-words px-2">
+                {formatTokenAmount(receipt.amount)} {cleanMemeSymbol(receipt.asset) || receipt.asset}
               </div>
             </div>
 
             {statusBadge.label === 'Failed' && receipt.failureReason && (
               <div className="rounded-2xl bg-red-50 border border-red-200 p-3.5 flex items-start gap-2.5 text-xs">
                 <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-                <p className="text-red-800 leading-relaxed">{receipt.failureReason}</p>
+                <p className="text-red-800 leading-relaxed break-words">{receipt.failureReason}</p>
               </div>
             )}
 
             <div className="rounded-2xl bg-stone-50 border border-stone-200 divide-y divide-stone-200 text-xs font-mono">
               {receipt.fromHandle && (
-                <div className="flex items-center justify-between px-4 py-3">
-                  <span className="text-stone-500">From</span>
-                  <span className="font-bold text-stone-900">@{receipt.fromHandle}</span>
+                <div className="flex items-center justify-between px-4 py-3 gap-2">
+                  <span className="text-stone-500 flex-shrink-0">From</span>
+                  <span className="font-bold text-stone-900 truncate">@{receipt.fromHandle}</span>
                 </div>
               )}
               <div className="flex items-center justify-between px-4 py-3 gap-3">
-                <span className="text-stone-500">To</span>
+                <span className="text-stone-500 flex-shrink-0">To</span>
                 <span
-                  className="font-bold text-stone-900 truncate"
+                  className="font-bold text-stone-900 truncate max-w-[200px] sm:max-w-[240px] text-right"
                   title={receipt.destinationAddress}
                 >
                   {shortenAddress(receipt.destinationAddress)}

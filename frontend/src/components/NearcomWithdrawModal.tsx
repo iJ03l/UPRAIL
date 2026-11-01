@@ -25,6 +25,7 @@ import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useToast } from './Toast';
 import {
   api,
+  cleanMemeSymbol,
   formatTokenAmount,
   formatUsd,
   tokenUsdPrice,
@@ -464,8 +465,8 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
 
             {/* ── MODE: FIRST-TIME SETUP or EDIT DESTINATION ── */}
             {(mode === 'setup' || mode === 'edit') && (
-              <form onSubmit={handleSaveDestination} className="space-y-5">
-                <div className="flex items-start gap-3.5 pr-6">
+              <form onSubmit={handleSaveDestination} className="space-y-4">
+                <div className="flex items-center gap-3 pr-6">
                   {mode === 'edit' ? (
                     <button
                       type="button"
@@ -480,57 +481,43 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       <ArrowLeft className="w-4 h-4" />
                     </button>
                   ) : (
-                    <div className="w-11 h-11 rounded-2xl bg-stone-900 text-white flex items-center justify-center flex-shrink-0">
+                    <div className="w-10 h-10 rounded-2xl bg-stone-900 text-white flex items-center justify-center flex-shrink-0">
                       <Shield className="w-5 h-5" />
                     </div>
                   )}
-                  <div className="space-y-1 min-w-0">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[10px] font-mono font-bold uppercase tracking-wider">
-                      <Lock className="w-2.5 h-2.5" />
-                      <span>Passkey Protected</span>
-                    </span>
+                  <div className="min-w-0">
                     <h3
                       id="nearcom-modal-title"
-                      className="text-lg sm:text-xl font-display font-extrabold text-stone-950 tracking-tight"
+                      className="text-lg font-display font-extrabold text-stone-950 tracking-tight"
                     >
                       {mode === 'edit'
                         ? 'Edit near.com Address'
-                        : 'Set Up near.com Internal Withdrawal'}
+                        : 'near.com Withdrawal Address'}
                     </h3>
-                    <p className="text-xs text-stone-600 leading-relaxed">
-                      {mode === 'edit'
-                        ? 'Paste your updated near.com internal address below and confirm with your passkey.'
-                        : 'Set up your near.com internal withdrawal address first. Once saved with your passkey, you can withdraw any Intents asset to near.com in one tap.'}
+                    <p className="text-xs text-stone-500">
+                      Paste your internal address from near.com
                     </p>
                   </div>
                 </div>
 
-                {/* Instructions box */}
-                <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3.5 space-y-1.5">
-                  <div className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-700">
-                    How to find your near.com internal address
+                {/* Compact Instructions */}
+                <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3 text-[11px] text-stone-600 space-y-1">
+                  <div className="font-mono font-bold text-stone-800 uppercase tracking-wider text-[10px]">
+                    How to find it:
                   </div>
-                  <ol className="text-[11px] text-stone-600 space-y-1 list-decimal list-inside font-sans">
-                    <li>
-                      Open <span className="font-mono font-semibold text-stone-900">near.com</span> and open your account menu
-                    </li>
-                    <li>
-                      Select <span className="font-semibold text-stone-900">My address</span> and copy your internal address
-                    </li>
-                    <li>
-                      Paste it below (e.g. <span className="font-mono text-stone-900">nearcom:0xb137…163c</span>)
-                    </li>
-                  </ol>
+                  <p>
+                    On <span className="font-semibold text-stone-900">near.com</span>, go to <span className="font-semibold text-stone-900">Account Menu → My address</span> and copy your internal address (<span className="font-mono text-stone-800">nearcom:0x…</span>).
+                  </p>
                 </div>
 
                 {/* Address input */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label
                       htmlFor="nearcom-address-input"
-                      className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-600"
+                      className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500"
                     >
-                      near.com Internal Address
+                      Internal Address
                     </label>
                     <button
                       type="button"
@@ -553,32 +540,27 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                     placeholder="nearcom:0xb137a2f1054b5de422a8df801613d6722701163c"
                     autoComplete="off"
                     spellCheck={false}
-                    className="w-full px-3.5 py-3 rounded-2xl border border-stone-200 bg-white text-xs font-mono text-stone-950 placeholder:text-stone-400 focus:outline-none focus:border-stone-900 transition-colors"
+                    className="w-full px-3.5 py-2.5 rounded-2xl border border-stone-200 bg-stone-50/50 text-xs font-mono text-stone-950 placeholder:text-stone-400 focus:outline-none focus:border-stone-900 focus:bg-white transition-colors"
                   />
 
                   {/* Live validation feedback */}
                   {parsedInput.valid && (
-                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-emerald-900">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 mt-0.5 flex-shrink-0" />
-                      <div className="min-w-0 break-all">
-                        <div className="font-bold">Valid near.com internal destination</div>
-                        <div className="text-emerald-700 text-[10px]">
-                          Routes internally to Intents account: {parsedInput.intentsAccountId}
-                        </div>
-                      </div>
+                    <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-1.5 flex items-center gap-2 text-[11px] font-mono text-emerald-900">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                      <span className="truncate">Valid near.com address</span>
                     </div>
                   )}
 
                   {(addressError || (addressInput.trim() && parsedInput.error)) && (
-                    <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
+                    <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-1.5 flex items-start gap-2 text-[11px] font-mono text-red-700">
                       <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
-                      <span>{addressError || parsedInput.error}</span>
+                      <span className="break-words">{addressError || parsedInput.error}</span>
                     </div>
                   )}
                 </div>
 
                 {/* Submit button */}
-                <div className="pt-1 flex items-center gap-2.5">
+                <div className="pt-1 flex items-center gap-2">
                   {mode === 'edit' && (
                     <button
                       type="button"
@@ -588,7 +570,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                         setMode('withdraw');
                       }}
                       disabled={isSavingAddress || isAuthorizing}
-                      className="py-3.5 px-4 rounded-2xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-display font-bold transition-colors cursor-pointer"
+                      className="py-3 px-4 rounded-2xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-display font-bold transition-colors cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -596,21 +578,17 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   <button
                     type="submit"
                     disabled={!parsedInput.valid || isSavingAddress || isAuthorizing}
-                    className="flex-1 py-3.5 px-4 rounded-2xl bg-stone-950 hover:bg-black text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 py-3 px-4 rounded-2xl bg-stone-950 hover:bg-black text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isSavingAddress || isAuthorizing ? (
                       <>
                         <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        <span>Verifying Passkey…</span>
+                        <span>Verifying…</span>
                       </>
                     ) : (
                       <>
                         <Fingerprint className="w-4 h-4" />
-                        <span>
-                          {mode === 'edit'
-                            ? 'Update with Passkey'
-                            : 'Save & Verify with Passkey'}
-                        </span>
+                        <span>{mode === 'edit' ? 'Update Address' : 'Save Address'}</span>
                       </>
                     )}
                   </button>
@@ -641,11 +619,10 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                 </div>
 
                 {/* Saved Destination Card + Edit Button */}
-                <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3.5 flex items-center justify-between gap-2">
+                <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3 flex items-center justify-between gap-2">
                   <div className="min-w-0 space-y-0.5">
-                    <div className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center gap-1.5">
-                      <span>Destination (near.com Internal)</span>
-                      <Lock className="w-2.5 h-2.5 text-stone-400" />
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
+                      Destination
                     </div>
                     <div
                       className="text-xs font-mono font-bold text-stone-950 truncate"
@@ -658,8 +635,8 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                     <button
                       type="button"
                       onClick={handleCopyDestination}
-                      className="p-2 rounded-xl text-stone-500 hover:text-stone-900 hover:bg-stone-200/60 transition-colors cursor-pointer"
-                      title="Copy full near.com address"
+                      className="p-1.5 rounded-xl text-stone-500 hover:text-stone-900 hover:bg-stone-200/60 transition-colors cursor-pointer"
+                      title="Copy address"
                     >
                       {copiedDest ? (
                         <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -674,8 +651,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                         setAddressInput(destination.nearcomAddress);
                         setMode('edit');
                       }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white hover:border-stone-900 text-[11px] font-mono font-bold text-stone-800 hover:text-black transition-all cursor-pointer"
-                      title="Edit near.com withdrawal address (Passkey required)"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border border-stone-200 bg-white hover:border-stone-900 text-[11px] font-mono font-bold text-stone-800 hover:text-black transition-all cursor-pointer"
                     >
                       <Edit3 className="w-3 h-3" />
                       <span>Edit</span>
@@ -683,21 +659,18 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   </div>
                 </div>
 
-                {/* Intents-Supported Asset Selection */}
-                <div className="space-y-2">
+                {/* Asset Selection */}
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-600">
-                      Select Intents Asset
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
+                      Asset
                     </span>
                     <span className="text-[11px] font-mono text-stone-500">
-                      Available:{' '}
-                      <span className="font-bold text-stone-900">
-                        {formatTokenAmount(selectedToken?.balance || '0')} {selectedToken?.symbol}
-                      </span>
+                      Available: <span className="font-bold text-stone-900">{formatTokenAmount(selectedToken?.balance || '0')} {selectedToken?.symbol}</span>
                     </span>
                   </div>
 
-                  {/* One-tap quick pills for held / popular Intents assets */}
+                  {/* Quick pills */}
                   {quickTokens.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
                       {quickTokens.map((t) => {
@@ -716,7 +689,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-mono transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-stone-950 text-white border-stone-950 font-bold shadow-xs'
-                                : 'bg-white text-stone-800 border-stone-200 hover:border-stone-400'
+                                : 'bg-stone-50 text-stone-800 border-stone-200 hover:border-stone-400'
                             }`}
                           >
                             <TokenIcon symbol={t.symbol} iconUrl={t.iconUrl} size="sm" />
@@ -738,7 +711,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                 </div>
 
                 {/* Amount Input Box with AssetPicker */}
-                <div className="rounded-2xl border border-stone-200 bg-stone-50/70 p-4 space-y-3 focus-within:border-stone-900 focus-within:bg-white transition-colors">
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-3 focus-within:border-stone-900 focus-within:ring-1 focus-within:ring-stone-900/10 focus-within:bg-white transition-all shadow-xs">
                   <div className="flex items-center justify-between gap-3">
                     <input
                       type="text"
@@ -752,7 +725,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                         }
                       }}
                       placeholder="0.00"
-                      className="w-full bg-transparent text-2xl sm:text-3xl font-display font-extrabold text-stone-950 placeholder:text-stone-300 focus:outline-none tabular-nums"
+                      className="w-full bg-transparent text-2xl sm:text-3xl font-display font-extrabold text-stone-950 placeholder:text-stone-400 focus:outline-none tabular-nums"
                     />
                     {selectedToken && (
                       <AssetPicker
@@ -766,7 +739,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-stone-200/70">
+                  <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-stone-200">
                     <span className="text-xs font-mono text-stone-500">
                       {amountUsd !== null ? `≈ ${formatUsd(amountUsd)} USD` : '—'}
                     </span>
@@ -781,7 +754,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                           key={btn.label}
                           type="button"
                           onClick={() => handleSelectPercentage(btn.pct)}
-                          className="px-2 py-1 rounded-lg bg-white hover:bg-stone-900 hover:text-white border border-stone-200 text-[10px] font-mono font-bold text-stone-700 transition-colors cursor-pointer"
+                          className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-900 hover:text-white border border-stone-200 text-[10px] font-mono font-bold text-stone-700 transition-colors cursor-pointer"
                         >
                           {btn.label}
                         </button>
@@ -790,25 +763,13 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   </div>
                 </div>
 
-                {/* Route Summary */}
-                <div className="rounded-2xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 space-y-1.5 text-[11px] font-mono">
-                  <div className="flex items-center justify-between text-stone-600">
-                    <span>Settlement Rail</span>
-                    <span className="font-bold text-stone-900">
-                      Confidential Intents → near.com
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-stone-600">
-                    <span>Gas & Bridge Fee</span>
-                    <span className="font-bold text-emerald-700">100% Sponsored ($0.00)</span>
-                  </div>
+                {/* Concise Summary */}
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 flex items-center justify-between text-xs font-mono">
+                  <span className="text-stone-500">Fee: <strong className="text-emerald-700 font-bold">$0.00 (Sponsored)</strong></span>
                   {numericAmount > 0 && (
-                    <div className="flex items-center justify-between text-stone-900 pt-1 border-t border-stone-200/80">
-                      <span className="font-bold">You Receive on near.com</span>
-                      <span className="font-extrabold">
-                        {amount} {selectedToken?.symbol}
-                      </span>
-                    </div>
+                    <span className="text-stone-900 font-bold">
+                      Receive: {amount} {selectedToken?.symbol}
+                    </span>
                   )}
                 </div>
 
@@ -850,8 +811,8 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       ? 'Withdrawn to near.com!'
                       : 'Withdrawal Submitted!'}
                   </h3>
-                  <p className="text-xs text-stone-600 font-mono">
-                    {receipt.amount} {receipt.asset} → {shortenNearcomAddress(receipt.destinationAddress)}
+                  <p className="text-xs text-stone-500 font-mono break-all px-2">
+                    {receipt.amount} {cleanMemeSymbol(receipt.asset) || receipt.asset} → {shortenNearcomAddress(receipt.destinationAddress)}
                   </p>
                 </div>
 
@@ -859,24 +820,18 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   <div className="flex items-center justify-between px-4 py-2.5">
                     <span className="text-stone-500">Amount</span>
                     <span className="font-bold text-stone-950">
-                      {receipt.amount} {receipt.asset}
+                      {receipt.amount} {cleanMemeSymbol(receipt.asset) || receipt.asset}
                     </span>
                   </div>
                   <div className="flex items-center justify-between px-4 py-2.5 gap-3">
                     <span className="text-stone-500 flex-shrink-0">Destination</span>
-                    <span className="font-semibold text-stone-800 truncate" title={receipt.destinationAddress}>
+                    <span className="font-semibold text-stone-800 truncate max-w-[200px] text-right" title={receipt.destinationAddress}>
                       {shortenNearcomAddress(receipt.destinationAddress)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between px-4 py-2.5">
-                    <span className="text-stone-500">Rail</span>
-                    <span className="font-semibold text-emerald-700">
-                      Confidential Intents Internal
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between px-4 py-2.5">
                     <span className="text-stone-500">Status</span>
-                    <span className="font-bold text-stone-900">{receipt.status}</span>
+                    <span className="font-bold text-emerald-700">{receipt.status}</span>
                   </div>
                 </div>
 
@@ -912,14 +867,10 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
           isOpen={showConfirm}
           tone="financial"
           title="Confirm near.com Withdrawal"
-          description="Review your internal withdrawal details below. Confirming will prompt your device passkey to authorize the transfer."
+          description="Review details below. Confirming will prompt your device passkey."
           details={[
             {
-              label: 'Asset',
-              value: `${selectedToken.symbol} (NEAR Intents)`,
-            },
-            {
-              label: 'Withdraw Amount',
+              label: 'Withdraw',
               value: `${amount} ${selectedToken.symbol}${
                 amountUsd !== null ? ` (≈ ${formatUsd(amountUsd)})` : ''
               }`,
@@ -930,20 +881,10 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
               value: destination.nearcomAddress,
             },
             {
-              label: 'Route',
-              value: 'Confidential Intents → near.com Internal',
-            },
-            {
-              label: 'Fee',
-              value: '0.00 (100% Sponsored)',
-            },
-            {
-              label: 'You Receive',
-              value: `${amount} ${selectedToken.symbol}`,
-              emphasis: true,
+              label: 'Network Fee',
+              value: '0.00 (Sponsored)',
             },
           ]}
-          warning="Please verify that this near.com internal address belongs to you. Internal Intents transfers settle directly into the destination account and cannot be reversed."
           confirmLabel="Confirm with Passkey"
           cancelLabel="Back"
           isLoading={isWithdrawing || isAuthorizing}
