@@ -224,3 +224,27 @@ export interface AgentKey {
 export interface CreatedAgentKey extends AgentKey {
   key: string;
 }
+
+/** Passkey-verified near.com internal withdrawal destination. */
+export interface NearcomDestination {
+  nearcomAddress: string;
+  intentsAccountId: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface NearcomWithdrawResponse {
+  success: boolean;
+  withdrawalId: string;
+  status: 'COMPLETED' | 'PENDING';
+  txHash: string;
+  intentHash: string;
+  destinationAddress: string;
+  intentsAccountId: string;
+  asset: string;
+  amount: string;
+  privacy: 'confidential';
+  rail: 'nearcom_internal';
+  shareLink?: string;
+  message: string;
+}

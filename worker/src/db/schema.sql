@@ -318,3 +318,18 @@ CREATE INDEX IF NOT EXISTS idx_launchpad_token_bindings_pending
 CREATE INDEX IF NOT EXISTS idx_launchpad_token_bindings_claim
   ON launchpad_token_bindings(claim_json);
 
+-- ── near.com Internal Withdrawal Rail ──────────────────────────────────────
+-- Stores each user's passkey-verified near.com internal account destination
+-- (e.g. nearcom:0xb137a2f1054b5de422a8df801613d6722701163c).
+CREATE TABLE IF NOT EXISTS nearcom_withdraw_destinations (
+  x_id TEXT PRIMARY KEY,
+  x_handle TEXT NOT NULL,
+  nearcom_address TEXT NOT NULL,
+  intents_account_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_nearcom_destinations_handle
+  ON nearcom_withdraw_destinations(x_handle);
+

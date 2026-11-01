@@ -31,6 +31,7 @@ import {
 } from '../lib/api';
 import type { PaymentIntent } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
+import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
@@ -40,6 +41,7 @@ export const AppHome: React.FC = () => {
   const { user } = useXAuth();
   const { toast } = useToast();
   const {
+    tokens: paymentTokens,
     history,
     loadHistory,
     isLoadingHistory,
@@ -65,6 +67,7 @@ export const AppHome: React.FC = () => {
 
   const [hideBalance, setHideBalance] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState<boolean>(false);
 
   const handleManualRefresh = async () => {
     if (isRefreshing) return;
@@ -453,7 +456,7 @@ export const AppHome: React.FC = () => {
           )}
 
           {/* Quick Action Buttons */}
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
             <Link
               to="/app/send"
               className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
@@ -483,6 +486,22 @@ export const AppHome: React.FC = () => {
                 Any Chain
               </span>
             </Link>
+
+            <button
+              type="button"
+              onClick={() => setIsWithdrawModalOpen(true)}
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black text-center transition-all flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+            >
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black transition-colors">
+                Withdraw
+              </span>
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400">
+                near.com
+              </span>
+            </button>
 
             <Link
               to="/app/claim"
@@ -649,6 +668,15 @@ export const AppHome: React.FC = () => {
       <div className="mt-8">
         <FlowPulseWidget history={history} transactions={transactions} tokens={tokens} />
       </div>
+
+      <NearcomWithdrawModal
+        isOpen={isWithdrawModalOpen}
+        onClose={() => setIsWithdrawModalOpen(false)}
+        tokens={paymentTokens}
+        onSuccess={() => {
+          void handleManualRefresh();
+        }}
+      />
     </div>
   );
 };

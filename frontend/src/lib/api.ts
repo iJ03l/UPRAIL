@@ -11,6 +11,8 @@ import {
   WithdrawalReceipt,
   AgentKey,
   CreatedAgentKey,
+  NearcomDestination,
+  NearcomWithdrawResponse,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
 import { pruneStoredPasskeys } from './passkeyStorage';
@@ -1394,6 +1396,68 @@ export const api = {
       console.warn('Backend getWithdrawalReceipt error', e);
       return null;
     }
+  },
+
+  // ── near.com Internal Withdrawal Rail (Passkey-Gated) ──────────────────────
+
+  async getNearcomDestination(): Promise<{
+    configured: boolean;
+    destination: NearcomDestination | null;
+  }> {
+    const url = API_BASE
+      ? `${API_BASE}/api/claim/nearcom-destination`
+      : '/api/claim/nearcom-destination';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as any;
+      throw new Error(err.error || 'Failed to load near.com withdrawal destination');
+    }
+    return await res.json();
+  },
+
+  async saveNearcomDestination(params: {
+    address: string;
+    passkeyAssertion: unknown;
+  }): Promise<{
+    configured: boolean;
+    destination: NearcomDestination;
+  }> {
+    const url = API_BASE
+      ? `${API_BASE}/api/claim/nearcom-destination`
+      : '/api/claim/nearcom-destination';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as any;
+      throw new Error(err.error || 'Failed to save near.com withdrawal destination');
+    }
+    return await res.json();
+  },
+
+  async withdrawToNearcom(params: {
+    asset: string;
+    amount: string;
+    expectedDestination?: string;
+    passkeyAssertion: unknown;
+  }): Promise<NearcomWithdrawResponse> {
+    const url = API_BASE
+      ? `${API_BASE}/api/claim/nearcom-withdraw`
+      : '/api/claim/nearcom-withdraw';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as any;
+      throw new Error(err.error || 'near.com withdrawal failed');
+    }
+    return await res.json();
   },
 
   // Invite & Referral Endpoints

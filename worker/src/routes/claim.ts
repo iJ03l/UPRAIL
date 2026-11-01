@@ -48,6 +48,11 @@ import {
   waitForSettlement,
   scrubSettledPaymentLinks,
 } from '../services/confidentialRail';
+import {
+  getNearcomDestination,
+  saveNearcomDestination,
+  executeNearcomWithdrawal,
+} from '../services/nearcomWithdraw';
 
 export const claimRouter = new Hono<AppContext>();
 
@@ -1214,6 +1219,117 @@ claimRouter.get('/withdraw-chains', requireAuth({ passkeyVerified: true }), asyn
  */
 claimRouter.post('/withdraw', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), (c) =>
   handleWithdraw(c)
+);
+
+/**
+ * GET /api/claim/nearcom-destination
+ * Returns the authenticated user's configured near.com internal withdrawal destination.
+ */
+claimRouter.get('/nearcom-destination', requireAuth({ passkeyVerified: true }), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const destination = await getNearcomDestination(c.env, session.x_id);
+    return c.json({
+      configured: Boolean(destination),
+      destination,
+    });
+  } catch (err) {
+    console.error('[nearcom-destination] GET failed:', err);
+    return c.json<ErrorResponse>(
+      { error: 'Failed to load near.com withdrawal destination', code: 'NEARCOM_READ_FAILED' },
+      500
+    );
+  }
+});
+
+/**
+ * POST /api/claim/nearcom-destination
+ * Sets or updates the user's near.com internal withdrawal destination.
+ * Strictly passkey-gated so a session cookie alone can never change the withdrawal address.
+ */
+claimRouter.post(
+  '/nearcom-destination',
+  requireAuth({ passkeyVerified: true }),
+  requirePasskeyAuth(),
+  async (c) => {
+    try {
+      const session = c.get('session')!;
+      const body = (c.get('parsedBody' as any) ||
+        (await c.req.json<{ address?: string }>().catch(() => null))) as {
+        address?: string;
+      } | null;
+
+      const rawAddress = typeof body?.address === 'string' ? body.address : '';
+      const result = await saveNearcomDestination(c.env, {
+        xId: session.x_id,
+        xHandle: session.x_handle,
+        rawAddress,
+      });
+
+      if (!result.ok) {
+        return c.json<ErrorResponse>(
+          { error: result.error, code: result.code },
+          result.status
+        );
+      }
+
+      return c.json({
+        configured: true,
+        destination: result.destination,
+      });
+    } catch (err) {
+      console.error('[nearcom-destination] POST failed:', err);
+      return c.json<ErrorResponse>(
+        { error: 'Failed to save near.com withdrawal destination', code: 'SAVE_DESTINATION_FAILED' },
+        500
+      );
+    }
+  }
+);
+
+/**
+ * POST /api/claim/nearcom-withdraw
+ * Executes a passkey-authorized internal withdrawal directly to the user's saved
+ * near.com internal account over the Confidential Intents rail.
+ */
+claimRouter.post(
+  '/nearcom-withdraw',
+  requireAuth({ passkeyVerified: true }),
+  requirePasskeyAuth(),
+  async (c) => {
+    try {
+      const session = c.get('session')!;
+      const body = (c.get('parsedBody' as any) ||
+        (await c.req
+          .json<{
+            asset?: string;
+            amount?: string;
+            expectedDestination?: string;
+          }>()
+          .catch(() => null))) as {
+        asset?: string;
+        amount?: string;
+        expectedDestination?: string;
+      } | null;
+
+      const result = await executeNearcomWithdrawal(c.env, session, {
+        asset: body?.asset || 'usdc',
+        amount: body?.amount,
+        expectedDestination: body?.expectedDestination,
+      });
+
+      return c.json(result.body as any, result.httpStatus as any);
+    } catch (err) {
+      console.error('[nearcom-withdraw] POST failed:', err);
+      return c.json<ErrorResponse>(
+        {
+          error: `near.com withdrawal failed: ${publicErrorMessage(err, 'Internal error')}`,
+          code: 'WITHDRAWAL_FAILED',
+        },
+        500
+      );
+    }
+  }
 );
 
 /**
