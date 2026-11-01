@@ -28,6 +28,12 @@ export interface GlitchLogoProps {
   hideWordmarkOnMobile?: boolean;
 }
 
+const ASCII_GLYPHS = ['/', '\\', '|', '_', '[', ']', '{', '}', '<', '>', '~', '!', '?', '#', '$', '%', '&', '*', '^', '=', '+', '0', '1', '░', '▒', '▓', '█'];
+const ASCII_ICONS = ['//', '[//]', '[/]', '░▒', '<//>', '[▲]', '[#]', '||', '//'];
+const ASCII_BADGES = ['[::]', '[01]', '[#]', '[!!]', '[OK]'];
+const ASCII_STREAMS = ['0x9A', '1011', '0100', 'SYNC', 'RAIL', 'OK'];
+const TARGET_WORD = 'UPRAIL';
+
 export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   href = '/',
   size = 'md',
@@ -42,31 +48,82 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
   hideWordmarkOnMobile = false,
 }) => {
   const [isGlitching, setIsGlitching] = useState<boolean>(false);
-  const glitchTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [asciiWordmark, setAsciiWordmark] = useState<string>(TARGET_WORD);
+  const [asciiIcon, setAsciiIcon] = useState<string>('//');
+  const [asciiBadge, setAsciiBadge] = useState<string>(badge || '');
+  const [asciiStream, setAsciiStream] = useState<string>('0x9A');
+
+  const glitchFrameRef = useRef<number | null>(null);
   const intervalTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { resolved } = useTheme();
-  // 'auto' flips the wordmark with the active theme so the (black) wordmark is
+  // 'auto' flips the wordmark with the active theme so the wordmark is
   // never left invisible against the dark background.
   const effectiveVariant = variant === 'auto' ? (resolved === 'dark' ? 'dark' : 'light') : variant;
 
   const burstInterval = interval || fullDuration || 6500;
 
-  // Trigger a brief cinematic glitch sequence (450ms) - strictly zero layout reflow
+  // Trigger an authentic cyber ASCII glitch burst (~460ms) - strictly zero layout reflow
   const triggerGlitch = () => {
     if (isGlitching) return;
     setIsGlitching(true);
 
-    if (glitchTimerRef.current) {
-      clearTimeout(glitchTimerRef.current);
+    if (typeof window === 'undefined') return;
+
+    // Check for prefers-reduced-motion
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setTimeout(() => setIsGlitching(false), 200);
+      return;
     }
 
-    glitchTimerRef.current = setTimeout(() => {
-      setIsGlitching(false);
-    }, 450);
+    const startTime = performance.now();
+    const duration = 460;
+
+    const frameStep = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+
+      if (progress >= 1) {
+        setIsGlitching(false);
+        setAsciiWordmark(TARGET_WORD);
+        setAsciiIcon('//');
+        setAsciiBadge(badge || '');
+        if (glitchFrameRef.current) {
+          cancelAnimationFrame(glitchFrameRef.current);
+          glitchFrameRef.current = null;
+        }
+        return;
+      }
+
+      // Step ASCII icon glyph
+      const iconIdx = Math.floor(progress * ASCII_ICONS.length);
+      setAsciiIcon(ASCII_ICONS[iconIdx] || '//');
+
+      // Step ASCII badge
+      const badgeIdx = Math.floor(progress * ASCII_BADGES.length);
+      setAsciiBadge(badge ? ASCII_BADGES[badgeIdx] || '[01]' : '');
+
+      // Step ASCII telemetry
+      const streamIdx = Math.floor(progress * ASCII_STREAMS.length);
+      setAsciiStream(ASCII_STREAMS[streamIdx] || '0x9A');
+
+      // Scramble wordmark: characters progressively resolve towards completion
+      const scrambled = TARGET_WORD.split('').map((char, i) => {
+        const lockProgress = (i + 1) / (TARGET_WORD.length + 0.8);
+        if (progress > lockProgress && Math.random() > 0.12) {
+          return char;
+        }
+        return ASCII_GLYPHS[Math.floor(Math.random() * ASCII_GLYPHS.length)];
+      }).join('');
+
+      setAsciiWordmark(scrambled);
+      glitchFrameRef.current = requestAnimationFrame(frameStep);
+    };
+
+    glitchFrameRef.current = requestAnimationFrame(frameStep);
   };
 
-  // Autonomous cinematic glitch interval
+  // Autonomous periodic ASCII glitch burst
   useEffect(() => {
     if (mode === 'icon-only' || mode === 'full-only') return;
 
@@ -76,7 +133,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
 
     return () => {
       if (intervalTimerRef.current) clearInterval(intervalTimerRef.current);
-      if (glitchTimerRef.current) clearTimeout(glitchTimerRef.current);
+      if (glitchFrameRef.current) cancelAnimationFrame(glitchFrameRef.current);
     };
   }, [mode, burstInterval]);
 
@@ -99,6 +156,8 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
       wordmark: 'h-4.5 max-w-[70px]',
       gap: 'space-x-1.5',
       badge: 'text-[9px] px-1 py-0.2',
+      asciiIconText: 'text-[11px]',
+      asciiWordmarkText: 'text-[10px] sm:text-[11px]',
     },
     md: {
       container:
@@ -111,6 +170,8 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
       wordmark: 'h-5.5 sm:h-6.5 max-w-[88px] sm:max-w-[105px]',
       gap: 'space-x-2 sm:space-x-2.5',
       badge: 'text-[10px] px-1.5 py-0.5',
+      asciiIconText: 'text-xs sm:text-sm',
+      asciiWordmarkText: 'text-xs sm:text-[13px]',
     },
     lg: {
       container:
@@ -123,6 +184,8 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
       wordmark: 'h-7.5 sm:h-8.5 max-w-[115px] sm:max-w-[135px]',
       gap: 'space-x-2.5 sm:space-x-3',
       badge: 'text-xs px-2 py-0.5',
+      asciiIconText: 'text-sm sm:text-base',
+      asciiWordmarkText: 'text-sm sm:text-base',
     },
     xl: {
       container:
@@ -135,6 +198,8 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
       wordmark: 'h-9.5 sm:h-10.5 max-w-[140px] sm:max-w-[165px]',
       gap: 'space-x-3 sm:space-x-3.5',
       badge: 'text-xs px-2 py-1',
+      asciiIconText: 'text-base sm:text-lg',
+      asciiWordmarkText: 'text-base sm:text-lg',
     },
   }[size];
 
@@ -154,122 +219,107 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
       title="UPRAIL"
     >
       {/* 
-        === PRIMARY LAYER === 
+        === PRIMARY LOGO SURFACE === 
       */}
       <div
-        className={`relative z-10 flex items-center ${dimensions.gap} flex-shrink-0 transition-transform duration-150 ${
-          isGlitching ? 'glitch-anim-active' : ''
+        className={`relative z-10 flex items-center ${dimensions.gap} flex-shrink-0 transition-transform duration-100 ${
+          isGlitching ? 'ascii-glitch-active' : ''
         }`}
       >
-        {/* Brand Icon (Universal Orange Track) */}
+        {/* Brand Icon: Switches between authentic PNG and glowing ASCII rail glyphs */}
         <div
-          className={`relative flex-shrink-0 ${dimensions.icon} flex items-center justify-center transition-all duration-300 ${
-            isGlitching ? 'icon-beacon-glow scale-105' : ''
-          }`}
+          className={`relative flex-shrink-0 ${dimensions.icon} flex items-center justify-center transition-all duration-150`}
         >
           <img
             src="/brand/uprail-icon.png"
             alt="UPRAIL"
-            className="w-full h-full object-contain filter drop-shadow-xs"
+            className={`w-full h-full object-contain filter drop-shadow-xs transition-opacity duration-75 ${
+              isGlitching ? 'opacity-0 scale-95' : 'opacity-100 scale-100'
+            }`}
             draggable={false}
           />
+          {isGlitching && (
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
+            >
+              <span
+                className={`font-mono font-black text-[#E05326] ${dimensions.asciiIconText} tracking-tighter drop-shadow-[0_0_8px_rgba(224,83,38,0.9)]`}
+              >
+                {asciiIcon}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* Wordmark ("uprail ™") - Always stable in box, zero layout shift */}
+        {/* Wordmark: Switches between brand wordmark PNG and dynamic ASCII scramble */}
         {showWordmark && (
           <div
-            className={`${wordmarkVisibilityClass} items-center flex-shrink-0 transition-opacity duration-200 ${
-              isGlitching ? 'opacity-90' : 'opacity-100'
-            }`}
+            className={`${wordmarkVisibilityClass} relative items-center flex-shrink-0`}
           >
             <img
               src={wordmarkSrc}
               alt="uprail"
-              className={`${dimensions.wordmark} w-auto object-contain flex-shrink-0`}
+              className={`${dimensions.wordmark} w-auto object-contain flex-shrink-0 transition-opacity duration-75 ${
+                isGlitching ? 'opacity-0' : 'opacity-100'
+              }`}
               draggable={false}
             />
+            {isGlitching && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-0 flex items-center pointer-events-none select-none overflow-hidden"
+              >
+                <span
+                  className={`font-mono font-black text-[#E05326] ${dimensions.asciiWordmarkText} uppercase tracking-wider whitespace-nowrap drop-shadow-[0_0_8px_rgba(224,83,38,0.85)]`}
+                >
+                  {asciiWordmark}
+                </span>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Optional Badge (e.g. "APP") */}
+        {/* Optional Badge (e.g. "APP"): Scrambles into ASCII on glitch */}
         {badge && showWordmark && (
           <div className={`${wordmarkVisibilityClass} items-center flex-shrink-0`}>
             <span
-              className={`font-mono font-bold bg-stone-100 text-stone-800 border border-stone-200 rounded-md uppercase tracking-wider flex-shrink-0 ${dimensions.badge}`}
+              className={`font-mono font-bold ${
+                isGlitching
+                  ? 'bg-[#E05326]/10 text-[#E05326] border-[#E05326]/40'
+                  : 'bg-stone-100 text-stone-800 border-stone-200'
+              } border rounded-md uppercase tracking-wider flex-shrink-0 transition-colors ${dimensions.badge}`}
             >
-              {badge}
+              {isGlitching ? asciiBadge : badge}
             </span>
           </div>
         )}
       </div>
 
       {/* 
-        === CINEMATIC GLITCH DISRUPTION LAYERS (Active during signal disruption) === 
+        === CYBER ASCII ATMOSPHERIC TELEMETRY (Active strictly during glitch burst) === 
       */}
       {isGlitching && (
         <>
-          {/* Slice Tearing Layer 1 (Red/Orange chromatic split) */}
+          {/* Micro Telemetry Stream */}
           <div
             aria-hidden="true"
-            className={`absolute inset-0 z-20 flex items-center ${dimensions.gap} pointer-events-none glitch-slice-layer-1`}
-            style={{
-              filter: 'drop-shadow(-3px 0 0 rgba(224, 83, 38, 0.95))',
-            }}
+            className="absolute -top-3 left-0 right-0 overflow-hidden h-2.5 pointer-events-none opacity-60 font-mono text-[7px] sm:text-[8px] tracking-widest text-[#E05326] flex items-center justify-between select-none"
           >
-            <div className={`flex-shrink-0 ${dimensions.icon}`}>
-              <img
-                src="/brand/uprail-icon.png"
-                alt=""
-                className="w-full h-full object-contain"
-              />
-            </div>
-            {showWordmark && (
-              <div className={`${wordmarkVisibilityClass} items-center flex-shrink-0`}>
-                <img
-                  src={wordmarkSrc}
-                  alt=""
-                  className={`${dimensions.wordmark} w-auto object-contain flex-shrink-0`}
-                />
-              </div>
-            )}
+            <span>//RAIL</span>
+            <span>{asciiStream}</span>
           </div>
 
-          {/* Slice Tearing Layer 2 (Cyan/Blue chromatic split) */}
+          {/* Micro CRT Scanline Laser Sweep */}
           <div
             aria-hidden="true"
-            className={`absolute inset-0 z-20 flex items-center ${dimensions.gap} pointer-events-none glitch-slice-layer-2`}
-            style={{
-              filter: 'drop-shadow(3px 0 0 rgba(0, 220, 255, 0.85))',
-            }}
-          >
-            <div className={`flex-shrink-0 ${dimensions.icon}`}>
-              <img
-                src="/brand/uprail-icon.png"
-                alt=""
-                className="w-full h-full object-contain"
-              />
-            </div>
-            {showWordmark && (
-              <div className={`${wordmarkVisibilityClass} items-center flex-shrink-0`}>
-                <img
-                  src={wordmarkSrc}
-                  alt=""
-                  className={`${dimensions.wordmark} w-auto object-contain flex-shrink-0`}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Scanning Laser Beam */}
-          <div
-            aria-hidden="true"
-            className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#E05326] to-transparent pointer-events-none z-30 glitch-laser-beam shadow-[0_0_8px_#E05326]"
+            className="absolute left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#E05326] to-transparent pointer-events-none z-30 glitch-laser-beam shadow-[0_0_6px_#E05326]"
           />
 
-          {/* Micro CRT Scanlines Overlay */}
+          {/* Micro CRT Terminal Scanlines */}
           <div
             aria-hidden="true"
-            className="absolute inset-0 z-20 pointer-events-none glitch-scanlines opacity-40 rounded-sm"
+            className="absolute inset-0 z-20 pointer-events-none glitch-scanlines opacity-30 rounded-sm"
           />
         </>
       )}
