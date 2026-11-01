@@ -6,8 +6,7 @@ import { Link, useLocation } from '@/lib/router';
 const LINKS: { to: string; label: string }[] = [
   { to: '/docs', label: 'Overview' },
   { to: '/docs/near', label: 'near.com Integration' },
-  { to: '/docs/agents', label: 'AI Chat payments' },
-  { to: '/docs/mcp', label: 'Connect a chat' },
+  { to: '/docs/agents', label: 'AI Agents & MCP' },
   { to: '/docs/fees', label: 'Creator fees' },
 ];
 
@@ -18,7 +17,7 @@ export const DocsNav: React.FC = () => {
   return (
     <nav className="space-y-0.5">
       {LINKS.map((link) => {
-        const active = path === link.to;
+        const active = path === link.to || (link.to === '/docs/agents' && path === '/docs/mcp');
         return (
           <Link
             key={link.to}

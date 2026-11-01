@@ -4,9 +4,9 @@ import { DocsNav } from '@/components/docs/DocsNav';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://docs.uprail.world'),
-  title: 'UPRAIL Docs — AI Chat payments, connector setup & creator fees',
+  title: 'UPRAIL Docs — AI Agents & MCP payments, near.com rail & creator fees',
   description:
-    'Documentation for UPRAIL AI chat payments (Grok Bot, Meta Muse, OpenAI Dot, ChatGPT, Claude, Cursor), per-chat connector setup, and launchpad creator-fee routing to an X handle.',
+    'Documentation for UPRAIL AI Agents & Model Context Protocol payments (Grok, Meta Muse, ChatGPT, Claude, Cursor), near.com routing, and launchpad creator-fee routing to an X handle.',
 };
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
@@ -31,10 +31,7 @@ export default function DocsLayout({ children }: { children: React.ReactNode }) 
           </a>
           <div className="flex items-center space-x-4 text-xs font-mono font-bold">
             <a href="/docs/agents" className="hidden sm:inline text-stone-500 hover:text-stone-950">
-              AI Chat
-            </a>
-            <a href="/docs/mcp" className="hidden sm:inline text-stone-500 hover:text-stone-950">
-              MCP
+              AI Agents &amp; MCP
             </a>
             <a
               href="https://app.uprail.world"

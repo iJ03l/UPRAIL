@@ -35,7 +35,7 @@ import type { AgentKey, CreatedAgentKey } from '../types';
 
 const MCP_ENDPOINT = 'https://api.uprail.world/api/mcp';
 const OPENAPI_SPEC_URL = 'https://api.uprail.world/api/agent/openapi.json';
-const DOCS_SETUP_URL = 'https://docs.uprail.world/docs/mcp';
+const DOCS_SETUP_URL = 'https://docs.uprail.world/docs/agents';
 const CLAUDE_CONNECTORS_URL = 'https://claude.ai/customize/connectors';
 const CHATGPT_CONNECTORS_URL = 'https://chatgpt.com/plugins';
 const GROK_CONNECTORS_URL = 'https://grok.com/connectors';

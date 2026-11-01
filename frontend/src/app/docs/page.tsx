@@ -13,16 +13,16 @@ export default function DocsOverviewPage() {
         </h1>
         <p className="text-base text-stone-600 leading-relaxed max-w-2xl">
           UPRAIL moves value between X handles on NEAR Confidential Intents — no wallet, no seed
-          phrase. Connect <strong className="text-stone-900">any AI chat interface</strong> (Grok Bot,
-          Meta Muse, OpenAI Dot / ChatGPT, Claude, Cursor) to send, receive, and check payments, or route{' '}
+          phrase. Connect <strong className="text-stone-900">any AI chat interface or autonomous agent</strong> (Claude,
+          ChatGPT, Grok, Meta Muse, Cursor) to send, receive, and check payments, or route{' '}
           <strong className="text-stone-900">launchpad creator fees</strong> straight to an X handle.
         </p>
       </header>
 
-      <section className="grid sm:grid-cols-2 gap-4">
+      <section className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <a
           href="/docs/near"
-          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
+          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2 bg-white"
         >
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase tracking-wider">
@@ -41,12 +41,16 @@ export default function DocsOverviewPage() {
 
         <a
           href="/docs/agents"
-          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
+          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2 bg-white"
         >
-          <h2 className="font-display font-extrabold text-stone-950">AI Chat payments</h2>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-800 border border-orange-200 uppercase tracking-wider">
+              Post-Frontend Rail
+            </span>
+          </div>
+          <h2 className="font-display font-extrabold text-stone-950">AI Agents &amp; MCP</h2>
           <p className="text-sm text-stone-600">
-            Passkey-authorized keys with per-payment and daily USD limits that let you send,
-            receive, and check payments from any AI chat.
+            Connect Claude, ChatGPT, Grok, Meta Muse, or Cursor via OAuth 2.1 &amp; Model Context Protocol with biometric spend caps.
           </p>
           <span className="text-[11px] font-mono font-bold text-stone-500">
             /docs/agents →
@@ -54,23 +58,14 @@ export default function DocsOverviewPage() {
         </a>
 
         <a
-          href="/docs/mcp"
-          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
-        >
-          <h2 className="font-display font-extrabold text-stone-950">Connect your chat</h2>
-          <p className="text-sm text-stone-600">
-            Step-by-step setup for Claude, ChatGPT, Grok, Meta Muse, Cursor, and any other chat that
-            supports a remote connector.
-          </p>
-          <span className="text-[11px] font-mono font-bold text-stone-500">
-            /docs/mcp →
-          </span>
-        </a>
-
-        <a
           href="/docs/fees"
-          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2"
+          className="block p-5 rounded-2xl border border-stone-200 hover:border-stone-900 transition-colors space-y-2 bg-white"
         >
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 uppercase tracking-wider">
+              Launchpads
+            </span>
+          </div>
           <h2 className="font-display font-extrabold text-stone-950">Creator fees</h2>
           <p className="text-sm text-stone-600">
             Launchpads keep their own fee receiver. A payout meant for an X handle goes out
@@ -87,14 +82,18 @@ export default function DocsOverviewPage() {
         <p className="text-sm text-stone-600 leading-relaxed">
           Every surface uses the same confidential settlement primitive: resolve an X handle, and
           either deliver directly to its NEAR Intents vault (if already activated) or escrow the
-          funds until the recipient receives it with a passkey.
+          funds until the recipient claims it with a hardware passkey.
         </p>
         <Callout>
           <strong className="text-stone-900">New to UPRAIL?</strong> Start with{' '}
           <a className="text-stone-900 underline" href="/docs/agents">
-            AI Chat payments
+            AI Agents &amp; MCP
           </a>{' '}
-          to create a key, then follow the chat setup guide.
+          to connect your AI assistant, or view the{' '}
+          <a className="text-stone-900 underline" href="/docs/near">
+            near.com Integration guide
+          </a>{' '}
+          to link your personal near.com wallet.
         </Callout>
       </section>
     </article>

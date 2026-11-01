@@ -16,7 +16,7 @@
 
 1. **Public blockchains expose every financial relationship.** Standard transfers leak the sender address, recipient address, token, and exact amount on public explorers, turning a single peer transfer or creator payout into permanent wallet-graph surveillance.
 2. **Sending crypto requires the recipient to already have a wallet.** Senders must ask for a chain-specific address (`0x...`, `.near`, Solana base58) and worry about bridging and gas before a transfer can happen.
-3. **AI agents and token launchpads lack safe, identity-native payment primitives.** Giving an AI assistant raw private keys risks catastrophic balance drain, while token launchpads require creators to hardcode public wallets upfront instead of routing fees directly to an X identity.
+3. **The post-frontend reality lacks safe, autonomous payment rails.** In the near future, users will not interact with traditional web frontends: AI agents (Claude, ChatGPT, Grok, Cursor, autonomous bots) will orchestrate commerce, negotiate deals, and move value on our behalf. Yet today, giving an AI assistant raw private keys risks catastrophic wallet drain, while token launchpads require creators to hardcode public wallets upfront instead of routing fees directly to an X identity.
 4. **near.com and cross-chain intent protocols require interactive, rotating deposit sessions.** On `near.com` (and Defuse / 1Click), cross-chain deposit addresses are ephemeral, session-bound, and rotating. Only the authenticated account owner sitting at the terminal can generate a quote and fund their own account. You cannot publish a permanent address on your social profile, invoice, or AI agent configuration for third parties, friends, or clients to deposit funds to you asynchronously.
 
 ---
@@ -30,7 +30,7 @@ UPRAIL bridges this gap by mapping any X handle (`@handle`) to a deterministic, 
 - **Passkey + X OAuth 2.0 onboarding (zero seed phrases):** Recipients sign in with X OAuth 2.0 PKCE and confirm with a hardware WebAuthn P-256 passkey (Touch ID / Face ID / YubiKey). UPRAIL sponsors 100% of NEAR account creation, storage deposits, and execution gas.
 - **Confidential execution & unlinked escrow claims:** When routed through NEAR Confidential Intents, balances and swap legs settle inside the confidential layer. Escrowed claims settle from pooled escrow's confidential balance to the recipient's vault, breaking onchain linkability between sender and recipient.
 - **Cross-chain "Send to Wallet" across 35+ blockchains:** Users can withdraw their balance to any external wallet on NEAR, Ethereum, Base, Arbitrum, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and 25+ other chains via 1Click.
-- **Policy-bounded AI Agent Payments (OAuth 2.1 + MCP):** Users connect Claude, ChatGPT, Grok, or Cursor via OAuth 2.1 + PKCE or scoped Bearer keys with Passkey-approved per-transaction and daily USD spend caps enforced atomically.
+- **Built for the Post-Frontend Era (OAuth 2.1 + MCP):** Because users won't interact with frontends in the future, UPRAIL integrated the agent value rail from day one. Users connect Claude, ChatGPT, Grok, Meta Muse, or Cursor via OAuth 2.1 + PKCE or scoped Bearer keys with passkey-bounded per-transaction and daily USD spend caps enforced atomically—enabling AI agents to transact autonomously without seed phrases or raw key custody.
 - **Launchpad Creator-Fee Routing:** Token launchpads route creator fees directly to an X identity by sending transfers to escrow with the target handle memo, crediting the creator onchain automatically.
 
 ---
@@ -80,12 +80,24 @@ When a sender initiates a transfer, the system generates a cryptographically sig
   - **Edit Protection:** Updating or replacing the saved `near.com` withdrawal destination is strictly gated by a fresh passkey challenge to protect against unauthorized modification.
 - **Cross-Chain Withdrawals ("Send to Wallet"):** In addition to internal `near.com` routing, users can withdraw any asset from their vault to an external address across **35+ blockchains** (NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Stellar, Dogecoin, Litecoin, Zcash, Starknet, Hyperliquid, Monad, Berachain, etc.) with chain-specific address validation and atomic state reservation.
 
-### 6. AI Agent Payment Rail & OAuth 2.1 Remote MCP Server
+### 6. AI Agent Payment Rail & OAuth 2.1 Remote MCP Server (The Post-Frontend Thesis)
+
+> **The Post-Frontend Thesis:** In the coming era, users will rarely interact with traditional web frontends. The future of software is conversational and autonomous — where AI agents negotiate, orchestrate workflows, tip creators, purchase compute, split bounties, and settle transactions on our behalf. But an agent that cannot move value is just an observer, while giving an LLM unconstrained access to a raw crypto wallet is a fatal security flaw. From day one, UPRAIL was built with this post-frontend reality in mind: we integrated the agentic value railway directly into the protocol's foundation, letting autonomous models transact with cryptographic safety, biometric spend limits, and zero seed phrases.
+
 UPRAIL includes a full **OAuth 2.1 Authorization Server** and **Streamable HTTP MCP Server** (`2025-06-18`) at `https://api.uprail.world/api/mcp`:
-- **OAuth 2.1 + Passkey Consent (`/authorize`):** Supports RFC 8414 & RFC 9728 discovery, Dynamic Client Registration, and PKCE S256. Users authenticate with X + WebAuthn Passkey and set mandatory per-payment USD and daily USD spend limits.
-- **7 MCP Tools:** `pay_handle` (supports single and batch sends; returns claim/share links and prefilled X post intent URLs), `check_approval`, `withdraw_to_wallet`, `receive_payment`, `get_balance`, `list_payments`, and `resolve_handle`.
-- **Share Links & Multi-Account Instant Passkey Approvals:** Every agent send returns share links, claim links, and prefilled X post intent URLs. When a batch send to multiple accounts exceeds configured guardrails, the agent receives an instant authorization link (`/approve?id=...`). The user signs with Touch ID / Face ID via WebAuthn to authorize and execute the full batch atomically.
-- **Fail-Closed Spend Policy:** Prices tokens in USD via a live oracle, reserves daily spend atomically before signing, and enforces idempotency locks so retried agent tool calls cannot double-pay.
+- **The Railway for Autonomous Agents:** Rather than forcing humans to sit at terminals and click through transaction forms, users connect Claude, ChatGPT, Grok, Meta Muse, or Cursor directly to UPRAIL via open standards (OAuth 2.1 PKCE + Model Context Protocol).
+- **Zero Raw Key Exposure:** Agents never touch or store private keys. Instead, they receive revocable, policy-bounded OAuth bearer grants authorized by the user's hardware passkey (Touch ID / Face ID / WebAuthn).
+- **Biometric Policy Boundaries & Spend Caps:** Users define strict, immutable guardrails during connection: a maximum USD limit per individual payment and an aggregate daily USD spend cap. Every tool call pre-checks and reserves quota atomically against live oracle pricing.
+- **7 MCP Tools for Autonomous Commerce:**
+  1. `pay_handle`: Send crypto confidentially to any X handle (single or batch) with automated claim links and prefilled X post intent URLs.
+  2. `check_approval`: Query the resolution status of batch or policy-overflow authorization tickets.
+  3. `withdraw_to_wallet`: Withdraw funds to any external address across 35+ blockchains or internally to near.com.
+  4. `receive_payment`: Inspect deposit addresses, pending incoming transfers, or shareable payment links.
+  5. `get_balance`: Check public, confidential, and total balances across all supported assets.
+  6. `list_payments`: Audit recent sent and received payments with full transaction telemetry.
+  7. `resolve_handle`: Resolve whether an X identity has an active UPRAIL vault or routes through escrow.
+- **Human-in-the-Loop Instant Passkey Escalation (`/approve`):** When an agent needs to execute an anomalous high-value batch transfer or exceed its daily limit, it yields an authorization ticket link (`/approve?id=...`). The user reviews the breakdown on their device, confirms with Face ID or fingerprint via WebAuthn, and the agent's intent executes atomically on NEAR.
+- **Fail-Closed Spend Policy & Anti-Replay:** Live oracle token pricing, atomic database reservations before signing intents, and idempotency locks prevent retried prompts from causing double-spends or prompt-injection drains.
 
 ### 7. Launchpad Creator-Fee Routing
 Launchpads and DEX pools (Nearly, JustHoot v2, and Intear Launchpad on `launch.intear.near` / `dex.intear.near`) keep their own fee receiver. When a payout should reach an X handle, their adapter or keeper sends the transfer to escrow with the target handle memo (`Fees to @handle via UPRAIL`), and UPRAIL automatically verifies the onchain receipt and credits the creator's vault.
