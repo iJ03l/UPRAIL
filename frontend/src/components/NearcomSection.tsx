@@ -143,13 +143,13 @@ export const NearcomSection: React.FC = () => {
         backgroundSize: '20px 20px',
       }}
     >
-      <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 relative z-10">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-8 lg:gap-12">
+      <div className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 relative z-10">
+        <div className="flex flex-col lg:flex-row items-center gap-8 lg:gap-10 xl:gap-14 w-full">
           {/* 
-            LEFT: The Master Hardware Schematic Card (Black Obsidian Card on NEAR Green)
+            LEFT: The Master Hardware Schematic Card (Fullwidth on Desktop)
           */}
-          <div className="w-full lg:w-7/12 flex-1 min-w-0">
-            <div className="rounded-3xl border-2 border-black bg-[#0A0807] p-4 sm:p-6 space-y-3.5 shadow-2xl overflow-hidden relative">
+          <div className="w-full lg:flex-1 min-w-0">
+            <div className="w-full rounded-3xl border-2 border-black bg-[#0A0807] p-4 sm:p-6 lg:p-7 space-y-4 shadow-2xl relative">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-800/80 pb-3 text-xs font-mono">
                 <div className="flex items-center space-x-2">
                   <span className="h-2 w-2 rounded-full bg-[#00EC97] animate-pulse" />
@@ -164,9 +164,9 @@ export const NearcomSection: React.FC = () => {
                 </div>
               </div>
 
-              {/* Desktop & Tablet ASCII (126 columns, hidden on mobile) */}
+              {/* Desktop & Tablet ASCII (126 columns, fills available card width) */}
               <div className="hidden md:block overflow-x-auto py-2 select-all scrollbar-thin scrollbar-thumb-stone-800">
-                <pre className="font-mono text-[9.5px] lg:text-[10px] xl:text-[11px] leading-tight text-[#00EC97] font-medium whitespace-pre">
+                <pre className="font-mono text-[8.5px] sm:text-[9.5px] lg:text-[10px] xl:text-[11.5px] 2xl:text-[13px] leading-tight text-[#00EC97] font-medium whitespace-pre w-full">
                   {desktopLines.join('\n')}
                 </pre>
               </div>
@@ -199,7 +199,7 @@ export const NearcomSection: React.FC = () => {
           {/* 
             RIGHT: The Technical Writeup
           */}
-          <div className="w-full lg:w-5/12 space-y-4 text-left">
+          <div className="w-full lg:w-96 xl:w-[28rem] 2xl:w-[32rem] flex-shrink-0 space-y-4 text-left">
             <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-black tracking-tight text-black leading-[1.05]">
               The public adapter to privacy
             </h2>
