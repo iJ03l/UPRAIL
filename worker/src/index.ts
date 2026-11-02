@@ -217,6 +217,9 @@ apiRouter.route('/onchain', onchainRouter);
 apiRouter.get('/auth-challenge', requireAuth(), issueTxChallenge);
 apiRouter.post('/auth-challenge', requireAuth(), issueTxChallenge);
 
+// System health & SITREP outage communications
+apiRouter.route('/system', healthRouter);
+
 app.route('/api', apiRouter);
 
 // Dynamic social cards for share links (claim / invite / receipt).

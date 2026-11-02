@@ -8,6 +8,7 @@ import { SettingsSidebar } from './SettingsSidebar';
 import { QuantusInteractiveCanvas } from './QuantusInteractiveCanvas';
 import { InviteGateModal } from './InviteGateModal';
 import { GlitchLogo } from './GlitchLogo';
+import { SituationReportBanner } from './SituationReportBanner';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -21,6 +22,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
     <div className="min-h-screen bg-surface text-stone-900 flex flex-col font-sans selection:bg-black selection:text-white relative">
       {/* Quantus Background Canvas (Fullscreen on dashboard/app) */}
       <QuantusInteractiveCanvas fullScreenRoam={true} />
+
+      {/* Outage Communications & Live Situation Report */}
+      <SituationReportBanner />
 
       {/* 
         Clean, properly placed top header (no bloated navbar)

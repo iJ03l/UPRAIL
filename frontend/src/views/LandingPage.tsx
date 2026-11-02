@@ -10,6 +10,7 @@ import { GlitchLogo } from '../components/GlitchLogo';
 import { useTheme } from '../components/ThemeProvider';
 import { MultiChainSection } from '../components/MultiChainSection';
 import { NearcomSection } from '../components/NearcomSection';
+import { SituationReportBanner } from '../components/SituationReportBanner';
 
 const getAppSubdomainUrl = () => {
   if (typeof window !== 'undefined') {
@@ -42,6 +43,9 @@ export const LandingPage: React.FC = () => {
         Interactive Pixel Background & Adventurous Figurine
       */}
       <QuantusInteractiveCanvas />
+
+      {/* Outage Communications & Live Situation Report */}
+      <SituationReportBanner />
 
       {/* Clean Header */}
       <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-surface-glass backdrop-blur-md">
