@@ -372,9 +372,10 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
       // -------------------------------------------------------------
       if (spriteReady) {
         const isMobile = width < 768;
-        // Scaled down significantly so it is a subtle companion that never dominates screens
-        // Mobile: 1.8 (was 4.5), App/FullScreen: 2.2 (was 6.0), Landing Desktop: 3.0 (was 6.0)
-        const SCALE = isMobile ? 1.8 : (isFullScreen ? 2.2 : 3.0);
+        // Desktop hero: 5.5 (bold, heroic presence in open desktop space)
+        // App / FullScreen views: 2.2 (sleek and compact, never blocks dashboard actions)
+        // Mobile screens: 1.8 (small, safe within margins)
+        const SCALE = isMobile ? 1.8 : (isFullScreen ? 2.2 : 5.5);
         const dw = LOW_W * SCALE;
         const dh = LOW_H * SCALE;
 
