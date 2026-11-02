@@ -149,6 +149,7 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
       facingLeft: false,
       wanderTimer: 0,
       roamSpeed: 0.022,
+      scale: isFullScreen ? 2.2 : (width < 768 ? 1.8 : 5.5),
     };
 
     let scrollY = window.scrollY;
@@ -372,12 +373,22 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
       // -------------------------------------------------------------
       if (spriteReady) {
         const isMobile = width < 768;
-        // Desktop hero: 5.5 (bold, heroic presence in open desktop space)
-        // App / FullScreen views: 2.2 (sleek and compact, never blocks dashboard actions)
-        // Mobile screens: 1.8 (small, safe within margins)
-        const SCALE = isMobile ? 1.8 : (isFullScreen ? 2.2 : 5.5);
-        const dw = LOW_W * SCALE;
-        const dh = LOW_H * SCALE;
+        // Target scale:
+        // Desktop hero (scrollY < 80): 5.5 (large and heroic in open space)
+        // Desktop scrolled down (scrollY >= 80): smoothly reduce to 2.2 so it never blocks page content!
+        // App / FullScreen views: 2.2
+        // Mobile screens: 1.8
+        const targetScale = isMobile
+          ? 1.8
+          : isFullScreen
+            ? 2.2
+            : (scrollY < 80 ? 5.5 : 2.2);
+
+        // Smooth springy scale easing
+        entity.scale += (targetScale - entity.scale) * 0.08;
+
+        const dw = LOW_W * entity.scale;
+        const dh = LOW_H * entity.scale;
 
         const drawX = entity.x - dw / 2;
         const drawY = entity.y - dh / 2;
