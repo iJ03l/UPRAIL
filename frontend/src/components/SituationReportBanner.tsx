@@ -21,13 +21,18 @@ export interface SitrepData {
   timestamp?: string;
 }
 
+/**
+ * Manual master toggle for Situation Report communications banner.
+ * Disabled by default; activate ONLY when explicitly instructed by the user.
+ */
+export const SITREP_BANNER_ENABLED = false;
+
 const DEFAULT_SITREP: SitrepData = {
-  active: true,
-  severity: 'maintenance',
-  badge: 'UPSTREAM NODE UPGRADE',
-  title: 'Upstream Defuse/1Click GKE Node Upgrades (CVE-2026-98432)',
-  summary:
-    'Defuse solver bridge nodes are paused for emergency GKE upgrades to patch Linux kernel vulnerability CVE-2026-98432. Cross-chain bridge quotes and deposit address generation are temporarily unavailable. Internal transfers and 𝕏 handle payments are 100% operational.',
+  active: false,
+  severity: 'operational',
+  badge: 'SYSTEMS NORMAL',
+  title: 'All Systems Operational',
+  summary: 'All systems are operating normally.',
   startedAt: 'Nov 2, 2026 1:15 PM',
   eta: 'About 1–2 hours',
   upstream: {
@@ -94,6 +99,8 @@ function sanitizeSitrep(raw: unknown): SitrepData {
 }
 
 export const SituationReportBanner: React.FC = () => {
+  if (!SITREP_BANNER_ENABLED) return null;
+
   const [sitrep, setSitrep] = useState<SitrepData>(DEFAULT_SITREP);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);

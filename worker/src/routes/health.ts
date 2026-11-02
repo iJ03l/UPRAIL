@@ -25,10 +25,27 @@ healthRouter.get('/', async (c) => {
 });
 
 /**
+ * Manual SITREP activation toggle.
+ * Kept false by default; activate ONLY when explicitly instructed by the user.
+ */
+const MANUAL_SITREP_ACTIVE = false;
+
+/**
  * GET /health/sitrep or /api/system/sitrep
  * Public situation report for active incidents, upstream maintenance, and system communications.
  */
 healthRouter.get('/sitrep', async (c) => {
+  if (!MANUAL_SITREP_ACTIVE) {
+    return c.json({
+      active: false,
+      severity: 'operational',
+      badge: 'SYSTEMS NORMAL',
+      title: 'All Systems Operational',
+      summary: 'All systems are operating normally.',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   let oneClickOnline = false;
   try {
     const apiBase = c.env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
