@@ -104,10 +104,10 @@ export const LandingPage: React.FC = () => {
           </span>
           <div className="w-full">
             <TextReveal
-              className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl xl:text-9xl 2xl:text-[10rem] font-display font-black tracking-tight leading-[1.08] sm:leading-[0.95]"
-              accentWords={['leak', 'rekt']}
+              className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.12] sm:leading-[0.98]"
+              accentWords={['leak', 'rekt', 'near', 'intents', 'confidential', 'uprail']}
             >
-              Public blockchains leak your wealth and rekt
+              Public blockchains leak your wealth and rekt. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to 𝕏 handles.
             </TextReveal>
           </div>
         </section>
