@@ -101,10 +101,10 @@ export const InteractiveRailSimulator: React.FC = () => {
         {/* Header with audio toggle */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-8 border-b border-stone-200/80 gap-4">
           <div>
-            <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold">
+            <span className="text-xs sm:text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold">
               Interactive Tactile Beam
             </span>
-            <h3 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-stone-950 mt-1 tracking-tight">
+            <h3 className="text-3xl sm:text-4xl md:text-5xl font-display font-extrabold text-stone-950 mt-1 tracking-tight">
               Send Value Into The Shielded Shard
             </h3>
           </div>

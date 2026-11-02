@@ -155,10 +155,10 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
 
     const getHeroBounds = () => {
       const isDesktop = width >= 768;
-      const minX = isDesktop ? width * 0.58 : width * 0.40;
-      const maxX = width * 0.90;
-      const minY = isDesktop ? 150 : 300;
-      const maxY = isDesktop ? Math.min(height * 0.68, 520) : Math.min(height * 0.75, 580);
+      const minX = isDesktop ? width * 0.60 : width * 0.68;
+      const maxX = isDesktop ? width * 0.90 : width * 0.88;
+      const minY = isDesktop ? 150 : 80;
+      const maxY = isDesktop ? Math.min(height * 0.68, 520) : 180;
       return { minX, maxX, minY, maxY };
     };
 
@@ -170,16 +170,22 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
     };
 
     const pickScrolledRoamTarget = () => {
-      // When scrolled down, entity explores downward across the page
-      const margin = 80;
-      entity.targetX = margin + Math.random() * (width - margin * 2);
-      // Place target based on current viewport height
-      entity.targetY = 140 + Math.random() * (height - 260);
-      entity.roamSpeed = 0.024 + Math.random() * 0.02;
+      const isMobile = width < 768;
+      if (isMobile) {
+        // Keep strictly in the right-side margin on mobile so it never obscures section text
+        entity.targetX = width - 65;
+        entity.targetY = 120 + Math.random() * (height - 240);
+        entity.roamSpeed = 0.02;
+      } else {
+        const margin = 80;
+        entity.targetX = margin + Math.random() * (width - margin * 2);
+        entity.targetY = 140 + Math.random() * (height - 260);
+        entity.roamSpeed = 0.024 + Math.random() * 0.02;
+      }
     };
 
     const pickFullScreenRoamTarget = () => {
-      // Full screen roaming across entire dashboard viewport
+      // Roaming across dashboard viewport
       const marginX = Math.min(width * 0.08, 90);
       const marginY = Math.min(height * 0.08, 80);
       entity.targetX = marginX + Math.random() * (width - marginX * 2);
@@ -366,7 +372,9 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
       // -------------------------------------------------------------
       if (spriteReady) {
         const isMobile = width < 768;
-        const SCALE = isMobile ? 4.5 : 6.0;
+        // Scaled down significantly so it is a subtle companion that never dominates screens
+        // Mobile: 1.8 (was 4.5), App/FullScreen: 2.2 (was 6.0), Landing Desktop: 3.0 (was 6.0)
+        const SCALE = isMobile ? 1.8 : (isFullScreen ? 2.2 : 3.0);
         const dw = LOW_W * SCALE;
         const dh = LOW_H * SCALE;
 

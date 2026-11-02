@@ -65,10 +65,10 @@ export const LandingPage: React.FC = () => {
       {/* Main Flow: Balanced spacing */}
       <main className="relative z-20 w-full pt-4 sm:pt-7 md:pt-9 lg:pt-10 pb-16 sm:pb-24 space-y-10 sm:space-y-16 md:space-y-20">
         {/* 
-          1. Hero Section: Full width end to end, text size halved, vertical space maintained
+          1. Hero Section: Full width end to end, bold mobile typography
         */}
-        <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-5 sm:space-y-8 text-left py-8 sm:py-16 md:py-20 lg:py-24 min-h-[38vh] sm:min-h-[50vh] flex flex-col justify-center">
-          <h1 className="w-full text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.08] sm:leading-[1.0] text-stone-950">
+        <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-6 sm:space-y-8 text-left py-8 sm:py-16 md:py-20 lg:py-24 min-h-[38vh] sm:min-h-[50vh] flex flex-col justify-center">
+          <h1 className="w-full text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.08] sm:leading-[1.0] text-stone-950">
             Your{' '}
             <span className="underline decoration-black decoration-2 sm:decoration-4 underline-offset-4 sm:underline-offset-6 inline-block">
               𝕏
@@ -78,7 +78,7 @@ export const LandingPage: React.FC = () => {
             is now a payment account<span className="text-black">.</span>
           </h1>
 
-          <p className="text-sm sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
+          <p className="text-base sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
             From the web, any AI chat, or launchpad fees. Send to a handle, near.com and a wallet.
           </p>
 
@@ -87,7 +87,7 @@ export const LandingPage: React.FC = () => {
               href={appSubdomainUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-7 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider shadow-sm hover:shadow-md hover:scale-105 active:scale-95 transition-all flex items-center space-x-2 cursor-pointer group"
+              className="px-7 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-sm uppercase tracking-wider shadow-sm hover:shadow-md hover:scale-105 active:scale-95 transition-all flex items-center space-x-2 cursor-pointer group"
             >
               <span>Launch App</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -96,15 +96,15 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* 
-          2. The Manifesto: Full width end to end
+          2. The Manifesto: Full width end to end with bold mobile presentation
         */}
         <section id="manifesto" className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-4 sm:space-y-6 scroll-mt-24">
-          <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
+          <span className="text-xs sm:text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
             // Manifesto
           </span>
           <div className="w-full">
             <TextReveal
-              className="text-2xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.12] sm:leading-[0.98]"
+              className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.12] sm:leading-[0.98]"
               accentWords={['leak', 'near', 'intents', 'confidential', 'uprail']}
             >
               Public blockchains leak your wealth. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to 𝕏 handles.
@@ -140,7 +140,7 @@ export const LandingPage: React.FC = () => {
           7. AI Chat & Creator Fees — Stark Architectural Split
         */}
         <section id="coming-soon" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24 space-y-5">
-          <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
+          <span className="text-xs sm:text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
             // AI Chat &amp; Creator Fees
           </span>
 
@@ -149,10 +149,10 @@ export const LandingPage: React.FC = () => {
             <div className="rounded-3xl bg-stone-950 text-white p-6 sm:p-9 flex flex-col justify-between space-y-6 sm:space-y-8 border border-stone-900">
               <div className="space-y-4 sm:space-y-5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono uppercase tracking-widest text-stone-400 font-bold">
+                  <span className="text-xs sm:text-[11px] font-mono uppercase tracking-widest text-stone-400 font-bold">
                     01 / AI Chat
                   </span>
-                  <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-stone-900 text-[#E05326] border border-stone-800 font-bold">
+                  <span className="text-xs sm:text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-stone-900 text-[#E05326] border border-stone-800 font-bold">
                     1-Click MCP
                   </span>
                 </div>
@@ -161,7 +161,7 @@ export const LandingPage: React.FC = () => {
                   <h3 className="text-2xl sm:text-4xl font-display font-extrabold tracking-tight text-white leading-[1.08]">
                     Pay from any AI.
                   </h3>
-                  <p className="text-xs sm:text-sm text-stone-400 leading-relaxed">
+                  <p className="text-sm sm:text-base text-stone-400 leading-relaxed">
                     Send and receive private transfers in chat. Capped in USD.
                   </p>
                 </div>
@@ -170,7 +170,7 @@ export const LandingPage: React.FC = () => {
                   {['Claude', 'OpenAI Dot', 'Grok Bot', 'Meta Muse', 'Cursor'].map((name) => (
                     <span
                       key={name}
-                      className="px-2.5 py-1 rounded-lg bg-stone-900 border border-stone-800 text-[11px] font-mono text-stone-300"
+                      className="px-2.5 py-1 rounded-lg bg-stone-900 border border-stone-800 text-xs sm:text-[11px] font-mono text-stone-300"
                     >
                       {name}
                     </span>
@@ -204,10 +204,10 @@ export const LandingPage: React.FC = () => {
             <div className="rounded-3xl bg-stone-100/80 text-stone-950 p-6 sm:p-9 flex flex-col justify-between space-y-6 sm:space-y-8 border border-stone-200">
               <div className="space-y-4 sm:space-y-5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono uppercase tracking-widest text-stone-500 font-bold">
+                  <span className="text-xs sm:text-[11px] font-mono uppercase tracking-widest text-stone-500 font-bold">
                     02 / Creator Fees
                   </span>
-                  <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-white text-stone-900 border border-stone-200 font-bold">
+                  <span className="text-xs sm:text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-white text-stone-900 border border-stone-200 font-bold">
                     Auto RPC
                   </span>
                 </div>
@@ -216,7 +216,7 @@ export const LandingPage: React.FC = () => {
                   <h3 className="text-2xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950 leading-[1.08]">
                     Route token fees to 𝕏.
                   </h3>
-                  <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
+                  <p className="text-sm sm:text-base text-stone-600 leading-relaxed">
                     Launch on any pad. Point fees to UPRAIL. Get paid by touch.
                   </p>
                 </div>
@@ -225,7 +225,7 @@ export const LandingPage: React.FC = () => {
                   {['Nearly', 'JustHoot', 'Intear'].map((tag) => (
                     <span
                       key={tag}
-                      className="px-2.5 py-1 rounded-lg bg-white border border-stone-200 text-[11px] font-mono text-stone-700"
+                      className="px-2.5 py-1 rounded-lg bg-white border border-stone-200 text-xs sm:text-[11px] font-mono text-stone-700"
                     >
                       {tag}
                     </span>
@@ -264,13 +264,13 @@ export const LandingPage: React.FC = () => {
           <div className="relative rounded-3xl border border-stone-200 bg-stone-950 text-white p-6 sm:p-10 lg:p-12 overflow-hidden shadow-xl">
             <div className="relative z-10 max-w-2xl space-y-5 text-left">
               <div className="space-y-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-stone-800 border border-stone-700 text-stone-300 text-[10px] font-mono font-bold uppercase tracking-wider inline-block">
+                <span className="px-2.5 py-0.5 rounded-full bg-stone-800 border border-stone-700 text-stone-300 text-xs sm:text-[10px] font-mono font-bold uppercase tracking-wider inline-block">
                   Gateway
                 </span>
-                <h2 className="text-2xl sm:text-4xl md:text-5xl font-display font-extrabold text-white tracking-tight">
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-display font-extrabold text-white tracking-tight">
                   Send to anyone on 𝕏.
                 </h2>
-                <p className="text-xs sm:text-sm text-stone-400">
+                <p className="text-sm sm:text-base text-stone-400">
                   Type an 𝕏 handle to launch directly into the confidential send pipeline on app.uprail.world.
                 </p>
               </div>
@@ -286,7 +286,7 @@ export const LandingPage: React.FC = () => {
                     value={quickSendHandle}
                     onChange={(e) => setQuickSendHandle(e.target.value)}
                     placeholder="username"
-                    className="w-full pl-8 pr-3 py-3 bg-stone-900 border border-stone-700 focus:border-white rounded-xl text-white font-medium text-base sm:text-xs font-mono focus:outline-none transition-colors"
+                    className="w-full pl-8 pr-3 py-3 bg-stone-900 border border-stone-700 focus:border-white rounded-xl text-white font-medium text-base font-mono focus:outline-none transition-colors"
                   />
                 </div>
 
