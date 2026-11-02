@@ -63,8 +63,8 @@ export const TextReveal: React.FC<TextRevealProps> = ({
               isRevealed
                 ? isAccent
                   ? 'text-[#E05326] font-black underline decoration-[#E05326]/40 decoration-4 sm:decoration-8 underline-offset-8 drop-shadow-[0_2px_12px_rgba(224,83,38,0.25)] scale-[1.02]'
-                  : 'text-stone-950 font-black'
-                : 'text-stone-300 font-bold opacity-30 select-none'
+                  : 'text-stone-950 dark:text-white font-black'
+                : 'text-stone-300 dark:text-stone-700 font-bold opacity-35 select-none'
             }`}
           >
             {word}

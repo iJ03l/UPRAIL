@@ -96,7 +96,7 @@ export const LandingPage: React.FC = () => {
         </section>
 
         {/* 
-          2. The Manifesto: Full width end to end with bold mobile presentation
+          2. The Manifesto: Full width end-to-end bold presentation
         */}
         <section id="manifesto" className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-4 sm:space-y-6 scroll-mt-24">
           <span className="text-xs sm:text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
@@ -104,10 +104,10 @@ export const LandingPage: React.FC = () => {
           </span>
           <div className="w-full">
             <TextReveal
-              className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.12] sm:leading-[0.98]"
-              accentWords={['leak', 'near', 'intents', 'confidential', 'uprail']}
+              className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl xl:text-9xl 2xl:text-[10rem] font-display font-black tracking-tight leading-[1.08] sm:leading-[0.95]"
+              accentWords={['leak', 'rekt']}
             >
-              Public blockchains leak your wealth. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to 𝕏 handles.
+              Public blockchains leak your wealth and rekt
             </TextReveal>
           </div>
         </section>
