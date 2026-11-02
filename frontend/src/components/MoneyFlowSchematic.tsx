@@ -17,7 +17,7 @@ export const MoneyFlowSchematic: React.FC = () => {
           How Money Moves
         </h2>
         <p className="text-sm sm:text-base text-stone-600 dark:text-stone-400 font-sans max-w-xl">
-          Radical public blockchain exposure versus UPRAIL&apos;s zero-knowledge confidential solver settlement.
+          Radical public blockchain exposure versus UPRAIL&apos;s confidential solver settlement.
         </p>
       </div>
 
@@ -252,7 +252,7 @@ export const MoneyFlowSchematic: React.FC = () => {
             <div className="space-y-2 text-xs font-mono">
               <div className="p-3 rounded-xl bg-stone-900 border border-stone-800 flex items-center justify-between">
                 <span className="text-stone-400">Identity &amp; Balance:</span>
-                <span className="text-[#00EC97] font-bold">Zero-Knowledge Private</span>
+                <span className="text-[#00EC97] font-bold">100% Confidential</span>
               </div>
               <div className="p-3 rounded-xl bg-stone-900 border border-stone-800 flex items-center justify-between">
                 <span className="text-stone-400">Settlement Target:</span>

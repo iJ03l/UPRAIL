@@ -109,7 +109,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
                 <Lock className="w-4 h-4 text-stone-900 mt-0.5 flex-shrink-0" />
                 <div className="space-y-1">
                   <div className="font-bold text-stone-950 font-sans text-xs">
-                    Zero-Knowledge & Privacy-First Architecture
+                    Confidential & Privacy-First Architecture
                   </div>
                   <p className="text-[12px] text-stone-600 leading-normal">
                     UPRAIL does not monetize, sell, track, or broker user personal data. We require only public 𝕏 handle identity and cryptographic hardware passkeys to deliver confidential settlement on NEAR Protocol.
