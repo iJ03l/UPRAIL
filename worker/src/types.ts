@@ -395,6 +395,7 @@ export interface Contact {
   last_transfer_at?: number | null;
   transfer_count?: number;
   is_registered?: boolean;
+  avatar_url?: string | null;
 }
 
 // ─── UPRAIL Payment Requests ─────────────────────────────────────────────────
@@ -404,6 +405,8 @@ export interface PaymentRequest {
   id: string;
   requester_x_id: string;
   requester_handle: string;
+  requester_name?: string | null;
+  requester_avatar?: string | null;
   requested_handle: string;
   requested_x_id?: string | null;
   asset: string;

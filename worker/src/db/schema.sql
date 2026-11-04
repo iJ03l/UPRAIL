@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS x_identities (
   personal_invite_code TEXT,
   invited_by_code TEXT,
   invited_by_handle TEXT,
+  avatar_url TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );

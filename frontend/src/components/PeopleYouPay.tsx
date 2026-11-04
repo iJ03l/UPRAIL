@@ -231,8 +231,8 @@ export const PeopleYouPay: React.FC<PeopleYouPayProps> = ({
         </button>
       </div>
 
-      {/* Responsive Grid across full desktop width */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+      {/* Scrollable Row across full desktop width */}
+      <div className="flex items-stretch space-x-3 overflow-x-auto pb-2 scrollbar-none">
         {contacts.map((c) => {
           const initials = (c.nickname || c.contact_handle).slice(0, 2).toUpperCase();
           const isPinned = c.is_pinned === 1;
@@ -240,12 +240,24 @@ export const PeopleYouPay: React.FC<PeopleYouPayProps> = ({
           return (
             <div
               key={c.id || c.contact_handle}
-              className="p-3.5 rounded-2xl border border-stone-200 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-950/60 hover:bg-stone-50 dark:hover:bg-stone-950 shadow-xs hover:border-stone-400 dark:hover:border-stone-700 transition-all flex flex-col justify-between"
+              className="flex-shrink-0 w-44 sm:w-48 p-3.5 rounded-2xl border border-stone-200 dark:border-stone-800 bg-stone-50/60 dark:bg-stone-950/60 hover:bg-stone-50 dark:hover:bg-stone-950 shadow-xs hover:border-stone-400 dark:hover:border-stone-700 transition-all flex flex-col justify-between"
             >
               <div>
                 <div className="flex items-start justify-between mb-2">
-                  <div className="w-9 h-9 rounded-xl bg-white dark:bg-stone-800 text-stone-900 dark:text-white font-mono font-bold text-xs flex items-center justify-center border border-stone-200 dark:border-stone-700 shadow-2xs">
-                    {initials}
+                  <div className="relative w-9 h-9 flex-shrink-0">
+                    <img
+                      src={c.avatar_url || `https://unavatar.io/twitter/${c.contact_handle}`}
+                      alt={c.contact_handle}
+                      className="w-9 h-9 rounded-xl object-cover border border-stone-200 dark:border-stone-700 shadow-2xs"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        const fb = (e.currentTarget.parentElement?.querySelector('.avatar-initials') as HTMLElement);
+                        if (fb) fb.style.display = 'flex';
+                      }}
+                    />
+                    <div className="avatar-initials hidden w-9 h-9 rounded-xl bg-white dark:bg-stone-800 text-stone-900 dark:text-white font-mono font-bold text-xs items-center justify-center border border-stone-200 dark:border-stone-700 shadow-2xs">
+                      {initials}
+                    </div>
                   </div>
                   <div className="flex items-center space-x-0.5">
                     <button
@@ -311,6 +323,18 @@ export const PeopleYouPay: React.FC<PeopleYouPayProps> = ({
             </div>
           );
         })}
+
+        {/* Quick Add Card at end of scrollable row */}
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+          className="flex-shrink-0 w-36 sm:w-40 p-3.5 rounded-2xl border-2 border-dashed border-stone-200 dark:border-stone-800 hover:border-stone-400 dark:hover:border-stone-600 bg-stone-50/30 dark:bg-stone-950/30 flex flex-col items-center justify-center space-y-2 text-stone-500 hover:text-stone-900 dark:hover:text-white transition-all cursor-pointer group"
+        >
+          <div className="w-9 h-9 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-500 group-hover:text-stone-900 dark:group-hover:text-white flex items-center justify-center transition-colors">
+            <Plus className="w-4 h-4" />
+          </div>
+          <span className="text-[11px] font-mono font-bold">Add Contact</span>
+        </button>
       </div>
 
       {showAddModal && (

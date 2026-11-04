@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse, PaymentRequest, PaymentRequestStatus } from '../types';
 import { requireAuth } from '../middleware/session';
+import { requirePasskeyAuth } from '../middleware/passkeyAuth';
+import { resolveShareTicker } from '../services/share';
 import { publicErrorMessage } from '../utils/errors';
 
 function normalizeHandle(rawHandle: string): string {
@@ -28,24 +30,42 @@ function sanitizeMemo(memo: unknown): string | null {
 }
 
 /**
+ * Cleans token ticker and formats clean amount
+ */
+async function sanitizeRequestRecord(env: any, req: PaymentRequest): Promise<PaymentRequest> {
+  const ticker = await resolveShareTicker(env, req.asset);
+  const cleanTicker = ticker || (req.asset.includes(':') ? req.asset.split(':').pop() : req.asset) || 'USDC';
+  let amountFormatted = req.amount_formatted;
+  if (!amountFormatted || amountFormatted.includes('nep141:') || /^[0-9a-f]{64}/i.test(amountFormatted.split(' ').pop() || '')) {
+    amountFormatted = `${req.amount} ${cleanTicker}`;
+  }
+  return {
+    ...req,
+    amount_formatted: amountFormatted,
+    requester_avatar: req.requester_avatar || `https://unavatar.io/twitter/${req.requester_handle}`,
+  };
+}
+
+/**
  * POST /api/requests
  * Creates a new UPRAIL payment request targeting any 𝕏 handle (registered or not).
+ * Requires biometric Passkey authorization.
  * Rate limited to 10 requests / hour per user.
  */
-requestsRouter.post('/', requireAuth({ passkeyVerified: true }), async (c) => {
+requestsRouter.post('/', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   try {
     const session = c.get('session')!;
     if (!c.env.DB) {
       return c.json<ErrorResponse>({ error: 'Database unavailable', code: 'DB_UNAVAILABLE' }, 503);
     }
 
-    const body = await c.req.json<{
+    const body = ((c.get('parsedBody' as any) || await c.req.json().catch(() => ({}))) as {
       requestedHandle: string;
       asset: string;
       amount: string;
       memo?: string;
       expiresInDays?: number;
-    }>();
+    });
 
     const targetHandle = normalizeHandle(body.requestedHandle || '');
     if (!targetHandle || !isValidXHandle(targetHandle)) {
@@ -142,7 +162,9 @@ requestsRouter.post('/', requireAuth({ passkeyVerified: true }), async (c) => {
 
     const id = `req_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
     const memo = sanitizeMemo(body.memo);
-    const amountFormatted = `${body.amount} ${asset.split('.').pop() || asset}`;
+    const ticker = await resolveShareTicker(c.env, asset);
+    const cleanTicker = ticker || (asset.includes(':') ? asset.split(':').pop() : asset) || 'USDC';
+    const amountFormatted = `${body.amount} ${cleanTicker}`;
 
     await c.env.DB.prepare(
       `INSERT INTO payment_requests (
@@ -229,7 +251,8 @@ requestsRouter.get('/incoming', requireAuth({ passkeyVerified: true }), async (c
       .bind(userHandle, session.x_id)
       .all<PaymentRequest>();
 
-    return c.json({ requests: rows.results || [] });
+    const sanitized = await Promise.all((rows.results || []).map((r) => sanitizeRequestRecord(c.env, r)));
+    return c.json({ requests: sanitized });
   } catch (err) {
     console.error('[incomingRequests] error:', err);
     return c.json({ requests: [] });
@@ -260,7 +283,8 @@ requestsRouter.get('/outgoing', requireAuth({ passkeyVerified: true }), async (c
       .bind(session.x_id)
       .all<PaymentRequest>();
 
-    return c.json({ requests: rows.results || [] });
+    const sanitized = await Promise.all((rows.results || []).map((r) => sanitizeRequestRecord(c.env, r)));
+    return c.json({ requests: sanitized });
   } catch (err) {
     console.error('[outgoingRequests] error:', err);
     return c.json({ requests: [] });
@@ -370,11 +394,23 @@ requestsRouter.get('/:id', async (c) => {
     }
 
     // Get requester info
-    const requester = await c.env.DB.prepare(
-      `SELECT x_handle, x_name, avatar_url FROM x_identities WHERE x_id = ?`
-    )
-      .bind(req.requester_x_id)
-      .first<{ x_handle: string; x_name: string; avatar_url: string }>();
+    let requester: { x_handle: string; x_name: string; avatar_url: string | null } | null = null;
+    try {
+      requester = await c.env.DB.prepare(
+        `SELECT x_handle, x_name, avatar_url FROM x_identities WHERE x_id = ?`
+      )
+        .bind(req.requester_x_id)
+        .first<{ x_handle: string; x_name: string; avatar_url: string | null }>();
+    } catch {
+      try {
+        const r = await c.env.DB.prepare(
+          `SELECT x_handle, x_name FROM x_identities WHERE x_id = ?`
+        )
+          .bind(req.requester_x_id)
+          .first<{ x_handle: string; x_name: string }>();
+        if (r) requester = { ...r, avatar_url: null };
+      } catch {}
+    }
 
     // Check if target recipient is registered
     const recipientUser = await c.env.DB.prepare(
@@ -383,11 +419,13 @@ requestsRouter.get('/:id', async (c) => {
       .bind(normalizeHandle(req.requested_handle))
       .first<{ x_id: string }>();
 
+    const sanitized = await sanitizeRequestRecord(c.env, req);
+
     return c.json({
       request: {
-        ...req,
+        ...sanitized,
         requester_name: requester?.x_name || req.requester_handle,
-        requester_avatar: requester?.avatar_url || null,
+        requester_avatar: requester?.avatar_url || `https://unavatar.io/twitter/${requester?.x_handle || req.requester_handle}`,
         is_recipient_registered: !!recipientUser,
       },
     });
@@ -475,11 +513,11 @@ requestsRouter.post('/:id/cancel', requireAuth({ passkeyVerified: true }), async
  * Marks a request completed when paid.
  * Can be called with paymentId to link settlement.
  */
-requestsRouter.post('/:id/accept', requireAuth({ passkeyVerified: true }), async (c) => {
+requestsRouter.post('/:id/accept', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   try {
     const session = c.get('session')!;
     const id = c.req.param('id');
-    const body = await c.req.json<{ paymentId?: string }>().catch(() => ({ paymentId: '' }));
+    const body = ((c.get('parsedBody' as any) || await c.req.json().catch(() => ({}))) as { paymentId?: string });
 
     const req = await c.env.DB.prepare(`SELECT * FROM payment_requests WHERE id = ?`).bind(id).first<PaymentRequest>();
     if (!req) {

@@ -1706,6 +1706,7 @@ export const api = {
     amount: string;
     memo?: string;
     expiresInDays?: number;
+    passkeyAssertion?: unknown;
   }): Promise<PaymentRequest> {
     const url = API_BASE ? `${API_BASE}/api/requests` : '/api/requests';
     const res = await fetch(url, {
@@ -1779,7 +1780,7 @@ export const api = {
     }
   },
 
-  async acceptPaymentRequest(id: string, paymentId?: string): Promise<void> {
+  async acceptPaymentRequest(id: string, options?: { paymentId?: string; passkeyAssertion?: unknown }): Promise<void> {
     const url = API_BASE
       ? `${API_BASE}/api/requests/${encodeURIComponent(id)}/accept`
       : `/api/requests/${encodeURIComponent(id)}/accept`;
@@ -1787,7 +1788,7 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ paymentId }),
+      body: JSON.stringify(options || {}),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -1832,5 +1833,21 @@ export const api = {
     }
   },
 };
+
+/**
+ * Normalizes any asset or contract ID into a clean display ticker (e.g. USDC).
+ */
+export function cleanAssetSymbol(raw: string): string {
+  if (!raw) return 'USDC';
+  if (raw.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')) return 'USDC';
+  if (raw.toLowerCase().includes('nep141:')) {
+    const withoutPrefix = raw.replace(/nep141:/gi, '');
+    if (/^[0-9a-f]{64}$/i.test(withoutPrefix)) return 'USDC';
+    return withoutPrefix.split('.').pop()?.toUpperCase() || 'TOKEN';
+  }
+  if (/^[0-9a-f]{64}$/i.test(raw)) return 'USDC';
+  return raw.toUpperCase();
+}
+
 
 

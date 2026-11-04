@@ -19,7 +19,7 @@ import {
   User,
   ExternalLink,
 } from 'lucide-react';
-import { api, formatTokenAmount, formatUsd, tokenUsdPrice } from '../lib/api';
+import { api, formatTokenAmount, formatUsd, tokenUsdPrice, cleanAssetSymbol } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
@@ -83,6 +83,8 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
     if (id) loadRequest();
   }, [id]);
 
+  const cleanTicker = request?.asset ? cleanAssetSymbol(request.asset) : 'USDC';
+
   // Resolve requested token and user's held balance
   const targetToken = tokens.find(
     (t) =>
@@ -91,12 +93,24 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
       (request?.asset && t.nearContractId && request.asset.includes(t.nearContractId))
   ) || {
     id: request?.asset || 'usdc',
-    symbol: request?.asset.split('.').pop()?.toUpperCase() || 'USDC',
-    name: request?.asset.split('.').pop()?.toUpperCase() || 'USDC',
+    symbol: cleanTicker,
+    name: cleanTicker,
     decimals: 6,
     iconUrl: '',
     nearContractId: '',
   };
+
+  const cleanAmountFormatted = (() => {
+    let raw = request?.amount_formatted || `${request?.amount} ${cleanTicker}`;
+    if (
+      raw.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1') ||
+      raw.toLowerCase().includes('nep141:') ||
+      /^[0-9a-f]{64}/i.test(raw.split(' ').pop() || '')
+    ) {
+      return `${request?.amount} ${cleanTicker}`;
+    }
+    return raw;
+  })();
 
   const heldBalanceItem = balances.find(
     (b) =>
@@ -290,17 +304,19 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
         {/* Status Badge */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            {request.requester_avatar ? (
-              <img
-                src={request.requester_avatar}
-                alt={request.requester_handle}
-                className="w-10 h-10 rounded-full border border-stone-200 dark:border-stone-700 object-cover"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-white font-mono font-bold flex items-center justify-center border border-stone-200 dark:border-stone-700">
-                {request.requester_handle.slice(0, 2).toUpperCase()}
-              </div>
-            )}
+            <img
+              src={request.requester_avatar || `https://unavatar.io/twitter/${request.requester_handle}`}
+              alt={request.requester_handle}
+              className="w-10 h-10 rounded-full border border-stone-200 dark:border-stone-700 object-cover"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+                const fb = (e.currentTarget.parentElement?.querySelector('.avatar-initials') as HTMLElement);
+                if (fb) fb.style.display = 'flex';
+              }}
+            />
+            <div className="avatar-initials hidden w-10 h-10 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-900 dark:text-white font-mono font-bold items-center justify-center border border-stone-200 dark:border-stone-700">
+              {request.requester_handle.slice(0, 2).toUpperCase()}
+            </div>
             <div>
               <div className="text-xs font-bold text-stone-900 dark:text-white font-display">
                 @{request.requester_handle}
@@ -345,7 +361,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
         {/* Amount Display */}
         <div className="text-center py-4 bg-stone-50 dark:bg-stone-950 rounded-2xl border border-stone-100 dark:border-stone-800 space-y-1">
           <div className="text-3xl font-extrabold font-mono text-stone-950 dark:text-white">
-            {request.amount_formatted}
+            {cleanAmountFormatted}
           </div>
           <div className="text-xs text-stone-500 dark:text-stone-400 font-mono">
             For @{request.requested_handle}
@@ -451,7 +467,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
                     Payment Completed
                   </div>
                   <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
-                    You paid {request.amount_formatted} to @{request.requester_handle}
+                    You paid {cleanAmountFormatted} to @{request.requester_handle}
                   </div>
                   {request.payment_id && (
                     <Link
@@ -502,7 +518,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
                         className="w-full py-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50"
                       >
                         <ArrowUpRight className="w-4 h-4" />
-                        <span>{isProcessing ? 'Confirming...' : `Accept & Send ${request.amount_formatted}`}</span>
+                        <span>{isProcessing ? 'Confirming...' : `Accept & Send ${cleanAmountFormatted}`}</span>
                       </button>
 
                       <div className="grid grid-cols-2 gap-2">
@@ -530,7 +546,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
                       <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 space-y-1">
                         <p className="font-bold">Vault Needs Funding</p>
                         <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                          You need {request.amount_formatted} to accept this request. Deposit to your vault to proceed.
+                          You need {cleanAmountFormatted} to accept this request. Deposit to your vault to proceed.
                         </p>
                       </div>
 

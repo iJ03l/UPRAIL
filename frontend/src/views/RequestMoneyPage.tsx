@@ -7,10 +7,11 @@ import { AssetPicker } from '../components/AssetPicker';
 import { PeopleYouPay } from '../components/PeopleYouPay';
 import { RequestShareModal } from '../components/RequestShareModal';
 import { usePayments } from '../hooks/usePayments';
+import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { api, tokenUsdPrice, formatUsd } from '../lib/api';
 import { useSearchParams } from '../lib/router';
 import type { PaymentRequest, Token } from '../types';
-import { ArrowDownLeft, AlertCircle, Clock, ShieldCheck } from 'lucide-react';
+import { ArrowDownLeft, AlertCircle, Clock, ShieldCheck, Fingerprint } from 'lucide-react';
 
 export const RequestMoneyPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -18,6 +19,7 @@ export const RequestMoneyPage: React.FC = () => {
   const prefillAsset = searchParams.get('asset') || '';
 
   const { tokens, selectedToken, setSelectedToken } = usePayments();
+  const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   const [recipientHandle, setRecipientHandle] = useState(prefillHandle);
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
@@ -75,12 +77,25 @@ export const RequestMoneyPage: React.FC = () => {
       setIsSubmitting(true);
       setError(null);
 
+      // Prompt biometric passkey verification
+      let passkeyAssertion: unknown = undefined;
+      try {
+        passkeyAssertion = await authorizeWithPasskey(
+          `Request ${amount} ${selectedToken.symbol} from @${cleanHandle}`
+        );
+      } catch (authErr: any) {
+        setError(authErr?.message || 'Passkey authorization cancelled');
+        setIsSubmitting(false);
+        return;
+      }
+
       const req = await api.createPaymentRequest({
         requestedHandle: cleanHandle,
-        asset: selectedToken.id,
+        asset: selectedToken.symbol || selectedToken.id,
         amount,
         memo: memo.trim() || undefined,
         expiresInDays,
+        passkeyAssertion,
       });
 
       setCreatedRequest(req);
@@ -222,11 +237,21 @@ export const RequestMoneyPage: React.FC = () => {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isSubmitting || !recipientHandle || numericAmount <= 0}
+            disabled={isSubmitting || isAuthorizing || !recipientHandle || numericAmount <= 0}
             className="w-full py-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            <ArrowDownLeft className="w-4 h-4" />
-            <span>{isSubmitting ? 'Creating Request...' : 'Create Payment Request'}</span>
+            {isAuthorizing ? (
+              <Fingerprint className="w-4 h-4 animate-pulse text-white" />
+            ) : (
+              <ArrowDownLeft className="w-4 h-4" />
+            )}
+            <span>
+              {isAuthorizing
+                ? 'Confirming with Passkey...'
+                : isSubmitting
+                ? 'Creating Request...'
+                : 'Create Payment Request'}
+            </span>
           </button>
         </form>
       </div>

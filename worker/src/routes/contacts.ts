@@ -81,23 +81,30 @@ contactsRouter.get('/', requireAuth({ passkeyVerified: true }), async (c) => {
     if (allHandles.length > 0) {
       const placeholders = allHandles.map(() => '?').join(',');
       const identities = await c.env.DB.prepare(
-        `SELECT x_id, x_handle FROM x_identities WHERE LOWER(x_handle) IN (${placeholders})`
+        `SELECT x_id, x_handle, avatar_url FROM x_identities WHERE LOWER(x_handle) IN (${placeholders})`
       )
         .bind(...allHandles)
-        .all<{ x_id: string; x_handle: string }>();
+        .all<{ x_id: string; x_handle: string; avatar_url: string | null }>();
 
-      const identityMap = new Map<string, string>();
+      const identityMap = new Map<string, { id: string; avatar_url: string | null }>();
       for (const id of identities.results || []) {
-        identityMap.set(id.x_handle.toLowerCase(), id.x_id);
+        identityMap.set(id.x_handle.toLowerCase(), { id: id.x_id, avatar_url: id.avatar_url });
       }
 
       for (const [handle, item] of contactMap.entries()) {
-        if (identityMap.has(handle)) {
+        const match = identityMap.get(handle);
+        if (match) {
           item.is_registered = true;
-          item.contact_x_id = identityMap.get(handle);
+          item.contact_x_id = match.id;
+          item.avatar_url = match.avatar_url || `https://unavatar.io/twitter/${handle}`;
         } else {
           item.is_registered = false;
+          item.avatar_url = `https://unavatar.io/twitter/${handle}`;
         }
+      }
+    } else {
+      for (const [handle, item] of contactMap.entries()) {
+        item.avatar_url = `https://unavatar.io/twitter/${handle}`;
       }
     }
 

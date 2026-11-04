@@ -569,19 +569,19 @@ app.notFound(async (c) => {
         const shortMemo = memo ? (memo.length > 50 ? `${memo.slice(0, 47)}…` : memo) : '';
         const memoPrefix = shortMemo ? `“${shortMemo}” — ` : '';
         const description = targetHandle
-          ? `${memoPrefix}@${targetHandle}, don't leave them hanging! 👀 Settle up in one tap.`
-          : `${memoPrefix}Don't leave them hanging! 👀 Settle up or decline in one tap.`;
+          ? `${memoPrefix}Payment request for @${targetHandle} on UPRAIL. Tap to view or pay.`
+          : `${memoPrefix}Payment request on UPRAIL. Tap to view or pay.`;
 
         return renderShareCardHtml({
-          title: requester ? `@${requester} requested ${amountLabel || 'a payment'} 💸` : 'Payment requested on UPRAIL',
+          title: requester ? `Payment request from @${requester}` : 'Payment request on UPRAIL',
           description,
           imageUrl: `${url.origin}/og/request/${requestId}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });
       }
 
-      const basePath = url.pathname.startsWith('/app/') ? '/app/request' : '/request';
-      const target = new URL(basePath, url);
+      // Always route request deep links to /request (PublicRequestView)
+      const target = new URL('/request', url);
       target.search = url.search;
       const assetResponse = await c.env.ASSETS.fetch(
         new Request(target, {

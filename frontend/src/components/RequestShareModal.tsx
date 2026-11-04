@@ -37,14 +37,24 @@ export const RequestShareModal: React.FC<RequestShareModalProps> = ({
       : request.memo
     : null;
 
+  const cleanAmount = (() => {
+    let raw = request.amount_formatted || `${request.amount} ${request.asset}`;
+    if (
+      raw.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1') ||
+      raw.toLowerCase().includes('nep141:') ||
+      /^[0-9a-f]{64}/i.test(raw.split(' ').pop() || '')
+    ) {
+      return `${request.amount} USDC`;
+    }
+    return raw;
+  })();
+
   const tweetText = encodeURIComponent(
     [
-      `Hey @${request.requested_handle}, don't leave me hanging! 👀`,
+      `Hey @${request.requested_handle}, I sent you a payment request for ${cleanAmount} on UPRAIL.`,
       '',
-      `I requested a payment of ${request.amount_formatted} on UPRAIL.`,
       shortMemo ? `Memo: "${shortMemo}"` : '',
-      '',
-      'Settle up or decline in one biometric tap (no wallet needed):',
+      'You can view, accept, or decline here (no wallet needed):',
       shareLink,
     ].filter(Boolean).join('\n')
   );
@@ -61,10 +71,10 @@ export const RequestShareModal: React.FC<RequestShareModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Fun Eyebrow Badge */}
+        {/* Eyebrow Badge */}
         <div className="flex items-center justify-center mb-3">
           <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-[10px] font-mono font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
-            <span>SETTLE UP 💸 · DON'T LEAVE 'EM HANGING 👀</span>
+            <span>PAYMENT REQUEST</span>
           </div>
         </div>
 
@@ -74,19 +84,19 @@ export const RequestShareModal: React.FC<RequestShareModalProps> = ({
             Request Created!
           </h3>
           <p className="text-xs text-stone-500 dark:text-stone-400 font-sans">
-            Drop this link to <span className="font-bold font-mono text-stone-900 dark:text-white">@{request.requested_handle}</span>. They can pay or decline in one biometric tap — no crypto wallet needed.
+            Share this link with <span className="font-bold font-mono text-stone-900 dark:text-white">@{request.requested_handle}</span>. They can accept or decline in one biometric tap — no crypto wallet needed.
           </p>
         </div>
 
         {/* Minimal Summary Card */}
         <div className="rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-4 mb-5 space-y-2.5">
           <div className="flex items-center justify-between text-xs font-mono">
-            <span className="text-stone-500 dark:text-stone-400">Target</span>
+            <span className="text-stone-500 dark:text-stone-400">Recipient</span>
             <span className="font-bold text-stone-900 dark:text-white">@{request.requested_handle}</span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-stone-500 dark:text-stone-400">Amount</span>
-            <span className="font-bold text-stone-900 dark:text-white text-base">{request.amount_formatted}</span>
+            <span className="font-bold text-stone-900 dark:text-white text-base">{cleanAmount}</span>
           </div>
           {shortMemo && (
             <div className="flex items-start justify-between text-xs font-mono pt-2 border-t border-stone-200/60 dark:border-stone-800/60">
@@ -116,7 +126,7 @@ export const RequestShareModal: React.FC<RequestShareModalProps> = ({
             className="w-full py-3.5 px-4 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-900 dark:text-white text-xs font-mono font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer"
           >
             <Share2 className="w-4 h-4" />
-            <span>Notify on 𝕏 ("Don't leave me hanging 👀")</span>
+            <span>Share on 𝕏</span>
           </a>
         </div>
       </div>

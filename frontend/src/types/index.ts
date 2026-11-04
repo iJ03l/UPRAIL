@@ -266,6 +266,7 @@ export interface Contact {
   last_transfer_at?: number | null;
   transfer_count?: number;
   is_registered?: boolean;
+  avatar_url?: string | null;
 }
 
 export type PaymentRequestStatus = 'PENDING' | 'COMPLETED' | 'DECLINED' | 'CANCELLED' | 'EXPIRED';

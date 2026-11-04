@@ -219,17 +219,17 @@ ogRouter.get('/request/:file', (c) => {
 
     let detail = '';
     if (shortMemo && target) {
-      detail = `“${shortMemo}” — @${target}, don't leave them hanging! 👀 Tap to pay.`;
+      detail = `“${shortMemo}” — Request for @${target} on UPRAIL. Tap to view or pay.`;
     } else if (shortMemo) {
-      detail = `“${shortMemo}” — Tap to pay or decline.`;
+      detail = `“${shortMemo}” — Tap to view or pay.`;
     } else if (target) {
-      detail = `@${target}, don't leave them hanging! 👀 Settle up in one tap.`;
+      detail = `Request for @${target} on UPRAIL. Tap to view or pay.`;
     } else {
-      detail = "Don't leave them hanging! 👀 Settle up or decline in one tap.";
+      detail = 'Payment request on UPRAIL. Tap to view or pay.';
     }
 
     return renderOgCard({
-      eyebrow: 'SETTLE UP 💸',
+      eyebrow: 'PAYMENT REQUEST',
       headline: amountLabel || 'Payment requested',
       subline: requester ? `requested by @${requester}` : 'via UPRAIL',
       detail,

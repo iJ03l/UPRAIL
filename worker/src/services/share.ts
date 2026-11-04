@@ -11,6 +11,7 @@ export async function resolveShareTicker(
 ): Promise<string> {
   if (!asset) return '';
   if (NATIVE_NEAR_ALIASES.has(asset.trim().toLowerCase())) return 'NEAR';
+  if (asset.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1')) return 'USDC';
   let ticker = '';
   try {
     const tokens = await nearRpc.getSupportedTokens(env);
