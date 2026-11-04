@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from '../lib/router';
+import { Link, useNavigate } from '../lib/router';
+import { PeopleYouPay } from '../components/PeopleYouPay';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -29,7 +30,7 @@ import {
   formatUsdCompact,
   sumUsd,
 } from '../lib/api';
-import type { PaymentIntent } from '../types';
+import type { PaymentIntent, PaymentRequest } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
 import { RollingNumber } from '../components/RollingNumber';
@@ -38,6 +39,7 @@ import { useToast } from '../components/Toast';
 import { cancellationReason, historyStatusLabel } from '../lib/statusLabels';
 
 export const AppHome: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useXAuth();
   const { toast } = useToast();
   const {
@@ -78,6 +80,7 @@ export const AppHome: React.FC = () => {
         refreshHistory(),
         loadHistory(),
         api.getPendingPayments().then((p) => setPendingPayments(p || [])),
+        api.getIncomingRequests().then((r) => setIncomingRequests(r || [])),
       ]);
     } catch (err) {
       console.warn('Manual refresh notice:', err);
@@ -91,6 +94,11 @@ export const AppHome: React.FC = () => {
   const isFirstLoad = isLoadingBalances && totalBalanceUsd === null && balances.length === 0;
   const [copiedTxId, setCopiedTxId] = useState<string | null>(null);
   const [pendingPayments, setPendingPayments] = useState<PaymentIntent[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<PaymentRequest[]>([]);
+
+  useEffect(() => {
+    api.getIncomingRequests().then((r) => setIncomingRequests(r || [])).catch(() => {});
+  }, []);
 
   // Received-payment notifications. Direct sends land straight in the vault
   // (no claim step), so the recipient is told here instead. Derived from the
@@ -127,6 +135,10 @@ export const AppHome: React.FC = () => {
       /* ignore */
     }
   };
+
+  const pendingIncomingRequests = useMemo(() => {
+    return incomingRequests.filter((r) => r.status === 'PENDING');
+  }, [incomingRequests]);
   // One automatic provisioning retry: a fresh signup can land here before the
   // background account creation settles. Manual retry stays on the button.
   const autoRetried = React.useRef(false);
@@ -395,6 +407,34 @@ export const AppHome: React.FC = () => {
             </div>
           </div>
 
+          {/* Incoming Payment Requests Banner */}
+          {pendingIncomingRequests.length > 0 && (
+            <Link
+              to={`/request/${pendingIncomingRequests[0].id}`}
+              className="p-4 rounded-3xl bg-orange-600 text-white shadow-md flex items-center justify-between gap-3 hover:bg-orange-700 transition-all group cursor-pointer animate-fade-in"
+            >
+              <div className="flex items-center space-x-3 sm:space-x-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-white text-orange-600 flex items-center justify-center font-bold flex-shrink-0">
+                  <ArrowDownLeft className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold font-display flex items-center space-x-2">
+                    <span className="truncate">
+                      {pendingIncomingRequests.length === 1
+                        ? `@${pendingIncomingRequests[0].requester_handle} requested ${pendingIncomingRequests[0].amount_formatted}`
+                        : `${pendingIncomingRequests.length} payment requests waiting`}
+                    </span>
+                    <span className="w-2 h-2 rounded-full bg-white animate-pulse flex-shrink-0" />
+                  </div>
+                  <div className="text-[11px] text-orange-100 font-mono mt-0.5 truncate">
+                    Tap to review and accept or decline
+                  </div>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-orange-200 group-hover:text-white group-hover:translate-x-1 transition-all flex-shrink-0" />
+            </Link>
+          )}
+
           {/* Incoming Claim Notification Banner (Auto-discovered payments waiting!) */}
           {pendingPayments.length > 0 && (
             <Link
@@ -451,7 +491,7 @@ export const AppHome: React.FC = () => {
           )}
 
           {/* Quick Action Buttons */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-2.5">
             <Link
               to="/app/send"
               className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
@@ -464,6 +504,26 @@ export const AppHome: React.FC = () => {
               </span>
               <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
                 𝕏 & Wallets
+              </span>
+            </Link>
+
+            <Link
+              to="/app/request"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer relative"
+            >
+              {pendingIncomingRequests.length > 0 && (
+                <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-orange-600 text-white text-[9px] font-mono font-bold animate-pulse">
+                  {pendingIncomingRequests.length}
+                </span>
+              )}
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!text-orange-500 flex items-center justify-center group-hover:scale-105 transition-all">
+                <ArrowDownLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors">
+                Request
+              </span>
+              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
+                From 𝕏
               </span>
             </Link>
 
@@ -518,6 +578,23 @@ export const AppHome: React.FC = () => {
               </span>
             </Link>
           </div>
+
+          {/* People You Pay Section */}
+          <PeopleYouPay
+            onSelectRecipient={(handle, asset, prefAmount) => {
+              const q = new URLSearchParams();
+              q.set('recipient', handle);
+              if (asset) q.set('asset', asset);
+              if (prefAmount) q.set('amount', prefAmount);
+              navigate(`/app/send?${q.toString()}`);
+            }}
+            onRequestMoney={(handle, asset) => {
+              const q = new URLSearchParams();
+              q.set('handle', handle);
+              if (asset) q.set('asset', asset);
+              navigate(`/app/request?${q.toString()}`);
+            }}
+          />
         </div>
 
         {/* ── RIGHT COLUMN: Live Transactions ── */}

@@ -15,12 +15,12 @@ import {
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
-import { cleanMemeSymbol, formatRecipientDisplay, formatTokenAmount, formatUsd } from '../lib/api';
+import { api, cleanMemeSymbol, formatRecipientDisplay, formatTokenAmount, formatUsd } from '../lib/api';
 import { ShareModal } from '../components/ShareModal';
 import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
-import { PaymentIntent } from '../types';
+import { PaymentIntent, PaymentRequest } from '../types';
 import { cancellationReason, historyStatusLabel } from '../lib/statusLabels';
 
 export const HistoryPage: React.FC = () => {
@@ -39,15 +39,36 @@ export const HistoryPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedSharePayment, setSelectedSharePayment] = useState<PaymentIntent | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [requests, setRequests] = useState<PaymentRequest[]>([]);
+
+  const loadRequests = async () => {
+    try {
+      const [inc, out] = await Promise.all([
+        api.getIncomingRequests(),
+        api.getOutgoingRequests(),
+      ]);
+      const combined = [...(inc || []), ...(out || [])];
+      const seen = new Set<string>();
+      setRequests(
+        combined.filter((r) => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        })
+      );
+    } catch {}
+  };
 
   useEffect(() => {
     loadHistory();
     loadOnchainHistory();
+    loadRequests();
   }, [loadHistory, loadOnchainHistory]);
 
   const handleRefresh = () => {
     loadHistory();
     loadOnchainHistory();
+    loadRequests();
   };
 
   const handleCopy = (value: string, id: string) => {
@@ -108,7 +129,32 @@ export const HistoryPage: React.FC = () => {
       });
     }
 
-    // 2. Onchain deposits, withdrawals, and direct settlements
+    // 2. UPRAIL Payment Requests
+    for (const req of requests) {
+      const isSent = Boolean(
+        user?.handle && req.requester_handle && req.requester_handle.toLowerCase() === user.handle.toLowerCase()
+      );
+      const targetToken = tokens.find(
+        (t) => t.id.toLowerCase() === req.asset.toLowerCase() || t.symbol.toLowerCase() === req.asset.toLowerCase()
+      );
+      list.push({
+        id: req.id,
+        type: 'payment',
+        isSent,
+        title: isSent ? `Request to @${req.requested_handle}` : `Request from @${req.requester_handle}`,
+        subtitle: req.memo || 'UPRAIL Payment Request',
+        reason: req.decline_reason ? `Declined: ${req.decline_reason}` : null,
+        amount: req.amount,
+        amountUsd: null,
+        symbol: targetToken?.symbol || req.asset.split('.').pop()?.toUpperCase() || 'USDC',
+        status: req.status.toLowerCase(),
+        date: new Date(req.created_at).toLocaleDateString(),
+        timestamp: req.created_at,
+        copyValue: typeof window !== 'undefined' ? `${window.location.origin}/request/${req.id}` : `/request/${req.id}`,
+      });
+    }
+
+    // 3. Onchain deposits, withdrawals, and direct settlements
     for (const tx of transactions) {
       const isDeposit = tx.intent_type === 'deposit';
       const isWithdrawal = tx.intent_type === 'withdrawal';
@@ -178,7 +224,7 @@ export const HistoryPage: React.FC = () => {
 
     list.sort((a, b) => b.timestamp - a.timestamp);
     return list;
-  }, [history, transactions, user?.handle, tokens, balances]);
+  }, [history, requests, transactions, user?.handle, tokens, balances]);
 
   const filteredHistory = useMemo(() => {
     return unifiedHistory.filter((item) => {
@@ -195,6 +241,8 @@ export const HistoryPage: React.FC = () => {
       let matchesFilter = true;
       if (statusFilter === 'all') {
         matchesFilter = true;
+      } else if (statusFilter === 'requests') {
+        matchesFilter = item.subtitle?.includes('Payment Request') || item.title?.includes('Request');
       } else if (statusFilter === 'deposits') {
         matchesFilter = item.type === 'deposit';
       } else if (statusFilter === 'withdrawals') {
@@ -245,6 +293,7 @@ export const HistoryPage: React.FC = () => {
         <div className="flex gap-2 overflow-x-auto pb-1 text-xs font-mono">
           {[
             { id: 'all', label: 'All' },
+            { id: 'requests', label: 'Requests' },
             { id: 'deposits', label: 'Deposits' },
             { id: 'withdrawals', label: 'Withdrawals' },
             { id: 'ready', label: 'Waiting' },

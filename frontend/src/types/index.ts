@@ -161,6 +161,7 @@ export interface CreatePaymentRequest {
   passkeyAssertion?: unknown;
   quoteSignature?: string;
   depositAddress?: string;
+  requestId?: string;
   /**
    * The already-resolved token object. Held launchpad assets are absent from
    * the curated token list, so without it the quote for such an asset cannot
@@ -250,3 +251,43 @@ export interface NearcomWithdrawResponse {
   shareLink?: string;
   message: string;
 }
+
+export interface Contact {
+  id: string;
+  user_x_id: string;
+  contact_handle: string;
+  contact_x_id?: string | null;
+  nickname?: string | null;
+  preferred_amount?: string | null;
+  preferred_asset?: string | null;
+  is_pinned: number;
+  created_at: number;
+  updated_at: number;
+  last_transfer_at?: number | null;
+  transfer_count?: number;
+  is_registered?: boolean;
+}
+
+export type PaymentRequestStatus = 'PENDING' | 'COMPLETED' | 'DECLINED' | 'CANCELLED' | 'EXPIRED';
+
+export interface PaymentRequest {
+  id: string;
+  requester_x_id: string;
+  requester_handle: string;
+  requester_name?: string;
+  requester_avatar?: string | null;
+  requested_handle: string;
+  requested_x_id?: string | null;
+  asset: string;
+  amount: string;
+  amount_formatted: string;
+  memo?: string | null;
+  status: PaymentRequestStatus;
+  decline_reason?: string | null;
+  payment_id?: string | null;
+  created_at: number;
+  expires_at: number;
+  completed_at?: number | null;
+  is_recipient_registered?: boolean;
+}
+

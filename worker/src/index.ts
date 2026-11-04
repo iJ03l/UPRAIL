@@ -27,6 +27,8 @@ import { agentRouter } from './routes/agent';
 import { feesRouter } from './routes/fees';
 import { launchpadsRouter } from './routes/launchpads';
 import { ogRouter } from './routes/og';
+import { contactsRouter } from './routes/contacts';
+import { requestsRouter } from './routes/requests';
 import { oauthRouter } from './routes/oauth';
 import { approvalRouter } from './routes/approval';
 import { getAuthorizationServer } from './oauth/authorization';
@@ -136,6 +138,10 @@ app.use('*', async (c, next) => {
       url.pathname.startsWith('/parking/') ||
       url.pathname === '/send' ||
       url.pathname.startsWith('/send/') ||
+      url.pathname === '/request' ||
+      url.pathname.startsWith('/request/') ||
+      url.pathname === '/contacts' ||
+      url.pathname.startsWith('/contacts/') ||
       url.pathname === '/receive' ||
       url.pathname.startsWith('/receive/') ||
       url.pathname === '/claim' ||
@@ -220,9 +226,15 @@ apiRouter.post('/auth-challenge', requireAuth(), issueTxChallenge);
 // System health & SITREP outage communications
 apiRouter.route('/system', healthRouter);
 
+// Persistent contacts & "People you pay"
+apiRouter.route('/contacts', contactsRouter);
+
+// UPRAIL payment requests (peer-to-peer 𝕏 handle requests)
+apiRouter.route('/requests', requestsRouter);
+
 app.route('/api', apiRouter);
 
-// Dynamic social cards for share links (claim / invite / receipt).
+// Dynamic social cards for share links (claim / invite / receipt / request).
 app.route('/og', ogRouter);
 
 // Global Error Handler
@@ -241,6 +253,9 @@ app.onError((err, c) => {
 // Next.js static export cannot prerender unknown payment IDs, so these paths
 // are rewritten onto the static claim page, which reads the id from the URL.
 const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
+
+// Payment request deep links: /request/<requestId> and /app/request/<requestId>
+const REQUEST_DEEP_LINK = /^\/(?:app\/)?request\/([A-Za-z0-9_-]{1,64})\/?$/;
 
 /**
  * Bump when the generated card artwork/layout changes. Social platforms cache
@@ -512,6 +527,53 @@ app.notFound(async (c) => {
       }
 
       const target = new URL('/receipt', url);
+      target.search = url.search;
+      const assetResponse = await c.env.ASSETS.fetch(
+        new Request(target, {
+          method: 'GET',
+          headers: c.req.raw.headers,
+        })
+      );
+      if (assetResponse.ok) {
+        return assetResponse;
+      }
+    }
+
+    const requestMatch = url.pathname.match(REQUEST_DEEP_LINK);
+    if (requestMatch) {
+      const requestId = requestMatch[1];
+      if (isBot && !STATIC_ASSET_RE.test(url.pathname)) {
+        let requester = '';
+        let targetHandle = '';
+        let amount = '';
+        let asset = '';
+        if (c.env.DB) {
+          try {
+            const r = await c.env.DB.prepare(
+              'SELECT requester_handle, requested_handle, amount, asset FROM payment_requests WHERE id = ?'
+            )
+              .bind(requestId)
+              .first<{ requester_handle: string | null; requested_handle: string | null; amount: string; asset: string }>();
+            if (r) {
+              requester = r.requester_handle || '';
+              targetHandle = r.requested_handle || '';
+              amount = r.amount;
+              asset = r.asset;
+            }
+          } catch {}
+        }
+        const ticker = await resolveShareTicker(c.env, asset);
+        const amountLabel = plainAmount(amount, ticker);
+        return renderShareCardHtml({
+          title: requester ? `@${requester} requested ${amountLabel || 'a payment'}` : 'Payment requested on UPRAIL',
+          description: targetHandle ? `Payment request for @${targetHandle}. Accept or decline securely on UPRAIL.` : 'Accept or decline securely on UPRAIL.',
+          imageUrl: `${url.origin}/og/request/${requestId}.png?v=${OG_CARD_VERSION}`,
+          url: url.href,
+        });
+      }
+
+      const basePath = url.pathname.startsWith('/app/') ? '/app/request' : '/request';
+      const target = new URL(basePath, url);
       target.search = url.search;
       const assetResponse = await c.env.ASSETS.fetch(
         new Request(target, {

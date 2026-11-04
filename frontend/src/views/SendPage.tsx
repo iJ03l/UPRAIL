@@ -16,13 +16,15 @@ import { BackBar } from '../components/BackBar';
 import { ShareModal } from '../components/ShareModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareModal';
+import { PeopleYouPay } from '../components/PeopleYouPay';
 import { usePayments } from '../hooks/usePayments';
 import { PROTOCOL_FEE_RATE, formatTokenAmount, formatUsd, api } from '../lib/api';
 import { addressFamily, familyLabel, WithdrawChain } from '../lib/withdrawChains';
-import { useSearchParams } from '../lib/router';
+import { useSearchParams, useNavigate } from '../lib/router';
 import { PaymentIntent } from '../types';
 
 export const SendPage: React.FC = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedMode = searchParams.get('mode');
   const {
@@ -290,12 +292,34 @@ export const SendPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Mode 1: 𝕏 Handle Input */}
           {sendMode === 'handle' ? (
-            <HandleInput
-              value={recipient}
-              onChange={setRecipient}
-              disabled={isSubmitting}
-              placeholder="username"
-            />
+            <div className="space-y-4">
+              <PeopleYouPay
+                onSelectRecipient={(handle, asset, prefAmount) => {
+                  setRecipient(handle.replace(/^@+/, ''));
+                  if (prefAmount) setAmount(prefAmount);
+                  if (asset) {
+                    const match = tokens.find(
+                      (t) =>
+                        t.symbol.toLowerCase() === asset.toLowerCase() ||
+                        t.id.toLowerCase() === asset.toLowerCase()
+                    );
+                    if (match) setSelectedToken(match);
+                  }
+                }}
+                onRequestMoney={(handle, asset) => {
+                  const q = new URLSearchParams();
+                  q.set('handle', handle.replace(/^@+/, ''));
+                  if (asset) q.set('asset', asset);
+                  navigate(`/app/request?${q.toString()}`);
+                }}
+              />
+              <HandleInput
+                value={recipient}
+                onChange={setRecipient}
+                disabled={isSubmitting}
+                placeholder="username"
+              />
+            </div>
           ) : (
             /* Mode 2: Wallet Address Input (EVM, Solana, NEAR) */
             <div className="space-y-4">

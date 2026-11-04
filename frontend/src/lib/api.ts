@@ -13,6 +13,8 @@ import {
   CreatedAgentKey,
   NearcomDestination,
   NearcomWithdrawResponse,
+  Contact,
+  PaymentRequest,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
 import { pruneStoredPasskeys } from './passkeyStorage';
@@ -1123,6 +1125,7 @@ export const api = {
         quoteSignature,
         depositAddress: depositAddress || 'escrow.uprail.near',
         passkeyAssertion: params.passkeyAssertion,
+        requestId: params.requestId || undefined,
       }),
     });
 
@@ -1649,5 +1652,185 @@ export const api = {
     }
     return await res.json();
   },
+
+  // ── Contacts ("People You Pay") ──────────────────────────────────────────
+
+  async getContacts(): Promise<Contact[]> {
+    const url = API_BASE ? `${API_BASE}/api/contacts` : '/api/contacts';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      return [];
+    }
+    const data = await res.json();
+    return data.contacts || [];
+  },
+
+  async saveContact(
+    handle: string,
+    data?: { nickname?: string; preferred_amount?: string; preferred_asset?: string; is_pinned?: boolean }
+  ): Promise<{ success: boolean; contact: Contact }> {
+    const url = API_BASE ? `${API_BASE}/api/contacts` : '/api/contacts';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ handle, ...data }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to save contact');
+    }
+    return await res.json();
+  },
+
+  async deleteContact(handle: string): Promise<void> {
+    const clean = handle.replace(/^@+/, '');
+    const url = API_BASE
+      ? `${API_BASE}/api/contacts/${encodeURIComponent(clean)}`
+      : `/api/contacts/${encodeURIComponent(clean)}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to remove contact');
+    }
+  },
+
+  // ── UPRAIL Payment Requests ──────────────────────────────────────────────
+
+  async createPaymentRequest(params: {
+    requestedHandle: string;
+    asset: string;
+    amount: string;
+    memo?: string;
+    expiresInDays?: number;
+  }): Promise<PaymentRequest> {
+    const url = API_BASE ? `${API_BASE}/api/requests` : '/api/requests';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to create payment request');
+    }
+    const data = await res.json();
+    return data.request;
+  },
+
+  async getPublicRequest(id: string): Promise<PaymentRequest> {
+    const url = API_BASE ? `${API_BASE}/api/requests/${encodeURIComponent(id)}` : `/api/requests/${encodeURIComponent(id)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Payment request not found');
+    }
+    const data = await res.json();
+    return data.request;
+  },
+
+  async getIncomingRequests(): Promise<PaymentRequest[]> {
+    const url = API_BASE ? `${API_BASE}/api/requests/incoming` : '/api/requests/incoming';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.requests || [];
+  },
+
+  async getOutgoingRequests(): Promise<PaymentRequest[]> {
+    const url = API_BASE ? `${API_BASE}/api/requests/outgoing` : '/api/requests/outgoing';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.requests || [];
+  },
+
+  async declinePaymentRequest(id: string, reason?: string): Promise<void> {
+    const url = API_BASE
+      ? `${API_BASE}/api/requests/${encodeURIComponent(id)}/decline`
+      : `/api/requests/${encodeURIComponent(id)}/decline`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to decline request');
+    }
+  },
+
+  async cancelPaymentRequest(id: string): Promise<void> {
+    const url = API_BASE
+      ? `${API_BASE}/api/requests/${encodeURIComponent(id)}/cancel`
+      : `/api/requests/${encodeURIComponent(id)}/cancel`;
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to cancel request');
+    }
+  },
+
+  async acceptPaymentRequest(id: string, paymentId?: string): Promise<void> {
+    const url = API_BASE
+      ? `${API_BASE}/api/requests/${encodeURIComponent(id)}/accept`
+      : `/api/requests/${encodeURIComponent(id)}/accept`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ paymentId }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to accept request');
+    }
+  },
+
+  async getBlockedUsers(): Promise<Array<{ blocked_handle: string; created_at: number }>> {
+    const url = API_BASE ? `${API_BASE}/api/requests/blocks` : '/api/requests/blocks';
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.blocked || [];
+  },
+
+  async blockUser(handle: string): Promise<void> {
+    const url = API_BASE ? `${API_BASE}/api/requests/block` : '/api/requests/block';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ handle }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to block user');
+    }
+  },
+
+  async unblockUser(handle: string): Promise<void> {
+    const clean = handle.replace(/^@+/, '');
+    const url = API_BASE
+      ? `${API_BASE}/api/requests/block/${encodeURIComponent(clean)}`
+      : `/api/requests/block/${encodeURIComponent(clean)}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to unblock user');
+    }
+  },
 };
+
 

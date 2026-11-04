@@ -181,3 +181,45 @@ ogRouter.get('/fees/:file', (c) => {
     });
   });
 });
+
+ogRouter.get('/request/:file', (c) => {
+  const id = pngId(c.req.param('file'));
+  if (!id) return c.text('Not found', 404);
+
+  return cached(c, async () => {
+    let requester = '';
+    let target = '';
+    let amount = '';
+    let asset = '';
+    try {
+      const row = await c.env.DB.prepare(
+        'SELECT requester_handle, requested_handle, amount, asset FROM payment_requests WHERE id = ?'
+      )
+        .bind(id)
+        .first<{
+          requester_handle: string | null;
+          requested_handle: string | null;
+          amount: string;
+          asset: string;
+        }>();
+      if (row) {
+        requester = row.requester_handle || '';
+        target = row.requested_handle || '';
+        amount = row.amount || '';
+        asset = row.asset || '';
+      }
+    } catch {}
+
+    const ticker = await resolveShareTicker(c.env, asset);
+    const amountLabel = plainAmount(amount, ticker);
+    return renderOgCard({
+      eyebrow: 'PAYMENT REQUEST',
+      headline: amountLabel || 'Payment requested',
+      subline: requester ? `requested by @${requester}` : 'via UPRAIL',
+      detail: target
+        ? `For @${target}. Accept or decline securely.`
+        : 'Accept or decline securely on UPRAIL.',
+    });
+  });
+});
+

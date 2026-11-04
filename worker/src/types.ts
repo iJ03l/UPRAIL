@@ -378,3 +378,43 @@ export type AppContext = {
   Bindings: Env;
   Variables: Variables;
 };
+
+// ─── Contacts & People You Pay ────────────────────────────────────────────────
+export interface Contact {
+  id: string;
+  user_x_id: string;
+  contact_handle: string;
+  contact_x_id?: string | null;
+  nickname?: string | null;
+  preferred_amount?: string | null;
+  preferred_asset?: string | null;
+  is_pinned: number;
+  created_at: number;
+  updated_at: number;
+  // Computed / joined fields
+  last_transfer_at?: number | null;
+  transfer_count?: number;
+  is_registered?: boolean;
+}
+
+// ─── UPRAIL Payment Requests ─────────────────────────────────────────────────
+export type PaymentRequestStatus = 'PENDING' | 'COMPLETED' | 'DECLINED' | 'CANCELLED' | 'EXPIRED';
+
+export interface PaymentRequest {
+  id: string;
+  requester_x_id: string;
+  requester_handle: string;
+  requested_handle: string;
+  requested_x_id?: string | null;
+  asset: string;
+  amount: string;
+  amount_formatted: string;
+  memo?: string | null;
+  status: PaymentRequestStatus;
+  decline_reason?: string | null;
+  payment_id?: string | null;
+  created_at: number;
+  expires_at: number;
+  completed_at?: number | null;
+}
+

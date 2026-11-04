@@ -1257,6 +1257,35 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       }
     }
 
+    // If this payment was settling a payment request, mark it COMPLETED
+    if ((body as any).requestId) {
+      try {
+        await c.env.DB.prepare(
+          `UPDATE payment_requests SET status = 'COMPLETED', payment_id = ?, completed_at = ? WHERE id = ? AND status = 'PENDING'`
+        )
+          .bind(paymentId, Date.now(), (body as any).requestId)
+          .run();
+      } catch (reqErr) {
+        console.warn(`[send] could not mark request ${(body as any).requestId} completed:`, reqErr);
+      }
+    }
+
+    // Automatically ensure recipient is recorded in contacts
+    if (session?.x_id && !recipient.isAddress && cleanHandle) {
+      try {
+        const contactId = `cnt_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+        await c.env.DB.prepare(
+          `INSERT INTO contacts (id, user_x_id, contact_handle, contact_x_id, preferred_asset, is_pinned, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+           ON CONFLICT(user_x_id, contact_handle) DO UPDATE SET updated_at = ?`
+        )
+          .bind(contactId, session.x_id, cleanHandle, recipientXId, body.asset, Date.now(), Date.now(), Date.now())
+          .run();
+      } catch (cntErr) {
+        console.warn('[send] could not auto-save contact:', cntErr);
+      }
+    }
+
     const appOrigin = resolveOrigin(c.env);
     // Every X-handle recipient gets a link so the sender can always notify
     // them. Unregistered recipients get the claim link (invite attached);
