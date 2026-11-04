@@ -31,61 +31,69 @@ export const RequestShareModal: React.FC<RequestShareModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const shortMemo = request.memo
+    ? request.memo.length > 50
+      ? `${request.memo.slice(0, 47)}…`
+      : request.memo
+    : null;
+
   const tweetText = encodeURIComponent(
     [
-      `Hey @${request.requested_handle},`,
+      `Hey @${request.requested_handle}, don't leave me hanging! 👀`,
       '',
-      `I requested a payment of ${request.amount_formatted} on @uprailworld.`,
-      request.memo ? `Memo: "${request.memo}"` : '',
+      `I requested a payment of ${request.amount_formatted} on UPRAIL.`,
+      shortMemo ? `Memo: "${shortMemo}"` : '',
       '',
-      'View, accept, or decline securely without creating a wallet:',
+      'Settle up or decline in one biometric tap (no wallet needed):',
       shareLink,
     ].filter(Boolean).join('\n')
   );
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in">
       <div className="relative w-full max-w-md rounded-3xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 shadow-2xl p-6 sm:p-7 overflow-hidden">
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 p-1 rounded-full text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+          className="absolute top-5 right-5 p-1.5 rounded-full text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* Header Icon */}
-        <div className="flex justify-center mb-4">
-          <div className="w-14 h-14 rounded-2xl bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 flex items-center justify-center text-orange-600 dark:text-orange-400 shadow-xs">
-            <ArrowDownLeft className="w-7 h-7" />
+        {/* Fun Eyebrow Badge */}
+        <div className="flex items-center justify-center mb-3">
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-[10px] font-mono font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+            <span>SETTLE UP 💸 · DON'T LEAVE 'EM HANGING 👀</span>
           </div>
         </div>
 
         {/* Title */}
         <div className="text-center space-y-1 mb-5">
-          <h3 className="text-xl font-extrabold text-stone-950 dark:text-white font-display">
+          <h3 className="text-2xl font-extrabold text-stone-950 dark:text-white font-display">
             Request Created!
           </h3>
           <p className="text-xs text-stone-500 dark:text-stone-400 font-sans">
-            Share this link with @{request.requested_handle} to receive payment
+            Drop this link to <span className="font-bold font-mono text-stone-900 dark:text-white">@{request.requested_handle}</span>. They can pay or decline in one biometric tap — no crypto wallet needed.
           </p>
         </div>
 
-        {/* Summary Card */}
-        <div className="rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-4 mb-5 space-y-2">
+        {/* Minimal Summary Card */}
+        <div className="rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 p-4 mb-5 space-y-2.5">
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-stone-500 dark:text-stone-400">Target</span>
             <span className="font-bold text-stone-900 dark:text-white">@{request.requested_handle}</span>
           </div>
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-stone-500 dark:text-stone-400">Amount</span>
-            <span className="font-bold text-stone-900 dark:text-white text-sm">{request.amount_formatted}</span>
+            <span className="font-bold text-stone-900 dark:text-white text-base">{request.amount_formatted}</span>
           </div>
-          {request.memo && (
-            <div className="flex items-start justify-between text-xs font-mono pt-1 border-t border-stone-200/60 dark:border-stone-800/60">
-              <span className="text-stone-500 dark:text-stone-400">Memo</span>
-              <span className="text-stone-800 dark:text-stone-200 text-right max-w-[200px] truncate">{request.memo}</span>
+          {shortMemo && (
+            <div className="flex items-start justify-between text-xs font-mono pt-2 border-t border-stone-200/60 dark:border-stone-800/60">
+              <span className="text-stone-500 dark:text-stone-400 flex-shrink-0 mr-2">Memo</span>
+              <span className="text-stone-800 dark:text-stone-200 text-right truncate max-w-[210px] font-sans italic" title={request.memo || ''}>
+                “{shortMemo}”
+              </span>
             </div>
           )}
         </div>
@@ -108,7 +116,7 @@ export const RequestShareModal: React.FC<RequestShareModalProps> = ({
             className="w-full py-3.5 px-4 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 hover:bg-stone-50 dark:hover:bg-stone-800 text-stone-900 dark:text-white text-xs font-mono font-bold flex items-center justify-center space-x-2 transition-all cursor-pointer"
           >
             <Share2 className="w-4 h-4" />
-            <span>Post on 𝕏</span>
+            <span>Notify on 𝕏 ("Don't leave me hanging 👀")</span>
           </a>
         </div>
       </div>

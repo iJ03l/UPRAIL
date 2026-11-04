@@ -75,91 +75,164 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   );
   const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${tweetText}`;
 
+  const shortPaymentId = payment.id ? `${payment.id.slice(0, 8)}…${payment.id.slice(-6)}` : '';
+  const dateFormatted = payment.createdAt ? new Date(payment.createdAt).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }) : 'Just now';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl p-6 sm:p-7 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fade-in">
+      <div className="relative w-full max-w-md rounded-3xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 shadow-2xl p-6 sm:p-7 overflow-hidden max-h-[90vh] overflow-y-auto">
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 p-1 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+          className="absolute top-5 right-5 p-1.5 rounded-full text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* Header Icon */}
-        <div className="flex justify-center mb-4">
-          <div className="w-14 h-14 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center text-stone-900 shadow-sm">
-            <Sparkles className="w-7 h-7" />
+        {/* Receipt Header Badge */}
+        <div className="flex items-center justify-center mb-4">
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300">
+            <Shield className="w-3.5 h-3.5 text-stone-900 dark:text-white" />
+            <span>UPRAIL Settlement Receipt</span>
           </div>
         </div>
 
         {/* Title */}
         <div className="text-center space-y-1 mb-5">
-          <h3 className="text-xl font-extrabold text-stone-950 font-display">
-            {isDirect ? 'Payment Delivered!' : 'Payment Ready!'}
+          <h3 className="text-2xl font-extrabold text-stone-950 dark:text-white font-display">
+            {isDirect ? 'Payment Delivered' : 'Payment Dispatched'}
           </h3>
-          <p className="text-xs text-stone-600">
+          <p className="text-xs text-stone-500 dark:text-stone-400">
             {isDirect ? (
               <>
                 Funds deposited directly into{' '}
-                <span className="text-stone-900 font-bold font-mono">
+                <span className="text-stone-900 dark:text-white font-bold font-mono">
                   @{payment.recipientHandle}
                 </span>
-                ’s UPRAIL account.
+                ’s vault.
               </>
             ) : (
               <>
-                Share the payment link with{' '}
-                <span className="text-stone-900 font-bold font-mono">
+                Reserved in escrow for{' '}
+                <span className="text-stone-900 dark:text-white font-bold font-mono">
                   @{payment.recipientHandle}
-                </span>{' '}
-                so they can receive it.
+                </span>.
               </>
             )}
           </p>
         </div>
 
-        {/* Payment Summary Pill */}
-        <div className="mb-5 p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between">
-          <div className="flex items-center space-x-2.5">
+        {/* Prominent Amount Ticket Card */}
+        <div className="mb-4 p-4 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 text-center space-y-1">
+          <div className="flex items-center justify-center space-x-2.5">
             <TokenIcon
               symbol={payment.token.symbol}
               iconUrl={payment.token.iconUrl}
               size="lg"
             />
-            <div>
-              <span className="text-sm font-extrabold text-stone-950 font-mono">
-                {formatTokenAmount(displayAmount)} {payment.token.symbol}
-              </span>
-              <span className="text-xs text-stone-500 block font-mono">
-                ≈ {formatUsd(displayAmountUsd)} USD
-              </span>
-            </div>
+            <span className="text-2xl font-extrabold text-stone-950 dark:text-white font-mono">
+              {formatTokenAmount(displayAmount)} {payment.token.symbol}
+            </span>
           </div>
-          <span className="text-xs px-2.5 py-1 rounded-full bg-stone-100 text-stone-900 border border-stone-200 font-bold">
-            {isDirect ? 'Direct Transfer' : 'Payment Waiting'}
-          </span>
+          {displayAmountUsd != null && (
+            <div className="text-xs text-stone-500 dark:text-stone-400 font-mono">
+              ≈ {formatUsd(displayAmountUsd)} USD
+            </div>
+          )}
         </div>
 
-        {/* Claim / receipt link */}
+        {/* Itemized Breakdown Table */}
+        <div className="rounded-2xl border border-stone-200 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-950/50 p-3.5 mb-4 space-y-2 text-xs font-mono">
+          <div className="flex items-center justify-between">
+            <span className="text-stone-500 dark:text-stone-400">Recipient</span>
+            <span className="font-bold text-stone-900 dark:text-white">@{payment.recipientHandle}</span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-stone-500 dark:text-stone-400">Settlement Rail</span>
+            <span className="font-bold text-stone-800 dark:text-stone-200">
+              {isDirect ? 'Direct Vault Transfer' : 'Confidential Escrow'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-stone-500 dark:text-stone-400">Status</span>
+            <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+              isDirect
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                : 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20'
+            }`}>
+              {isDirect ? 'Delivered to Vault' : 'Waiting Claim'}
+            </span>
+          </div>
+
+          {payment.fee && parseFloat(payment.fee) > 0 && (
+            <div className="flex items-center justify-between pt-1 border-t border-stone-200/60 dark:border-stone-800/60">
+              <span className="text-stone-500 dark:text-stone-400">Protocol Fee (1%)</span>
+              <span className="text-stone-700 dark:text-stone-300">
+                {payment.fee} {payment.token.symbol}
+              </span>
+            </div>
+          )}
+
+          {payment.memo && (
+            <div className="flex items-start justify-between pt-1 border-t border-stone-200/60 dark:border-stone-800/60">
+              <span className="text-stone-500 dark:text-stone-400 flex-shrink-0 mr-2">Memo</span>
+              <span className="text-stone-800 dark:text-stone-200 text-right truncate max-w-[210px]">
+                "{payment.memo}"
+              </span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-1 border-t border-stone-200/60 dark:border-stone-800/60">
+            <span className="text-stone-500 dark:text-stone-400">Timestamp</span>
+            <span className="text-stone-600 dark:text-stone-400 text-[11px]">{dateFormatted}</span>
+          </div>
+
+          {payment.id && (
+            <div className="flex items-center justify-between pt-1 border-t border-stone-200/60 dark:border-stone-800/60">
+              <span className="text-stone-500 dark:text-stone-400">Payment ID</span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(payment.id);
+                  toast('Payment ID copied');
+                }}
+                className="inline-flex items-center space-x-1 text-stone-700 dark:text-stone-300 hover:text-black dark:hover:text-white cursor-pointer"
+                title="Copy Payment ID"
+              >
+                <span>{shortPaymentId}</span>
+                <Copy className="w-3 h-3 text-stone-400" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Link / URL Row */}
         <div className="space-y-1.5 mb-4">
-          <label className="text-[11px] font-bold uppercase tracking-wider text-stone-600">
-            {isDirect ? 'Payment Link (receipt)' : 'Payment Link'}
+          <label className="text-[10px] font-mono uppercase tracking-wider text-stone-500 dark:text-stone-400 block">
+            {isDirect ? 'Proof of Payment Link' : 'Passkey Claim Link'}
           </label>
           <div className="flex items-center space-x-2">
             <input
               type="text"
               readOnly
               value={payment.claimLink}
-              className="flex-1 bg-stone-50 rounded-xl px-3 py-2.5 text-base sm:text-xs text-stone-800 font-mono border border-stone-200 focus:outline-none select-all"
+              className="flex-1 bg-stone-50 dark:bg-stone-950 rounded-xl px-3 py-2.5 text-xs text-stone-800 dark:text-stone-200 font-mono border border-stone-200 dark:border-stone-800 focus:outline-hidden select-all"
             />
             <button
               onClick={handleCopy}
-              className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
+              className="flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 text-xs font-mono font-bold transition-colors cursor-pointer"
             >
               {copied ? (
                 <>
-                  <Check className="w-3.5 h-3.5" />
+                  <Check className="w-3.5 h-3.5 text-emerald-400 dark:text-emerald-600" />
                   <span>Copied</span>
                 </>
               ) : (
@@ -172,32 +245,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           </div>
         </div>
 
-        {!isDirect ? (
-          /* Preloaded Invite Code Notice */
-          <div className="mb-4 p-3 rounded-2xl bg-stone-50 border border-stone-200 flex items-center justify-between text-xs font-mono">
-            <span className="text-stone-500 text-[11px]">VIP Invite Attached:</span>
-            <span className="font-bold text-stone-900 bg-white px-2 py-0.5 rounded border border-stone-200">
-              {payment.inviteCode || (payment.claimLink.includes('invite=') ? payment.claimLink.split('invite=')[1] : 'INCLUDED')}
-            </span>
-            <span className="text-[10px] text-stone-400">Preloaded for Recipient</span>
-          </div>
-        ) : (
-          <div className="mb-4 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center space-x-2">
-            <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span>
-              @{payment.recipientHandle} is already on UPRAIL — the money is in their
-              account. The link opens a receipt so they know it arrived.
-            </span>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="space-y-2 mb-5">
+        {/* Action Buttons */}
+        <div className="space-y-2 mb-4">
           <a
             href={twitterIntentUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl bg-black hover:bg-stone-800 text-white font-extrabold text-xs transition-colors shadow-sm"
+            className="w-full flex items-center justify-center space-x-2 py-3 px-4 rounded-xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 font-mono font-bold text-xs transition-colors shadow-xs"
           >
             <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
               <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
@@ -205,49 +259,25 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <span>Notify @{payment.recipientHandle} on 𝕏</span>
             <ExternalLink className="w-3.5 h-3.5 ml-1 opacity-70" />
           </a>
-
-          <button
-            onClick={() => setShowQr(!showQr)}
-            className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-4 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold border border-stone-200 transition-colors cursor-pointer"
-          >
-            <QrCode className="w-3.5 h-3.5 text-stone-500" />
-            <span>{showQr ? 'Hide Link' : 'Show Link'}</span>
-          </button>
         </div>
 
-        {/* Claim link card — rendered fully client-side. No third-party QR
-            service is used: those services receive the URL being encoded,
-            which would leak the payment id + invite code. */}
-        {showQr && (
-          <div className="p-4 rounded-2xl bg-white border border-stone-200 flex flex-col mb-4 animate-fade-in">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1.5">
-              {isDirect ? 'Receipt Link' : 'Payment Link'}
-            </span>
-            <p className="text-[11px] font-mono text-stone-700 break-all bg-stone-50 border border-stone-200 rounded-lg p-2 select-all">
-              {payment.claimLink}
-            </p>
-            <span className="text-[10px] text-stone-400 mt-1.5">
-              Shown locally — never sent to a third-party QR service
-            </span>
-          </div>
-        )}
-
         {/* Privacy Note */}
-        <div className="flex items-start space-x-2 p-3 rounded-2xl bg-stone-50 border border-stone-200 text-[11px] text-stone-700">
-          <Shield className="w-4 h-4 text-stone-900 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start space-x-2 p-3 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 text-[11px] text-stone-600 dark:text-stone-400">
+          <Shield className="w-4 h-4 text-stone-900 dark:text-white flex-shrink-0 mt-0.5" />
           <p>
-            <strong>Only they can open it.</strong> Even if this link is shared publicly, only{' '}
-            <span className="font-bold text-stone-900 font-mono">@{payment.recipientHandle}</span>{' '}
-            can confirm the payment. The link alone can't move the money.
+            <strong>Private & Non-Custodial.</strong>{' '}
+            {isDirect
+              ? 'Funds were moved directly into the recipient’s vault. Only their passkey can authorize withdrawals.'
+              : 'Escrowed securely. Only @' + payment.recipientHandle + ' can claim this payment via their biometric passkey.'}
           </p>
         </div>
 
         {/* Done Button */}
         <button
           onClick={onClose}
-          className="mt-4 w-full py-2.5 text-xs font-bold text-stone-500 hover:text-stone-900 transition-colors cursor-pointer"
+          className="mt-4 w-full py-2.5 text-xs font-mono font-bold text-stone-500 hover:text-stone-900 dark:hover:text-white transition-colors cursor-pointer"
         >
-          Done
+          Close Receipt
         </button>
       </div>
     </div>

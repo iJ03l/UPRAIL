@@ -27,6 +27,8 @@ UPRAIL bridges this gap by mapping any X handle (`@handle`) to a deterministic, 
 
 - **Universal Ingress to near.com via Public Identity:** Solves the near.com rotating address barrier. Anyone in the world can deposit or send funds to your persistent public identity (`@handle`) from 35+ chains without requiring a live session quote from you. Funds settle into your passkey-secured vault on NEAR Intents (`intents.near`), ready to be routed into any personal wallet or spent across the NEAR ecosystem.
 - **Send to any `@handle` without a recipient wallet:** Senders pay `@handle` in `USDC`, `USDT`, `NEAR`, `ETH`, `SOL`, `BTC`, or NEP-141 tokens. Registered recipients receive funds directly into their confidential/intents vault; unregistered handles receive funds into a pooled escrow and claim whenever they sign in.
+- **"People You Pay" (Persistent Identity Contacts & Quick-Actions):** P2P transfers are social and recurring. UPRAIL maintains a user-controlled, persistent contact memory merging pinned favorites, custom nicknames, and historical transfer recency—enabling single-tap sends and requests without re-typing handles or token parameters.
+- **UPRAIL Requests (Social Invoicing & Network-Effect Ingress):** Allow users to request money from any X handle with custom amounts, reasons, and expiry. Recipients receive a minimal, playful social card (`/request/:id`) and can accept or decline voluntarily in one tap. Unregistered recipients can view requests without an account upfront, and upon passkey onboarding, settle directly from their vault.
 - **Passkey + X OAuth 2.0 onboarding (zero seed phrases):** Recipients sign in with X OAuth 2.0 PKCE and confirm with a hardware WebAuthn P-256 passkey (Touch ID / Face ID / YubiKey). UPRAIL sponsors 100% of NEAR account creation, storage deposits, and execution gas.
 - **Confidential execution & unlinked escrow claims:** When routed through NEAR Confidential Intents, balances and swap legs settle inside the confidential layer. Escrowed claims settle from pooled escrow's confidential balance to the recipient's vault, breaking onchain linkability between sender and recipient.
 - **Cross-chain "Send to Wallet" across 35+ blockchains:** Users can withdraw their balance to any external wallet on NEAR, Ethereum, Base, Arbitrum, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and 25+ other chains via 1Click.
@@ -88,7 +90,7 @@ UPRAIL includes a full **OAuth 2.1 Authorization Server** and **Streamable HTTP 
 - **The Railway for Autonomous Agents:** Rather than forcing humans to sit at terminals and click through transaction forms, users connect Claude, ChatGPT, Grok, Meta Muse, or Cursor directly to UPRAIL via open standards (OAuth 2.1 PKCE + Model Context Protocol).
 - **Zero Raw Key Exposure:** Agents never touch or store private keys. Instead, they receive revocable, policy-bounded OAuth bearer grants authorized by the user's hardware passkey (Touch ID / Face ID / WebAuthn).
 - **Biometric Policy Boundaries & Spend Caps:** Users define strict, immutable guardrails during connection: a maximum USD limit per individual payment and an aggregate daily USD spend cap. Every tool call pre-checks and reserves quota atomically against live oracle pricing.
-- **7 MCP Tools for Autonomous Commerce:**
+- **13 MCP Tools for Autonomous Commerce:**
   1. `pay_handle`: Send crypto confidentially to any X handle (single or batch) with automated claim links and prefilled X post intent URLs.
   2. `check_approval`: Query the resolution status of batch or policy-overflow authorization tickets.
   3. `withdraw_to_wallet`: Withdraw funds to any external address across 35+ blockchains or internally to near.com.
@@ -96,11 +98,23 @@ UPRAIL includes a full **OAuth 2.1 Authorization Server** and **Streamable HTTP 
   5. `get_balance`: Check public, confidential, and total balances across all supported assets.
   6. `list_payments`: Audit recent sent and received payments with full transaction telemetry.
   7. `resolve_handle`: Resolve whether an X identity has an active UPRAIL vault or routes through escrow.
+  8. `list_contacts`: Retrieve the user's saved and frequent transfer recipients with recency and preferred assets.
+  9. `save_contact`: Save, update, or pin trusted contacts in the user's persistent address book.
+  10. `request_payment`: Create a social payment request asking an X handle for funds, generating shareable claim URLs and prefilled X posts.
+  11. `list_requests`: Query inbound and outbound payment requests by direction and settlement status.
+  12. `accept_request`: Pay an incoming payment request autonomously on behalf of the owner, bounded by spend caps.
+  13. `decline_request`: Decline an incoming payment request with an optional reason.
 - **Human-in-the-Loop Instant Passkey Escalation (`/approve`):** When an agent needs to execute an anomalous high-value batch transfer or exceed its daily limit, it yields an authorization ticket link (`/approve?id=...`). The user reviews the breakdown on their device, confirms with Face ID or fingerprint via WebAuthn, and the agent's intent executes atomically on NEAR.
 - **Fail-Closed Spend Policy & Anti-Replay:** Live oracle token pricing, atomic database reservations before signing intents, and idempotency locks prevent retried prompts from causing double-spends or prompt-injection drains.
 
 ### 7. Launchpad Creator-Fee Routing
 Launchpads and DEX pools (Nearly, JustHoot v2, and Intear Launchpad on `launch.intear.near` / `dex.intear.near`) keep their own fee receiver. When a payout should reach an X handle, their adapter or keeper sends the transfer to escrow with the target handle memo (`Fees to @handle via UPRAIL`), and UPRAIL automatically verifies the onchain receipt and credits the creator's vault.
+
+### 8. Social Invoicing, Contact Memory & Anti-Spam Request Rails
+Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduces zero-friction social payment memory:
+- **"People you pay" (Contact Engine):** A user-governed registry mapping contacts to X identities, tracking custom nicknames, preferred transfer assets and amounts, and pin priorities, automatically merged with transfer ledger history.
+- **Social Requests Lifecycle & Anti-Harassment:** Payment requests follow a strict state machine (`PENDING` → `COMPLETED` / `DECLINED` / `CANCELLED` / `EXPIRED`). Requests include rate-limiting (max 10 requests/hour/user) and request-blocking primitives to prevent spam, while allowing unregistered recipients to inspect invoices without signing up upfront.
+- **Full Autonomous Agent Parity:** AI agents can audit, generate, accept, and decline payment requests within their owner's biometric spend guardrails.
 
 ---
 

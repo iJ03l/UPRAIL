@@ -547,26 +547,34 @@ app.notFound(async (c) => {
         let targetHandle = '';
         let amount = '';
         let asset = '';
+        let memo = '';
         if (c.env.DB) {
           try {
             const r = await c.env.DB.prepare(
-              'SELECT requester_handle, requested_handle, amount, asset FROM payment_requests WHERE id = ?'
+              'SELECT requester_handle, requested_handle, amount, asset, memo FROM payment_requests WHERE id = ?'
             )
               .bind(requestId)
-              .first<{ requester_handle: string | null; requested_handle: string | null; amount: string; asset: string }>();
+              .first<{ requester_handle: string | null; requested_handle: string | null; amount: string; asset: string; memo: string | null }>();
             if (r) {
               requester = r.requester_handle || '';
               targetHandle = r.requested_handle || '';
               amount = r.amount;
               asset = r.asset;
+              memo = r.memo || '';
             }
           } catch {}
         }
         const ticker = await resolveShareTicker(c.env, asset);
         const amountLabel = plainAmount(amount, ticker);
+        const shortMemo = memo ? (memo.length > 50 ? `${memo.slice(0, 47)}…` : memo) : '';
+        const memoPrefix = shortMemo ? `“${shortMemo}” — ` : '';
+        const description = targetHandle
+          ? `${memoPrefix}@${targetHandle}, don't leave them hanging! 👀 Settle up in one tap.`
+          : `${memoPrefix}Don't leave them hanging! 👀 Settle up or decline in one tap.`;
+
         return renderShareCardHtml({
-          title: requester ? `@${requester} requested ${amountLabel || 'a payment'}` : 'Payment requested on UPRAIL',
-          description: targetHandle ? `Payment request for @${targetHandle}. Accept or decline securely on UPRAIL.` : 'Accept or decline securely on UPRAIL.',
+          title: requester ? `@${requester} requested ${amountLabel || 'a payment'} 💸` : 'Payment requested on UPRAIL',
+          description,
           imageUrl: `${url.origin}/og/request/${requestId}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });

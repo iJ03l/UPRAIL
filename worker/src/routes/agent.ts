@@ -1342,6 +1342,274 @@ agentRouter.get('/payments', requireAgent(), async (c) => {
 });
 
 /**
+ * GET /api/agent/contacts
+ * The owner's saved contacts and frequent transfer recipients.
+ */
+agentRouter.get('/contacts', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  if (!c.env.DB) return c.json({ contacts: [] });
+
+  const saved = await c.env.DB.prepare(
+    `SELECT * FROM contacts WHERE user_x_id = ? ORDER BY is_pinned DESC, updated_at DESC LIMIT 50`
+  )
+    .bind(session.x_id)
+    .all<any>();
+
+  return c.json({ contacts: saved.results || [] });
+});
+
+/**
+ * POST /api/agent/contacts
+ * Save or pin a trusted recipient.
+ */
+agentRouter.post('/contacts', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  const body = await c.req.json<any>().catch(() => ({}));
+  const rawHandle = String(body.handle || '').trim().replace(/^@+/, '').toLowerCase();
+  if (!rawHandle) {
+    return c.json({ error: 'Valid handle is required.', code: 'INVALID_HANDLE' }, 400);
+  }
+
+  const id = `cnt_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const now = Date.now();
+  const isPinned = body.is_pinned === true || body.isPinned === true ? 1 : 0;
+
+  await c.env.DB.prepare(
+    `INSERT INTO contacts (id, user_x_id, contact_handle, nickname, preferred_amount, preferred_asset, is_pinned, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_x_id, contact_handle) DO UPDATE SET
+       nickname = COALESCE(excluded.nickname, contacts.nickname),
+       preferred_amount = COALESCE(excluded.preferred_amount, contacts.preferred_amount),
+       preferred_asset = COALESCE(excluded.preferred_asset, contacts.preferred_asset),
+       is_pinned = excluded.is_pinned,
+       updated_at = excluded.updated_at`
+  )
+    .bind(id, session.x_id, rawHandle, body.nickname || null, body.preferred_amount || null, body.preferred_asset || null, isPinned, now, now)
+    .run();
+
+  return c.json({ success: true, handle: rawHandle });
+});
+
+/**
+ * DELETE /api/agent/contacts/:handle
+ * Remove a saved contact.
+ */
+agentRouter.delete('/contacts/:handle', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  const handle = String(c.req.param('handle') || '').trim().replace(/^@+/, '').toLowerCase();
+  await c.env.DB.prepare(
+    `DELETE FROM contacts WHERE user_x_id = ? AND LOWER(contact_handle) = ?`
+  )
+    .bind(session.x_id, handle)
+    .run();
+
+  return c.json({ success: true, removed: handle });
+});
+
+/**
+ * POST /api/agent/requests
+ * Create a UPRAIL payment request asking an X handle to send funds.
+ */
+agentRouter.post('/requests', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  const body = await c.req.json<any>().catch(() => ({}));
+  const targetHandle = String(body.requestedHandle || body.handle || '').trim().replace(/^@+/, '').toLowerCase();
+  const asset = String(body.asset || 'USDC').trim().toUpperCase();
+  const amount = String(body.amount || '').trim();
+  const amountNum = parseFloat(amount);
+
+  if (!targetHandle || isNaN(amountNum) || amountNum <= 0) {
+    return c.json({ error: 'requestedHandle, asset, and positive amount are required.', code: 'INVALID_REQUEST' }, 400);
+  }
+
+  const requesterHandle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+  if (targetHandle === requesterHandle) {
+    return c.json({ error: 'You cannot request payment from yourself.', code: 'SELF_REQUEST_FORBIDDEN' }, 400);
+  }
+
+  // Anti-spam hourly check
+  const oneHourAgo = Date.now() - 3600 * 1000;
+  const countRow = await c.env.DB.prepare(
+    `SELECT COUNT(*) as count FROM payment_requests WHERE requester_x_id = ? AND created_at > ?`
+  )
+    .bind(session.x_id, oneHourAgo)
+    .first<{ count: number }>();
+
+  if (countRow && countRow.count >= 10) {
+    return c.json({ error: 'Rate limit: Maximum 10 payment requests per hour.', code: 'RATE_LIMIT_EXCEEDED' }, 429);
+  }
+
+  const id = `req_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const now = Date.now();
+  const days = Math.min(Math.max(Number(body.expiresInDays) || 7, 1), 30);
+  const expiresAt = now + days * 86400 * 1000;
+  const memo = typeof body.memo === 'string' ? body.memo.trim().slice(0, 280) : null;
+  const amountFormatted = `${amount} ${asset}`;
+
+  await c.env.DB.prepare(
+    `INSERT INTO payment_requests (
+      id, requester_x_id, requester_handle, requested_handle, requested_x_id,
+      asset, amount, amount_formatted, memo, status, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 'PENDING', ?, ?)`
+  )
+    .bind(id, session.x_id, requesterHandle, targetHandle, asset, amount, amountFormatted, memo, now, expiresAt)
+    .run();
+
+  const appOrigin = resolveOrigin(c.env);
+  const requestLink = `${appOrigin}/request/${id}`;
+  const tweetText = `Hey @${targetHandle}, @${requesterHandle} requested a payment of ${amountFormatted} on @uprailworld: ${requestLink}`;
+  const xShareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`;
+
+  return c.json({
+    success: true,
+    requestId: id,
+    requestLink,
+    xShareUrl,
+    requestedHandle: `@${targetHandle}`,
+    amount: amountFormatted,
+    memo,
+    expiresAt,
+  }, 201);
+});
+
+/**
+ * GET /api/agent/requests
+ * List incoming and/or outgoing payment requests for the owner.
+ */
+agentRouter.get('/requests', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  const direction = c.req.query('direction') || 'incoming';
+  const handle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+
+  let query = '';
+  if (direction === 'outgoing') {
+    query = `SELECT * FROM payment_requests WHERE requester_x_id = ? ORDER BY created_at DESC LIMIT 50`;
+  } else if (direction === 'all') {
+    query = `SELECT * FROM payment_requests WHERE requester_x_id = ? OR LOWER(requested_handle) = ? ORDER BY created_at DESC LIMIT 50`;
+  } else {
+    query = `SELECT * FROM payment_requests WHERE LOWER(requested_handle) = ? OR requested_x_id = ? ORDER BY created_at DESC LIMIT 50`;
+  }
+
+  const { results } = await c.env.DB.prepare(query)
+    .bind(direction === 'incoming' ? handle : session.x_id, direction === 'all' ? handle : (direction === 'incoming' ? session.x_id : undefined))
+    .all<any>();
+
+  const appOrigin = resolveOrigin(c.env);
+  const requests = (results || []).map((r) => ({
+    id: r.id,
+    direction: r.requester_x_id === session.x_id ? 'outgoing' : 'incoming',
+    requesterHandle: `@${r.requester_handle}`,
+    requestedHandle: `@${r.requested_handle}`,
+    asset: r.asset,
+    amount: r.amount,
+    amountFormatted: r.amount_formatted,
+    memo: r.memo || null,
+    status: r.status,
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
+    completedAt: r.completed_at || null,
+    requestLink: `${appOrigin}/request/${r.id}`,
+  }));
+
+  return c.json({ requests });
+});
+
+/**
+ * POST /api/agent/requests/:id/accept
+ * Automatically pay an incoming payment request on behalf of the owner.
+ */
+agentRouter.post('/requests/:id/accept', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  const id = c.req.param('id');
+  const req = await c.env.DB.prepare(`SELECT * FROM payment_requests WHERE id = ?`).bind(id).first<any>();
+
+  if (!req) {
+    return c.json({ error: 'Request not found.', code: 'NOT_FOUND' }, 404);
+  }
+
+  const currentHandle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+  const targetHandle = String(req.requested_handle || '').trim().replace(/^@+/, '').toLowerCase();
+
+  if (session.x_id !== req.requested_x_id && currentHandle !== targetHandle) {
+    return c.json({ error: 'Unauthorized: Only the requested recipient can accept.', code: 'UNAUTHORIZED' }, 403);
+  }
+
+  if (req.status !== 'PENDING') {
+    return c.json({ error: `Request cannot be accepted (current status: ${req.status}).`, code: 'INVALID_STATUS' }, 400);
+  }
+
+  // Delegate payment execution via executeAgentPay, passing requestId
+  return await executeAgentPay(c, {
+    recipientHandle: req.requester_handle,
+    asset: req.asset,
+    amount: req.amount,
+    memo: req.memo || undefined,
+    requestId: req.id,
+  });
+});
+
+/**
+ * POST /api/agent/requests/:id/decline
+ * Decline an incoming payment request.
+ */
+agentRouter.post('/requests/:id/decline', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  const id = c.req.param('id');
+  const body = await c.req.json<any>().catch(() => ({}));
+  const req = await c.env.DB.prepare(`SELECT * FROM payment_requests WHERE id = ?`).bind(id).first<any>();
+
+  if (!req) return c.json({ error: 'Request not found.', code: 'NOT_FOUND' }, 404);
+
+  const currentHandle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+  const targetHandle = String(req.requested_handle || '').trim().replace(/^@+/, '').toLowerCase();
+
+  if (session.x_id !== req.requested_x_id && currentHandle !== targetHandle) {
+    return c.json({ error: 'Unauthorized: Only the requested recipient can decline.', code: 'UNAUTHORIZED' }, 403);
+  }
+
+  if (req.status !== 'PENDING') {
+    return c.json({ error: `Request cannot be declined (current status: ${req.status}).`, code: 'INVALID_STATUS' }, 400);
+  }
+
+  const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 200) : null;
+  await c.env.DB.prepare(
+    `UPDATE payment_requests SET status = 'DECLINED', decline_reason = ?, completed_at = ? WHERE id = ?`
+  )
+    .bind(reason, Date.now(), id)
+    .run();
+
+  return c.json({ success: true, status: 'DECLINED' });
+});
+
+/**
+ * POST /api/agent/requests/:id/cancel
+ * Cancel an outgoing payment request.
+ */
+agentRouter.post('/requests/:id/cancel', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  const id = c.req.param('id');
+  const req = await c.env.DB.prepare(`SELECT * FROM payment_requests WHERE id = ?`).bind(id).first<any>();
+
+  if (!req) return c.json({ error: 'Request not found.', code: 'NOT_FOUND' }, 404);
+
+  if (session.x_id !== req.requester_x_id) {
+    return c.json({ error: 'Unauthorized: Only the requester can cancel.', code: 'UNAUTHORIZED' }, 403);
+  }
+
+  if (req.status !== 'PENDING') {
+    return c.json({ error: `Request cannot be cancelled (current status: ${req.status}).`, code: 'INVALID_STATUS' }, 400);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE payment_requests SET status = 'CANCELLED', completed_at = ? WHERE id = ?`
+  )
+    .bind(Date.now(), id)
+    .run();
+
+  return c.json({ success: true, status: 'CANCELLED' });
+});
+
+/**
  * GET /api/agent/openapi.json
  * Public OpenAPI 3.1.0 specification so OpenAI (ChatGPT / OpenAI Dot), Grok,
  * Meta Muse, or any OpenAPI-based AI assistant can import UPRAIL payment
@@ -1578,6 +1846,116 @@ agentRouter.get('/openapi.json', (c) => {
           summary: 'List recent sent and received payments',
           responses: {
             '200': { description: 'List of recent sent and received payments' },
+          },
+        },
+      },
+      '/api/agent/contacts': {
+        get: {
+          operationId: 'listContacts',
+          summary: "List the owner's saved contacts ('People you pay')",
+          responses: {
+            '200': { description: 'List of saved and frequent contacts' },
+          },
+        },
+        post: {
+          operationId: 'saveContact',
+          summary: 'Save, pin, or update a trusted recipient',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['handle'],
+                  properties: {
+                    handle: { type: 'string', description: 'X handle' },
+                    nickname: { type: 'string', description: 'Friendly nickname' },
+                    preferred_amount: { type: 'string' },
+                    preferred_asset: { type: 'string' },
+                    is_pinned: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': { description: 'Contact saved' },
+          },
+        },
+      },
+      '/api/agent/requests': {
+        get: {
+          operationId: 'listRequests',
+          summary: 'List incoming or outgoing payment requests',
+          parameters: [
+            {
+              name: 'direction',
+              in: 'query',
+              required: false,
+              schema: { type: 'string', enum: ['incoming', 'outgoing', 'all'], default: 'incoming' },
+            },
+          ],
+          responses: {
+            '200': { description: 'List of payment requests' },
+          },
+        },
+        post: {
+          operationId: 'createRequest',
+          summary: 'Create a UPRAIL payment request asking an X handle for money',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['requestedHandle', 'asset', 'amount'],
+                  properties: {
+                    requestedHandle: { type: 'string', description: 'Target X handle' },
+                    asset: { type: 'string', description: 'Token symbol (e.g. USDC)' },
+                    amount: { type: 'string', description: 'Token amount' },
+                    memo: { type: 'string', description: 'Optional reason' },
+                    expiresInDays: { type: 'number', default: 7 },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '201': { description: 'Payment request created' },
+          },
+        },
+      },
+      '/api/agent/requests/{id}/accept': {
+        post: {
+          operationId: 'acceptRequest',
+          summary: 'Accept and pay an incoming payment request on behalf of owner',
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            '200': { description: 'Payment executed and request marked COMPLETED' },
+          },
+        },
+      },
+      '/api/agent/requests/{id}/decline': {
+        post: {
+          operationId: 'declineRequest',
+          summary: 'Decline an incoming payment request',
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            '200': { description: 'Request declined' },
           },
         },
       },

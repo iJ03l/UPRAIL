@@ -93,7 +93,7 @@ export const RequestMoneyPage: React.FC = () => {
   };
 
   return (
-    <div className="max-w-xl mx-auto space-y-5 pb-12 animate-fade-in">
+    <div className="w-full space-y-6 pb-12 animate-fade-in">
       <BackBar to="/app" label="Back to Dashboard" />
 
       {/* Title */}
@@ -114,8 +114,8 @@ export const RequestMoneyPage: React.FC = () => {
       />
 
       {/* Form Card */}
-      <div className="rounded-3xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 shadow-sm p-5 sm:p-6 space-y-4">
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="rounded-3xl p-4 sm:p-6 md:p-8 shadow-sm bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 relative space-y-5 sm:space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
           {error && (
             <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400 flex items-start space-x-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />

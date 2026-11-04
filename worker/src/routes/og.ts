@@ -191,9 +191,10 @@ ogRouter.get('/request/:file', (c) => {
     let target = '';
     let amount = '';
     let asset = '';
+    let memo = '';
     try {
       const row = await c.env.DB.prepare(
-        'SELECT requester_handle, requested_handle, amount, asset FROM payment_requests WHERE id = ?'
+        'SELECT requester_handle, requested_handle, amount, asset, memo FROM payment_requests WHERE id = ?'
       )
         .bind(id)
         .first<{
@@ -201,24 +202,37 @@ ogRouter.get('/request/:file', (c) => {
           requested_handle: string | null;
           amount: string;
           asset: string;
+          memo: string | null;
         }>();
       if (row) {
         requester = row.requester_handle || '';
         target = row.requested_handle || '';
         amount = row.amount || '';
         asset = row.asset || '';
+        memo = row.memo || '';
       }
     } catch {}
 
     const ticker = await resolveShareTicker(c.env, asset);
     const amountLabel = plainAmount(amount, ticker);
+    const shortMemo = memo ? (memo.length > 45 ? `${memo.slice(0, 42)}…` : memo) : '';
+
+    let detail = '';
+    if (shortMemo && target) {
+      detail = `“${shortMemo}” — @${target}, don't leave them hanging! 👀 Tap to pay.`;
+    } else if (shortMemo) {
+      detail = `“${shortMemo}” — Tap to pay or decline.`;
+    } else if (target) {
+      detail = `@${target}, don't leave them hanging! 👀 Settle up in one tap.`;
+    } else {
+      detail = "Don't leave them hanging! 👀 Settle up or decline in one tap.";
+    }
+
     return renderOgCard({
-      eyebrow: 'PAYMENT REQUEST',
+      eyebrow: 'SETTLE UP 💸',
       headline: amountLabel || 'Payment requested',
       subline: requester ? `requested by @${requester}` : 'via UPRAIL',
-      detail: target
-        ? `For @${target}. Accept or decline securely.`
-        : 'Accept or decline securely on UPRAIL.',
+      detail,
     });
   });
 });

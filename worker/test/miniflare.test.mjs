@@ -664,7 +664,21 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(listed.status, 200);
     const listedBody = await listed.json();
     const names = listedBody.result.tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ['check_approval', 'get_balance', 'list_payments', 'pay_handle', 'receive_payment', 'resolve_handle', 'withdraw_to_wallet']);
+    assert.deepEqual(names, [
+      'accept_request',
+      'check_approval',
+      'decline_request',
+      'get_balance',
+      'list_contacts',
+      'list_payments',
+      'list_requests',
+      'pay_handle',
+      'receive_payment',
+      'request_payment',
+      'resolve_handle',
+      'save_contact',
+      'withdraw_to_wallet',
+    ]);
 
     const resolved = await mf.dispatchFetch('http://localhost/api/mcp', {
       method: 'POST',
@@ -876,7 +890,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 30, method: 'tools/list' }),
     });
     assert.equal(mcp.status, 200);
-    assert.equal((await mcp.json()).result.tools.length, 7);
+    assert.equal((await mcp.json()).result.tools.length, 13);
 
     const listed = await mf.dispatchFetch('http://localhost/api/agent/keys', {
       headers: { Cookie: sessionCookie },

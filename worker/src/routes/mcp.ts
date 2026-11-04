@@ -191,6 +191,82 @@ const TOOLS = [
       required: ['handle'],
     },
   },
+  {
+    name: 'list_contacts',
+    description: "List the owner's saved contacts ('People you pay') and frequent transfer recipients, including nicknames, pinned status, and preferred assets.",
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'save_contact',
+    description: "Save, update, or pin a trusted contact in the owner's 'People you pay' list.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        handle: { type: 'string', description: 'X handle (with or without @)' },
+        nickname: { type: 'string', description: 'Optional friendly nickname' },
+        preferredAsset: { type: 'string', description: 'Optional preferred asset symbol (e.g. USDC, NEAR)' },
+        preferredAmount: { type: ['string', 'number'], description: 'Optional default transfer amount' },
+        isPinned: { type: 'boolean', description: 'Whether to pin this contact to the top' },
+      },
+      required: ['handle'],
+    },
+  },
+  {
+    name: 'request_payment',
+    description: 'Create a UPRAIL payment request asking an X @handle for money. Returns the request ID, share link, and tweet text. The recipient can view, accept, or decline voluntarily.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requestedHandle: { type: 'string', description: 'Target X handle to request money from (with or without @)' },
+        asset: { type: 'string', description: 'Asset symbol, e.g. USDC, USDT, NEAR' },
+        amount: { type: ['string', 'number'], description: 'Human-readable token amount requested' },
+        memo: { type: 'string', description: 'Optional note or reason for the request' },
+        expiresInDays: { type: 'number', description: 'Days until expiry (1 to 30, default 7)' },
+      },
+      required: ['requestedHandle', 'asset', 'amount'],
+    },
+  },
+  {
+    name: 'list_requests',
+    description: "List the owner's incoming and/or outgoing payment requests on UPRAIL.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        direction: {
+          type: 'string',
+          enum: ['incoming', 'outgoing', 'all'],
+          description: "Filter direction: 'incoming' (requests sent to owner), 'outgoing' (requests created by owner), or 'all'. Default is 'all'.",
+        },
+      },
+    },
+  },
+  {
+    name: 'accept_request',
+    description: 'Accept and pay an incoming UPRAIL payment request using vault funds. Executes a payment bounded by agent spend caps, marks the request as COMPLETED, and returns settlement proof.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'The payment request ID (e.g. req_...)' },
+        idempotencyKey: { type: 'string', description: 'Optional idempotency key to prevent double payment' },
+      },
+      required: ['requestId'],
+    },
+  },
+  {
+    name: 'decline_request',
+    description: 'Decline an incoming UPRAIL payment request.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requestId: { type: 'string', description: 'The payment request ID (e.g. req_...)' },
+        reason: { type: 'string', description: 'Optional decline reason' },
+      },
+      required: ['requestId'],
+    },
+  },
 ];
 
 function rpcResult(id: JsonRpcRequest['id'], result: unknown) {
@@ -476,6 +552,205 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
         };
       });
       return toolText({ payments });
+    }
+
+    case 'list_contacts': {
+      if (!c.env.DB) return toolText({ contacts: [] });
+      const saved = await c.env.DB.prepare(
+        `SELECT * FROM contacts WHERE user_x_id = ? ORDER BY is_pinned DESC, updated_at DESC LIMIT 50`
+      )
+        .bind(session.x_id)
+        .all<any>();
+      return toolText({ contacts: saved.results || [] });
+    }
+
+    case 'save_contact': {
+      const rawHandle = String(args?.handle || args?.contactHandle || '').trim().replace(/^@+/, '').toLowerCase();
+      if (!rawHandle) return toolText({ error: 'Valid handle is required.' }, true);
+      if (!c.env.DB) return toolText({ error: 'Database unavailable' }, true);
+
+      const id = `cnt_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+      const now = Date.now();
+      const isPinned = args?.isPinned === true || args?.is_pinned === true ? 1 : 0;
+
+      await c.env.DB.prepare(
+        `INSERT INTO contacts (id, user_x_id, contact_handle, nickname, preferred_amount, preferred_asset, is_pinned, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_x_id, contact_handle) DO UPDATE SET
+           nickname = COALESCE(excluded.nickname, contacts.nickname),
+           preferred_amount = COALESCE(excluded.preferred_amount, contacts.preferred_amount),
+           preferred_asset = COALESCE(excluded.preferred_asset, contacts.preferred_asset),
+           is_pinned = excluded.is_pinned,
+           updated_at = excluded.updated_at`
+      )
+        .bind(id, session.x_id, rawHandle, args?.nickname || null, args?.preferredAmount ? String(args.preferredAmount) : null, args?.preferredAsset ? String(args.preferredAsset).toUpperCase() : null, isPinned, now, now)
+        .run();
+
+      return toolText({ success: true, handle: `@${rawHandle}`, isPinned: Boolean(isPinned) });
+    }
+
+    case 'request_payment': {
+      const targetHandle = String(args?.requestedHandle || args?.handle || '').trim().replace(/^@+/, '').toLowerCase();
+      const asset = String(args?.asset || 'USDC').trim().toUpperCase();
+      const amount = String(args?.amount || '').trim();
+      const requesterHandle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+
+      if (!targetHandle) return toolText({ error: 'Valid requestedHandle is required.' }, true);
+      if (targetHandle === requesterHandle) return toolText({ error: 'Cannot request money from yourself.' }, true);
+      if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) return toolText({ error: 'Amount must be greater than zero.' }, true);
+
+      if (!c.env.DB) return toolText({ error: 'Database unavailable' }, true);
+
+      // Check anti-spam hourly rate limit
+      const oneHourAgo = Date.now() - 3600 * 1000;
+      const countRow = await c.env.DB.prepare(
+        `SELECT COUNT(*) as count FROM payment_requests WHERE requester_x_id = ? AND created_at > ?`
+      )
+        .bind(session.x_id, oneHourAgo)
+        .first<{ count: number }>();
+
+      if (countRow && countRow.count >= 10) {
+        return toolText({ error: 'Rate limit: Maximum 10 payment requests per hour.' }, true);
+      }
+
+      const id = `req_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+      const now = Date.now();
+      const days = Math.min(Math.max(Number(args?.expiresInDays) || 7, 1), 30);
+      const expiresAt = now + days * 86400 * 1000;
+      const memo = typeof args?.memo === 'string' ? args.memo.trim().slice(0, 280) : null;
+      const amountFormatted = `${amount} ${asset}`;
+
+      await c.env.DB.prepare(
+        `INSERT INTO payment_requests (
+          id, requester_x_id, requester_handle, requested_handle, requested_x_id,
+          asset, amount, amount_formatted, memo, status, created_at, expires_at
+        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 'PENDING', ?, ?)`
+      )
+        .bind(id, session.x_id, requesterHandle, targetHandle, asset, amount, amountFormatted, memo, now, expiresAt)
+        .run();
+
+      const appOrigin = resolveOrigin(c.env);
+      const requestLink = `${appOrigin}/request/${id}`;
+      const tweetText = `Hey @${targetHandle}, don't leave me hanging! 👀 I requested a payment of ${amountFormatted} on UPRAIL. Settle up or decline here: ${requestLink}`;
+
+      return toolText({
+        id,
+        status: 'PENDING',
+        requesterHandle: `@${requesterHandle}`,
+        requestedHandle: `@${targetHandle}`,
+        asset,
+        amount,
+        amountFormatted,
+        memo,
+        requestLink,
+        tweetText,
+        xShareUrl: `https://x.com/intent/post?text=${encodeURIComponent(tweetText)}`,
+        expiresAt,
+      });
+    }
+
+    case 'list_requests': {
+      if (!c.env.DB) return toolText({ requests: [] });
+      const direction = String(args?.direction || 'all').toLowerCase();
+      const handle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+
+      let query = '';
+      if (direction === 'outgoing') {
+        query = `SELECT * FROM payment_requests WHERE requester_x_id = ? ORDER BY created_at DESC LIMIT 50`;
+      } else if (direction === 'incoming') {
+        query = `SELECT * FROM payment_requests WHERE LOWER(requested_handle) = ? OR requested_x_id = ? ORDER BY created_at DESC LIMIT 50`;
+      } else {
+        query = `SELECT * FROM payment_requests WHERE requester_x_id = ? OR LOWER(requested_handle) = ? ORDER BY created_at DESC LIMIT 50`;
+      }
+
+      const { results } = await c.env.DB.prepare(query)
+        .bind(direction === 'incoming' ? handle : session.x_id, direction === 'all' ? handle : (direction === 'incoming' ? session.x_id : undefined))
+        .all<any>();
+
+      const appOrigin = resolveOrigin(c.env);
+      const requests = (results || []).map((r) => ({
+        id: r.id,
+        direction: r.requester_x_id === session.x_id ? 'outgoing' : 'incoming',
+        requesterHandle: `@${r.requester_handle}`,
+        requestedHandle: `@${r.requested_handle}`,
+        asset: r.asset,
+        amount: r.amount,
+        amountFormatted: r.amount_formatted,
+        memo: r.memo || null,
+        status: r.status,
+        createdAt: r.created_at,
+        expiresAt: r.expires_at,
+        completedAt: r.completed_at || null,
+        requestLink: `${appOrigin}/request/${r.id}`,
+      }));
+
+      return toolText({ requests });
+    }
+
+    case 'accept_request': {
+      const id = String(args?.requestId || '').trim();
+      if (!id) return toolText({ error: 'requestId is required.' }, true);
+      if (!c.env.DB) return toolText({ error: 'Database unavailable' }, true);
+
+      const req = await c.env.DB.prepare(`SELECT * FROM payment_requests WHERE id = ?`).bind(id).first<any>();
+      if (!req) return toolText({ error: 'Request not found.' }, true);
+
+      const currentHandle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+      const targetHandle = String(req.requested_handle || '').trim().replace(/^@+/, '').toLowerCase();
+
+      if (targetHandle !== currentHandle && req.requested_x_id !== session.x_id) {
+        return toolText({ error: 'Unauthorized: This request was sent to a different account.' }, true);
+      }
+
+      if (req.status !== 'PENDING') {
+        return toolText({ error: `Request cannot be accepted (current status: ${req.status}).` }, true);
+      }
+
+      if (req.expires_at && req.expires_at < Date.now()) {
+        await c.env.DB.prepare(`UPDATE payment_requests SET status = 'EXPIRED' WHERE id = ?`).bind(id).run();
+        return toolText({ error: 'Request has expired.' }, true);
+      }
+
+      const response = await executeAgentPay(c, {
+        recipientHandle: req.requester_handle,
+        asset: req.asset,
+        amount: req.amount,
+        memo: req.memo ? `Accept: ${req.memo}` : `Payment request ${req.id}`,
+        idempotencyKey: args?.idempotencyKey,
+        requestId: req.id,
+      });
+
+      const body = await response.json();
+      return toolText(body, !response.ok);
+    }
+
+    case 'decline_request': {
+      const id = String(args?.requestId || '').trim();
+      if (!id) return toolText({ error: 'requestId is required.' }, true);
+      if (!c.env.DB) return toolText({ error: 'Database unavailable' }, true);
+
+      const req = await c.env.DB.prepare(`SELECT * FROM payment_requests WHERE id = ?`).bind(id).first<any>();
+      if (!req) return toolText({ error: 'Request not found.' }, true);
+
+      const currentHandle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+      const targetHandle = String(req.requested_handle || '').trim().replace(/^@+/, '').toLowerCase();
+
+      if (targetHandle !== currentHandle && req.requested_x_id !== session.x_id) {
+        return toolText({ error: 'Unauthorized: This request was sent to a different account.' }, true);
+      }
+
+      if (req.status !== 'PENDING') {
+        return toolText({ error: `Request cannot be declined (current status: ${req.status}).` }, true);
+      }
+
+      const reason = typeof args?.reason === 'string' ? args.reason.trim().slice(0, 200) : null;
+      await c.env.DB.prepare(
+        `UPDATE payment_requests SET status = 'DECLINED', decline_reason = ?, completed_at = ? WHERE id = ?`
+      )
+        .bind(reason, Date.now(), id)
+        .run();
+
+      return toolText({ success: true, status: 'DECLINED', requestId: id });
     }
 
     default:

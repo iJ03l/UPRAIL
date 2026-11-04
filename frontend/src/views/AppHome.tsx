@@ -101,18 +101,21 @@ export const AppHome: React.FC = () => {
   }, []);
 
   // Received-payment notifications. Direct sends land straight in the vault
-  // (no claim step), so the recipient is told here instead. Derived from the
-  // payments table — no schema change — with a local "seen" marker.
-  const RECEIPTS_SEEN_KEY = 'uprail_seen_receipts';
-  const [seenReceiptIds, setSeenReceiptIds] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
+  // (no claim step), so the recipient is told here instead. Scoped per user handle
+  // and synchronized on mount so dismissed receipts stay permanently dismissed.
+  const RECEIPTS_SEEN_KEY = user?.handle
+    ? `uprail_seen_receipts_${user.handle.toLowerCase().replace(/^@+/, '')}`
+    : 'uprail_seen_receipts';
+  const [seenReceiptIds, setSeenReceiptIds] = useState<string[]>([]);
+
+  useEffect(() => {
     try {
       const raw = window.localStorage.getItem(RECEIPTS_SEEN_KEY);
-      return raw ? (JSON.parse(raw) as string[]) : [];
-    } catch {
-      return [];
-    }
-  });
+      if (raw) {
+        setSeenReceiptIds(JSON.parse(raw));
+      }
+    } catch {}
+  }, [RECEIPTS_SEEN_KEY]);
 
   const receivedReceipts = useMemo(() => {
     if (!user?.handle) return [];
@@ -124,12 +127,15 @@ export const AppHome: React.FC = () => {
       .slice(0, 5);
   }, [history, user?.handle]);
 
-  const unseenReceipts = receivedReceipts.filter((p) => !seenReceiptIds.includes(p.id));
+  const unseenReceipts = receivedReceipts.filter((p) => p.id && !seenReceiptIds.includes(p.id));
 
   const dismissReceipts = () => {
-    const ids = Array.from(new Set([...seenReceiptIds, ...receivedReceipts.map((p) => p.id)]));
-    setSeenReceiptIds(ids);
     try {
+      let currentStored: string[] = [];
+      const raw = window.localStorage.getItem(RECEIPTS_SEEN_KEY);
+      if (raw) currentStored = JSON.parse(raw);
+      const ids = Array.from(new Set([...currentStored, ...seenReceiptIds, ...receivedReceipts.map((p) => p.id)]));
+      setSeenReceiptIds(ids);
       window.localStorage.setItem(RECEIPTS_SEEN_KEY, JSON.stringify(ids));
     } catch {
       /* ignore */
@@ -464,6 +470,7 @@ export const AppHome: React.FC = () => {
             <div className="p-4 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 shadow-xs flex items-center justify-between gap-3 animate-fade-in">
               <Link
                 to="/app/history"
+                onClick={dismissReceipts}
                 className="flex items-center space-x-3.5 min-w-0 group"
               >
                 <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-600 flex items-center justify-center font-bold flex-shrink-0">
@@ -491,7 +498,7 @@ export const AppHome: React.FC = () => {
           )}
 
           {/* Quick Action Buttons */}
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5">
             <Link
               to="/app/send"
               className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
@@ -557,44 +564,7 @@ export const AppHome: React.FC = () => {
                 near.com
               </span>
             </button>
-
-            <Link
-              to="/app/claim"
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer relative"
-            >
-              {pendingPayments.length > 0 && (
-                <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-stone-900 text-white text-[9px] font-mono font-bold animate-pulse">
-                  {pendingPayments.length}
-                </span>
-              )}
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!text-orange-500 flex items-center justify-center group-hover:scale-105 transition-all">
-                <Fingerprint className="w-4 h-4 sm:w-5 sm:h-5" />
-              </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors">
-                Payments
-              </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
-                {pendingPayments.length > 0 ? `${pendingPayments.length} Waiting` : 'Passkey'}
-              </span>
-            </Link>
           </div>
-
-          {/* People You Pay Section */}
-          <PeopleYouPay
-            onSelectRecipient={(handle, asset, prefAmount) => {
-              const q = new URLSearchParams();
-              q.set('recipient', handle);
-              if (asset) q.set('asset', asset);
-              if (prefAmount) q.set('amount', prefAmount);
-              navigate(`/app/send?${q.toString()}`);
-            }}
-            onRequestMoney={(handle, asset) => {
-              const q = new URLSearchParams();
-              q.set('handle', handle);
-              if (asset) q.set('asset', asset);
-              navigate(`/app/request?${q.toString()}`);
-            }}
-          />
         </div>
 
         {/* ── RIGHT COLUMN: Live Transactions ── */}
@@ -734,6 +704,25 @@ export const AppHome: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ── PEOPLE YOU PAY (Full Width on Desktop) ── */}
+      <div className="w-full mt-6 sm:mt-8">
+        <PeopleYouPay
+          onSelectRecipient={(handle, asset, prefAmount) => {
+            const q = new URLSearchParams();
+            q.set('recipient', handle);
+            if (asset) q.set('asset', asset);
+            if (prefAmount) q.set('amount', prefAmount);
+            navigate(`/app/send?${q.toString()}`);
+          }}
+          onRequestMoney={(handle, asset) => {
+            const q = new URLSearchParams();
+            q.set('handle', handle);
+            if (asset) q.set('asset', asset);
+            navigate(`/app/request?${q.toString()}`);
+          }}
+        />
       </div>
 
       {/* ── FLOW TELEMETRY & ACTIVITY PULSE WIDGET (Under everything) ── */}
