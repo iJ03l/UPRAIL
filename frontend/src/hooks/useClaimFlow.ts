@@ -92,11 +92,15 @@ export function useClaimFlow(initialCode?: string) {
         if (found) {
           setSelectedPayment(found);
         } else {
-          // Fetch directly
           const direct = await api.getPaymentByCode(initialCode.trim());
           if (direct) {
             setSelectedPayment(direct);
-            if (!payments.some((p) => p.id === direct.id)) {
+            const userHandle = user?.handle?.replace(/^@/, '').toLowerCase();
+            const recipientHandle = direct.recipientHandle?.replace(/^@/, '').toLowerCase();
+            const isRecipient = !userHandle || userHandle === recipientHandle;
+            const isPending = direct.status !== 'claimed' && direct.status !== 'cancelled' && direct.status !== 'refunded';
+
+            if (isRecipient && isPending && !payments.some((p) => p.id === direct.id)) {
               setPendingPayments([direct, ...payments]);
             }
           }

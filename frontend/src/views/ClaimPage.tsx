@@ -8,8 +8,10 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowUpRight,
+  ArrowDownLeft,
   RefreshCw,
   Sparkles,
+  User,
 } from 'lucide-react';
 import { useClaimFlow } from '../hooks/useClaimFlow';
 import { useXAuth } from '../hooks/useXAuth';
@@ -87,12 +89,10 @@ export const ClaimPage: React.FC = () => {
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
   const [pendingClaim, setPendingClaim] = useState<{ id: string; all: boolean } | null>(null);
 
-  // A share link may point at a payment that was already DELIVERED (an
-  // already-registered recipient, or a claim that already settled). In that
-  // case the page shows a receipt notice instead of the claim flow.
+  // A share link may point at a payment that was already DELIVERED or sent by this user.
   const [linkedPayment, setLinkedPayment] = useState<PaymentIntent | null>(null);
   useEffect(() => {
-    if (!queryPaymentCode || !user) {
+    if (!queryPaymentCode) {
       setLinkedPayment(null);
       return;
     }
@@ -108,14 +108,21 @@ export const ClaimPage: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [queryPaymentCode, user]);
+  }, [queryPaymentCode]);
 
-  const isReceipt = Boolean(
-    linkedPayment &&
-      user?.handle &&
-      linkedPayment.recipientHandle?.replace(/^@/, '').toLowerCase() === user.handle.toLowerCase() &&
-      (linkedPayment.isDirect || linkedPayment.status === 'claimed')
+  const userHandle = user?.handle?.replace(/^@/, '').toLowerCase();
+  const recipientHandle = linkedPayment?.recipientHandle?.replace(/^@/, '').toLowerCase();
+  const senderHandle = linkedPayment?.senderHandle?.replace(/^@/, '').toLowerCase();
+
+  const isSender = Boolean(linkedPayment && userHandle && senderHandle && userHandle === senderHandle);
+  const isRecipient = Boolean(linkedPayment && userHandle && recipientHandle && userHandle === recipientHandle);
+  const isThirdParty = Boolean(
+    linkedPayment && userHandle && recipientHandle && userHandle !== recipientHandle && userHandle !== senderHandle
   );
+  const isReceipt = Boolean(
+    linkedPayment && isRecipient && (linkedPayment.isDirect || linkedPayment.status === 'claimed')
+  );
+  const isHandledTargetedView = Boolean(isReceipt || isSender || isThirdParty);
 
   const {
     pendingPayments,
@@ -242,12 +249,119 @@ export const ClaimPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Receipt: the linked payment was already delivered to this vault */}
+      {/* SENDER RECEIPT: Current user sent this payment */}
+      {isSender && linkedPayment && (
+        <div className="rounded-3xl p-6 sm:p-7 bg-white border border-stone-200 shadow-xs space-y-4 animate-fade-in text-left">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-stone-100 border border-stone-200 text-stone-900 flex items-center justify-center flex-shrink-0">
+              <ArrowUpRight className="w-6 h-6 text-stone-800" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-lg font-bold font-display text-stone-950">Payment Sent</h3>
+                <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-0.5 rounded-full border ${
+                  linkedPayment.status === 'claimed'
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                }`}>
+                  {linkedPayment.status === 'claimed' ? 'Delivered' : 'Waiting for claim'}
+                </span>
+              </div>
+              <p className="text-xs text-stone-500 font-mono mt-0.5">
+                To @{linkedPayment.recipientHandle} · {new Date(linkedPayment.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-stone-50 border border-stone-200">
+            <div className="flex items-center space-x-3">
+              <TokenIcon
+                symbol={linkedPayment.token.symbol}
+                iconUrl={linkedPayment.token.iconUrl}
+                size="lg"
+              />
+              <div>
+                <div className="text-base font-extrabold font-display text-stone-950">
+                  -{formatTokenAmount(linkedPayment.amount)} {linkedPayment.token.symbol}
+                </div>
+                <div className="text-xs text-stone-500 font-mono">
+                  ≈ {formatUsd(linkedPayment.amountUsd)} USD
+                </div>
+              </div>
+            </div>
+            <span className={`text-[10px] font-mono font-bold px-2.5 py-1 rounded-full border ${
+              linkedPayment.status === 'claimed'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-stone-100 text-stone-700 border-stone-200'
+            }`}>
+              {linkedPayment.status === 'claimed' ? 'Claimed by recipient' : 'In confidential escrow'}
+            </span>
+          </div>
+
+          {linkedPayment.memo && (
+            <p className="text-xs text-stone-500 font-mono italic">"{linkedPayment.memo}"</p>
+          )}
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Link
+              to="/app/home"
+              className="py-2.5 px-4 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+            >
+              Open Dashboard
+            </Link>
+            <Link
+              to="/app/history"
+              className="py-2.5 px-4 rounded-xl border border-stone-200 hover:border-black text-stone-700 hover:text-black font-display font-bold text-xs uppercase tracking-wider bg-white transition-colors cursor-pointer"
+            >
+              View Full Ledger
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* THIRD-PARTY NOTICE: Logged in as someone else */}
+      {isThirdParty && linkedPayment && (
+        <div className="rounded-3xl p-6 sm:p-7 bg-white border border-stone-200 shadow-xs space-y-4 animate-fade-in text-left">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-stone-100 border border-stone-200 text-stone-700 flex items-center justify-center flex-shrink-0">
+              <User className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold font-display text-stone-950">
+                Payment for @{linkedPayment.recipientHandle}
+              </h3>
+              <p className="text-xs text-stone-500 font-mono mt-0.5">
+                Sent by @{linkedPayment.senderHandle || 'anonymous'} · {new Date(linkedPayment.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-600 font-sans space-y-2">
+            <p>
+              This payment is addressed exclusively to <strong className="font-mono text-stone-900 font-bold">@{linkedPayment.recipientHandle}</strong>.
+            </p>
+            <p className="text-stone-500 text-[11px] font-mono">
+              You are currently signed in as <strong className="text-stone-900 font-bold">@{user?.handle}</strong>. Only the intended recipient can claim these funds.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Link
+              to="/app/home"
+              className="py-2.5 px-4 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+            >
+              Go to Your Dashboard
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* RECIPIENT RECEIPT: The linked payment was already delivered to recipient's vault */}
       {isReceipt && linkedPayment && (
-        <div className="rounded-3xl p-6 sm:p-7 bg-stone-50 border border-stone-200 shadow-xs space-y-4 animate-fade-in">
+        <div className="rounded-3xl p-6 sm:p-7 bg-stone-50 border border-stone-200 shadow-xs space-y-4 animate-fade-in text-left">
           <div className="flex items-center space-x-3">
             <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 flex items-center justify-center">
-              <CheckCircle2 className="w-6 h-6" />
+              <ArrowDownLeft className="w-6 h-6 text-emerald-600" />
             </div>
             <div>
               <h3 className="text-lg font-bold font-display text-stone-950">Payment received</h3>
@@ -265,15 +379,15 @@ export const ClaimPage: React.FC = () => {
               size="lg"
             />
             <div>
-              <div className="text-base font-extrabold font-display text-stone-950">
-                {formatTokenAmount(linkedPayment.amount)} {linkedPayment.token.symbol}
+              <div className="text-base font-extrabold font-display text-stone-950 text-emerald-600">
+                +{formatTokenAmount(linkedPayment.amount)} {linkedPayment.token.symbol}
               </div>
               <div className="text-xs text-stone-500 font-mono">
                 ≈ {formatUsd(linkedPayment.amountUsd)} USD
               </div>
             </div>
             <span className="sm:ml-auto text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
-              In your UPRAIL account
+              In your UPRAIL vault
             </span>
           </div>
 
@@ -373,7 +487,7 @@ export const ClaimPage: React.FC = () => {
       )}
 
       {/* Pending Payments List — AUTOMATICALLY DISCOVERED (No link/code input!) */}
-      {!isReceipt && !isLoading && visiblePayments.length > 0 && (
+      {!isHandledTargetedView && !isLoading && visiblePayments.length > 0 && (
         <div className="space-y-4">
           {/* Batch Claim All CTA (if more than 1 payment) */}
           {visiblePayments.length > 1 && (
@@ -481,7 +595,7 @@ export const ClaimPage: React.FC = () => {
       )}
 
       {/* Authentication / Empty State Handling */}
-      {!isReceipt &&
+      {!isHandledTargetedView &&
         (!user ? (
         !isAuthLoading && (
           <XAuthBanner

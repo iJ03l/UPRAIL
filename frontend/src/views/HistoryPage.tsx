@@ -338,13 +338,13 @@ export const HistoryPage: React.FC = () => {
                   <div className="flex items-start sm:items-center space-x-3 min-w-0">
                     <div
                       className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 text-xs font-bold ${
-                        tx.type === 'deposit'
-                          ? 'bg-emerald-50 text-emerald-800'
-                          : 'bg-stone-100 text-stone-800'
+                        tx.isSent
+                          ? 'bg-stone-100 text-stone-800 border border-stone-200'
+                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                       }`}
                     >
                       {tx.isSent ? (
-                        <ArrowUpRight className="w-4 h-4" />
+                        <ArrowUpRight className="w-4 h-4 text-stone-700" />
                       ) : (
                         <ArrowDownLeft className="w-4 h-4 text-emerald-700" />
                       )}
@@ -378,7 +378,7 @@ export const HistoryPage: React.FC = () => {
                     <div className="text-right">
                       <div
                         className={`text-xs font-mono font-bold ${
-                          tx.isSent ? 'text-red-600' : 'text-emerald-600'
+                          tx.isSent ? 'text-stone-900' : 'text-emerald-600'
                         }`}
                       >
                         {tx.isSent ? '-' : '+'}{formatTokenAmount(tx.amount)} {tx.symbol}
@@ -400,7 +400,9 @@ export const HistoryPage: React.FC = () => {
                               : 'text-stone-600 bg-stone-100 border-stone-200'
                           }`}
                         >
-                          {historyStatusLabel(tx.status)}
+                          {tx.isSent
+                            ? (tx.status === 'claimed' || tx.status === 'success' ? 'DELIVERED' : tx.status === 'cancelled' ? 'CANCELLED' : 'WAITING FOR CLAIM')
+                            : (tx.status === 'claimed' || tx.status === 'success' ? 'RECEIVED' : historyStatusLabel(tx.status))}
                         </span>
                       </div>
                     </div>

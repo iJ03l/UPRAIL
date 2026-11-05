@@ -670,8 +670,16 @@ export const AppHome: React.FC = () => {
                       className="py-3 flex items-center justify-between gap-2 hover:bg-stone-50/70 rounded-xl px-2 transition-colors group"
                     >
                       <div className="flex items-center space-x-2.5 min-w-0">
-                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${tx.isSent ? 'bg-stone-100 text-stone-800' : 'bg-emerald-50 text-emerald-800'}`}>
-                          {tx.isSent ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-700" />}
+                        <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                          tx.isSent
+                            ? 'bg-stone-100 text-stone-800 border border-stone-200'
+                            : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        }`}>
+                          {tx.isSent ? (
+                            <ArrowUpRight className="w-3.5 h-3.5 text-stone-700" />
+                          ) : (
+                            <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-700" />
+                          )}
                         </div>
                         <div className="min-w-0">
                           <div className="text-xs font-bold text-stone-900 font-mono truncate">
@@ -694,7 +702,9 @@ export const AppHome: React.FC = () => {
 
                       <div className="flex items-center space-x-1.5 sm:space-x-2 flex-shrink-0">
                         <div className="text-right">
-                          <div className="text-xs font-mono font-bold text-stone-900 whitespace-nowrap">
+                          <div className={`text-xs font-mono font-bold whitespace-nowrap ${
+                            tx.isSent ? 'text-stone-900' : 'text-emerald-600'
+                          }`}>
                             {tx.amount} {tx.symbol}
                           </div>
                           <span className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
@@ -706,7 +716,9 @@ export const AppHome: React.FC = () => {
                               ? 'text-amber-700 bg-amber-50 border-amber-200'
                               : 'text-stone-600 bg-stone-100 border-stone-200'
                           }`}>
-                            {historyStatusLabel(tx.status)}
+                            {tx.isSent
+                              ? (tx.status === 'claimed' || tx.status === 'success' ? 'DELIVERED' : tx.status === 'cancelled' ? 'CANCELLED' : 'WAITING FOR CLAIM')
+                              : (tx.status === 'claimed' || tx.status === 'success' ? 'RECEIVED' : historyStatusLabel(tx.status))}
                           </span>
                         </div>
                         {tx.copyValue && (
