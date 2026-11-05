@@ -412,12 +412,94 @@ onchainRouter.get('/deposit-status', requireAuth({ passkeyVerified: true }), asy
       .first<{ memo: string | null }>()
       .catch(() => null);
 
-    return await probeDepositStatus(
+    const probeRes = await probeDepositStatus(
       address,
       authToken,
       c.env.ONE_CLICK_API_KEY || c.env.ONE_CLICK_JWT,
       memoRow?.memo || undefined
     );
+
+    // If 1Click reports settled, return immediately
+    const probeData = (await probeRes.clone().json().catch(() => null)) as any;
+    if (probeData?.isSettled) {
+      return probeRes;
+    }
+
+    // Fallback: On-chain check for mismatched/un-forwarded deposits on NEAR address
+    const isNearAddress = address.length === 64 || address.endsWith('.near');
+    if (isNearAddress && (contract || tokenSymbol)) {
+      try {
+        const supportedTokens = await nearRpc.getSupportedTokens(c.env);
+        const resolvedToken = contract
+          ? nearRpc.resolveTokenForAsset(contract, supportedTokens)
+          : (tokenSymbol ? nearRpc.resolveTokenForAsset(tokenSymbol, supportedTokens) : null);
+
+        const targetFtContract = contract || resolvedToken?.nearContractId || (resolvedToken?.defuse_asset_id?.startsWith('nep141:') ? resolvedToken.defuse_asset_id.replace(/^nep141:/, '') : '');
+        const decimals = resolvedToken?.decimals ?? 6;
+
+        if (targetFtContract) {
+          const rawFt = await nearRpc.getPlainFtBalanceStrict(
+            c.env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com',
+            targetFtContract,
+            address
+          );
+          if (rawFt && rawFt > 0n) {
+            const formatted = nearRpc.formatAmount(rawFt.toString(), decimals);
+
+            // Check if already credited in D1 to guarantee idempotency
+            let txHash: string | null = null;
+            const already = await c.env.DB?.prepare(
+              'SELECT tx_hash FROM rescued_deposits WHERE address = ? AND contract = ? LIMIT 1'
+            )
+              .bind(address, targetFtContract)
+              .first<{ tx_hash: string | null }>();
+
+            if (already) {
+              txHash = already.tx_hash;
+            } else {
+              // Forward from escrow.uprail.near to user's intents account!
+              const assetName = resolvedToken?.symbol || tokenSymbol || targetFtContract;
+              const settlement = await nearRpc.executeTransferFromEscrowIntent(
+                c.env,
+                nearAccount,
+                assetName,
+                formatted
+              );
+            if (settlement.success) {
+              txHash = settlement.txHash || null;
+              await c.env.DB?.prepare(
+                'INSERT INTO rescued_deposits (address, contract, account_id, amount, tx_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+              )
+                .bind(address, targetFtContract, nearAccount, formatted, txHash, Date.now())
+                .run();
+            } else {
+              console.warn('[onchain/deposit-status] escrow rescue transfer failed:', settlement.error);
+            }
+          }
+
+          if (txHash || already) {
+            return c.json({
+              status: 'SUCCESS',
+              depositedAmount: rawFt.toString(),
+              depositedAmountFormatted: formatted,
+              depositedAmountUsd: formatted,
+              amountInFormatted: formatted,
+              amountOutFormatted: formatted,
+              timeEstimate: null,
+              txHashes: txHash ? [txHash] : [],
+              updatedAt: new Date().toISOString(),
+              isSettled: true,
+              source: 'onchain_rescued_deposit',
+            });
+          }
+        }
+      }
+    } catch (rescueErr) {
+        console.warn('[onchain/deposit-status] rescue check error:', rescueErr);
+      }
+    }
+
+    return probeRes;
   } catch (err: any) {
     // A lookup failure is not "still pending" — masking it here made the UI
     // sit on PENDING_DEPOSIT forever while the backend was actually broken.

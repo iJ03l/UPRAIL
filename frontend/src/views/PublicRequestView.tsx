@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -8,6 +8,8 @@ import {
   XCircle,
   Clock,
   AlertCircle,
+  AlertTriangle,
+  Loader2,
   Shield,
   Copy,
   Check,
@@ -25,7 +27,13 @@ import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { useToast } from '../components/Toast';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
-import { fetchDepositAddress } from '../lib/onchainApi';
+import {
+  fetchDepositAddress,
+  fetchDepositStatus,
+  type DepositStatusResponse,
+  type DepositAddress,
+  type OnchainToken,
+} from '../lib/onchainApi';
 import { Link } from '../lib/router';
 import type { PaymentRequest, Token } from '../types';
 
@@ -36,7 +44,7 @@ interface PublicRequestViewProps {
 export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId: propId }) => {
   const { user } = useXAuth();
   const { authorizeWithPasskey } = usePasskeyTxAuth();
-  const { balances, tokens, refreshBalances } = useOnchainData();
+  const { balances, tokens, nearAccount, refreshBalances } = useOnchainData();
   const { toast } = useToast();
 
   const [id, setId] = useState<string>(propId || '');
@@ -49,8 +57,14 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
   const [showDeclineModal, setShowDeclineModal] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
   const [showDepositModal, setShowDepositModal] = useState(false);
+  const [depositChain, setDepositChain] = useState<string>('base');
   const [depositAddress, setDepositAddress] = useState<string | null>(null);
+  const [depositAddressObj, setDepositAddressObj] = useState<DepositAddress | null>(null);
+  const [isDerivingDeposit, setIsDerivingDeposit] = useState(false);
+  const [depositStatus, setDepositStatus] = useState<DepositStatusResponse | null>(null);
+  const [showDirectNearVault, setShowDirectNearVault] = useState(false);
   const [isCopiedDeposit, setIsCopiedDeposit] = useState(false);
+  const [isCopiedDirectVault, setIsCopiedDirectVault] = useState(false);
   const [isCopiedShare, setIsCopiedShare] = useState(false);
   const [successPaymentId, setSuccessPaymentId] = useState<string | null>(null);
 
@@ -86,7 +100,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
   const cleanTicker = request?.asset ? cleanAssetSymbol(request.asset) : 'USDC';
 
   // Resolve requested token and user's held balance
-  const targetToken = tokens.find(
+  const targetToken: OnchainToken = tokens.find(
     (t) =>
       t.id.toLowerCase() === request?.asset.toLowerCase() ||
       t.symbol.toLowerCase() === request?.asset.toLowerCase() ||
@@ -98,6 +112,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
     decimals: 6,
     iconUrl: '',
     nearContractId: '',
+    chain: 'near',
   };
 
   const cleanAmountFormatted = (() => {
@@ -130,16 +145,91 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
     user?.handle && request?.requested_handle && user.handle.toLowerCase() === request.requested_handle.toLowerCase();
   const isOtherUser = user?.handle && !isRequester && !isRequestedRecipient;
 
-  // Load deposit address if unfunded
-  const loadDeposit = async () => {
-    try {
-      const chain = 'near';
-      const addr = await fetchDepositAddress(chain);
-      if (addr?.address) setDepositAddress(addr.address);
-    } catch (err) {
-      console.warn('Could not load deposit address:', err);
+  // Dynamically resolve all chains supporting this token from the live onchain token registry
+  const availableChains = useMemo<string[]>(() => {
+    const sym = targetToken.symbol.toUpperCase();
+    const set = new Set<string>();
+    tokens.forEach((t) => {
+      if (
+        (t.symbol.toUpperCase() === sym || t.id.toLowerCase() === targetToken.id.toLowerCase()) &&
+        t.chain
+      ) {
+        set.add(t.chain.toLowerCase());
+      }
+    });
+    if (targetToken.chain) set.add(targetToken.chain.toLowerCase());
+    const list = Array.from(set);
+    return list.length > 0 ? list : ['near'];
+  }, [tokens, targetToken]);
+
+  // Keep selected depositChain valid among available chains
+  useEffect(() => {
+    if (availableChains.length > 0 && !availableChains.includes(depositChain)) {
+      setDepositChain(availableChains[0]);
     }
-  };
+  }, [availableChains, depositChain]);
+
+  // Load fresh deposit address for chosen chain, exact token, and amount
+  const loadDeposit = useCallback(
+    async (chainToUse?: string, refresh = true) => {
+      const chain = chainToUse || depositChain;
+      if (!request) return;
+      try {
+        setIsDerivingDeposit(true);
+        setDepositStatus(null);
+        const addr = await fetchDepositAddress(
+          chain,
+          refresh,
+          targetToken.symbol,
+          request.amount,
+          targetToken.nearContractId
+        );
+        setDepositAddressObj(addr);
+        setDepositAddress(addr?.address || null);
+      } catch (err) {
+        console.warn('Could not load deposit address:', err);
+      } finally {
+        setIsDerivingDeposit(false);
+      }
+    },
+    [depositChain, request, targetToken.symbol, targetToken.nearContractId]
+  );
+
+  // Poll deposit status live while deposit modal is open
+  useEffect(() => {
+    if (!showDepositModal || !depositAddress) return;
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const res = await fetchDepositStatus(depositAddress, {
+          contract: targetToken.nearContractId,
+          token: targetToken.symbol,
+        });
+        if (cancelled) return;
+        setDepositStatus(res);
+        if (res.isSettled || res.status === 'SUCCESS' || parseFloat(res.depositedAmountFormatted || '0') > 0) {
+          toast(
+            `Deposit Settled! Received ${res.depositedAmountFormatted || request?.amount} ${targetToken.symbol}. Vault funded.`,
+            'success'
+          );
+          await refreshBalances();
+          setTimeout(() => {
+            if (!cancelled) setShowDepositModal(false);
+          }, 1200);
+        }
+      } catch (err) {
+        console.warn('[PublicRequestView] deposit poll error:', err);
+      }
+    };
+
+    check();
+    const interval = setInterval(check, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [showDepositModal, depositAddress, targetToken.nearContractId, targetToken.symbol, refreshBalances, toast, request?.amount]);
 
   const handleAcceptAndPay = async () => {
     if (!request || !isRequestedRecipient) return;
@@ -626,7 +716,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
         </div>
       )}
 
-      {/* Deposit Modal */}
+      {/* Dynamic Multi-Chain Deposit Modal */}
       {showDepositModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 p-6 shadow-2xl space-y-4">
@@ -642,46 +732,158 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-stone-500 dark:text-stone-400 font-sans">
-              Send {targetToken.symbol} to your personal UPRAIL vault address. Once settled, tap "Refresh".
-            </p>
 
-            {depositAddress && (
-              <div className="flex justify-center p-3 bg-white rounded-2xl border border-stone-200">
-                <QRCodeDisplay value={depositAddress} size={150} />
+            {/* Dynamic Network Selector */}
+            {availableChains.length > 1 && (
+              <div className="space-y-1.5 text-left">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
+                  Select Source Network
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {availableChains.map((chain) => (
+                    <button
+                      key={chain}
+                      type="button"
+                      onClick={() => {
+                        setDepositChain(chain);
+                        loadDeposit(chain, true);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl text-xs font-mono font-bold uppercase transition-all cursor-pointer ${
+                        depositChain === chain
+                          ? 'bg-black text-white dark:bg-white dark:text-black shadow-xs'
+                          : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:text-black dark:hover:text-white'
+                      }`}
+                    >
+                      {chain}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
-            <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 flex items-center justify-between text-xs font-mono">
-              <span className="truncate max-w-[220px] text-stone-900 dark:text-white">
-                {depositAddress || 'Loading address...'}
-              </span>
-              {depositAddress && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(depositAddress);
-                    setIsCopiedDeposit(true);
-                    setTimeout(() => setIsCopiedDeposit(false), 2000);
-                  }}
-                  className="p-1 text-stone-500 hover:text-stone-900 dark:hover:text-white"
-                >
-                  {isCopiedDeposit ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-                </button>
-              )}
+            {/* Dynamic Instructions */}
+            <div className="p-3 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 text-left space-y-1">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="font-bold text-stone-900 dark:text-white">
+                  Send {targetToken.symbol} on {depositChain.toUpperCase()}
+                </span>
+                <span className="text-[10px] text-stone-500 font-bold uppercase">
+                  {depositAddressObj?.isOneTime ? 'Single-Use' : 'Direct'}
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-500 dark:text-stone-400 font-sans leading-relaxed">
+                Send exactly {cleanAmountFormatted} on {depositChain.toUpperCase()}. Solvers route and credit it directly to your UPRAIL vault.
+              </p>
             </div>
 
-            <div className="flex space-x-2 pt-2">
+            {/* QR Code and Address */}
+            {isDerivingDeposit ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-2 text-stone-500 text-xs font-mono">
+                <Loader2 className="w-6 h-6 animate-spin text-stone-900 dark:text-white" />
+                <span>Generating {targetToken.symbol} deposit address on {depositChain.toUpperCase()}...</span>
+              </div>
+            ) : depositAddress ? (
+              <>
+                <div className="flex justify-center p-3 bg-white rounded-2xl border border-stone-200">
+                  <QRCodeDisplay value={depositAddress} size={150} />
+                </div>
+
+                <div className="p-3 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 flex items-center justify-between text-xs font-mono">
+                  <span className="truncate max-w-[220px] text-stone-900 dark:text-white font-medium select-all">
+                    {depositAddress}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(depositAddress);
+                      setIsCopiedDeposit(true);
+                      setTimeout(() => setIsCopiedDeposit(false), 2000);
+                    }}
+                    className="p-1.5 rounded-lg hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-600 dark:text-stone-300"
+                  >
+                    {isCopiedDeposit ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="py-8 text-center text-xs text-stone-500 font-mono">
+                Could not load deposit address for {depositChain.toUpperCase()}.
+              </div>
+            )}
+
+            {/* Real-time Deposit Status */}
+            {depositStatus?.isSettled || depositStatus?.status === 'SUCCESS' ? (
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 flex items-center space-x-2 text-xs font-mono text-emerald-800 dark:text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span>Deposit confirmed & settled! Completing payment...</span>
+              </div>
+            ) : depositStatus?.status === 'PROCESSING' || parseFloat(depositStatus?.depositedAmountFormatted || '0') > 0 ? (
+              <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 flex items-center space-x-2 text-xs font-mono text-blue-800 dark:text-blue-300">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
+                <span>Deposit detected onchain! Routing via Intents...</span>
+              </div>
+            ) : (
+              <div className="p-2.5 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 flex items-center space-x-2 text-[11px] font-mono text-stone-500">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping flex-shrink-0" />
+                <span>Standby: Waiting for incoming {targetToken.symbol} on {depositChain.toUpperCase()}</span>
+              </div>
+            )}
+
+            {/* Direct NEAR Vault option for NEAR deposits */}
+            {depositChain === 'near' && nearAccount && (
+              <div className="pt-1 text-left">
+                <button
+                  type="button"
+                  onClick={() => setShowDirectNearVault(!showDirectNearVault)}
+                  className="text-[11px] font-mono text-stone-500 hover:text-stone-900 dark:hover:text-white flex items-center justify-between w-full cursor-pointer py-1"
+                >
+                  <span>Direct NEAR Vault Address</span>
+                  <span>{showDirectNearVault ? '−' : '+'}</span>
+                </button>
+                {showDirectNearVault && (
+                  <div className="p-2.5 bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 rounded-xl space-y-1.5 mt-1">
+                    <span className="text-[10px] text-stone-400 font-mono block">
+                      Permanent vault address for direct NEAR/NEP-141 transfers
+                    </span>
+                    <div className="flex items-center justify-between font-mono text-xs text-stone-900 dark:text-white">
+                      <span className="truncate max-w-[210px] select-all">{nearAccount}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(nearAccount);
+                          setIsCopiedDirectVault(true);
+                          setTimeout(() => setIsCopiedDirectVault(false), 2000);
+                        }}
+                        className="p-1 text-stone-500 hover:text-stone-900 dark:hover:text-white"
+                      >
+                        {isCopiedDirectVault ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex space-x-2 pt-1">
               <button
                 type="button"
-                onClick={() => {
-                  refreshBalances();
+                onClick={() => loadDeposit(depositChain, true)}
+                disabled={isDerivingDeposit}
+                className="w-1/2 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 text-xs font-mono font-bold hover:bg-stone-100 dark:hover:bg-stone-800 flex items-center justify-center space-x-1 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isDerivingDeposit ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await refreshBalances();
                   setShowDepositModal(false);
                 }}
-                className="w-full py-3 rounded-2xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 text-xs font-mono font-bold flex items-center justify-center space-x-1"
+                className="w-1/2 py-2.5 rounded-xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 text-xs font-mono font-bold flex items-center justify-center space-x-1"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Done & Refresh</span>
+                <span>Done</span>
               </button>
             </div>
           </div>
