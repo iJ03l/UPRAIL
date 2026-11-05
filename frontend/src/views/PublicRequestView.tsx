@@ -62,9 +62,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
   const [depositAddressObj, setDepositAddressObj] = useState<DepositAddress | null>(null);
   const [isDerivingDeposit, setIsDerivingDeposit] = useState(false);
   const [depositStatus, setDepositStatus] = useState<DepositStatusResponse | null>(null);
-  const [showDirectNearVault, setShowDirectNearVault] = useState(false);
   const [isCopiedDeposit, setIsCopiedDeposit] = useState(false);
-  const [isCopiedDirectVault, setIsCopiedDirectVault] = useState(false);
   const [isCopiedShare, setIsCopiedShare] = useState(false);
   const [successPaymentId, setSuccessPaymentId] = useState<string | null>(null);
 
@@ -829,40 +827,7 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
               </div>
             )}
 
-            {/* Direct NEAR Vault option for NEAR deposits */}
-            {depositChain === 'near' && nearAccount && (
-              <div className="pt-1 text-left">
-                <button
-                  type="button"
-                  onClick={() => setShowDirectNearVault(!showDirectNearVault)}
-                  className="text-[11px] font-mono text-stone-500 hover:text-stone-900 dark:hover:text-white flex items-center justify-between w-full cursor-pointer py-1"
-                >
-                  <span>Direct NEAR Vault Address</span>
-                  <span>{showDirectNearVault ? '−' : '+'}</span>
-                </button>
-                {showDirectNearVault && (
-                  <div className="p-2.5 bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 rounded-xl space-y-1.5 mt-1">
-                    <span className="text-[10px] text-stone-400 font-mono block">
-                      Permanent vault address for direct NEAR/NEP-141 transfers
-                    </span>
-                    <div className="flex items-center justify-between font-mono text-xs text-stone-900 dark:text-white">
-                      <span className="truncate max-w-[210px] select-all">{nearAccount}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(nearAccount);
-                          setIsCopiedDirectVault(true);
-                          setTimeout(() => setIsCopiedDirectVault(false), 2000);
-                        }}
-                        className="p-1 text-stone-500 hover:text-stone-900 dark:hover:text-white"
-                      >
-                        {isCopiedDirectVault ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+
 
             {/* Actions */}
             <div className="flex space-x-2 pt-1">

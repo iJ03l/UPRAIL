@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useNavigate } from '../lib/router';
 import { PeopleYouPay } from '../components/PeopleYouPay';
 import {
@@ -161,11 +161,32 @@ export const AppHome: React.FC = () => {
     }
   }, [isLoadingBalances, hasIntentAccount, user, refreshBalances]);
 
-  // Load payment history and pending claims on mount
+  const [requests, setRequests] = useState<PaymentRequest[]>([]);
+
+  const loadRequests = useCallback(async () => {
+    try {
+      const [inc, out] = await Promise.all([
+        api.getIncomingRequests(),
+        api.getOutgoingRequests(),
+      ]);
+      const combined = [...(inc || []), ...(out || [])];
+      const seen = new Set<string>();
+      setRequests(
+        combined.filter((r) => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        })
+      );
+    } catch {}
+  }, []);
+
+  // Load payment history, requests, and pending claims on mount
   useEffect(() => {
     loadHistory();
+    loadRequests();
     api.getPendingPayments().then((p) => setPendingPayments(p || []));
-  }, [loadHistory]);
+  }, [loadHistory, loadRequests]);
 
   const handleCopyTxLink = (claimLink: string, id: string) => {
     navigator.clipboard.writeText(claimLink);
@@ -278,9 +299,36 @@ export const AppHome: React.FC = () => {
       });
     }
 
+    for (const req of requests) {
+      const isSent = Boolean(
+        user?.handle && req.requester_handle && req.requester_handle.toLowerCase() === user.handle.toLowerCase()
+      );
+      const targetToken = tokens.find(
+        (t) => t.id.toLowerCase() === req.asset.toLowerCase() || t.symbol.toLowerCase() === req.asset.toLowerCase()
+      );
+      const sym = targetToken?.symbol || req.asset.split('.').pop()?.toUpperCase() || 'USDC';
+      const cleanSym = cleanMemeSymbol(sym) || 'USDC';
+      const reqUrl = typeof window !== 'undefined' ? `${window.location.origin}/request/${req.id}` : `/request/${req.id}`;
+
+      list.push({
+        id: req.id,
+        type: 'payment',
+        isSent,
+        title: isSent ? `Request to @${req.requested_handle}` : `Request from @${req.requester_handle}`,
+        subtitle: req.memo || (isSent ? 'Sent payment request' : 'Received payment request'),
+        reason: req.decline_reason ? `Declined: ${req.decline_reason}` : null,
+        amount: `${isSent ? '+' : '-'}${formatTokenAmount(req.amount)}`,
+        symbol: cleanSym,
+        status: req.status.toLowerCase(),
+        timestamp: req.created_at,
+        copyValue: reqUrl,
+        copyTitle: 'Copy request link',
+      });
+    }
+
     list.sort((a, b) => b.timestamp - a.timestamp);
     return list;
-  }, [history, transactions, user?.handle, tokens, balances]);
+  }, [history, requests, transactions, user?.handle, tokens, balances]);
 
   return (
     <div className="w-full">
