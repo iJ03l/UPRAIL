@@ -94,7 +94,7 @@ export const LandingPage: React.FC = () => {
             Send, request, and stream confidential value to any 𝕏 handle, near.com vault, or autonomous AI agent.
           </p>
 
-          <div className="pt-2 sm:pt-4 flex flex-wrap items-center gap-3">
+          <div className="pt-2 sm:pt-4 flex items-center gap-3">
             <a
               href={appSubdomainUrl}
               target="_blank"
@@ -103,15 +103,6 @@ export const LandingPage: React.FC = () => {
             >
               <span>Launch App</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </a>
-            <a
-              href={`${appSubdomainUrl}/request`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-6 py-3.5 sm:px-7 sm:py-4 rounded-2xl border border-stone-300 dark:border-stone-700 hover:border-black dark:hover:border-white text-stone-900 dark:text-white font-display font-bold text-sm uppercase tracking-wider hover:bg-stone-50 dark:hover:bg-stone-900 transition-all flex items-center space-x-2 cursor-pointer group"
-            >
-              <span>Request Money</span>
-              <ArrowDownLeft className="w-4 h-4 text-[#E05326] group-hover:scale-110 transition-transform" />
             </a>
           </div>
         </section>
