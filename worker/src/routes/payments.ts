@@ -783,22 +783,10 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
               nearRpc.assetsMatch(b.nearContractId, privateToken.nearContractId)
           )
           .reduce((sum, b) => sum + BigInt(b.amount || '0'), 0n);
-        if (confidentialAtomic > 0n && publicAtomic < grossAtomic) {
-          // User's balance is split across Confidential Intents and public/plain;
-          // shield the shortfall into Confidential Intents first, then send from
-          // the combined confidential balance.
-          try {
-            await ensureConfidentialFunds(c.env, session!.x_id, body.asset, grossAtomic);
-            source = 'confidential';
-          } catch (shieldErr: any) {
-            return await failSend(
-              'SETTLEMENT_FAILED',
-              publicErrorMessage(shieldErr, 'Could not shield funds for this send'),
-              502
-            );
-          }
-        } else if (publicAtomic < grossAtomic) {
-          const shortfallAtomic = grossAtomic - publicAtomic;
+
+        const totalAtomic = confidentialAtomic + publicAtomic;
+        if (totalAtomic < grossAtomic) {
+          const shortfallAtomic = grossAtomic - totalAtomic;
           const deposit = await nearRpc.depositPlainBalanceToIntents(
             c.env,
             session!.x_id,
@@ -810,12 +798,27 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
             return await failSend(
               'SETTLEMENT_FAILED',
               publicErrorMessage(
-                new Error(deposit.reason || 'Could not shield funds for this send'),
+                new Error(deposit.reason || 'Insufficient funds for this send'),
                 'Onchain settlement failed'
               ),
               502
             );
           }
+        }
+
+        // Always shield into Confidential Intents first. ensureConfidentialFunds
+        // verifies that the sender's confidential balance actually increases to
+        // grossAtomic before returning. This prevents escrow from ever fronting
+        // unbacked payouts if a solver drops an on-chain public debit.
+        try {
+          await ensureConfidentialFunds(c.env, session!.x_id, body.asset, grossAtomic);
+          source = 'confidential';
+        } catch (shieldErr: any) {
+          return await failSend(
+            'SETTLEMENT_FAILED',
+            publicErrorMessage(shieldErr, 'Could not shield vault funds for this send'),
+            502
+          );
         }
       }
 
