@@ -27,6 +27,7 @@ import {
   isConfidentialRailEnabled,
 } from '../services/confidentialRail';
 import { resolveOrigin } from '../services/webauthnConfig';
+import { resolveAccount } from '../services/accountResolver';
 
 export const mcpRouter = new Hono<AppContext>();
 
@@ -292,19 +293,18 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
     case 'resolve_handle': {
       const raw = String(args?.handle || '').trim().replace(/^@/, '');
       if (!raw) return toolText({ error: 'handle is required.' }, true);
-      const row = await c.env.DB.prepare(
-        `SELECT x_handle, x_name, near_account, is_activated
-           FROM x_identities WHERE lower(x_handle) = lower(?)`
-      )
-        .bind(raw)
-        .first<any>();
-      if (!row) return toolText({ handle: raw, exists: false });
+      const res = await resolveAccount(c.env, raw);
+      if (!res.ok) {
+        return toolText({ handle: raw, exists: false, error: res.error });
+      }
       return toolText({
-        handle: row.x_handle,
-        exists: true,
-        name: row.x_name,
-        nearAccount: row.near_account,
-        isActivated: Boolean(row.is_activated),
+        handle: res.account.handle,
+        cleanHandle: res.account.cleanHandle,
+        exists: res.account.exists,
+        isRegistered: res.account.isRegistered,
+        name: res.account.name,
+        avatarUrl: res.account.avatarUrl,
+        nearAccount: res.account.nearAccount,
       });
     }
 
@@ -598,6 +598,11 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
       if (!targetHandle) return toolText({ error: 'Valid requestedHandle is required.' }, true);
       if (targetHandle === requesterHandle) return toolText({ error: 'Cannot request money from yourself.' }, true);
       if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) return toolText({ error: 'Amount must be greater than zero.' }, true);
+
+      const resolveRes = await resolveAccount(c.env, targetHandle);
+      if (!resolveRes.ok) {
+        return toolText({ error: resolveRes.error }, true);
+      }
 
       if (!c.env.DB) return toolText({ error: 'Database unavailable' }, true);
 

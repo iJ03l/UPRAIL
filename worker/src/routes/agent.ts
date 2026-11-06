@@ -26,6 +26,7 @@ import {
   isValidAgentHandle,
 } from '../services/agentPolicy';
 import { resolveOrigin } from '../services/webauthnConfig';
+import { resolveAccount } from '../services/accountResolver';
 import {
   generateAgentKey,
   currentUtcDay,
@@ -1425,6 +1426,11 @@ agentRouter.post('/requests', requireAgent(), async (c) => {
   const requesterHandle = String(session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
   if (targetHandle === requesterHandle) {
     return c.json({ error: 'You cannot request payment from yourself.', code: 'SELF_REQUEST_FORBIDDEN' }, 400);
+  }
+
+  const resolved = await resolveAccount(c.env, targetHandle);
+  if (!resolved.ok) {
+    return c.json({ error: resolved.error, code: resolved.code }, resolved.status as any);
   }
 
   // Anti-spam hourly check

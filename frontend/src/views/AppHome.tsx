@@ -16,7 +16,9 @@ import {
   ArrowRight,
   AlertCircle,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
+import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData, balanceUsd } from '../hooks/useOnchainData';
@@ -198,7 +200,7 @@ export const AppHome: React.FC = () => {
   const recentActivity = useMemo(() => {
     type UnifiedActivity = {
       id: string;
-      type: 'payment' | 'deposit' | 'withdrawal';
+      type: 'payment' | 'deposit' | 'withdrawal' | 'request';
       isSent: boolean;
       title: string;
       subtitle: string;
@@ -207,6 +209,7 @@ export const AppHome: React.FC = () => {
       symbol: string;
       status: string;
       timestamp: number;
+      balanceEffect: BalanceEffect;
       copyValue?: string;
       copyTitle?: string;
       explorerUrl?: string;
@@ -218,6 +221,11 @@ export const AppHome: React.FC = () => {
       const isSent = Boolean(
         user?.handle && p.senderHandle && p.senderHandle.toLowerCase() === user.handle.toLowerCase()
       );
+      const balanceEffect = getTransactionBalanceEffect({
+        type: 'payment',
+        isSent,
+        status: p.status,
+      });
       list.push({
         id: p.id,
         type: 'payment',
@@ -228,10 +236,11 @@ export const AppHome: React.FC = () => {
           p.status === 'cancelled'
             ? cancellationReason(p.cancelReason, p.cancelCode)
             : null,
-        amount: `${isSent ? '-' : '+'}${formatTokenAmount(p.amount)}`,
+        amount: formatTokenAmount(p.amount),
         symbol: p.token.symbol,
         status: p.status,
         timestamp: new Date(p.createdAt).getTime(),
+        balanceEffect,
         copyValue: p.status === 'claimed' ? undefined : (p.claimLink || undefined),
         copyTitle: 'Copy payment link',
       });
@@ -240,6 +249,12 @@ export const AppHome: React.FC = () => {
     for (const tx of transactions) {
       const isDeposit = tx.intent_type === 'deposit';
       const isWithdrawal = tx.intent_type === 'withdrawal';
+      const txType = isDeposit ? 'deposit' : isWithdrawal ? 'withdrawal' : 'payment';
+      const balanceEffect = getTransactionBalanceEffect({
+        type: txType,
+        isSent: !isDeposit,
+        status: tx.status,
+      });
       // An outgoing transfer carries its asset in `defuse_asset_id_out`; only
       // deposits populate `_in`. Reading `_in` alone left every send unlabelled
       // and falling through to the NEAR default.
@@ -281,7 +296,7 @@ export const AppHome: React.FC = () => {
 
       list.push({
         id: tx.id,
-        type: isDeposit ? 'deposit' : isWithdrawal ? 'withdrawal' : 'payment',
+        type: txType,
         isSent: !isDeposit,
         title: isDeposit
           ? 'Deposit to Vault'
@@ -289,10 +304,11 @@ export const AppHome: React.FC = () => {
           ? `Withdraw to ${tx.receiver_id ? `${tx.receiver_id.slice(0, 6)}...` : 'wallet'}`
           : 'Intent Transfer',
         subtitle: `${new Date(tx.block_timestamp).toLocaleDateString()} • Tx: ${shortId}`,
-        amount: `${isDeposit ? '+' : '-'}${amt}`,
+        amount: amt,
         symbol,
         status: tx.status,
         timestamp: Number(tx.block_timestamp) || 0,
+        balanceEffect,
         copyValue: tx.id,
         copyTitle: 'Copy tx hash',
         explorerUrl,
@@ -303,6 +319,12 @@ export const AppHome: React.FC = () => {
       const isSent = Boolean(
         user?.handle && req.requester_handle && req.requester_handle.toLowerCase() === user.handle.toLowerCase()
       );
+      const balanceEffect = getTransactionBalanceEffect({
+        type: 'request',
+        isRequest: true,
+        isSent,
+        status: req.status,
+      });
       const targetToken = tokens.find(
         (t) => t.id.toLowerCase() === req.asset.toLowerCase() || t.symbol.toLowerCase() === req.asset.toLowerCase()
       );
@@ -312,15 +334,16 @@ export const AppHome: React.FC = () => {
 
       list.push({
         id: req.id,
-        type: 'payment',
+        type: 'request',
         isSent,
         title: isSent ? `Request to @${req.requested_handle}` : `Request from @${req.requester_handle}`,
         subtitle: req.memo || (isSent ? 'Sent payment request' : 'Received payment request'),
         reason: req.decline_reason ? `Declined: ${req.decline_reason}` : null,
-        amount: `${isSent ? '+' : '-'}${formatTokenAmount(req.amount)}`,
+        amount: formatTokenAmount(req.amount),
         symbol: cleanSym,
         status: req.status.toLowerCase(),
         timestamp: req.created_at,
+        balanceEffect,
         copyValue: reqUrl,
         copyTitle: 'Copy request link',
       });
@@ -671,18 +694,22 @@ export const AppHome: React.FC = () => {
                     >
                       <div className="flex items-center space-x-2.5 min-w-0">
                         <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                          tx.isSent
-                            ? 'bg-stone-100 text-stone-800 border border-stone-200'
-                            : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                          tx.balanceEffect === 'debit'
+                            ? 'bg-red-50 text-red-800 border border-red-200 dark:bg-red-950/40 dark:border-red-900/60'
+                            : tx.balanceEffect === 'incoming'
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-900/60'
+                            : 'bg-stone-100 text-stone-700 border border-stone-200 dark:bg-stone-800 dark:border-stone-700'
                         }`}>
-                          {tx.isSent ? (
-                            <ArrowUpRight className="w-3.5 h-3.5 text-stone-700" />
+                          {tx.balanceEffect === 'debit' ? (
+                            <ArrowUpRight className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                          ) : tx.balanceEffect === 'incoming' ? (
+                            <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                           ) : (
-                            <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-700" />
+                            <Clock className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                           )}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xs font-bold text-stone-900 font-mono truncate">
+                          <div className="text-xs font-bold text-stone-900 dark:text-stone-100 font-mono truncate">
                             {tx.title}
                           </div>
                           <div className="text-[10px] text-stone-400 font-mono truncate">
@@ -690,7 +717,7 @@ export const AppHome: React.FC = () => {
                           </div>
                           {tx.reason && (
                             <div
-                              className="text-[10px] text-amber-700 font-mono flex items-start gap-1 leading-snug mt-0.5 max-w-[220px] sm:max-w-xs"
+                              className="text-[10px] text-amber-700 dark:text-amber-400 font-mono flex items-start gap-1 leading-snug mt-0.5 max-w-[220px] sm:max-w-xs"
                               title={tx.reason}
                             >
                               <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
@@ -702,19 +729,25 @@ export const AppHome: React.FC = () => {
 
                       <div className="flex items-center space-x-1.5 sm:space-x-2 flex-shrink-0">
                         <div className="text-right">
-                          <div className={`text-xs font-mono font-bold whitespace-nowrap ${
-                            tx.isSent ? 'text-stone-900' : 'text-emerald-600'
-                          }`}>
-                            {tx.amount} {tx.symbol}
-                          </div>
+                          {(() => {
+                            const amt = formatBalanceAmount(tx.amount, tx.balanceEffect);
+                            return (
+                              <div className="text-xs font-mono font-bold whitespace-nowrap">
+                                <span className={amt.colorClass}>
+                                  {amt.prefix}{amt.amount}
+                                </span>{' '}
+                                <span className="text-stone-500 dark:text-stone-400 font-normal">{tx.symbol}</span>
+                              </div>
+                            );
+                          })()}
                           <span className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
                             tx.status === 'success' || tx.status === 'claimed'
-                              ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                              ? 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/50 dark:border-emerald-800 dark:text-emerald-300'
                               : tx.status === 'failed'
-                              ? 'text-red-700 bg-red-50 border-red-200'
+                              ? 'text-red-700 bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800 dark:text-red-300'
                               : tx.status === 'cancelled'
-                              ? 'text-amber-700 bg-amber-50 border-amber-200'
-                              : 'text-stone-600 bg-stone-100 border-stone-200'
+                              ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-300'
+                              : 'text-stone-600 bg-stone-100 border-stone-200 dark:bg-stone-800 dark:border-stone-700 dark:text-stone-300'
                           }`}>
                             {tx.isSent
                               ? (tx.status === 'claimed' || tx.status === 'success' ? 'DELIVERED' : tx.status === 'cancelled' ? 'CANCELLED' : 'WAITING FOR CLAIM')

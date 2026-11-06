@@ -259,7 +259,13 @@ export interface ResolveRequest {
 
 export interface ResolveResponse {
   handle: string;
+  cleanHandle?: string;
   resolved: boolean;
+  exists?: boolean;
+  isRegistered?: boolean;
+  name?: string;
+  avatarUrl?: string;
+  nearAccount?: string | null;
   message?: string;
 }
 

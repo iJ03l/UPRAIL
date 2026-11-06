@@ -39,6 +39,7 @@ import {
   scrubSettledPaymentLinks,
 } from '../services/confidentialRail';
 import { background } from '../utils/background';
+import { resolveAccount } from '../services/accountResolver';
 
 export const paymentsRouter = new Hono<AppContext>();
 
@@ -197,35 +198,44 @@ paymentsRouter.get('/tokens/search', async (c) => {
 });
 
 /**
- * POST /api/resolve
- * Validates X handle format.
- * NOTE: Free tier X API cannot resolve user IDs server-side; resolution occurs at recipient claim.
+ * GET & POST /api/resolve
+ * Validates X handle format, verifies it is a real account on 𝕏,
+ * and returns profile details & display picture (avatarUrl).
  */
-paymentsRouter.post('/resolve', async (c) => {
+const handleResolveAccount = async (c: Context<AppContext>) => {
   try {
-    const body = await c.req.json<ResolveRequest>().catch(() => null);
-    if (!body || !body.handle) {
+    let rawHandle = c.req.query('handle');
+    if (!rawHandle && c.req.method === 'POST') {
+      const body = await c.req.json<ResolveRequest>().catch(() => null);
+      rawHandle = body?.handle;
+    }
+    if (!rawHandle) {
       return c.json<ErrorResponse>(
         { error: 'Missing handle parameter', code: 'INVALID_REQUEST' },
         400
       );
     }
 
-    const clean = normalizeHandle(body.handle);
-    if (!isValidXHandle(clean)) {
+    const result = await resolveAccount(c.env, rawHandle);
+    if (!result.ok) {
       return c.json<ErrorResponse>(
-        {
-          error: 'Invalid X handle. Handles must be 1 to 15 alphanumeric characters or underscores.',
-          code: 'INVALID_HANDLE_FORMAT',
-        },
-        400
+        { error: result.error, code: result.code },
+        result.status as any
       );
     }
 
     return c.json<ResolveResponse>({
-      handle: `@${clean}`,
-      resolved: false,
-      message: 'Payment will be delivered to the recipient',
+      handle: result.account.handle,
+      cleanHandle: result.account.cleanHandle,
+      resolved: true,
+      exists: result.account.exists,
+      isRegistered: result.account.isRegistered,
+      name: result.account.name,
+      avatarUrl: result.account.avatarUrl,
+      nearAccount: result.account.nearAccount,
+      message: result.account.isRegistered
+        ? 'Registered UPRAIL account'
+        : 'Valid 𝕏 account (unclaimed funds will be held in secure escrow)',
     });
   } catch (err: any) {
     return c.json<ErrorResponse>(
@@ -233,7 +243,10 @@ paymentsRouter.post('/resolve', async (c) => {
       500
     );
   }
-});
+};
+
+paymentsRouter.get('/resolve', handleResolveAccount);
+paymentsRouter.post('/resolve', handleResolveAccount);
 
 /**
  * POST /api/quote
@@ -252,15 +265,6 @@ paymentsRouter.post('/quote', async (c) => {
       );
     }
 
-    const recipient = classifyRecipient(body.recipientHandle);
-    if (!recipient.isAddress && !isValidXHandle(recipient.value)) {
-      return c.json<ErrorResponse>(
-        { error: 'Invalid recipient: expected an X handle or a valid wallet address', code: 'INVALID_HANDLE' },
-        400
-      );
-    }
-    const cleanHandle = recipient.value;
-
     const cleanAmount = String(body.amount ?? '')
       .trim()
       .replace(/^["']|["']$/g, '');
@@ -272,24 +276,22 @@ paymentsRouter.post('/quote', async (c) => {
     }
 
     const holdingAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
-
-    // Check if recipient is already registered with an active NEAR intent account
-    // (only meaningful for X-handle recipients; wallet addresses never map to
-    // an x_identities row).
+    const recipient = classifyRecipient(body.recipientHandle);
     let recipientNearAccount: string | null = null;
     let isRegistered = false;
+    let cleanHandle = recipient.value;
+
     if (!recipient.isAddress) {
-      try {
-        const existing = await c.env.DB.prepare(
-          'SELECT near_account FROM x_identities WHERE LOWER(x_handle) = ?'
-        )
-          .bind(cleanHandle)
-          .first<{ near_account: string | null }>();
-        if (existing?.near_account) {
-          recipientNearAccount = existing.near_account;
-          isRegistered = true;
-        }
-      } catch {}
+      const resolved = await resolveAccount(c.env, recipient.value);
+      if (!resolved.ok) {
+        return c.json<ErrorResponse>(
+          { error: resolved.error, code: resolved.code },
+          resolved.status as any
+        );
+      }
+      cleanHandle = resolved.account.cleanHandle;
+      isRegistered = resolved.account.isRegistered;
+      recipientNearAccount = resolved.account.nearAccount || null;
     }
 
     // When the X user HAS NOT signed up yet:
@@ -455,13 +457,17 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     }
 
     const recipient = classifyRecipient(body.recipientHandle);
-    if (!recipient.isAddress && !isValidXHandle(recipient.value)) {
-      return c.json<ErrorResponse>(
-        { error: 'Invalid recipient: expected an X handle or a valid wallet address', code: 'INVALID_HANDLE' },
-        400
-      );
+    let cleanHandle = recipient.value;
+    if (!recipient.isAddress) {
+      const resolved = await resolveAccount(c.env, recipient.value);
+      if (!resolved.ok) {
+        return c.json<ErrorResponse>(
+          { error: resolved.error, code: resolved.code },
+          resolved.status as any
+        );
+      }
+      cleanHandle = resolved.account.cleanHandle;
     }
-    const cleanHandle = recipient.value;
 
     // Amount is stored and signed as a human-readable decimal; reject anything
     // that would turn into NaN/Infinity downstream (fee math, base-unit math).

@@ -96,6 +96,8 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0010_launchpad_token_bindings.sql',
       '0011_oauth_connections.sql',
       '0012_confidential_rail.sql',
+      '0013_contacts_and_requests.sql',
+      '0014_add_avatar_url.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
@@ -116,6 +118,13 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
         await db.prepare(stmt).run();
       }
     }
+
+    // Seed test accounts so offline tests pass without requiring external X network access
+    await db.prepare(
+      `INSERT INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+       VALUES ('xid_test_illia', 'illia', 'Illia Polosukhin', 'illia.near', 1, 0, 0),
+              ('xid_test_alice', 'alice', 'Alice', 'alice.near', 1, 0, 0)`
+    ).run();
   });
 
   after(async () => {
@@ -191,7 +200,8 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.handle, '@alice');
-    assert.equal(body.resolved, false);
+    assert.equal(body.resolved, true);
+    assert.equal(body.exists, true);
   });
 
   it('POST /api/resolve rejects invalid handles', async () => {

@@ -28,6 +28,7 @@ export const RequestMoneyPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [createdRequest, setCreatedRequest] = useState<PaymentRequest | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [isHandleValid, setIsHandleValid] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (prefillHandle) setRecipientHandle(prefillHandle.replace(/^@+/, ''));
@@ -141,7 +142,11 @@ export const RequestMoneyPage: React.FC = () => {
           {/* Recipient Handle */}
           <HandleInput
             value={recipientHandle}
-            onChange={setRecipientHandle}
+            onChange={(val) => {
+              setRecipientHandle(val);
+              if (!val) setIsHandleValid(null);
+            }}
+            onResolved={(_acc, isValid) => setIsHandleValid(isValid)}
             disabled={isSubmitting}
             placeholder="Recipient's 𝕏 handle"
           />
@@ -237,7 +242,7 @@ export const RequestMoneyPage: React.FC = () => {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isSubmitting || isAuthorizing || !recipientHandle || numericAmount <= 0}
+            disabled={isSubmitting || isAuthorizing || !recipientHandle || isHandleValid === false || numericAmount <= 0}
             className="w-full py-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {isAuthorizing ? (

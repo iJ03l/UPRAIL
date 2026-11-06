@@ -984,6 +984,36 @@ export const api = {
     }
   },
 
+  /**
+   * Resolves an X handle: validates format, verifies it is a real account,
+   * and fetches profile information & display picture (avatarUrl).
+   */
+  async resolveHandle(handle: string): Promise<{
+    handle: string;
+    cleanHandle: string;
+    resolved: boolean;
+    exists: boolean;
+    isRegistered: boolean;
+    name?: string;
+    avatarUrl?: string;
+    nearAccount?: string | null;
+    message?: string;
+  }> {
+    const clean = (handle || '').trim().replace(/^@+/, '').toLowerCase();
+    if (!clean) {
+      throw new Error('Please enter an 𝕏 handle');
+    }
+    const url = API_BASE
+      ? `${API_BASE}/api/resolve?handle=${encodeURIComponent(clean)}`
+      : `/api/resolve?handle=${encodeURIComponent(clean)}`;
+    const res = await fetch(url, { credentials: 'include' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || `Account @${clean} does not exist on 𝕏`);
+    }
+    return data;
+  },
+
   // Payment quote calculation with cryptographic backend binding
   async getQuote(
     tokenId: string,

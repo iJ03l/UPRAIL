@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { resolveShareTicker } from '../services/share';
 import { publicErrorMessage } from '../utils/errors';
+import { resolveAccount } from '../services/accountResolver';
 
 function normalizeHandle(rawHandle: string): string {
   return rawHandle.trim().replace(/^@+/, '').toLowerCase();
@@ -80,6 +81,14 @@ requestsRouter.post('/', requireAuth({ passkeyVerified: true }), requirePasskeyA
       return c.json<ErrorResponse>(
         { error: 'You cannot request payment from yourself', code: 'SELF_REQUEST_FORBIDDEN' },
         400
+      );
+    }
+
+    const resolved = await resolveAccount(c.env, targetHandle);
+    if (!resolved.ok) {
+      return c.json<ErrorResponse>(
+        { error: resolved.error, code: resolved.code },
+        resolved.status as any
       );
     }
 

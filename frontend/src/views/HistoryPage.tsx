@@ -11,7 +11,9 @@ import {
   Share2,
   ExternalLink,
   AlertCircle,
+  Clock,
 } from 'lucide-react';
+import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
@@ -94,6 +96,7 @@ export const HistoryPage: React.FC = () => {
       status: string;
       date: string;
       timestamp: number;
+      balanceEffect: BalanceEffect;
       payment?: PaymentIntent;
       copyValue?: string;
       explorerUrl?: string;
@@ -106,6 +109,11 @@ export const HistoryPage: React.FC = () => {
       const isSent = Boolean(
         user?.handle && p.senderHandle && p.senderHandle.toLowerCase() === user.handle.toLowerCase()
       );
+      const balanceEffect = getTransactionBalanceEffect({
+        type: 'payment',
+        isSent,
+        status: p.status,
+      });
       list.push({
         id: p.id,
         type: 'payment',
@@ -124,6 +132,7 @@ export const HistoryPage: React.FC = () => {
         status: p.status,
         date: new Date(p.createdAt).toLocaleDateString(),
         timestamp: new Date(p.createdAt).getTime(),
+        balanceEffect,
         payment: p,
         copyValue: p.claimLink,
       });
@@ -134,6 +143,12 @@ export const HistoryPage: React.FC = () => {
       const isSent = Boolean(
         user?.handle && req.requester_handle && req.requester_handle.toLowerCase() === user.handle.toLowerCase()
       );
+      const balanceEffect = getTransactionBalanceEffect({
+        type: 'request',
+        isRequest: true,
+        isSent,
+        status: req.status,
+      });
       const targetToken = tokens.find(
         (t) => t.id.toLowerCase() === req.asset.toLowerCase() || t.symbol.toLowerCase() === req.asset.toLowerCase()
       );
@@ -150,6 +165,7 @@ export const HistoryPage: React.FC = () => {
         status: req.status.toLowerCase(),
         date: new Date(req.created_at).toLocaleDateString(),
         timestamp: req.created_at,
+        balanceEffect,
         copyValue: typeof window !== 'undefined' ? `${window.location.origin}/request/${req.id}` : `/request/${req.id}`,
       });
     }
@@ -158,6 +174,12 @@ export const HistoryPage: React.FC = () => {
     for (const tx of transactions) {
       const isDeposit = tx.intent_type === 'deposit';
       const isWithdrawal = tx.intent_type === 'withdrawal';
+      const txType = isDeposit ? 'deposit' : isWithdrawal ? 'withdrawal' : 'payment';
+      const balanceEffect = getTransactionBalanceEffect({
+        type: txType,
+        isSent: !isDeposit,
+        status: tx.status,
+      });
       // An outgoing transfer carries its asset in `defuse_asset_id_out`; only
       // deposits populate `_in`. Reading `_in` alone left every send unlabelled
       // and falling through to the NEAR default.
@@ -201,7 +223,7 @@ export const HistoryPage: React.FC = () => {
 
       list.push({
         id: tx.id,
-        type: isDeposit ? 'deposit' : isWithdrawal ? 'withdrawal' : 'payment',
+        type: txType,
         isSent: !isDeposit,
         title: isDeposit
           ? 'Deposit to Confidential Vault'
@@ -217,6 +239,7 @@ export const HistoryPage: React.FC = () => {
         status: tx.status,
         date: new Date(tx.block_timestamp).toLocaleDateString(),
         timestamp: Number(tx.block_timestamp) || 0,
+        balanceEffect,
         copyValue: tx.id,
         explorerUrl,
       });
@@ -338,32 +361,36 @@ export const HistoryPage: React.FC = () => {
                   <div className="flex items-start sm:items-center space-x-3 min-w-0">
                     <div
                       className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 text-xs font-bold ${
-                        tx.isSent
-                          ? 'bg-stone-100 text-stone-800 border border-stone-200'
-                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        tx.balanceEffect === 'debit'
+                          ? 'bg-red-50 text-red-800 border border-red-200 dark:bg-red-950/40 dark:border-red-900/60'
+                          : tx.balanceEffect === 'incoming'
+                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-900/60'
+                          : 'bg-stone-100 text-stone-700 border border-stone-200 dark:bg-stone-800 dark:border-stone-700'
                       }`}
                     >
-                      {tx.isSent ? (
-                        <ArrowUpRight className="w-4 h-4 text-stone-700" />
+                      {tx.balanceEffect === 'debit' ? (
+                        <ArrowUpRight className="w-4 h-4 text-red-600 dark:text-red-400" />
+                      ) : tx.balanceEffect === 'incoming' ? (
+                        <ArrowDownLeft className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                       ) : (
-                        <ArrowDownLeft className="w-4 h-4 text-emerald-700" />
+                        <Clock className="w-4 h-4 text-stone-500 dark:text-stone-400" />
                       )}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center space-x-2">
-                        <span className="text-xs font-bold text-stone-900 font-mono truncate max-w-[160px] sm:max-w-none">
+                        <span className="text-xs font-bold text-stone-900 dark:text-stone-100 font-mono truncate max-w-[160px] sm:max-w-none">
                           {tx.title}
                         </span>
                         <span className="text-[10px] text-stone-400 font-mono flex-shrink-0">
                           {tx.date}
                         </span>
                       </div>
-                      <p className="text-[11px] text-stone-500 font-mono mt-0.5 line-clamp-1 break-all">
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400 font-mono mt-0.5 line-clamp-1 break-all">
                         {tx.subtitle}
                       </p>
                       {tx.reason && (
                         <p
-                          className="text-[10px] text-amber-700 font-mono mt-1 flex items-start gap-1.5 leading-snug"
+                          className="text-[10px] text-amber-700 dark:text-amber-400 font-mono mt-1 flex items-start gap-1.5 leading-snug"
                           title={tx.reason}
                         >
                           <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
@@ -376,13 +403,17 @@ export const HistoryPage: React.FC = () => {
                   {/* Right: Amount, Badge, and Action buttons */}
                   <div className="flex items-center justify-between sm:justify-end space-x-3 pl-12 sm:pl-0">
                     <div className="text-right">
-                      <div
-                        className={`text-xs font-mono font-bold ${
-                          tx.isSent ? 'text-stone-900' : 'text-emerald-600'
-                        }`}
-                      >
-                        {tx.isSent ? '-' : '+'}{formatTokenAmount(tx.amount)} {tx.symbol}
-                      </div>
+                      {(() => {
+                        const amt = formatBalanceAmount(formatTokenAmount(tx.amount), tx.balanceEffect);
+                        return (
+                          <div className="text-xs font-mono font-bold whitespace-nowrap">
+                            <span className={amt.colorClass}>
+                              {amt.prefix}{amt.amount}
+                            </span>{' '}
+                            <span className="text-stone-500 dark:text-stone-400 font-normal">{tx.symbol}</span>
+                          </div>
+                        );
+                      })()}
                       <div className="flex items-center space-x-1.5 justify-end">
                         {tx.amountUsd !== null && (
                           <span className="text-[10px] text-stone-400 font-mono">

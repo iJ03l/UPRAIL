@@ -58,6 +58,7 @@ export const SendPage: React.FC = () => {
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isHandleValid, setIsHandleValid] = useState<boolean | null>(null);
 
   // Recalculate quote on token or amount changes
   useEffect(() => {
@@ -128,7 +129,7 @@ export const SendPage: React.FC = () => {
   }, [showChainSelector, withdrawChains, destinationChain, destinationChainTouched, detectedFamily]);
 
   const isFormValid =
-    (sendMode === 'handle' ? recipient.trim().length >= 2 : walletAddress.trim().length >= 5) &&
+    (sendMode === 'handle' ? (recipient.trim().length >= 1 && isHandleValid !== false) : walletAddress.trim().length >= 5) &&
     parseFloat(amount) > 0 &&
     !chainFamilyMismatch &&
     !isSubmitting;
@@ -315,7 +316,11 @@ export const SendPage: React.FC = () => {
               />
               <HandleInput
                 value={recipient}
-                onChange={setRecipient}
+                onChange={(val) => {
+                  setRecipient(val);
+                  if (!val) setIsHandleValid(null);
+                }}
+                onResolved={(_acc, isValid) => setIsHandleValid(isValid)}
                 disabled={isSubmitting}
                 placeholder="username"
               />

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppContext, Contact, ErrorResponse } from '../types';
 import { requireAuth } from '../middleware/session';
 import { publicErrorMessage } from '../utils/errors';
+import { resolveAccount } from '../services/accountResolver';
 
 function normalizeHandle(rawHandle: string): string {
   return rawHandle.trim().replace(/^@+/, '').toLowerCase();
@@ -146,6 +147,11 @@ contactsRouter.post('/', requireAuth({ passkeyVerified: true }), async (c) => {
     // Disallow self-contact
     if (cleanHandle === session.x_handle.toLowerCase()) {
       return c.json<ErrorResponse>({ error: 'Cannot add yourself to contacts', code: 'SELF_CONTACT' }, 400);
+    }
+
+    const resolved = await resolveAccount(c.env, cleanHandle);
+    if (!resolved.ok) {
+      return c.json<ErrorResponse>({ error: resolved.error, code: resolved.code }, resolved.status as any);
     }
 
     // Check if user is registered on UPRAIL
