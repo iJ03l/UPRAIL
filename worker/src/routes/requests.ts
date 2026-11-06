@@ -462,11 +462,15 @@ requestsRouter.post('/:id/decline', requireAuth({ passkeyVerified: true }), asyn
     }
 
     const reason = sanitizeMemo(body.reason);
-    await c.env.DB.prepare(
-      `UPDATE payment_requests SET status = 'DECLINED', decline_reason = ?, completed_at = ? WHERE id = ?`
+    const declineResult = await c.env.DB.prepare(
+      `UPDATE payment_requests SET status = 'DECLINED', decline_reason = ?, completed_at = ? WHERE id = ? AND status = 'PENDING'`
     )
       .bind(reason, Date.now(), id)
       .run();
+
+    if ((declineResult.meta?.changes ?? 0) === 0) {
+      return c.json<ErrorResponse>({ error: 'Request is no longer pending', code: 'INVALID_STATUS' }, 409);
+    }
 
     return c.json({ success: true, status: 'DECLINED' });
   } catch (err) {
@@ -496,11 +500,15 @@ requestsRouter.post('/:id/cancel', requireAuth({ passkeyVerified: true }), async
       return c.json<ErrorResponse>({ error: `Request cannot be cancelled (current status: ${req.status})`, code: 'INVALID_STATUS' }, 400);
     }
 
-    await c.env.DB.prepare(
-      `UPDATE payment_requests SET status = 'CANCELLED', completed_at = ? WHERE id = ?`
+    const cancelResult = await c.env.DB.prepare(
+      `UPDATE payment_requests SET status = 'CANCELLED', completed_at = ? WHERE id = ? AND status = 'PENDING'`
     )
       .bind(Date.now(), id)
       .run();
+
+    if ((cancelResult.meta?.changes ?? 0) === 0) {
+      return c.json<ErrorResponse>({ error: 'Request is no longer pending', code: 'INVALID_STATUS' }, 409);
+    }
 
     return c.json({ success: true, status: 'CANCELLED' });
   } catch (err) {
@@ -553,11 +561,15 @@ requestsRouter.post('/:id/accept', requireAuth({ passkeyVerified: true }), requi
     }
 
     const now = Date.now();
-    await c.env.DB.prepare(
-      `UPDATE payment_requests SET status = 'COMPLETED', payment_id = ?, completed_at = ? WHERE id = ?`
+    const acceptResult = await c.env.DB.prepare(
+      `UPDATE payment_requests SET status = 'COMPLETED', payment_id = ?, completed_at = ? WHERE id = ? AND status = 'PENDING'`
     )
       .bind(body.paymentId || null, now, id)
       .run();
+
+    if ((acceptResult.meta?.changes ?? 0) === 0) {
+      return c.json<ErrorResponse>({ error: 'Request is no longer pending or already completed', code: 'INVALID_STATUS' }, 409);
+    }
 
     return c.json({ success: true, status: 'COMPLETED', paymentId: body.paymentId || null });
   } catch (err) {
