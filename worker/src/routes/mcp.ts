@@ -18,7 +18,7 @@
 import { Context, Hono } from 'hono';
 import type { AgentPrincipal, AppContext, Env, Session } from '../types';
 import { requireAgent } from '../middleware/agentAuth';
-import { executeAgentPay, executeAgentWithdraw } from './agent';
+import { executeAgentPay, executeAgentWithdraw, sanitizeAgentPaymentReceipt } from './agent';
 import { publicErrorMessage } from '../utils/errors';
 import * as nearRpc from '../services/nearRpc';
 import {
@@ -50,7 +50,7 @@ const TOOLS = [
   {
     name: 'pay_handle',
     description:
-      'Send a confidential payment to one or more X (Twitter) handles on UPRAIL. If the payment completes, ALWAYS display the returned claimLink / shareLink and xShareUrl so the user can share it on X/Twitter. If the payment requires passkey approval (status: REQUIRES_PASSKEY_APPROVAL), you MUST display the clickable markdown link [Confirm & Authorize with Passkey](approvalUrl) so the user can tap to approve with Touch ID / Face ID. IMPORTANT: Never retry with a modified idempotencyKey if a call fails or times out; if retryable is false or the outcome is uncertain, call list_payments first to verify whether the payment already went through.',
+      'Send a confidential payment to one or more X (Twitter) handles on UPRAIL. If the payment completes, display a clean receipt: for registered users (status: CLAIMED), state that funds were delivered directly to their UPRAIL vault and show the receipt link. For new users (status: ESCROWED), provide the share link to claim. Always show the exact amount sent; never invent or deduct fees or say "recipient gets X after fee". If the payment requires passkey approval (status: REQUIRES_PASSKEY_APPROVAL), you MUST display the clickable markdown link [Confirm & Authorize with Passkey](approvalUrl) so the user can tap to approve with Touch ID / Face ID. IMPORTANT: Never retry with a modified idempotencyKey if a call fails or times out; if retryable is false or the outcome is uncertain, call list_payments first to verify whether the payment already went through.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -378,11 +378,14 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
         idempotencyKey: args?.idempotencyKey,
         requestApproval: args?.requestApproval !== false,
       });
-      const payload = (await response.json().catch(() => ({}))) as any;
+      const rawPayload = (await response.json().catch(() => ({}))) as any;
       const isError =
         response.status !== 201 &&
         response.status !== 200 &&
-        payload?.status !== 'REQUIRES_PASSKEY_APPROVAL';
+        rawPayload?.status !== 'REQUIRES_PASSKEY_APPROVAL';
+      const payload = isError
+        ? rawPayload
+        : sanitizeAgentPaymentReceipt(rawPayload, args?.asset ?? args?.token ?? 'USDC');
       return toolText(payload, isError);
     }
 
@@ -535,9 +538,11 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
       const payments = (results || []).map((row) => {
         const recipientHandle = `@${String(row.recipient_handle || '').replace(/^@/, '')}`;
         const shareLink = `${appOrigin}/claim/${row.id}`;
+        const isClaimed = row.status === 'CLAIMED';
+        const isSent = row.sender_x_id === session.x_id;
         return {
           id: row.id,
-          direction: row.sender_x_id === session.x_id ? 'sent' : 'received',
+          direction: isSent ? 'sent' : 'received',
           senderHandle: row.sender_x_handle ? `@${row.sender_x_handle}` : null,
           recipientHandle,
           asset: row.asset,
@@ -545,7 +550,8 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
           memo: row.memo || null,
           status: row.status,
           shareLink,
-          claimLink: shareLink,
+          claimLink: !isClaimed && !isSent ? shareLink : undefined,
+          receiptLink: isClaimed || isSent ? shareLink : undefined,
           xShareUrl: `https://x.com/intent/post?text=${encodeURIComponent(`Hey ${recipientHandle}, I sent you ${row.amount} ${row.asset} on UPRAIL: ${shareLink}`)}`,
           created_at: row.created_at,
           expires_at: row.expires_at,

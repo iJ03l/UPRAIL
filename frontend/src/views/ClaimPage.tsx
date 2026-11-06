@@ -120,7 +120,7 @@ export const ClaimPage: React.FC = () => {
     linkedPayment && userHandle && recipientHandle && userHandle !== recipientHandle && userHandle !== senderHandle
   );
   const isReceipt = Boolean(
-    linkedPayment && isRecipient && (linkedPayment.isDirect || linkedPayment.status === 'claimed')
+    linkedPayment && (isRecipient || !userHandle) && (linkedPayment.isDirect || linkedPayment.status === 'claimed')
   );
   const isHandledTargetedView = Boolean(isReceipt || isSender || isThirdParty);
 

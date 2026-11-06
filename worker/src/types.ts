@@ -312,6 +312,7 @@ export interface SendResponse {
   paymentId: string;
   shareLink: string;
   claimLink?: string;
+  receiptLink?: string;
   xShareUrl?: string;
   tweetIntentUrl?: string;
   status: PaymentStatus;

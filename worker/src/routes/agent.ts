@@ -143,6 +143,77 @@ export function parseAgentRecipients(rawBody: Record<string, any>): ParsedAgentR
   return single ? [{ handle: single, amount: defaultAmount }] : [];
 }
 
+/**
+ * Sanitizes agent payment responses so AI chat models never output confusing
+ * internal fee calculations like "(recipient gets 0.99 USDC after 0.01 fee)"
+ * or report registered user direct transfers as "escrowed".
+ */
+export function sanitizeAgentPaymentReceipt(raw: any, defaultAsset = 'USDC'): any {
+  if (!raw || typeof raw !== 'object') return raw;
+
+  const clone: Record<string, any> = { ...raw };
+
+  // Always scrub internal fee and carved net fields
+  delete clone.recipientAmount;
+  delete clone.fee;
+  delete clone.feeRecipient;
+  delete clone.protocolFee;
+
+  const isDirect = Boolean(clone.isDirect || clone.isRegistered || clone.status === 'CLAIMED');
+  clone.isRegistered = isDirect;
+  clone.status = isDirect ? 'CLAIMED' : 'ESCROWED';
+
+  const shareLink = clone.shareLink || clone.claimLink || clone.receiptLink || '';
+  clone.shareLink = shareLink;
+
+  if (isDirect) {
+    clone.receiptLink = shareLink;
+    delete clone.claimLink;
+  } else {
+    clone.claimLink = shareLink;
+    delete clone.receiptLink;
+  }
+
+  if (Array.isArray(clone.payments)) {
+    clone.payments = clone.payments.map((p: any) => {
+      if (!p || typeof p !== 'object') return p;
+      const pDirect = Boolean(p.isDirect || p.isRegistered || p.status === 'CLAIMED' || isDirect);
+      const pShareLink = p.shareLink || p.claimLink || p.receiptLink || shareLink;
+      const cleanP: Record<string, any> = {
+        recipientHandle: p.recipientHandle ? `@${String(p.recipientHandle).replace(/^@+/, '')}` : p.recipientHandle,
+        amount: p.amount,
+        asset: p.asset || defaultAsset,
+        paymentId: p.paymentId || p.id,
+        status: pDirect ? 'CLAIMED' : 'ESCROWED',
+        isRegistered: pDirect,
+        shareLink: pShareLink,
+      };
+      if (pDirect) {
+        cleanP.receiptLink = pShareLink;
+      } else {
+        cleanP.claimLink = pShareLink;
+      }
+      if (p.xShareUrl) cleanP.xShareUrl = p.xShareUrl;
+      if (p.tweetIntentUrl) cleanP.tweetIntentUrl = p.tweetIntentUrl;
+      return cleanP;
+    });
+  }
+
+  const rawRecipient = clone.recipientHandle || clone.recipient;
+  if (rawRecipient) {
+    const handle = `@${String(rawRecipient).replace(/^@+/, '')}`;
+    const amt = clone.amount ? `${clone.amount} ` : '';
+    const sym = clone.asset ? `${clone.asset} ` : '';
+    if (isDirect) {
+      clone.message = `Payment of ${amt}${sym}delivered directly to ${handle}'s UPRAIL account! Receipt: ${shareLink}`.trim();
+    } else {
+      clone.message = `Payment of ${amt}${sym}sent to ${handle}. Funds are held in secure escrow until they claim: ${shareLink}`.trim();
+    }
+  }
+
+  return clone;
+}
+
 export async function executeAgentPay(
   c: Context<AppContext>,
   rawBody: Record<string, any>
@@ -459,9 +530,17 @@ export async function executeAgentPay(
           await markCompleted(payload.paymentId);
         }
         if (payload && payload.shareLink) {
-          payload.shareLinks = [payload.shareLink];
-          payload.message = `Payment of ${r.amount} ${asset} sent to @${r.handle}! Share link: ${payload.shareLink}`;
-          return c.json(payload, 201);
+          const sanitized = sanitizeAgentPaymentReceipt(
+            {
+              ...payload,
+              recipientHandle: r.handle,
+              amount: r.amount,
+              asset,
+            },
+            asset
+          );
+          sanitized.shareLinks = [sanitized.shareLink].filter(Boolean);
+          return c.json(sanitized, 201);
         }
       } else if (shouldReleaseAgentSpend(singleRes.status, code)) {
         await auth.release();
@@ -514,16 +593,19 @@ export async function executeAgentPay(
         );
       }
       const data = (await singleRes.json()) as any;
+      const isDirect = Boolean(data.isDirect || data.status === 'CLAIMED');
       results.push({
         recipientHandle: r.handle,
         amount: r.amount,
         asset,
         paymentId: data.paymentId,
         shareLink: data.shareLink,
-        claimLink: data.claimLink || data.shareLink,
+        claimLink: isDirect ? undefined : (data.claimLink || data.shareLink),
+        receiptLink: isDirect ? data.shareLink : undefined,
         xShareUrl: data.xShareUrl,
         tweetIntentUrl: data.tweetIntentUrl,
-        status: data.status,
+        status: isDirect ? 'CLAIMED' : 'ESCROWED',
+        isRegistered: isDirect,
       });
     }
 
@@ -531,7 +613,7 @@ export async function executeAgentPay(
       await markCompleted(results[0].paymentId);
     }
 
-    return c.json(
+    const batchResponse = sanitizeAgentPaymentReceipt(
       {
         status: 'CLAIMED',
         success: true,
@@ -541,10 +623,11 @@ export async function executeAgentPay(
         shareLinks: results.map((p) => p.shareLink).filter(Boolean),
         message:
           `Payments delivered to ${results.length} accounts! Links to share:\n` +
-          results.map((p) => `@${p.recipientHandle}: ${p.shareLink}`).join('\n'),
+          results.map((p) => `@${String(p.recipientHandle).replace(/^@+/, '')}: ${p.shareLink}`).join('\n'),
       },
-      201
+      asset
     );
+    return c.json(batchResponse, 201);
   } catch (err) {
     await markUnknown();
     throw err;

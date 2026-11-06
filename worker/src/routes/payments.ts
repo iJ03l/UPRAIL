@@ -1132,10 +1132,9 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     } // end empirical rail (probe could not answer)
 
     // ── 3. Finalize the record with the settlement hashes ──────────────────
-    const paymentStatus =
-      isRecipientRegistered && (!privateRailSettled || recipientPaidAtSend)
-        ? PaymentStatus.CLAIMED
-        : PaymentStatus.ESCROWED;
+    const paymentStatus = isRecipientRegistered
+      ? PaymentStatus.CLAIMED
+      : PaymentStatus.ESCROWED;
     try {
       const finalize =
         privacyRail === 'confidential'
@@ -1313,7 +1312,8 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       {
         paymentId,
         shareLink,
-        claimLink: shareLink || undefined,
+        claimLink: isRecipientRegistered ? undefined : shareLink || undefined,
+        receiptLink: isRecipientRegistered ? shareLink : undefined,
         xShareUrl,
         tweetIntentUrl,
         status: paymentStatus,
@@ -1323,7 +1323,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         recipientAmount,
         feeRecipient,
         inviteCode: inviteCode || undefined,
-        isDirect: isRecipientRegistered && (!privateRailSettled || recipientPaidAtSend),
+        isDirect: isRecipientRegistered,
       },
       201
     );
@@ -1426,7 +1426,12 @@ paymentsRouter.get('/payments/:id', async (c) => {
     }
 
     const session = c.get('session');
-    const isSender = Boolean(session && payment.sender_x_id && payment.sender_x_id === session.x_id);
+    const isSender = Boolean(
+      session &&
+        ((payment.sender_x_id && payment.sender_x_id === session.x_id) ||
+          (payment.sender_x_handle &&
+            session.x_handle.toLowerCase() === payment.sender_x_handle.toLowerCase()))
+    );
     const isRecipient = Boolean(
       session &&
         ((payment.recipient_x_id && payment.recipient_x_id === session.x_id) ||

@@ -97,8 +97,10 @@ export function useClaimFlow(initialCode?: string) {
             setSelectedPayment(direct);
             const userHandle = user?.handle?.replace(/^@/, '').toLowerCase();
             const recipientHandle = direct.recipientHandle?.replace(/^@/, '').toLowerCase();
-            const isRecipient = !userHandle || userHandle === recipientHandle;
-            const isPending = direct.status !== 'claimed' && direct.status !== 'cancelled' && direct.status !== 'refunded';
+            const senderHandle = direct.senderHandle?.replace(/^@/, '').toLowerCase();
+            const isSender = Boolean(userHandle && senderHandle && userHandle === senderHandle);
+            const isRecipient = !isSender && (!userHandle || userHandle === recipientHandle);
+            const isPending = !direct.isDirect && direct.status !== 'claimed' && direct.status !== 'cancelled' && direct.status !== 'refunded';
 
             if (isRecipient && isPending && !payments.some((p) => p.id === direct.id)) {
               setPendingPayments([direct, ...payments]);
