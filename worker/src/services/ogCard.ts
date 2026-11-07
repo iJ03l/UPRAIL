@@ -8,7 +8,7 @@
  * using Satori + resvg inside the Worker (no browser, no external service).
  */
 import { ImageResponse } from 'workers-og';
-import { FONT_DISPLAY, FONT_SANS } from '../assets/fonts';
+import { FONT_REGULAR, FONT_BOLD } from '../assets/fonts';
 import { BRAND_ICON, BRAND_WORDMARK } from '../assets/brand';
 
 export interface OgCardOptions {
@@ -20,13 +20,9 @@ export interface OgCardOptions {
 }
 
 const ACCENT = '#E05326';
-const ACCENT_GLOW = 'rgba(224, 83, 38, 0.15)';
-const CARD_BG = '#14100D';
-const CARD_BORDER = '#2B211B';
-const TEXT_WHITE = '#FFFFFF';
-const TEXT_SUBTLE = '#D6D3D1';
-const TEXT_MUTED = '#A8A29E';
-const FOOTER_LABEL = '#78716C';
+const INK = '#191A1C';
+const MUTED = '#6E7075';
+const FOOT = '#9B9DA1';
 
 function esc(value: string): string {
   return value
@@ -38,59 +34,47 @@ function esc(value: string): string {
 }
 
 function headlineSize(text: string): number {
-  if (text.length <= 10) return 92;
-  if (text.length <= 16) return 80;
-  if (text.length <= 24) return 66;
-  return 52;
+  if (text.length <= 12) return 96;
+  if (text.length <= 18) return 82;
+  if (text.length <= 26) return 68;
+  return 56;
 }
 
 export async function renderOgCard(opts: OgCardOptions): Promise<Response> {
   const size = headlineSize(opts.headline);
   const subline = opts.subline
-    ? `<div style="display:flex;font-family:'SpaceGrotesk';font-size:26px;color:${TEXT_SUBTLE};margin-top:14px;letter-spacing:-0.3px;">${esc(opts.subline)}</div>`
+    ? `<div style="display:flex;font-size:28px;color:${MUTED};margin-top:18px;">${esc(opts.subline)}</div>`
     : '';
   const detail = opts.detail
-    ? `<div style="display:flex;font-family:'SpaceGrotesk';font-size:20px;color:${TEXT_MUTED};line-height:1.45;">${esc(opts.detail)}</div>`
+    ? `<div style="display:flex;font-size:24px;color:${MUTED};line-height:1.45;">${esc(opts.detail)}</div>`
     : '';
 
   const html = `
-  <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:36px;background:#0A0807;font-family:'SpaceGrotesk';">
-    <div style="display:flex;flex-direction:column;width:100%;height:100%;box-sizing:border-box;padding:48px 56px;background:${CARD_BG};border:2px solid ${CARD_BORDER};border-radius:28px;">
-      
-      <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
-        <div style="display:flex;align-items:center;">
-          <img src="${BRAND_ICON}" width="44" height="42" />
-          <img src="${BRAND_WORDMARK}" width="104" height="35" style="margin-left:14px;" />
-        </div>
-        <div style="display:flex;align-items:center;padding:7px 18px;border-radius:999px;background:${ACCENT_GLOW};border:1.5px solid rgba(224,83,38,0.35);">
-          <div style="display:flex;width:8px;height:8px;border-radius:4px;background:${ACCENT};margin-right:10px;"></div>
-          <div style="display:flex;font-family:'SpaceGrotesk';font-size:13px;font-weight:700;letter-spacing:2px;color:#FF7D54;">CONFIDENTIAL RAIL</div>
-        </div>
+  <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:60px 72px;background:#F7F6F3;border:2px solid #ECE9E4;font-family:'DejaVu';">
+    <div style="display:flex;align-items:center;">
+      <img src="${BRAND_ICON}" width="48" height="46" />
+      <img src="${BRAND_WORDMARK}" width="110" height="37" style="margin-left:14px;" />
+    </div>
+
+    <div style="display:flex;flex-direction:column;margin-top:92px;">
+      <div style="display:flex;font-size:20px;font-weight:700;letter-spacing:3px;color:${ACCENT};">${esc(opts.eyebrow)}</div>
+      <div style="display:flex;font-size:${size}px;font-weight:700;color:${INK};line-height:1.05;margin-top:18px;">${esc(opts.headline)}</div>
+      ${subline}
+    </div>
+
+    <div style="display:flex;flex-direction:column;margin-top:auto;">
+      ${detail}
+      <div style="display:flex;align-items:center;margin-top:26px;">
+        <div style="display:flex;font-size:16px;font-weight:700;letter-spacing:1px;color:${FOOT};">app.uprail.world</div>
+        <div style="display:flex;font-size:16px;font-weight:700;letter-spacing:1px;color:${FOOT};margin-left:auto;">UPRAIL</div>
       </div>
-
-      <div style="display:flex;flex-direction:column;margin-top:54px;">
-        <div style="display:flex;font-family:'SpaceGrotesk';font-size:15px;font-weight:700;letter-spacing:3px;color:${ACCENT};text-transform:uppercase;">${esc(opts.eyebrow)}</div>
-        <div style="display:flex;font-family:'Syne';font-size:${size}px;font-weight:700;color:${TEXT_WHITE};line-height:1.02;margin-top:14px;letter-spacing:-1.5px;">${esc(opts.headline)}</div>
-        ${subline}
+      <div style="display:flex;align-items:center;margin-top:16px;">
+        <div style="display:flex;width:10px;height:10px;border-radius:5px;background:${ACCENT};"></div>
+        <div style="display:flex;flex:1;border-top:2px dashed #DAD8D3;margin:0 8px;"></div>
+        <div style="display:flex;width:8px;height:8px;border-radius:4px;background:#C7C5C0;"></div>
+        <div style="display:flex;flex:1;border-top:2px dashed #DAD8D3;margin:0 8px;"></div>
+        <div style="display:flex;width:8px;height:8px;border-radius:4px;background:#C7C5C0;"></div>
       </div>
-
-      <div style="display:flex;flex-direction:column;margin-top:auto;">
-        ${detail}
-        
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:24px;">
-          <div style="display:flex;font-family:'SpaceGrotesk';font-size:15px;font-weight:700;letter-spacing:1px;color:${FOOTER_LABEL};">app.uprail.world</div>
-          <div style="display:flex;font-family:'SpaceGrotesk';font-size:13px;font-weight:700;letter-spacing:1.5px;color:${FOOTER_LABEL};">THE VALUE RAILWAY FOR X</div>
-        </div>
-
-        <div style="display:flex;align-items:center;margin-top:14px;">
-          <div style="display:flex;width:12px;height:12px;border-radius:6px;background:${ACCENT};"></div>
-          <div style="display:flex;flex:1;border-top:2px dashed #3D2D24;margin:0 10px;"></div>
-          <div style="display:flex;width:10px;height:10px;border-radius:5px;background:#00C1DE;"></div>
-          <div style="display:flex;flex:1;border-top:2px dashed #3D2D24;margin:0 10px;"></div>
-          <div style="display:flex;width:12px;height:12px;border-radius:6px;background:#00EC97;"></div>
-        </div>
-      </div>
-
     </div>
   </div>`;
 
@@ -99,8 +83,8 @@ export async function renderOgCard(opts: OgCardOptions): Promise<Response> {
     height: 630,
     format: 'png',
     fonts: [
-      { name: 'Syne', data: FONT_DISPLAY, weight: 700, style: 'normal' },
-      { name: 'SpaceGrotesk', data: FONT_SANS, weight: 500, style: 'normal' },
+      { name: 'DejaVu', data: FONT_REGULAR, weight: 400, style: 'normal' },
+      { name: 'DejaVu', data: FONT_BOLD, weight: 700, style: 'normal' },
     ],
   });
 
