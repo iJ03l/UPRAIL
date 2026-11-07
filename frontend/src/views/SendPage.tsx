@@ -198,7 +198,7 @@ export const SendPage: React.FC = () => {
         );
       } else {
         setSuccessToast(
-          `Payment sent to @${payment.recipientHandle} — ${formatTokenAmount(payment.grossAmount || payment.amount)} ${payment.token.symbol} waiting.`
+          `Payment sent to @${payment.recipientHandle} · ${formatTokenAmount(payment.grossAmount || payment.amount)} ${payment.token.symbol} waiting.`
         );
       }
       setRecipient('');

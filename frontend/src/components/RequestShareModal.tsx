@@ -84,7 +84,7 @@ export const RequestShareModal: React.FC<RequestShareModalProps> = ({
             Request Created!
           </h3>
           <p className="text-xs text-stone-500 dark:text-stone-400 font-sans">
-            Share this link with <span className="font-bold font-mono text-stone-900 dark:text-white">@{request.requested_handle}</span>. They can accept or decline in one biometric tap — no crypto wallet needed.
+            Share this link with <span className="font-bold font-mono text-stone-900 dark:text-white">@{request.requested_handle}</span>. They can accept or decline in one biometric tap (no crypto wallet needed).
           </p>
         </div>
 

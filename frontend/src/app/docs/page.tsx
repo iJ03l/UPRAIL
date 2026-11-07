@@ -175,7 +175,7 @@ export default function DocsOverviewPage() {
               UPRAIL Payment Requests
             </h3>
             <p className="text-sm text-stone-600 leading-relaxed">
-              Request funds from any 𝕏 user—registered or new. Generates a polite shareable link and
+              Request funds from any 𝕏 user (registered or new). Generates a polite shareable link and
               custom OpenGraph card. The recipient can accept and send or decline in a single biometric
               tap. No crypto wallet or seed phrase needed.
             </p>

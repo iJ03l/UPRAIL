@@ -56,9 +56,9 @@ export const WalletShareModal: React.FC<WalletShareModalProps> = ({
   const shortDest = shortenAddress(receipt.destinationAddress);
   const tweetText = encodeURIComponent(
     [
-      `I just sent ${formatTokenAmount(receipt.amount)} ${receipt.symbol} to ${shortDest} on UPRAIL — settled privately.`,
+      `I just sent ${formatTokenAmount(receipt.amount)} ${receipt.symbol} to ${shortDest} on UPRAIL. Settled privately.`,
       '',
-      'Receipt — proof of payment:',
+      'Receipt (proof of payment):',
       '',
       receipt.shareLink,
     ].join('\n')
@@ -190,7 +190,7 @@ export const WalletShareModal: React.FC<WalletShareModalProps> = ({
         <div className="flex items-start space-x-2 p-3 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 text-[11px] text-stone-600 dark:text-stone-400">
           <Shield className="w-4 h-4 text-stone-900 dark:text-white flex-shrink-0 mt-0.5" />
           <p>
-            <strong>Safe to share:</strong> this receipt only proves a transfer happened — it never
+            <strong>Safe to share:</strong> this receipt only proves a transfer happened. It never
             grants access to the funds or your account.
           </p>
         </div>

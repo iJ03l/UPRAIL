@@ -57,18 +57,18 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       ? [
           `Hey @${payment.recipientHandle},`,
           '',
-          `I sent you ${formatTokenAmount(displayAmount)} ${payment.token.symbol} on UPRAIL — it’s already in your account.`,
+          `I sent you ${formatTokenAmount(displayAmount)} ${payment.token.symbol} on UPRAIL. It’s already in your account.`,
           '',
-          'Open the receipt — no wallet needed:',
+          'Open the receipt (no wallet needed):',
           '',
           payment.claimLink,
         ].join('\n')
       : [
           `Hey @${payment.recipientHandle},`,
           '',
-          `I sent you ${formatTokenAmount(displayAmount)} ${payment.token.symbol} on UPRAIL — it’s waiting for you.`,
+          `I sent you ${formatTokenAmount(displayAmount)} ${payment.token.symbol} on UPRAIL. It’s waiting for you.`,
           '',
-          'Sign in with X, then confirm with your passkey — no crypto wallet needed.',
+          'Sign in with X, then confirm with your passkey (no crypto wallet needed):',
           '',
           payment.claimLink,
         ].join('\n')
