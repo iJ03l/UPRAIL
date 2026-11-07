@@ -44,6 +44,8 @@ export const BITCOIN_ADDRESS_REGEX = /^(?:bc1[a-zA-HJ-NP-Z0-9]{25,62}|[13][a-km-
 // case-sensitive base58 and can be shorter than Solana's 32-character floor,
 // so they need their own check rather than piggy-backing on SOLANA_ADDRESS_REGEX.
 export const XRP_ADDRESS_REGEX = /^(?:r[1-9A-HJ-NP-Za-km-z]{24,34}|X[1-9A-HJ-NP-Za-km-z]{45,49})$/;
+// Pearl L1 Bech32 address (prl1...)
+export const PEARL_ADDRESS_REGEX = /^prl1[a-z0-9]{38,70}$/;
 
 export function isValidDestinationAddress(address: string): boolean {
   const clean = address.trim();
@@ -51,6 +53,7 @@ export function isValidDestinationAddress(address: string): boolean {
   if (EVM_ADDRESS_REGEX.test(clean)) return true;
   if (BITCOIN_ADDRESS_REGEX.test(clean)) return true;
   if (XRP_ADDRESS_REGEX.test(clean)) return true;
+  if (PEARL_ADDRESS_REGEX.test(clean)) return true;
   if (!clean.includes('.') && SOLANA_ADDRESS_REGEX.test(clean)) return true;
   if (clean.length <= 64 && NEAR_ACCOUNT_REGEX.test(clean)) return true;
   return false;
@@ -58,10 +61,11 @@ export function isValidDestinationAddress(address: string): boolean {
 
 export function isNearAccountAddress(address: string): boolean {
   const clean = address.trim();
-  // Solana addresses are base58 without dots, EVM starts with 0x, BTC starts with bc1/1/3
+  // Solana addresses are base58 without dots, EVM starts with 0x, BTC starts with bc1/1/3, Pearl starts with prl1
   if (EVM_ADDRESS_REGEX.test(clean)) return false;
   if (BITCOIN_ADDRESS_REGEX.test(clean)) return false;
   if (XRP_ADDRESS_REGEX.test(clean)) return false;
+  if (PEARL_ADDRESS_REGEX.test(clean)) return false;
   if (!clean.includes('.') && SOLANA_ADDRESS_REGEX.test(clean)) {
     // If it contains uppercase letters or doesn't end in .near, it is Solana
     if (/[A-Z]/.test(clean) || clean.length !== 64) return false;
@@ -70,7 +74,7 @@ export function isNearAccountAddress(address: string): boolean {
 }
 
 /** Chain family used to sanity-check a chosen network against the address. */
-export type ChainFamily = 'evm' | 'sol' | 'btc' | 'near';
+export type ChainFamily = 'evm' | 'sol' | 'btc' | 'near' | 'prl';
 
 /**
  * Families we can confidently check an address against. Chains that are not
@@ -98,6 +102,10 @@ const CHAIN_FAMILY: Record<string, ChainFamily> = {
   sol: 'sol',
   btc: 'btc',
   near: 'near',
+  hood: 'evm',
+  robinhood: 'evm',
+  prl: 'prl',
+  pearl: 'prl',
 };
 
 /** Human labels for the networks 1Click exposes (cosmetic only). */
@@ -120,6 +128,10 @@ export const CHAIN_NAMES: Record<string, string> = {
   hypercore: 'Hyperliquid',
   sol: 'Solana',
   btc: 'Bitcoin',
+  hood: 'Robinhood',
+  robinhood: 'Robinhood',
+  prl: 'Pearl',
+  pearl: 'Pearl',
   doge: 'Dogecoin',
   sui: 'Sui',
   aptos: 'Aptos',
@@ -344,6 +356,7 @@ export async function getWithdrawChains(env: Env, sourceAsset: string): Promise<
 /** Best-guess chain when the caller did not choose one. EVM defaults to Base. */
 export function inferChainFromAddress(address: string): string {
   const clean = address.trim();
+  if (PEARL_ADDRESS_REGEX.test(clean)) return 'prl';
   if (EVM_ADDRESS_REGEX.test(clean)) return 'base';
   if (BITCOIN_ADDRESS_REGEX.test(clean)) return 'btc';
   if (XRP_ADDRESS_REGEX.test(clean)) return 'xrp';
@@ -370,6 +383,7 @@ export function chainMatchesAddress(chain: string, address: string): boolean {
   const clean = address.trim();
   if (family === 'evm') return EVM_ADDRESS_REGEX.test(clean);
   if (family === 'btc') return BITCOIN_ADDRESS_REGEX.test(clean);
+  if (family === 'prl') return PEARL_ADDRESS_REGEX.test(clean);
   if (family === 'sol') {
     return (
       !EVM_ADDRESS_REGEX.test(clean) &&

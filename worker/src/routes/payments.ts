@@ -58,6 +58,8 @@ function isValidXHandle(handle: string): boolean {
 }
 
 const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+const BITCOIN_ADDRESS_RE = /^(?:bc1[a-zA-HJ-NP-Z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/;
+const PEARL_ADDRESS_RE = /^prl1[a-z0-9]{38,70}$/;
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const NEAR_ACCOUNT_RE =
   /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?)*$/;
@@ -65,15 +67,17 @@ const IMPLICIT_ACCOUNT_RE = /^[0-9a-f]{64}$/;
 
 /**
  * Classifies a raw recipient value as either a raw chain address
- * ("Send to Wallet": EVM, Solana, NEAR named/implicit account) or an X handle.
+ * ("Send to Wallet": EVM, Solana, Bitcoin, Pearl, NEAR named/implicit account) or an X handle.
  * Handles are lowercased without '@'; addresses keep their canonical form
  * (EVM/NEAR named accounts are case-insensitive → lowercase; Solana base58
- * and64-hex implicit accounts are case-sensitive → preserved).
+ * and 64-hex implicit accounts are case-sensitive → preserved).
  */
 function classifyRecipient(raw: string): { isAddress: boolean; value: string } {
   const t = raw.trim();
   if (EVM_ADDRESS_RE.test(t)) return { isAddress: true, value: t.toLowerCase() };
   if (IMPLICIT_ACCOUNT_RE.test(t)) return { isAddress: true, value: t };
+  if (BITCOIN_ADDRESS_RE.test(t)) return { isAddress: true, value: t };
+  if (PEARL_ADDRESS_RE.test(t)) return { isAddress: true, value: t.toLowerCase() };
   if (SOLANA_ADDRESS_RE.test(t)) return { isAddress: true, value: t };
   // NEAR named accounts always contain a dot; X handles never do.
   if (t.includes('.') && NEAR_ACCOUNT_RE.test(t)) return { isAddress: true, value: t.toLowerCase() };
@@ -102,6 +106,10 @@ function mapPublicToken(t: any) {
     badge = 'Ethereum L1';
   } else if (t.chain === 'btc') {
     badge = 'Bitcoin Native';
+  } else if (t.chain === 'hood') {
+    badge = 'Robinhood';
+  } else if (t.chain === 'prl') {
+    badge = 'Pearl L1';
   } else if (t.chain === 'near') {
     badge = 'NEAR Native';
   }

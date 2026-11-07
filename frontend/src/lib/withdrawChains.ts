@@ -9,7 +9,7 @@
  * sensible default and flag an obvious mismatch.
  */
 
-export type WithdrawChainFamily = 'evm' | 'sol' | 'btc' | 'near';
+export type WithdrawChainFamily = 'evm' | 'sol' | 'btc' | 'near' | 'prl';
 
 export interface WithdrawChain {
   key: string;
@@ -19,6 +19,7 @@ export interface WithdrawChain {
 
 const EVM_RE = /^0x[a-fA-F0-9]{40}$/;
 const BTC_RE = /^(?:bc1[a-zA-HJ-NP-Z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})$/;
+const PRL_RE = /^prl1[a-z0-9]{38,70}$/;
 const SOL_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const NEAR_RE = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?)*$/;
 
@@ -28,6 +29,7 @@ export function addressFamily(address: string): WithdrawChainFamily | null {
   if (!a) return null;
   if (EVM_RE.test(a)) return 'evm';
   if (BTC_RE.test(a)) return 'btc';
+  if (PRL_RE.test(a)) return 'prl';
   if (!a.includes('.') && SOL_RE.test(a)) return 'sol';
   if (a.length <= 64 && NEAR_RE.test(a)) return 'near';
   return null;
@@ -44,6 +46,8 @@ export function familyLabel(family: WithdrawChainFamily | null): string {
       return 'Bitcoin';
     case 'near':
       return 'NEAR';
+    case 'prl':
+      return 'Pearl';
     default:
       return '';
   }

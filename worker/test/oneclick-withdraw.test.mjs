@@ -227,5 +227,22 @@ describe('XRP destination validation', () => {
     assert.equal(hasKnownAddressFamily('starknet'), false);
     assert.equal(hasKnownAddressFamily('near'), true);
     assert.equal(hasKnownAddressFamily('base'), true);
+    assert.equal(hasKnownAddressFamily('hood'), true);
+    assert.equal(hasKnownAddressFamily('prl'), true);
+  });
+});
+
+describe('Robinhood and Pearl destination validation', () => {
+  it('recognises Robinhood EVM and Pearl Bech32 addresses', () => {
+    const pearlAddress = 'prl1pgvux70s2fhwn80dv3ceqw2qdu3h62zxlh7d5m6ef6zqllr4vglpszmpk4p';
+    const hoodAddress = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+
+    assert.equal(isValidDestinationAddress(pearlAddress), true);
+    assert.equal(isNearAccountAddress(pearlAddress), false);
+    assert.equal(inferChainFromAddress(pearlAddress), 'prl');
+    assert.equal(chainMatchesAddress('prl', pearlAddress), true);
+
+    assert.equal(isValidDestinationAddress(hoodAddress), true);
+    assert.equal(chainMatchesAddress('hood', hoodAddress), true);
   });
 });

@@ -969,6 +969,9 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
           'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near': { symbol: 'USDC', name: 'USD Coin (Ethereum)', priority: 10, chain: 'eth' },
           'nep141:853d955acef822db058eb8505911ed77f175b99e.factory.bridge.near': { symbol: 'FRAX', name: 'Frax Stablecoin', priority: 11, chain: 'near' },
           'nep141:aaaaaa20d9e0e2461697782ef11675f668207961.factory.bridge.near': { symbol: 'AURORA', name: 'Aurora', priority: 12, chain: 'near' },
+          'nep141:prl.omft.near': { symbol: 'PRL', name: 'Pearl', priority: 13, chain: 'prl' },
+          'nep141:hood-0x5fc5360d0400a0fd4f2af552add042d716f1d168.omft.near': { symbol: 'USDG', name: 'Global Dollar (Robinhood)', priority: 14, chain: 'hood' },
+          'nep141:hood.omft.near': { symbol: 'ETH', name: 'Ethereum (Robinhood)', priority: 15, chain: 'hood' },
         };
 
         const tokens: OnchainToken[] = [];
@@ -1037,9 +1040,9 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
           let category: TokenCategory = 'all';
           if (isNear || symUpper === 'NEAR') {
             category = 'popular';
-          } else if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG'].some((x) => symUpper.includes(x))) {
+          } else if (['USDC', 'USDT', 'DAI', 'FRAX', 'USDG', 'USDE'].some((x) => symUpper.includes(x))) {
             category = 'stables';
-          } else if (['ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA'].some((x) => symUpper === x)) {
+          } else if (['ETH', 'BTC', 'SOL', 'AVAX', 'BNB', 'AURORA', 'PRL'].some((x) => symUpper === x)) {
             category = 'l1';
           } else if (isMeme) {
             category = 'memes';
@@ -1076,6 +1079,8 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
           DAI: 8,
           FRAX: 9,
           AURORA: 10,
+          USDG: 11,
+          PRL: 12,
         };
 
         // Artwork for assets our inline table does not cover comes from the
@@ -1668,6 +1673,8 @@ export const SUPPORTED_CHAINS = [
   { chain: 'near', chainName: 'NEAR', badge: 'Instant Finality' },
   { chain: 'eth', chainName: 'Ethereum', badge: 'Mainnet L1' },
   { chain: 'btc', chainName: 'Bitcoin', badge: 'Native SegWit' },
+  { chain: 'hood', chainName: 'Robinhood', badge: 'Robinhood EVM' },
+  { chain: 'prl', chainName: 'Pearl', badge: 'Pearl L1' },
 ];
 
 const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
@@ -1986,6 +1993,52 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     symbol: 'DOGE',
     decimals: 8,
   },
+
+  // Robinhood (hood)
+  'hood_usdg': {
+    key: 'hood_usdg',
+    chain: 'hood',
+    chainName: 'Robinhood',
+    token: 'USDG',
+    originAsset: 'nep141:hood-0x5fc5360d0400a0fd4f2af552add042d716f1d168.omft.near',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '1000000',
+    minAmountFormatted: '1.00 USDG',
+    minAmountUsd: '$1.00',
+    refundTo: '',
+    symbol: 'USDG',
+    decimals: 6,
+  },
+  'hood_eth': {
+    key: 'hood_eth',
+    chain: 'hood',
+    chainName: 'Robinhood',
+    token: 'ETH',
+    originAsset: 'nep141:hood.omft.near',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '500000000000000',
+    minAmountFormatted: '0.0005 ETH',
+    minAmountUsd: '$1.00',
+    refundTo: '',
+    symbol: 'ETH',
+    decimals: 18,
+  },
+
+  // Pearl (prl)
+  'prl_prl': {
+    key: 'prl_prl',
+    chain: 'prl',
+    chainName: 'Pearl',
+    token: 'PRL',
+    originAsset: 'nep141:prl.omft.near',
+    destinationAsset: 'nep141:prl.omft.near',
+    amount: '100000000',
+    minAmountFormatted: '1.00 PRL',
+    minAmountUsd: '$1.75',
+    refundTo: '',
+    symbol: 'PRL',
+    decimals: 8,
+  },
 };
 
 // Aliases for chain-only fallback queries
@@ -2006,6 +2059,10 @@ CHAIN_DEPOSIT_CONFIGS['optimism'] = CHAIN_DEPOSIT_CONFIGS['op_usdc'];
 CHAIN_DEPOSIT_CONFIGS['avax'] = CHAIN_DEPOSIT_CONFIGS['avax_usdc'];
 CHAIN_DEPOSIT_CONFIGS['bsc'] = CHAIN_DEPOSIT_CONFIGS['bsc_usdt'];
 CHAIN_DEPOSIT_CONFIGS['doge'] = CHAIN_DEPOSIT_CONFIGS['doge_doge'];
+CHAIN_DEPOSIT_CONFIGS['hood'] = CHAIN_DEPOSIT_CONFIGS['hood_usdg'];
+CHAIN_DEPOSIT_CONFIGS['robinhood'] = CHAIN_DEPOSIT_CONFIGS['hood_usdg'];
+CHAIN_DEPOSIT_CONFIGS['prl'] = CHAIN_DEPOSIT_CONFIGS['prl_prl'];
+CHAIN_DEPOSIT_CONFIGS['pearl'] = CHAIN_DEPOSIT_CONFIGS['prl_prl'];
 
 /**
  * Calls 1Click quote endpoint to generate a live, cross-chain deposit address.
@@ -3020,7 +3077,7 @@ export async function getAllDepositAddresses(
     (env.CONFIDENTIAL_RAIL_ENABLED || '').trim().toLowerCase()
   );
   const confidential = Boolean(railOn && opts.xId);
-  const uniqueChains = ['eth', 'btc', 'sol', 'base', 'arbitrum', 'near', 'robinhood'];
+  const uniqueChains = ['eth', 'btc', 'sol', 'base', 'arbitrum', 'near', 'hood', 'prl'];
   const chainMap = new Map<string, DepositAddress>();
 
   // 1. Load cached addresses from D1 first
