@@ -2,8 +2,8 @@
 
 **The public identity & universal deposit ingress layer for near.com: Private value transfers to any X (Twitter) handle, policy-bounded AI agent payment rails, and 35+ chain wallet routing built on NEAR Intents + confidential execution.**
 
-- **Version:** v1.1.0 (1% Protocol Fee, Passkey-Gated near.com Internal Rail, Universal Ingress)
-- **Hackathon Tracks:** Privacy & Private AI · Social Money · Unstoppable DeFi
+- **Version:** v1.1.0
+- **Hackathon Tracks:** Privacy & Private AI · Social Money · Agent Economy · Real World Money · Open Innovation
 - **Live Application:** [https://app.uprail.world](https://app.uprail.world)
 - **Marketing & Interactive Preview:** [https://uprail.world](https://uprail.world)
 - **Developer Documentation:** [https://docs.uprail.world](https://docs.uprail.world)
