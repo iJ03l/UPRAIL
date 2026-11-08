@@ -292,3 +292,43 @@ export interface PaymentRequest {
   is_recipient_registered?: boolean;
 }
 
+export type StabilizeTargetSymbol = 'USDC' | 'USDT';
+
+export interface StabilizeQuote {
+  sourceAsset: string;
+  sourceSymbol: string;
+  sourceDecimals: number;
+  targetAsset: string;
+  targetSymbol: StabilizeTargetSymbol;
+  targetDecimals: number;
+  grossAmount: string;
+  grossAmountAtomic: string;
+  protocolFee: string;
+  protocolFeeAtomic: string;
+  feePercent: number;
+  netAmountIn: string;
+  netAmountInAtomic: string;
+  amountOut: string;
+  amountOutAtomic: string;
+  minAmountOut: string;
+  minAmountOutAtomic: string;
+  amountInUsd: string | null;
+  amountOutUsd: string | null;
+  protocolFeeUsd: string | null;
+  exchangeRate: string;
+  slippageBps: number;
+  timeEstimateSeconds: number;
+  confidential: boolean;
+  gasSponsored: boolean;
+}
+
+export interface StabilizeResult extends StabilizeQuote {
+  id: string;
+  status: string;
+  depositAddress: string;
+  intentHash: string;
+  feeIntentHash?: string;
+  shieldedAtomic: string;
+}
+
+

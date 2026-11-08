@@ -16,9 +16,15 @@
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse, Session } from '../types';
 import { requireAuth } from '../middleware/session';
+import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import * as nearRpc from '../services/nearRpc';
 import { isConfidentialRailEnabled, getConfidentialBalances } from '../services/confidentialRail';
 import { getUserSession } from '../services/oneclickAuth';
+import {
+  executeStabilize,
+  getStabilizeQuote,
+  StabilizeError,
+} from '../services/stabilize';
 import { publicErrorMessage } from '../utils/errors';
 import { cleanMemeSymbol } from '../utils/token';
 
@@ -860,4 +866,101 @@ onchainRouter.get('/account', requireAuth({ passkeyVerified: true }), async (c) 
     ...(report.error ? { provisionError: report.error } : {}),
   });
 });
+
+// ─── POST /api/onchain/stabilize/quote ────────────────────────────────────────
+/**
+ * Returns an accurate live 1Click quote for converting `amount` of `sourceAsset`
+ * into `targetAsset` ('USDC' or 'USDT'), including the exact 1% protocol fee
+ * calculated in base units.
+ */
+onchainRouter.post(
+  '/stabilize/quote',
+  requireAuth({ passkeyVerified: true }),
+  async (c) => {
+    const session = c.get('session')!;
+    try {
+      const body = await c.req
+        .json<{
+          sourceAsset?: string;
+          targetAsset?: string;
+          amount?: string;
+        }>()
+        .catch(() => null);
+
+      const quote = await getStabilizeQuote(c.env, session, {
+        sourceAsset: body?.sourceAsset || '',
+        targetAsset: body?.targetAsset || 'USDC',
+        amount: body?.amount || '',
+      });
+      return c.json({ quote });
+    } catch (err: any) {
+      if (err instanceof StabilizeError) {
+        return c.json<ErrorResponse>(
+          { error: err.message, code: err.code },
+          err.httpStatus as any
+        );
+      }
+      console.error('[onchain/stabilize/quote] error:', err);
+      return c.json<ErrorResponse>(
+        {
+          error: `Could not calculate stabilize quote: ${publicErrorMessage(err)}`,
+          code: 'STABILIZE_QUOTE_FAILED',
+        },
+        502
+      );
+    }
+  }
+);
+
+// ─── POST /api/onchain/stabilize ──────────────────────────────────────────────
+/**
+ * Executes a passkey-authorized, gas-sponsored confidential 1Click stabilization
+ * swap of any held token (including plain native NEAR and NEP-141s) into USDC or
+ * USDT inside the user's Confidential Intents vault, with a 1% protocol fee.
+ */
+onchainRouter.post(
+  '/stabilize',
+  requireAuth({ passkeyVerified: true }),
+  requirePasskeyAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    try {
+      const body = (c.get('parsedBody' as any) ||
+        (await c.req
+          .json<{
+            sourceAsset?: string;
+            targetAsset?: string;
+            amount?: string;
+          }>()
+          .catch(() => null))) as {
+        sourceAsset?: string;
+        targetAsset?: string;
+        amount?: string;
+      } | null;
+
+      const result = await executeStabilize(c.env, session, {
+        sourceAsset: body?.sourceAsset || '',
+        targetAsset: body?.targetAsset || 'USDC',
+        amount: body?.amount || '',
+      });
+      return c.json({ result });
+    } catch (err: any) {
+      if (err instanceof StabilizeError) {
+        return c.json<ErrorResponse>(
+          { error: err.message, code: err.code },
+          err.httpStatus as any
+        );
+      }
+      console.error('[onchain/stabilize] error:', err);
+      return c.json<ErrorResponse>(
+        {
+          error: `Stabilize failed: ${publicErrorMessage(err)}`,
+          code: 'STABILIZE_FAILED',
+        },
+        502
+      );
+    }
+  }
+);
+
 

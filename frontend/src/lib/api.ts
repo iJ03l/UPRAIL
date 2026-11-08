@@ -1862,6 +1862,60 @@ export const api = {
       throw new Error(err.error || 'Failed to unblock user');
     }
   },
+
+  async getStabilizeQuote(params: {
+    sourceAsset: string;
+    targetAsset: 'USDC' | 'USDT';
+    amount: string;
+    signal?: AbortSignal;
+  }): Promise<import('../types').StabilizeQuote> {
+    const url = API_BASE
+      ? `${API_BASE}/api/onchain/stabilize/quote`
+      : '/api/onchain/stabilize/quote';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      signal: params.signal,
+      body: JSON.stringify({
+        sourceAsset: params.sourceAsset,
+        targetAsset: params.targetAsset,
+        amount: params.amount,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch stabilize quote');
+    }
+    return data.quote;
+  },
+
+  async stabilizeAsset(params: {
+    sourceAsset: string;
+    targetAsset: 'USDC' | 'USDT';
+    amount: string;
+    passkeyAssertion: unknown;
+  }): Promise<import('../types').StabilizeResult> {
+    const url = API_BASE
+      ? `${API_BASE}/api/onchain/stabilize`
+      : '/api/onchain/stabilize';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        sourceAsset: params.sourceAsset,
+        targetAsset: params.targetAsset,
+        amount: params.amount,
+        passkeyAssertion: params.passkeyAssertion,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to stabilize token');
+    }
+    return data.result;
+  },
 };
 
 /**

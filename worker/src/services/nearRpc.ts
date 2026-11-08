@@ -5271,27 +5271,50 @@ export async function depositPlainBalanceToIntents(
         gas: 45_000_000_000_000n,
         deposit: 1n,
       });
-      return res.ok
-        ? { deposited: true, txHash: res.txHash }
-        : { deposited: false, reason: res.error || 'ft_transfer_call failed' };
+      if (res.ok) {
+        await (env as any).CACHE?.delete(`plain_bal:${senderAccountId}`).catch(() => {});
+        return { deposited: true, txHash: res.txHash };
+      }
+      return { deposited: false, reason: res.error || 'ft_transfer_call failed' };
     }
 
-    // 2. Plain native NEAR (NEAR asset only): wrap to wNEAR first, then the
-    //    same ft_transfer_call — keeping a gas reserve for both transactions.
+    // 2. Plain native NEAR (NEAR asset only): wrap the shortfall to wNEAR first
+    //    (with NEP-145 storage on wrap.near and gas reserve sponsored by escrow),
+    //    then execute ft_transfer_call for the full baseUnits.
     if (isNearNative && contractId === 'wrap.near') {
       const plainNear = await getPlainNearBalanceStrict(rpcUrl, senderAccountId);
       if (plainNear === null) {
         return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
       }
-      const gasReserve = 10000000000000000000000n; // 0.01 NEAR
-      if (plainNear >= BigInt(baseUnits) + gasReserve) {
+      const totalHeld = plainFt + plainNear;
+      const wrapNeeded = BigInt(baseUnits) - plainFt;
+      if (totalHeld >= BigInt(baseUnits) && wrapNeeded > 0n) {
+        // Register NEP-145 storage for senderAccountId on wrap.near from escrow so
+        // near_deposit credits 100% of wrapNeeded instead of carving 0.00125 NEAR for storage.
+        const senderWrapStorage = await ensureReceiverStorageRegistered(
+          rpcUrl,
+          'wrap.near',
+          senderAccountId,
+          sponsor
+        );
+        if (!senderWrapStorage.registered) {
+          return {
+            deposited: false,
+            reason: senderWrapStorage.reason || 'Could not register wrap.near storage for account',
+          };
+        }
+        // Sponsor gas + account storage reserve from escrow BEFORE near_deposit so the user
+        // can wrap 100% of their native NEAR balance (gas-sponsored).
+        const gasAndStorageHeadroom = 60000000000000000000000n; // 0.06 NEAR
+        await ensureRegistrationGas(env, senderAccountId, wrapNeeded + gasAndStorageHeadroom);
+
         const wrap = await signAndBroadcastFunctionCall({
           ...senderKey,
           receiverId: 'wrap.near',
           method: 'near_deposit',
           args: '{}',
           gas: 10_000_000_000_000n,
-          deposit: BigInt(baseUnits),
+          deposit: wrapNeeded,
         });
         if (!wrap.ok) {
           return { deposited: false, reason: wrap.error || 'near_deposit (wrap.near) failed' };
@@ -5305,20 +5328,11 @@ export async function depositPlainBalanceToIntents(
           gas: 45_000_000_000_000n,
           deposit: 1n,
         });
-        return res.ok
-          ? { deposited: true, txHash: res.txHash }
-          : { deposited: false, reason: res.error || 'ft_transfer_call (wNEAR) failed' };
-      }
-      if (plainNear > 0n) {
-        // Native NEAR is held but withdrawing this amount would leave less than
-        // the gas reserve needed to wrap + transfer. Return the exact shortfall
-        // so the caller can explain it, instead of failing later on an empty
-        // intents balance with a cryptic error.
-        const shortfall = BigInt(baseUnits) + gasReserve - plainNear;
-        return {
-          deposited: false,
-          reason: `NEAR_GAS_RESERVE_SHORTFALL:${shortfall.toString()}`,
-        };
+        if (res.ok) {
+          await (env as any).CACHE?.delete(`plain_bal:${senderAccountId}`).catch(() => {});
+          return { deposited: true, txHash: res.txHash };
+        }
+        return { deposited: false, reason: res.error || 'ft_transfer_call (wNEAR) failed' };
       }
     }
 

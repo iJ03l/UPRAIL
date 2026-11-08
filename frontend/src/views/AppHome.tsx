@@ -5,6 +5,7 @@ import { Link, useNavigate } from '../lib/router';
 import { PeopleYouPay } from '../components/PeopleYouPay';
 import {
   ArrowDownLeft,
+  ArrowLeftRight,
   ArrowUpRight,
   Fingerprint,
   Eye,
@@ -12,6 +13,7 @@ import {
   Copy,
   Check,
   Shield,
+  Sparkles,
   RefreshCw,
   ArrowRight,
   AlertCircle,
@@ -32,9 +34,10 @@ import {
   formatUsdCompact,
   sumUsd,
 } from '../lib/api';
-import type { PaymentIntent, PaymentRequest } from '../types';
+import type { PaymentIntent, PaymentRequest, Token } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
+import { StabilizeModal } from '../components/StabilizeModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
@@ -71,6 +74,8 @@ export const AppHome: React.FC = () => {
   const [hideBalance, setHideBalance] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState<boolean>(false);
+  const [isStabilizeModalOpen, setIsStabilizeModalOpen] = useState<boolean>(false);
+  const [stabilizeInitialToken, setStabilizeInitialToken] = useState<Token | null>(null);
 
   const handleManualRefresh = async () => {
     if (isRefreshing) return;
@@ -289,16 +294,22 @@ export const AppHome: React.FC = () => {
       const amt = tx.amount_in || tx.amount_out || '0';
 
       const shortId = tx.id ? `${tx.id.slice(0, 6)}...${tx.id.slice(-4)}` : '';
+      const isStabilize = Boolean(tx.receiver_id && tx.receiver_id.startsWith('stabilize:'));
+      const stabilizeParts = isStabilize && tx.receiver_id ? tx.receiver_id.split(':') : [];
+      const stabilizeTarget = stabilizeParts[1] || 'USDC';
+      const stabilizeOutAmt = stabilizeParts[2] || '';
       const explorerUrl =
-        !isWithdrawal && tx.id && !tx.id.startsWith('0x') && tx.id.length > 20
+        !isWithdrawal && !isStabilize && tx.id && !tx.id.startsWith('0x') && tx.id.length > 20
           ? `https://nearblocks.io/txns/${tx.id}`
           : undefined;
 
       list.push({
         id: tx.id,
         type: txType,
-        isSent: !isDeposit,
-        title: isDeposit
+        isSent: !isDeposit && !isStabilize,
+        title: isStabilize
+          ? `Stabilized to ${stabilizeTarget}${stabilizeOutAmt ? ` (+${stabilizeOutAmt})` : ''}`
+          : isDeposit
           ? 'Deposit to Vault'
           : isWithdrawal
           ? `Withdraw to ${tx.receiver_id ? `${tx.receiver_id.slice(0, 6)}...` : 'wallet'}`
@@ -308,7 +319,7 @@ export const AppHome: React.FC = () => {
         symbol,
         status: tx.status,
         timestamp: Number(tx.block_timestamp) || 0,
-        balanceEffect,
+        balanceEffect: isStabilize ? 'none' : balanceEffect,
         copyValue: tx.id,
         copyTitle: 'Copy tx hash',
         explorerUrl,
@@ -440,47 +451,93 @@ export const AppHome: React.FC = () => {
               ) : null}
             </div>
 
-            {/* Live asset breakdown from onchain */}
-            <div className="flex flex-wrap gap-2 pt-2 border-t border-stone-100">
-              {balances.length > 0 ? (
-                balances.map((b) => {
-                  const usd = hideBalance ? null : balanceUsd(b, tokens);
-                  return (
-                    <span
-                      key={b.defuse_asset_id}
-                      className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700"
-                      title={b.defuse_asset_id}
+            {/* Live asset breakdown from onchain + Stabilize button */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-100">
+              <div className="flex flex-wrap items-center gap-2">
+                {balances.length > 0 ? (
+                  balances.map((b) => {
+                    const usd = hideBalance ? null : balanceUsd(b, tokens);
+                    const symUpper = (b.symbol || '').toUpperCase();
+                    const isNonStable = symUpper !== 'USDC' && symUpper !== 'USDT';
+                    return (
+                      <button
+                        key={b.defuse_asset_id}
+                        type="button"
+                        onClick={() => {
+                          const matched = paymentTokens.find(
+                            (t) =>
+                              t.id.toLowerCase() === b.defuse_asset_id.toLowerCase() ||
+                              t.symbol.toUpperCase() === symUpper
+                          );
+                          setStabilizeInitialToken(
+                            matched || {
+                              id: b.defuse_asset_id,
+                              symbol: b.symbol,
+                              name: b.symbol,
+                              iconUrl: b.icon || '',
+                              decimals: b.decimals,
+                              nearContractId: b.nearContractId,
+                              balance: b.amountFormatted,
+                            }
+                          );
+                          setIsStabilizeModalOpen(true);
+                        }}
+                        className={`px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700 transition-all ${
+                          isNonStable
+                            ? 'hover:border-stone-900 hover:bg-stone-100 cursor-pointer'
+                            : 'cursor-default'
+                        }`}
+                        title={
+                          isNonStable
+                            ? `Tap to stabilize ${b.symbol} to USDC or USDT`
+                            : b.defuse_asset_id
+                        }
+                      >
+                        {formatCompactAmount(b.amountFormatted)} {b.symbol}
+                        {usd !== null && usd > 0 ? (
+                          <span className="text-stone-400"> · {formatUsdCompact(usd)}</span>
+                        ) : null}
+                      </button>
+                    );
+                  })
+                ) : isFirstLoad ? (
+                  <div className="flex flex-wrap gap-2 pt-0.5" aria-hidden="true">
+                    <Skeleton variant="chip" className="w-24" />
+                    <Skeleton variant="chip" className="w-20" />
+                    <Skeleton variant="chip" className="w-16" />
+                  </div>
+                ) : balancesError || onchainError ? (
+                  <span className="text-xs font-mono text-red-500 flex items-center space-x-1">
+                    <AlertCircle className="w-3 h-3" />
+                    <span>{balancesError || onchainError}</span>
+                    <button
+                      type="button"
+                      onClick={() => void refreshBalances()}
+                      className="underline underline-offset-2 hover:text-red-700 cursor-pointer"
                     >
-                      {formatCompactAmount(b.amountFormatted)} {b.symbol}
-                      {usd !== null && usd > 0 ? (
-                        <span className="text-stone-400"> · {formatUsdCompact(usd)}</span>
-                      ) : null}
-                    </span>
-                  );
-                })
-              ) : isFirstLoad ? (
-                <div className="flex flex-wrap gap-2 pt-0.5" aria-hidden="true">
-                  <Skeleton variant="chip" className="w-24" />
-                  <Skeleton variant="chip" className="w-20" />
-                  <Skeleton variant="chip" className="w-16" />
-                </div>
-              ) : balancesError || onchainError ? (
-                <span className="text-xs font-mono text-red-500 flex items-center space-x-1">
-                  <AlertCircle className="w-3 h-3" />
-                  <span>{balancesError || onchainError}</span>
-                  <button
-                    type="button"
-                    onClick={() => void refreshBalances()}
-                    className="underline underline-offset-2 hover:text-red-700 cursor-pointer"
-                  >
-                    Retry
-                  </button>
-                </span>
-              ) : (
-                <span className="text-xs font-mono text-stone-400 py-0.5">
-                  {isLoadingBalances ? 'Fetching onchain balances...' : 'No balances yet in your intent account'}
-                </span>
-              )}
+                      Retry
+                    </button>
+                  </span>
+                ) : (
+                  <span className="text-xs font-mono text-stone-400 py-0.5">
+                    {isLoadingBalances ? 'Fetching onchain balances...' : 'No balances yet in your intent account'}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setStabilizeInitialToken(null);
+                  setIsStabilizeModalOpen(true);
+                }}
+                title="Convert any token to USDC or USDT via 1Click Confidential Intents"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-950 hover:bg-black text-white border border-stone-900 text-[11px] font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group ml-auto"
+              >
+                <Sparkles className="w-3 h-3 text-orange-400 group-hover:rotate-12 transition-transform" />
+                <span>Stabilize</span>
+                <ArrowLeftRight className="w-3 h-3 text-stone-400 group-hover:text-white transition-colors" />
+              </button>
             </div>
           </div>
 
@@ -831,6 +888,20 @@ export const AppHome: React.FC = () => {
           void handleManualRefresh();
         }}
       />
+
+      <StabilizeModal
+        isOpen={isStabilizeModalOpen}
+        onClose={() => {
+          setIsStabilizeModalOpen(false);
+          setStabilizeInitialToken(null);
+        }}
+        tokens={paymentTokens}
+        initialToken={stabilizeInitialToken}
+        onSuccess={() => {
+          void handleManualRefresh();
+        }}
+      />
     </div>
   );
 };
+
