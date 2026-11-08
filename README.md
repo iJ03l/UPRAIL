@@ -4,11 +4,27 @@
 
 - **Version:** v1.1.0
 - **Hackathon Tracks:** Privacy & Private AI · Social Money · Agent Economy · Real World Money · Open Innovation
+- **Mainnet Traction (Real People, Real Money):** **72** real users (**57** activated NEAR vaults, **63** hardware passkeys) · **120+** mainnet payment & withdrawal transactions · **$152.65+ USDC** settled volume ($167.50+ initiated) + **1.95M+ NEP-141 launchpad tokens** routed on NEAR Mainnet
 - **Live Application:** [https://app.uprail.world](https://app.uprail.world)
 - **Marketing & Interactive Preview:** [https://uprail.world](https://uprail.world)
 - **Developer Documentation:** [https://docs.uprail.world](https://docs.uprail.world)
 - **Remote MCP Server:** `https://api.uprail.world/api/mcp`
 - **OpenAPI 3.1.0 Spec (AI Agents):** [https://api.uprail.world/api/agent/openapi.json](https://api.uprail.world/api/agent/openapi.json)
+
+---
+
+## Live Mainnet Traction (Real People, Real Money)
+
+UPRAIL is not a testnet prototype — it is live in production on **NEAR Mainnet** with real users onboarding via X + WebAuthn passkeys and moving real money across social handles, AI agents, and external wallets:
+
+| Metric | Live Mainnet Count / Volume | Details |
+| :--- | :--- | :--- |
+| **Registered Users** | **72 X Identities** | Authenticated real X (Twitter) accounts onboarded via OAuth 2.0 PKCE |
+| **Activated NEAR Vaults** | **57 Onchain Vaults** | Deterministic `u_<hex>.escrow.uprail.near` sub-accounts provisioned & registered on `intents.near` |
+| **Hardware Passkeys** | **63 WebAuthn Passkeys** | Hardware P-256 (`ES256`) passkeys bound to user vaults for biometric transaction signing |
+| **Total Onchain Operations** | **120+ Transactions** | **71** social `@handle` payments + **49** cross-chain & `near.com` internal withdrawals (**9** social requests, **7** AI agent keys) |
+| **Real USD Stablecoin Volume** | **$152.65+ USDC Settled** ($167.51+ initiated) | **$83.75 USDC** across settled/active `@handle` payments + **$68.91 USDC** in completed wallet withdrawals |
+| **NEAR Ecosystem & Creator Tokens** | **1,951,388+ Tokens Settled** | **1,475,000 UPTOBER** (`uptober.nearlytrade.near`) · **310,038 6BOWEN** (`meme-cooking.near`) · **103,350 ROBIN** (`nearlytrade.near`) · **63,000 RAEN** (`justhoot.near`) |
 
 ---
 
@@ -308,7 +324,7 @@ flowchart TD
 
 ### Current Status
 - **Live in Production:** Running at [https://app.uprail.world](https://app.uprail.world), [https://api.uprail.world](https://api.uprail.world), [https://docs.uprail.world](https://docs.uprail.world), and [https://uprail.world](https://uprail.world).
-- **Mainnet Onchain Activity:** Active users onboard with X + Passkeys, provision vaults on NEAR mainnet, send and claim payments, withdraw cross-chain via 1Click, and connect AI chat clients over MCP.
+- **Mainnet Onchain Activity (Real People, Real Money):** **72** authenticated X users (**57** activated NEAR mainnet vaults, **63** hardware passkeys) have executed **120+** onchain payment and withdrawal transactions, settling **$152.65+ USDC** ($167.50+ initiated) and **1.95M+ NEP-141 ecosystem tokens** across `@handle` claims, `near.com` internal routes, 1Click cross-chain withdrawals, and MCP AI agents.
 
 ### Known Limitations (Tracked)
 1. **Fail-Closed Confidential Policy:** Prioritizes privacy over convenience. If confidential execution is unavailable or reports a privacy downgrade, transactions fail closed rather than falling back to a public broadcast.
