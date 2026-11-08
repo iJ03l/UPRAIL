@@ -423,10 +423,19 @@ export const AppHome: React.FC = () => {
                     setIsStabilizeModalOpen(true);
                   }}
                   title="Convert held crypto to USDC or USDT"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 text-xs font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group flex-shrink-0"
+                  className="relative overflow-hidden inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700/80 text-xs font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group flex-shrink-0"
                 >
-                  <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-100 group-hover:text-white transition-colors" />
-                  <span>Stabilize</span>
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[6.5px] leading-[7.5px] tracking-[0.12em] text-white/20 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
+                  >
+                    <span>░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░</span>
+                    <span>▒░╬─┼─USDC/USDT─┼─╬░▒▓█╬░</span>
+                    <span>▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓</span>
+                    <span>░▒▓█╬─┼─1CLICK─┼─╬█▓▒░▒▓█</span>
+                  </span>
+                  <ArrowLeftRight className="relative z-10 w-3.5 h-3.5 text-emerald-100 group-hover:text-white transition-colors drop-shadow-xs" />
+                  <span className="relative z-10 drop-shadow-xs">Stabilize</span>
                 </button>
               </div>
               {/* The headline is a priced subtotal whenever any holding is
@@ -471,12 +480,13 @@ export const AppHome: React.FC = () => {
                 balances.map((b) => {
                   const usd = hideBalance ? null : balanceUsd(b, tokens);
                   const symUpper = (b.symbol || '').toUpperCase();
-                  const intentsBalFormatted = b.intentsAmountFormatted ?? b.amountFormatted;
+                  const is1Click =
+                    b.supportsOneClick ?? (symUpper === 'NEAR' || symUpper === 'WNEAR' || !b.isPlainOnly);
                   const canStabilize =
-                    !b.isPlainOnly &&
+                    is1Click &&
                     symUpper !== 'USDC' &&
                     symUpper !== 'USDT' &&
-                    (parseFloat(intentsBalFormatted || '0') || 0) > 0;
+                    (parseFloat(b.amountFormatted || '0') || 0) > 0;
                   return (
                     <button
                       key={b.defuse_asset_id}
@@ -496,7 +506,7 @@ export const AppHome: React.FC = () => {
                           decimals: b.decimals,
                           nearContractId: b.nearContractId || matched?.nearContractId || '',
                           priceUsd: b.priceUsd ?? matched?.priceUsd,
-                          balance: intentsBalFormatted,
+                          balance: b.amountFormatted,
                         });
                         setIsStabilizeModalOpen(true);
                       }}
@@ -683,15 +693,29 @@ export const AppHome: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsWithdrawModalOpen(true)}
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="relative overflow-hidden py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-emerald-700/80 bg-emerald-600 hover:bg-emerald-700 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white/15 text-white flex items-center justify-center group-hover:scale-105 transition-all">
-                <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />
+              <span
+                aria-hidden="true"
+                className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[6.5px] leading-[8px] tracking-[0.12em] text-white/15 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-1 transition-colors"
+              >
+                <span>╔══╬░▒▓█ NEAR.COM █▓▒░╬══╗</span>
+                <span>║░▒▓█╬──┼──VAULT──┼──╬█▓▒║</span>
+                <span>╠══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═╣</span>
+                <span>║▓▒░╬──┼─NEP-518─┼──╬░▒▓█║</span>
+                <span>║░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒║</span>
+                <span>║█▓▒░╬──┼─SHIELD─┼──╬░▒▓█║</span>
+                <span>╠══╬░▒▓█╬═══╬█▓▒░▒▓█╬══╬═╣</span>
+                <span>║▒░╬──┼─0.00 GAS─┼──╬█▓▒░║</span>
+                <span>╚══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═╝</span>
+              </span>
+              <div className="relative z-10 w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white/15 backdrop-blur-[1px] border border-white/20 text-white flex items-center justify-center group-hover:scale-105 transition-all">
+                <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5 drop-shadow-xs" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-white transition-colors">
+              <span className="relative z-10 text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-white transition-colors drop-shadow-xs">
                 Withdraw
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-emerald-100 transition-colors">
+              <span className="relative z-10 text-[9px] sm:text-[10px] font-mono text-emerald-100 transition-colors drop-shadow-xs">
                 near.com
               </span>
             </button>
@@ -887,11 +911,7 @@ export const AppHome: React.FC = () => {
         isOpen={isWithdrawModalOpen}
         onClose={() => setIsWithdrawModalOpen(false)}
         tokens={balances
-          .filter(
-            (b) =>
-              !b.isPlainOnly &&
-              (parseFloat(b.intentsAmountFormatted ?? b.amountFormatted ?? '0') || 0) > 0
-          )
+          .filter((b) => (parseFloat(b.amountFormatted || '0') || 0) > 0)
           .map((b) => {
             const symUpper = (b.symbol || '').toUpperCase();
             const matched = paymentTokens.find(
@@ -900,14 +920,14 @@ export const AppHome: React.FC = () => {
                 t.symbol.toUpperCase() === symUpper
             );
             return {
-              id: b.defuse_asset_id,
+              id: b.nearContractId ? `nep141:${b.nearContractId}` : b.defuse_asset_id,
               symbol: b.symbol,
               name: matched?.name || b.symbol,
               iconUrl: b.icon || matched?.iconUrl || '',
               decimals: b.decimals,
               nearContractId: b.nearContractId || matched?.nearContractId || '',
               priceUsd: b.priceUsd ?? matched?.priceUsd,
-              balance: b.intentsAmountFormatted ?? b.amountFormatted,
+              balance: b.amountFormatted,
             };
           })}
         onSuccess={() => {
@@ -924,8 +944,8 @@ export const AppHome: React.FC = () => {
         tokens={balances
           .filter(
             (b) =>
-              !b.isPlainOnly &&
-              (parseFloat(b.intentsAmountFormatted ?? b.amountFormatted ?? '0') || 0) > 0
+              (b.supportsOneClick ?? (b.symbol?.toUpperCase() === 'NEAR' || !b.isPlainOnly)) &&
+              (parseFloat(b.amountFormatted || '0') || 0) > 0
           )
           .map((b) => {
             const symUpper = (b.symbol || '').toUpperCase();
@@ -942,7 +962,7 @@ export const AppHome: React.FC = () => {
               decimals: b.decimals,
               nearContractId: b.nearContractId || matched?.nearContractId || '',
               priceUsd: b.priceUsd ?? matched?.priceUsd,
-              balance: b.intentsAmountFormatted ?? b.amountFormatted,
+              balance: b.amountFormatted,
             };
           })}
         initialToken={stabilizeInitialToken}

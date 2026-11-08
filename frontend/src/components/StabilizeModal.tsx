@@ -597,21 +597,31 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                         isSubmitting ||
                         isAuthorizing
                       }
-                      className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                      className="relative overflow-hidden w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 border border-emerald-700/80 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm group"
                     >
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[7px] leading-[8.5px] tracking-[0.14em] text-white/15 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
+                      >
+                        <span>╔══╬░▒▓█═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░╬══╗</span>
+                        <span>║░▒▓█╬──┼──1CLICK──┼──INTENTS──┼──USDC/USDT──┼──╬█▓▒░▒▓║</span>
+                        <span>╠══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓═╣</span>
+                        <span>║▓▒░╬──┼──SHIELDED──┼──0.00 GAS──┼──STABILIZE──┼──╬░▒▓█║</span>
+                        <span>╚══╬░▒▓█═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░╬══╝</span>
+                      </span>
                       {isSubmitting || isAuthorizing ? (
-                        <>
+                        <span className="relative z-10 inline-flex items-center gap-2 drop-shadow-xs">
                           <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                           <span>Stabilizing…</span>
-                        </>
+                        </span>
                       ) : (
-                        <>
+                        <span className="relative z-10 inline-flex items-center gap-2 drop-shadow-xs">
                           <Fingerprint className="w-4 h-4" />
                           <span>
                             Stabilize to {targetAsset}
                             {quote ? ` (${quote.amountOut} ${targetAsset})` : ''}
                           </span>
-                        </>
+                        </span>
                       )}
                     </button>
                   </>

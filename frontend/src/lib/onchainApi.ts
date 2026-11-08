@@ -42,6 +42,7 @@ export interface OnchainBalance {
   intentsAmount?: string;
   intentsAmountFormatted?: string;
   isPlainOnly?: boolean;
+  supportsOneClick?: boolean;
   decimals: number;
   nearContractId: string;
   icon?: string;

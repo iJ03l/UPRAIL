@@ -620,9 +620,9 @@ export async function ensureConfidentialFunds(
   const accountId = session.accountId;
   if (!accountId) throw new Error('CONFIDENTIAL_ACCOUNT_UNAVAILABLE');
 
-  const publicHolding = await nearRpc.getIntentAssetBalance(env, asset, accountId);
+  let publicHolding = await nearRpc.getIntentAssetBalance(env, asset, accountId);
   if (publicHolding === null) {
-    throw new Error('PUBLIC_BALANCE_UNAVAILABLE');
+    publicHolding = { balance: 0n, decimals: before.decimals };
   }
 
   if (publicHolding.balance < shortfall) {

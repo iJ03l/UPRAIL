@@ -763,10 +763,20 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                     <button
                       type="submit"
                       disabled={!canReviewWithdraw}
-                      className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                      className="relative overflow-hidden w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 border border-emerald-700/80 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm group"
                     >
-                      <Fingerprint className="w-4 h-4" />
-                      <span>Withdraw to near.com</span>
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[7px] leading-[8.5px] tracking-[0.14em] text-white/15 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
+                      >
+                        <span>╔══╬░▒▓█═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░╬══╗</span>
+                        <span>║░▒▓█╬──┼──NEAR.COM──┼──INTENTS──┼──VAULT──┼──╬█▓▒░▒▓█╬║</span>
+                        <span>╠══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓═╣</span>
+                        <span>║▓▒░╬──┼──SHIELDED──┼──0.00 GAS──┼──WITHDRAW──┼──╬░▒▓█╬║</span>
+                        <span>╚══╬░▒▓█═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░╬══╝</span>
+                      </span>
+                      <Fingerprint className="relative z-10 w-4 h-4 drop-shadow-xs" />
+                      <span className="relative z-10 drop-shadow-xs">Withdraw to near.com</span>
                     </button>
                   </>
                 )}

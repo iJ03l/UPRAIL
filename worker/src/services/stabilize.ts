@@ -375,10 +375,10 @@ export function computeStabilizeSplit(
 }
 
 /**
- * Computes the user's total spendable Intents balance of `origin` across:
+ * Computes the user's total spendable balance of `origin` across:
  * 1. Confidential Intents (`getConfidentialAssetBalance`)
  * 2. Public Intents (`getIntentAssetBalance`)
- * (Excludes plain/native sub-account balances.)
+ * 3. Plain sub-account (`getPlainBalances` — automatically deposited to Confidential Intents via ensureConfidentialFunds)
  */
 export async function getTotalSpendableOriginAtomic(
   env: Env,
@@ -392,19 +392,36 @@ export async function getTotalSpendableOriginAtomic(
   nearAccount: string;
 }> {
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
-  const [confBal, pubBal] = await Promise.all([
+  const [confBal, pubBal, plainBals] = await Promise.all([
     isConfidentialRailEnabled(env)
       ? getConfidentialAssetBalance(env, session.x_id, origin.assetId).catch(() => null)
       : Promise.resolve(null),
     nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null),
+    nearRpc.getPlainBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[]),
   ]);
 
   const confidentialAtomic = confBal?.amountAtomic ?? 0n;
   const publicIntentsAtomic = pubBal?.balance ?? 0n;
-  const plainAtomic = 0n;
+
+  let plainAtomic = 0n;
+  for (const b of plainBals) {
+    const bId = (b.defuse_asset_id || '').toLowerCase();
+    const bContract = (b.nearContractId || '').toLowerCase();
+    const oId = origin.assetId.toLowerCase();
+    const oContract = (origin.nearContractId || '').toLowerCase();
+    if (
+      bId === oId ||
+      (oContract && (bContract === oContract || bId === `nep141:${oContract}`)) ||
+      (oId === 'nep141:wrap.near' && b.symbol.toUpperCase() === 'NEAR')
+    ) {
+      try {
+        plainAtomic += BigInt(b.amount || '0');
+      } catch {}
+    }
+  }
 
   return {
-    totalAtomic: confidentialAtomic + publicIntentsAtomic,
+    totalAtomic: confidentialAtomic + publicIntentsAtomic + plainAtomic,
     confidentialAtomic,
     publicIntentsAtomic,
     plainAtomic,
@@ -606,7 +623,7 @@ export async function executeStabilize(
   if (spendable.totalAtomic <= 0n) {
     throw new StabilizeError(
       'INSUFFICIENT_BALANCE',
-      `You do not have any ${origin.symbol} Intents balance to stabilize.`
+      `You do not have any ${origin.symbol} balance to stabilize.`
     );
   }
 
@@ -630,7 +647,7 @@ export async function executeStabilize(
     const availFormatted = formatAtomic(spendable.totalAtomic.toString(), origin.decimals);
     throw new StabilizeError(
       'INSUFFICIENT_BALANCE',
-      `Insufficient ${origin.symbol} Intents balance: requested ${formatAtomic(
+      `Insufficient ${origin.symbol} balance: requested ${formatAtomic(
         grossAtomic.toString(),
         origin.decimals
       )} ${origin.symbol}, available ${availFormatted} ${origin.symbol}.`

@@ -304,6 +304,27 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
     // otherwise drop out of the dashboard subtotal.
     await nearRpc.attachMissingPrices(c.env, balances);
 
+    // Tag 1Click-supported tokens so UI only enables Stabilize on assets that have
+    // live 1Click routes (native NEAR, wNEAR, USDC, USDT, and any registry token with oneClickSupported).
+    for (const b of balances) {
+      const bId = (b.defuse_asset_id || '').toLowerCase();
+      const bSym = (b.symbol || '').toUpperCase();
+      const bContract = (b.nearContractId || '').toLowerCase();
+      const regTok = tokens.find(
+        (t) =>
+          nearRpc.assetsMatch(t.defuse_asset_id, bId) ||
+          nearRpc.assetsMatch(t.nearContractId, bContract) ||
+          (t.symbol || '').toUpperCase() === bSym
+      );
+      const is1Click =
+        bSym === 'NEAR' ||
+        bSym === 'WNEAR' ||
+        bId === 'nep141:wrap.near' ||
+        bContract === 'wrap.near' ||
+        regTok?.oneClickSupported === true;
+      b.supportsOneClick = Boolean(is1Click);
+    }
+
     return c.json({
       nearAccount,
       balances,
