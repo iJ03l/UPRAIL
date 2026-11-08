@@ -13,7 +13,6 @@ import {
   Copy,
   Check,
   Shield,
-  Sparkles,
   RefreshCw,
   ArrowRight,
   AlertCircle,
@@ -399,22 +398,37 @@ export const AppHome: React.FC = () => {
               </div>
             </div>
 
-            {/* Big Balance Number */}
+            {/* Big Balance Number + Stabilize Button on opposite side */}
             <div className="space-y-1">
-              {isFirstLoad ? (
-                <div className="py-3 space-y-3" aria-hidden="true">
-                  <Skeleton className="h-11 w-56 sm:w-72" />
-                  <Skeleton className="h-3 w-64" />
-                </div>
-              ) : (
-                <div className="text-3xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums break-all">
-                  <RollingNumber
-                    value={hideBalance ? null : totalBalanceUsd}
-                    format={formatUsdCompact}
-                    fallback={hideBalance ? '••••••••' : '—'}
-                  />
-                </div>
-              )}
+              <div className="flex items-center justify-between gap-3">
+                {isFirstLoad ? (
+                  <div className="py-3 space-y-3" aria-hidden="true">
+                    <Skeleton className="h-11 w-56 sm:w-72" />
+                    <Skeleton className="h-3 w-64" />
+                  </div>
+                ) : (
+                  <div className="text-3xl sm:text-5xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums break-all min-w-0">
+                    <RollingNumber
+                      value={hideBalance ? null : totalBalanceUsd}
+                      format={formatUsdCompact}
+                      fallback={hideBalance ? '••••••••' : '—'}
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStabilizeInitialToken(null);
+                    setIsStabilizeModalOpen(true);
+                  }}
+                  title="Convert held crypto to USDC or USDT"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600 text-xs font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group flex-shrink-0"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-100 group-hover:text-white transition-colors" />
+                  <span>Stabilize</span>
+                </button>
+              </div>
               {/* The headline is a priced subtotal whenever any holding is
                   priced — a dash is useless. Say how much is missing so the
                   figure is read as a floor, never as the full portfolio. */}
@@ -451,93 +465,77 @@ export const AppHome: React.FC = () => {
               ) : null}
             </div>
 
-            {/* Live asset breakdown from onchain + Stabilize button */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-100">
-              <div className="flex flex-wrap items-center gap-2">
-                {balances.length > 0 ? (
-                  balances.map((b) => {
-                    const usd = hideBalance ? null : balanceUsd(b, tokens);
-                    const symUpper = (b.symbol || '').toUpperCase();
-                    const isNonStable = symUpper !== 'USDC' && symUpper !== 'USDT';
-                    return (
-                      <button
-                        key={b.defuse_asset_id}
-                        type="button"
-                        onClick={() => {
-                          const matched = paymentTokens.find(
-                            (t) =>
-                              t.id.toLowerCase() === b.defuse_asset_id.toLowerCase() ||
-                              t.symbol.toUpperCase() === symUpper
-                          );
-                          setStabilizeInitialToken(
-                            matched || {
-                              id: b.defuse_asset_id,
-                              symbol: b.symbol,
-                              name: b.symbol,
-                              iconUrl: b.icon || '',
-                              decimals: b.decimals,
-                              nearContractId: b.nearContractId,
-                              balance: b.amountFormatted,
-                            }
-                          );
-                          setIsStabilizeModalOpen(true);
-                        }}
-                        className={`px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700 transition-all ${
-                          isNonStable
-                            ? 'hover:border-stone-900 hover:bg-stone-100 cursor-pointer'
-                            : 'cursor-default'
-                        }`}
-                        title={
-                          isNonStable
-                            ? `Tap to stabilize ${b.symbol} to USDC or USDT`
-                            : b.defuse_asset_id
-                        }
-                      >
-                        {formatCompactAmount(b.amountFormatted)} {b.symbol}
-                        {usd !== null && usd > 0 ? (
-                          <span className="text-stone-400"> · {formatUsdCompact(usd)}</span>
-                        ) : null}
-                      </button>
-                    );
-                  })
-                ) : isFirstLoad ? (
-                  <div className="flex flex-wrap gap-2 pt-0.5" aria-hidden="true">
-                    <Skeleton variant="chip" className="w-24" />
-                    <Skeleton variant="chip" className="w-20" />
-                    <Skeleton variant="chip" className="w-16" />
-                  </div>
-                ) : balancesError || onchainError ? (
-                  <span className="text-xs font-mono text-red-500 flex items-center space-x-1">
-                    <AlertCircle className="w-3 h-3" />
-                    <span>{balancesError || onchainError}</span>
+            {/* Live asset breakdown from onchain */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-100">
+              {balances.length > 0 ? (
+                balances.map((b) => {
+                  const usd = hideBalance ? null : balanceUsd(b, tokens);
+                  const symUpper = (b.symbol || '').toUpperCase();
+                  const isNonStable = symUpper !== 'USDC' && symUpper !== 'USDT';
+                  return (
                     <button
+                      key={b.defuse_asset_id}
                       type="button"
-                      onClick={() => void refreshBalances()}
-                      className="underline underline-offset-2 hover:text-red-700 cursor-pointer"
+                      onClick={() => {
+                        if (!isNonStable) return;
+                        const matched = paymentTokens.find(
+                          (t) =>
+                            t.id.toLowerCase() === b.defuse_asset_id.toLowerCase() ||
+                            t.symbol.toUpperCase() === symUpper
+                        );
+                        setStabilizeInitialToken({
+                          id: b.defuse_asset_id,
+                          symbol: b.symbol,
+                          name: matched?.name || b.symbol,
+                          iconUrl: b.icon || matched?.iconUrl || '',
+                          decimals: b.decimals,
+                          nearContractId: b.nearContractId || matched?.nearContractId || '',
+                          priceUsd: b.priceUsd ?? matched?.priceUsd,
+                          balance: b.amountFormatted,
+                        });
+                        setIsStabilizeModalOpen(true);
+                      }}
+                      className={`px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700 transition-all ${
+                        isNonStable
+                          ? 'hover:border-stone-900 hover:bg-stone-100 cursor-pointer'
+                          : 'cursor-default'
+                      }`}
+                      title={
+                        isNonStable
+                          ? `Tap to stabilize ${b.symbol} to USDC or USDT`
+                          : b.defuse_asset_id
+                      }
                     >
-                      Retry
+                      {formatCompactAmount(b.amountFormatted)} {b.symbol}
+                      {usd !== null && usd > 0 ? (
+                        <span className="text-stone-400"> · {formatUsdCompact(usd)}</span>
+                      ) : null}
                     </button>
-                  </span>
-                ) : (
-                  <span className="text-xs font-mono text-stone-400 py-0.5">
-                    {isLoadingBalances ? 'Fetching onchain balances...' : 'No balances yet in your intent account'}
-                  </span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setStabilizeInitialToken(null);
-                  setIsStabilizeModalOpen(true);
-                }}
-                title="Convert any token to USDC or USDT via 1Click Confidential Intents"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-950 hover:bg-black text-white border border-stone-900 text-[11px] font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group ml-auto"
-              >
-                <Sparkles className="w-3 h-3 text-orange-400 group-hover:rotate-12 transition-transform" />
-                <span>Stabilize</span>
-                <ArrowLeftRight className="w-3 h-3 text-stone-400 group-hover:text-white transition-colors" />
-              </button>
+                  );
+                })
+              ) : isFirstLoad ? (
+                <div className="flex flex-wrap gap-2 pt-0.5" aria-hidden="true">
+                  <Skeleton variant="chip" className="w-24" />
+                  <Skeleton variant="chip" className="w-20" />
+                  <Skeleton variant="chip" className="w-16" />
+                </div>
+              ) : balancesError || onchainError ? (
+                <span className="text-xs font-mono text-red-500 flex items-center space-x-1">
+                  <AlertCircle className="w-3 h-3" />
+                  <span>{balancesError || onchainError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void refreshBalances()}
+                    className="underline underline-offset-2 hover:text-red-700 cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                </span>
+              ) : (
+                <span className="text-xs font-mono text-stone-400 py-0.5">
+                  {isLoadingBalances ? 'Fetching onchain balances...' : 'No balances yet in your intent account'}
+                </span>
+              )}
             </div>
           </div>
 
@@ -680,15 +678,15 @@ export const AppHome: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsWithdrawModalOpen(true)}
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!text-orange-500 flex items-center justify-center group-hover:scale-105 transition-all">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white/15 text-white flex items-center justify-center group-hover:scale-105 transition-all">
                 <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors">
+              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-white transition-colors">
                 Withdraw
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
+              <span className="text-[9px] sm:text-[10px] font-mono text-emerald-100 transition-colors">
                 near.com
               </span>
             </button>
@@ -883,7 +881,26 @@ export const AppHome: React.FC = () => {
       <NearcomWithdrawModal
         isOpen={isWithdrawModalOpen}
         onClose={() => setIsWithdrawModalOpen(false)}
-        tokens={paymentTokens}
+        tokens={balances
+          .filter((b) => (parseFloat(b.amountFormatted || '0') || 0) > 0)
+          .map((b) => {
+            const symUpper = (b.symbol || '').toUpperCase();
+            const matched = paymentTokens.find(
+              (t) =>
+                t.id.toLowerCase() === b.defuse_asset_id.toLowerCase() ||
+                t.symbol.toUpperCase() === symUpper
+            );
+            return {
+              id: b.nearContractId ? `nep141:${b.nearContractId}` : b.defuse_asset_id,
+              symbol: b.symbol,
+              name: matched?.name || b.symbol,
+              iconUrl: b.icon || matched?.iconUrl || '',
+              decimals: b.decimals,
+              nearContractId: b.nearContractId || matched?.nearContractId || '',
+              priceUsd: b.priceUsd ?? matched?.priceUsd,
+              balance: b.amountFormatted,
+            };
+          })}
         onSuccess={() => {
           void handleManualRefresh();
         }}
@@ -895,7 +912,26 @@ export const AppHome: React.FC = () => {
           setIsStabilizeModalOpen(false);
           setStabilizeInitialToken(null);
         }}
-        tokens={paymentTokens}
+        tokens={balances
+          .filter((b) => (parseFloat(b.amountFormatted || '0') || 0) > 0)
+          .map((b) => {
+            const symUpper = (b.symbol || '').toUpperCase();
+            const matched = paymentTokens.find(
+              (t) =>
+                t.id.toLowerCase() === b.defuse_asset_id.toLowerCase() ||
+                t.symbol.toUpperCase() === symUpper
+            );
+            return {
+              id: b.nearContractId ? `nep141:${b.nearContractId}` : b.defuse_asset_id,
+              symbol: b.symbol,
+              name: matched?.name || b.symbol,
+              iconUrl: b.icon || matched?.iconUrl || '',
+              decimals: b.decimals,
+              nearContractId: b.nearContractId || matched?.nearContractId || '',
+              priceUsd: b.priceUsd ?? matched?.priceUsd,
+              balance: b.amountFormatted,
+            };
+          })}
         initialToken={stabilizeInitialToken}
         onSuccess={() => {
           void handleManualRefresh();

@@ -20,3 +20,16 @@ dns.lookup = function(hostname, options, callback) {
     callback(err, address, family);
   });
 };
+
+try {
+  const undici = require('/home/x-5194/UP/worker/node_modules/undici');
+  if (undici && undici.setGlobalDispatcher && undici.Agent) {
+    undici.setGlobalDispatcher(
+      new undici.Agent({
+        headersTimeout: 600000,
+        bodyTimeout: 600000,
+        connectTimeout: 120000,
+      })
+    );
+  }
+} catch {}

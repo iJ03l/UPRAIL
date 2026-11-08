@@ -6483,3 +6483,354 @@ export async function getUserAvailableBalance(
   const netAvailable = onchainAmount + (deltas[targetAsset] || 0);
   return Math.max(0, netAvailable);
 }
+
+export interface RheaStabilizeQuote {
+  dex: 'ref-v2' | 'dcl-v2';
+  receiverId: string;
+  msg: string;
+  amountOutAtomic: bigint;
+  minAmountOutAtomic: bigint;
+}
+
+function canonicalDclPoolId(tokenA: string, tokenB: string, fee: number): string {
+  return tokenA < tokenB ? `${tokenA}|${tokenB}|${fee}` : `${tokenB}|${tokenA}|${fee}`;
+}
+
+/**
+ * Queries Rhea Finance (SmartRouter `v2.ref-finance.near` first, then `dclv2.ref-labs.near`
+ * concentrated liquidity pools as fallback for launchpad tokens) for a swap route from
+ * `contractIn` to `contractOut` (`USDC` or `USDT`) with 5% default slippage tolerance.
+ */
+export async function getRheaStabilizeQuote(
+  env: Env,
+  contractIn: string,
+  contractOut: string,
+  amountInAtomic: bigint,
+  slippageBps = 500
+): Promise<RheaStabilizeQuote> {
+  if (amountInAtomic <= 0n) {
+    throw new Error('Amount must be greater than zero');
+  }
+  const slippageFraction = Math.max(0.001, Math.min(0.5, slippageBps / 10_000));
+
+  // 1. Try Rhea SmartRouter (v2.ref-finance.near classic/stable/rated pools)
+  try {
+    const url = `https://smartrouter.ref.finance/findPath?amountIn=${amountInAtomic.toString()}&tokenIn=${encodeURIComponent(
+      contractIn
+    )}&tokenOut=${encodeURIComponent(contractOut)}&pathDeep=3&slippage=${slippageFraction}`;
+    const resp = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'UPRAIL/1.0' },
+    });
+    if (resp.ok) {
+      const json = (await resp.json().catch(() => null)) as any;
+      const data = json?.result_data;
+      const rawOut = String(data?.amount_out || '0');
+      const routes = Array.isArray(data?.routes) ? data.routes : [];
+      if (/^\d+$/.test(rawOut) && BigInt(rawOut) > 0n && routes.length > 0) {
+        const amountOutAtomic = BigInt(rawOut);
+        const minAmountOutAtomic =
+          (amountOutAtomic * BigInt(10_000 - slippageBps)) / 10_000n;
+        const actions: Array<{
+          pool_id: number;
+          token_in: string;
+          token_out: string;
+          amount_in?: string;
+          min_amount_out: string;
+        }> = [];
+        for (const r of routes) {
+          const pools = Array.isArray(r?.pools) ? r.pools : [];
+          for (const p of pools) {
+            actions.push({
+              pool_id: Number(p.pool_id),
+              token_in: String(p.token_in),
+              token_out: String(p.token_out),
+              ...(p.amount_in && String(p.amount_in) !== '0'
+                ? { amount_in: String(p.amount_in) }
+                : {}),
+              min_amount_out: String(p.min_amount_out || '0'),
+            });
+          }
+        }
+        if (actions.length > 0) {
+          return {
+            dex: 'ref-v2',
+            receiverId: 'v2.ref-finance.near',
+            msg: JSON.stringify({ force: 0, actions }),
+            amountOutAtomic,
+            minAmountOutAtomic: minAmountOutAtomic > 0n ? minAmountOutAtomic : 1n,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[getRheaStabilizeQuote] SmartRouter lookup warning:', err);
+  }
+
+  // 2. Fallback to Ref DCL (`dclv2.ref-labs.near`) for launchpad / DCL-paired tokens
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const candidatePoolChains: string[][] = [];
+
+  if (contractIn === WRAP_NEAR_CONTRACT_ID) {
+    for (const fee of [2000, 400, 100, 10000]) {
+      candidatePoolChains.push([canonicalDclPoolId(WRAP_NEAR_CONTRACT_ID, contractOut, fee)]);
+    }
+  } else {
+    // Check which DCL fee tier has an active pool for contractIn <-> wrap.near
+    const budget: PriceBudget = { spent: 0, max: 10 };
+    for (const fee of DCL_FEE_TIERS) {
+      const firstLegPoolId = canonicalDclPoolId(contractIn, WRAP_NEAR_CONTRACT_ID, fee);
+      const pool = await readDclPool(rpcUrl, firstLegPoolId, budget);
+      if (pool) {
+        const secondLegPoolId = canonicalDclPoolId(WRAP_NEAR_CONTRACT_ID, contractOut, 2000);
+        candidatePoolChains.push([firstLegPoolId, secondLegPoolId]);
+        break;
+      }
+    }
+    // Also check direct contractIn <-> contractOut DCL pool if no wNEAR pool matched
+    if (candidatePoolChains.length === 0) {
+      for (const fee of DCL_FEE_TIERS) {
+        const directPoolId = canonicalDclPoolId(contractIn, contractOut, fee);
+        const pool = await readDclPool(rpcUrl, directPoolId, budget);
+        if (pool) {
+          candidatePoolChains.push([directPoolId]);
+          break;
+        }
+      }
+    }
+  }
+
+  for (const poolIds of candidatePoolChains) {
+    try {
+      const q = (await viewFunction(rpcUrl, DCL_SWAP_CONTRACT_ID, 'quote', {
+        pool_ids: poolIds,
+        input_token: contractIn,
+        output_token: contractOut,
+        input_amount: amountInAtomic.toString(),
+        tag: 'stabilize',
+      })) as { amount?: string } | null;
+      const rawOut = String(q?.amount || '0');
+      if (/^\d+$/.test(rawOut) && BigInt(rawOut) > 0n) {
+        const amountOutAtomic = BigInt(rawOut);
+        const minAmountOutAtomic =
+          (amountOutAtomic * BigInt(10_000 - slippageBps)) / 10_000n;
+        const safeMin = minAmountOutAtomic > 0n ? minAmountOutAtomic : 1n;
+        return {
+          dex: 'dcl-v2',
+          receiverId: DCL_SWAP_CONTRACT_ID,
+          msg: JSON.stringify({
+            Swap: {
+              pool_ids: poolIds,
+              output_token: contractOut,
+              min_output_amount: safeMin.toString(),
+            },
+          }),
+          amountOutAtomic,
+          minAmountOutAtomic: safeMin,
+        };
+      }
+    } catch {}
+  }
+
+  throw new Error(
+    `No Rhea Finance liquidity pool found for ${contractIn} → ${contractOut}`
+  );
+}
+
+/**
+ * Swaps a native NEAR or NEP-141 token held on the user's sub-account via Rhea Finance
+ * (`v2.ref-finance.near` or `dclv2.ref-labs.near`) into `USDC` or `USDT`, takes the 1%
+ * protocol fee to `escrow.uprail.near`, and deposits the resulting stablecoins straight
+ * into the user's Intents balance on `intents.near` (100% gas & storage sponsored).
+ */
+export async function executeRheaStabilizeSwap(
+  env: Env,
+  senderXId: string,
+  contractIn: string,
+  contractOut: string,
+  grossAtomic: bigint,
+  feeAtomic: bigint,
+  netInputAtomic: bigint,
+  slippageBps = 500
+): Promise<{
+  swapTxHash: string;
+  depositTxHash: string;
+  feeTxHash?: string;
+  amountOutAtomic: bigint;
+  minAmountOutAtomic: bigint;
+}> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+  const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+
+  const sender = await deriveUserNearKeypair(env, senderXId);
+  let senderAccountId = sender.accountId;
+  if (env.DB) {
+    try {
+      const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+        .bind(senderXId)
+        .first<{ near_account: string | null }>();
+      if (idRow?.near_account) senderAccountId = idRow.near_account;
+    } catch {}
+  }
+  await createOnchainSubAccount(env, senderAccountId, sender.publicKey, sender.privateKey);
+
+  const sponsor = escrowSigningKey(env, rpcUrl);
+  if ('error' in sponsor) {
+    throw new Error(sponsor.error);
+  }
+
+  const senderKey = {
+    rpcUrl,
+    signerId: senderAccountId,
+    signerPrivKey: sender.privateKey,
+    signerPubKey: sender.publicKey,
+  };
+
+  // 1. If contractIn is wrap.near and plain wNEAR is below grossAtomic, wrap native NEAR shortfall
+  const plainFt = (await getPlainFtBalanceStrict(rpcUrl, contractIn, senderAccountId)) ?? 0n;
+  if (plainFt < grossAtomic) {
+    if (contractIn === WRAP_NEAR_CONTRACT_ID) {
+      const plainNear = (await getPlainNearBalanceStrict(rpcUrl, senderAccountId)) ?? 0n;
+      const wrapNeeded = grossAtomic - plainFt;
+      if (plainFt + plainNear < grossAtomic) {
+        throw new Error('Insufficient plain NEAR balance to execute Rhea swap');
+      }
+      const wrapStorage = await ensureReceiverStorageRegistered(
+        rpcUrl,
+        WRAP_NEAR_CONTRACT_ID,
+        senderAccountId,
+        sponsor
+      );
+      if (!wrapStorage.registered) {
+        throw new Error(wrapStorage.reason || 'Could not register wrap.near storage');
+      }
+      await ensureRegistrationGas(
+        env,
+        senderAccountId,
+        wrapNeeded + 80_000_000_000_000_000_000_000n
+      );
+      const wrapRes = await signAndBroadcastFunctionCall({
+        ...senderKey,
+        receiverId: WRAP_NEAR_CONTRACT_ID,
+        method: 'near_deposit',
+        args: '{}',
+        gas: 15_000_000_000_000n,
+        deposit: wrapNeeded,
+      });
+      if (!wrapRes.ok) {
+        throw new Error(wrapRes.error || 'near_deposit on wrap.near failed');
+      }
+    } else {
+      throw new Error(`Insufficient plain ${contractIn} balance on vault sub-account`);
+    }
+  }
+
+  // 2. Get live Rhea route & quote for netInputAtomic
+  const rheaQuote = await getRheaStabilizeQuote(
+    env,
+    contractIn,
+    contractOut,
+    netInputAtomic,
+    slippageBps
+  );
+
+  // 3. Ensure NEP-145 storage is registered for senderAccountId on contractOut (USDC/USDT)
+  const outStorage = await ensureReceiverStorageRegistered(
+    rpcUrl,
+    contractOut,
+    senderAccountId,
+    sponsor
+  );
+  if (!outStorage.registered) {
+    throw new Error(outStorage.reason || `Could not register storage on ${contractOut}`);
+  }
+
+  // 4. Transfer 1% protocol fee to escrow.uprail.near (gas-sponsored)
+  let feeTxHash: string | undefined;
+  if (feeAtomic > 0n) {
+    const escrowStorage = await ensureReceiverStorageRegistered(
+      rpcUrl,
+      contractIn,
+      escrowId,
+      sponsor
+    );
+    if (escrowStorage.registered) {
+      await ensureRegistrationGas(env, senderAccountId, 30_000_000_000_000_000_000_000n);
+      const feeRes = await signAndBroadcastFunctionCall({
+        ...senderKey,
+        receiverId: contractIn,
+        method: 'ft_transfer',
+        args: JSON.stringify({ receiver_id: escrowId, amount: feeAtomic.toString() }),
+        gas: 15_000_000_000_000n,
+        deposit: 1n,
+      });
+      if (feeRes.ok) feeTxHash = feeRes.txHash;
+    }
+  }
+
+  // 5. Execute Rhea Finance swap (ft_transfer_call to v2.ref-finance.near or dclv2.ref-labs.near)
+  const beforeOut = (await getPlainFtBalanceStrict(rpcUrl, contractOut, senderAccountId)) ?? 0n;
+  await ensureRegistrationGas(env, senderAccountId, 200_000_000_000_000_000_000_000n);
+
+  const swapRes = await signAndBroadcastFunctionCall({
+    ...senderKey,
+    receiverId: contractIn,
+    method: 'ft_transfer_call',
+    args: JSON.stringify({
+      receiver_id: rheaQuote.receiverId,
+      amount: netInputAtomic.toString(),
+      msg: rheaQuote.msg,
+    }),
+    gas: 180_000_000_000_000n,
+    deposit: 1n,
+  });
+  if (!swapRes.ok) {
+    throw new Error(swapRes.error || 'Rhea Finance swap transaction failed');
+  }
+
+  const afterOut = (await getPlainFtBalanceStrict(rpcUrl, contractOut, senderAccountId)) ?? 0n;
+  const swappedOutAtomic =
+    afterOut > beforeOut ? afterOut - beforeOut : rheaQuote.amountOutAtomic;
+  if (swappedOutAtomic <= 0n) {
+    throw new Error('Rhea Finance swap returned 0 stablecoin output');
+  }
+
+  // 6. Deposit the swapped USDC/USDT from senderAccountId straight into intents.near
+  const intentsStorage = await ensureReceiverStorageRegistered(
+    rpcUrl,
+    contractOut,
+    intentsId,
+    sponsor
+  );
+  if (!intentsStorage.registered) {
+    throw new Error(intentsStorage.reason || `intents.near not registered on ${contractOut}`);
+  }
+
+  await ensureRegistrationGas(env, senderAccountId, 60_000_000_000_000_000_000_000n);
+  const depositRes = await signAndBroadcastFunctionCall({
+    ...senderKey,
+    receiverId: contractOut,
+    method: 'ft_transfer_call',
+    args: JSON.stringify({
+      receiver_id: intentsId,
+      amount: swappedOutAtomic.toString(),
+      msg: senderAccountId,
+    }),
+    gas: 50_000_000_000_000n,
+    deposit: 1n,
+  });
+  if (!depositRes.ok) {
+    throw new Error(depositRes.error || 'Failed to deposit swapped stablecoin into Intents');
+  }
+
+  await (env as any).CACHE?.delete(`plain_bal:${senderAccountId}`).catch(() => {});
+
+  return {
+    swapTxHash: swapRes.txHash || '',
+    depositTxHash: depositRes.txHash || '',
+    ...(feeTxHash ? { feeTxHash } : {}),
+    amountOutAtomic: swappedOutAtomic,
+    minAmountOutAtomic: rheaQuote.minAmountOutAtomic,
+  };
+}
+

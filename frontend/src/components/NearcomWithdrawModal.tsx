@@ -154,52 +154,29 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
   const [isSavingAddress, setIsSavingAddress] = useState(false);
   const [addressError, setAddressError] = useState<string | null>(null);
 
-  // Intents-supported tokens only
+  // Strictly show only Intents-supported tokens that the user actually holds
   const intentsTokens = useMemo(() => {
-    const filtered = tokens.filter(isIntentsSupportedToken);
-    return filtered.length > 0 ? filtered : tokens;
-  }, [tokens]);
-
-  // Quick-select pills: held Intents tokens + top primary Intents assets (USDC, NEAR, USDT)
-  const quickTokens = useMemo(() => {
     const out: Token[] = [];
     const seen = new Set<string>();
-
-    // 1. All Intents tokens with positive balance
-    for (const t of intentsTokens) {
+    for (const t of tokens) {
+      if (!isIntentsSupportedToken(t)) continue;
       const bal = parseFloat(t.balance || '0') || 0;
-      const key = t.symbol.toUpperCase();
-      if (bal > 0 && !seen.has(key)) {
-        seen.add(key);
-        out.push(t);
-      }
+      if (bal <= 0) continue;
+      const key = `${t.id.toLowerCase()}|${t.symbol.toUpperCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(t);
     }
+    return out;
+  }, [tokens]);
 
-    // 2. Top standard Intents tokens (USDC, NEAR, USDT) if not already in quick pills
-    for (const sym of ['USDC', 'NEAR', 'USDT']) {
-      if (out.length >= 5) break;
-      if (seen.has(sym)) continue;
-      const match = intentsTokens.find((t) => t.symbol.toUpperCase() === sym);
-      if (match) {
-        seen.add(sym);
-        out.push(match);
-      }
-    }
+  const quickTokens = intentsTokens;
 
-    return out.slice(0, 6);
-  }, [intentsTokens]);
-
-  const [selectedToken, setSelectedToken] = useState<Token>(() => {
+  const [selectedToken, setSelectedToken] = useState<Token | undefined>(() => {
     const usdc = intentsTokens.find(
       (t) => t.symbol.toUpperCase() === 'USDC' && (parseFloat(t.balance || '0') || 0) > 0
     );
-    const anyHeld = intentsTokens.find((t) => (parseFloat(t.balance || '0') || 0) > 0);
-    return (
-      usdc ||
-      anyHeld ||
-      intentsTokens.find((t) => t.symbol.toUpperCase() === 'USDC') ||
-      intentsTokens[0]
-    );
+    return usdc || intentsTokens[0];
   });
 
   const [amount, setAmount] = useState('');
@@ -220,6 +197,8 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
       setSelectedToken(updated);
     } else if (intentsTokens.length > 0) {
       setSelectedToken(intentsTokens[0]);
+    } else {
+      setSelectedToken(undefined);
     }
   }, [intentsTokens]);
 
@@ -578,7 +557,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   <button
                     type="submit"
                     disabled={!parsedInput.valid || isSavingAddress || isAuthorizing}
-                    className="flex-1 py-3 px-4 rounded-2xl bg-stone-950 hover:bg-black text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isSavingAddress || isAuthorizing ? (
                       <>
@@ -655,25 +634,23 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   </div>
                 </div>
 
-                {/* Asset Selection */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
-                      Asset
-                    </span>
-                    <span className="text-[11px] font-mono text-stone-500">
-                      Available: <span className="font-bold text-stone-900">{formatTokenAmount(selectedToken?.balance || '0')} {selectedToken?.symbol}</span>
-                    </span>
+                {quickTokens.length === 0 ? (
+                  <div className="rounded-2xl border border-stone-200 bg-stone-50 p-6 text-center space-y-1.5">
+                    <p className="text-xs font-display font-bold text-stone-800">
+                      No Intents balance available
+                    </p>
+                    <p className="text-[11px] font-mono text-stone-500">
+                      Stabilize native tokens into USDC/USDT first or receive funds into your UPRAIL account.
+                    </p>
                   </div>
-
-                  {/* Quick pills */}
-                  {quickTokens.length > 0 && (
+                ) : (
+                  <>
+                    {/* Held Asset Pills */}
                     <div className="flex flex-wrap gap-1.5">
                       {quickTokens.map((t) => {
                         const isSelected =
                           t.id.toLowerCase() === selectedToken?.id?.toLowerCase() ||
                           t.symbol.toUpperCase() === selectedToken?.symbol?.toUpperCase();
-                        const bal = parseFloat(t.balance || '0') || 0;
                         return (
                           <button
                             key={t.id}
@@ -681,8 +658,9 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                             onClick={() => {
                               setSelectedToken(t);
                               setWithdrawError(null);
+                              setAmount(t.balance || '');
                             }}
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-mono transition-all cursor-pointer ${
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-stone-950 text-white border-stone-950 font-bold shadow-xs'
                                 : 'bg-stone-50 text-stone-800 border-stone-200 hover:border-stone-400'
@@ -690,108 +668,108 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                           >
                             <TokenIcon symbol={t.symbol} iconUrl={t.iconUrl} size="sm" />
                             <span>{t.symbol}</span>
-                            {bal > 0 && (
-                              <span
-                                className={`text-[10px] ${
-                                  isSelected ? 'text-stone-300' : 'text-stone-400'
-                                }`}
-                              >
-                                {formatTokenAmount(t.balance)}
-                              </span>
-                            )}
+                            <span
+                              className={`text-[10px] ${
+                                isSelected ? 'text-stone-300' : 'text-stone-400'
+                              }`}
+                            >
+                              {formatTokenAmount(t.balance)}
+                            </span>
                           </button>
                         );
                       })}
                     </div>
-                  )}
-                </div>
 
-                {/* Amount Input Box with AssetPicker */}
-                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-3 focus-within:border-stone-900 focus-within:ring-1 focus-within:ring-stone-900/10 focus-within:bg-white transition-all shadow-xs">
-                  <div className="flex items-center justify-between gap-3">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      value={amount}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/[^0-9.]/g, '');
-                        if ((v.match(/\./g) || []).length <= 1) {
-                          setAmount(v);
-                          setWithdrawError(null);
-                        }
-                      }}
-                      placeholder="0.00"
-                      className="w-full bg-transparent text-2xl sm:text-3xl font-display font-extrabold text-stone-950 placeholder:text-stone-400 focus:outline-none tabular-nums"
-                    />
-                    {selectedToken && (
-                      <AssetPicker
-                        tokens={intentsTokens}
-                        selectedToken={selectedToken}
-                        onSelectToken={(t) => {
-                          setSelectedToken(t);
-                          setWithdrawError(null);
-                        }}
-                      />
-                    )}
-                  </div>
+                    {/* Amount Input Box */}
+                    <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-2.5 focus-within:border-stone-900 focus-within:ring-1 focus-within:ring-stone-900/10 focus-within:bg-white transition-all shadow-xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={amount}
+                          onChange={(e) => {
+                            let v = e.target.value.replace(/[^0-9.]/g, '');
+                            if (v.startsWith('.')) v = '0' + v;
+                            if ((v.match(/\./g) || []).length <= 1) {
+                              setAmount(v);
+                              setWithdrawError(null);
+                            }
+                          }}
+                          placeholder="0.00"
+                          className="w-full bg-transparent text-2xl sm:text-3xl font-display font-extrabold text-stone-950 placeholder:text-stone-400 focus:outline-none tabular-nums"
+                        />
+                        {selectedToken && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white border border-stone-200 text-xs font-mono font-bold text-stone-900 flex-shrink-0">
+                            <TokenIcon
+                              symbol={selectedToken.symbol}
+                              iconUrl={selectedToken.iconUrl}
+                              size="sm"
+                            />
+                            <span>{selectedToken.symbol}</span>
+                          </div>
+                        )}
+                      </div>
 
-                  <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-stone-200">
-                    <span className="text-xs font-mono text-stone-500">
-                      {amountUsd !== null ? `≈ ${formatUsd(amountUsd)} USD` : '—'}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      {[
-                        { label: '25%', pct: 0.25 },
-                        { label: '50%', pct: 0.5 },
-                        { label: '75%', pct: 0.75 },
-                        { label: 'MAX', pct: 1 },
-                      ].map((btn) => (
-                        <button
-                          key={btn.label}
-                          type="button"
-                          onClick={() => handleSelectPercentage(btn.pct)}
-                          className="px-2 py-1 rounded-lg bg-stone-100 hover:bg-stone-900 hover:text-white border border-stone-200 text-[10px] font-mono font-bold text-stone-700 transition-colors cursor-pointer"
-                        >
-                          {btn.label}
-                        </button>
-                      ))}
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-stone-200/80">
+                        <span className="text-xs font-mono text-stone-500">
+                          {amountUsd !== null ? `≈ ${formatUsd(amountUsd)} USD` : '—'}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {[
+                            { label: '25%', pct: 0.25 },
+                            { label: '50%', pct: 0.5 },
+                            { label: 'MAX', pct: 1 },
+                          ].map((btn) => (
+                            <button
+                              key={btn.label}
+                              type="button"
+                              onClick={() => handleSelectPercentage(btn.pct)}
+                              className="px-2 py-0.5 rounded-lg bg-stone-200/70 hover:bg-stone-900 hover:text-white text-[10px] font-mono font-bold text-stone-700 transition-colors cursor-pointer"
+                            >
+                              {btn.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                {/* Concise Summary */}
-                <div className="rounded-2xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 flex items-center justify-between text-xs font-mono">
-                  <span className="text-stone-500">Fee: <strong className="text-emerald-700 font-bold">$0.00 (Sponsored)</strong></span>
-                  {numericAmount > 0 && (
-                    <span className="text-stone-900 font-bold">
-                      Receive: {amount} {selectedToken?.symbol}
-                    </span>
-                  )}
-                </div>
+                    {/* Concise Summary */}
+                    <div className="rounded-2xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 flex items-center justify-between text-xs font-mono">
+                      <span className="text-stone-500">
+                        Gas: <strong className="text-emerald-700 font-bold">$0.00 Sponsored</strong>
+                      </span>
+                      {numericAmount > 0 && (
+                        <span className="text-stone-900 font-bold">
+                          Receive: {amount} {selectedToken?.symbol}
+                        </span>
+                      )}
+                    </div>
 
-                {/* Error Feedback */}
-                {(exceedsBalance || withdrawError) && (
-                  <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
-                    <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
-                    <span>
-                      {exceedsBalance
-                        ? `Insufficient ${selectedToken?.symbol} balance. Available: ${formatTokenAmount(
-                            selectedToken?.balance || '0'
-                          )} ${selectedToken?.symbol}`
-                        : withdrawError}
-                    </span>
-                  </div>
+                    {/* Error Feedback */}
+                    {(exceedsBalance || withdrawError) && (
+                      <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
+                        <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
+                        <span>
+                          {exceedsBalance
+                            ? `Insufficient ${selectedToken?.symbol} balance. Available: ${formatTokenAmount(
+                                selectedToken?.balance || '0'
+                              )} ${selectedToken?.symbol}`
+                            : withdrawError}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Review Withdrawal CTA (Opens Confirmation Modal) */}
+                    <button
+                      type="submit"
+                      disabled={!canReviewWithdraw}
+                      className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                    >
+                      <Fingerprint className="w-4 h-4" />
+                      <span>Withdraw to near.com</span>
+                    </button>
+                  </>
                 )}
-
-                {/* Review Withdrawal CTA (Opens Confirmation Modal) */}
-                <button
-                  type="submit"
-                  disabled={!canReviewWithdraw}
-                  className="w-full py-3.5 px-4 rounded-2xl bg-stone-950 hover:bg-black text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Fingerprint className="w-4 h-4" />
-                  <span>Review Withdrawal</span>
-                </button>
               </form>
             )}
 
