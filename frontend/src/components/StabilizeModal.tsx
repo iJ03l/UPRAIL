@@ -233,7 +233,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
       setSubmitError('Waiting for live quote calculation.');
       return;
     }
-    setIsConfirmOpen(true);
+    void handleExecuteStabilize();
   };
 
   const handleExecuteStabilize = async () => {
@@ -285,7 +285,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   return (
     <Portal>
       <div
-        className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-xs animate-fade-in"
+        className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-xs animate-fade-in"
         onClick={() => {
           if (!isSubmitting && !isAuthorizing) onClose();
         }}

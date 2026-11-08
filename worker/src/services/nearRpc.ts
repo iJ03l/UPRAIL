@@ -4278,11 +4278,15 @@ async function signAndBroadcastFunctionCall(opts: {
       receiver = '';
     }
     // escrow.uprail.near and the user vaults are plain accounts. A transfer-call
-    // to them fails and refunds. The only allowed receiver is intents.near.
-    if (receiver !== 'intents.near') {
+    // to them fails and refunds. Only intents.near and Rhea/Ref DEX contracts take ft_transfer_call.
+    if (
+      receiver !== 'intents.near' &&
+      receiver !== 'v2.ref-finance.near' &&
+      receiver !== 'dclv2.ref-labs.near'
+    ) {
       return {
         ok: false,
-        error: 'ft_transfer_call receiver must be intents.near. Plain accounts take ft_transfer.',
+        error: 'ft_transfer_call receiver must be intents.near or Rhea Finance DEX.',
       };
     }
   }

@@ -501,6 +501,22 @@ export async function getStabilizeQuote(
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
   const deadline = new Date(Date.now() + QUOTE_TTL_MS).toISOString();
 
+  // Enforce 0.1 NEAR minimum on the native NEAR balance (not on Intents)
+  const MIN_NATIVE_NEAR_ATOMIC = 100_000_000_000_000_000_000_000n; // 0.1 NEAR
+  if (
+    origin.assetId.toLowerCase() === 'nep141:wrap.near' &&
+    grossAtomic < MIN_NATIVE_NEAR_ATOMIC
+  ) {
+    const spendable = await getTotalSpendableOriginAtomic(env, session, origin);
+    const intentsNearAtomic = spendable.confidentialAtomic + spendable.publicIntentsAtomic;
+    if (grossAtomic > intentsNearAtomic) {
+      throw new StabilizeError(
+        'MIN_NATIVE_NEAR',
+        'Minimum amount to stabilize on native NEAR balance is 0.1 NEAR.'
+      );
+    }
+  }
+
   let amountOutAtomic = 0n;
   let minAmountOutAtomic = 0n;
   let amountInUsd: string | null = null;
@@ -720,6 +736,20 @@ export async function executeStabilize(
         grossAtomic.toString(),
         origin.decimals
       )} ${origin.symbol}, available ${availFormatted} ${origin.symbol}.`
+    );
+  }
+
+  // Enforce 0.1 NEAR minimum on the native NEAR balance (not on Intents)
+  const MIN_NATIVE_NEAR_ATOMIC = 100_000_000_000_000_000_000_000n; // 0.1 NEAR
+  const intentsNearAtomic = spendable.confidentialAtomic + spendable.publicIntentsAtomic;
+  if (
+    origin.assetId.toLowerCase() === 'nep141:wrap.near' &&
+    grossAtomic > intentsNearAtomic &&
+    grossAtomic < MIN_NATIVE_NEAR_ATOMIC
+  ) {
+    throw new StabilizeError(
+      'MIN_NATIVE_NEAR',
+      'Minimum amount to stabilize on native NEAR balance is 0.1 NEAR.'
     );
   }
 
