@@ -471,13 +471,18 @@ export const AppHome: React.FC = () => {
                 balances.map((b) => {
                   const usd = hideBalance ? null : balanceUsd(b, tokens);
                   const symUpper = (b.symbol || '').toUpperCase();
-                  const isNonStable = symUpper !== 'USDC' && symUpper !== 'USDT';
+                  const intentsBalFormatted = b.intentsAmountFormatted ?? b.amountFormatted;
+                  const canStabilize =
+                    !b.isPlainOnly &&
+                    symUpper !== 'USDC' &&
+                    symUpper !== 'USDT' &&
+                    (parseFloat(intentsBalFormatted || '0') || 0) > 0;
                   return (
                     <button
                       key={b.defuse_asset_id}
                       type="button"
                       onClick={() => {
-                        if (!isNonStable) return;
+                        if (!canStabilize) return;
                         const matched = paymentTokens.find(
                           (t) =>
                             t.id.toLowerCase() === b.defuse_asset_id.toLowerCase() ||
@@ -491,17 +496,17 @@ export const AppHome: React.FC = () => {
                           decimals: b.decimals,
                           nearContractId: b.nearContractId || matched?.nearContractId || '',
                           priceUsd: b.priceUsd ?? matched?.priceUsd,
-                          balance: b.amountFormatted,
+                          balance: intentsBalFormatted,
                         });
                         setIsStabilizeModalOpen(true);
                       }}
                       className={`px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono font-medium text-stone-700 transition-all ${
-                        isNonStable
+                        canStabilize
                           ? 'hover:border-stone-900 hover:bg-stone-100 cursor-pointer'
                           : 'cursor-default'
                       }`}
                       title={
-                        isNonStable
+                        canStabilize
                           ? `Tap to stabilize ${b.symbol} to USDC or USDT`
                           : b.defuse_asset_id
                       }
@@ -882,7 +887,11 @@ export const AppHome: React.FC = () => {
         isOpen={isWithdrawModalOpen}
         onClose={() => setIsWithdrawModalOpen(false)}
         tokens={balances
-          .filter((b) => (parseFloat(b.amountFormatted || '0') || 0) > 0)
+          .filter(
+            (b) =>
+              !b.isPlainOnly &&
+              (parseFloat(b.intentsAmountFormatted ?? b.amountFormatted ?? '0') || 0) > 0
+          )
           .map((b) => {
             const symUpper = (b.symbol || '').toUpperCase();
             const matched = paymentTokens.find(
@@ -891,14 +900,14 @@ export const AppHome: React.FC = () => {
                 t.symbol.toUpperCase() === symUpper
             );
             return {
-              id: b.nearContractId ? `nep141:${b.nearContractId}` : b.defuse_asset_id,
+              id: b.defuse_asset_id,
               symbol: b.symbol,
               name: matched?.name || b.symbol,
               iconUrl: b.icon || matched?.iconUrl || '',
               decimals: b.decimals,
               nearContractId: b.nearContractId || matched?.nearContractId || '',
               priceUsd: b.priceUsd ?? matched?.priceUsd,
-              balance: b.amountFormatted,
+              balance: b.intentsAmountFormatted ?? b.amountFormatted,
             };
           })}
         onSuccess={() => {
@@ -913,7 +922,11 @@ export const AppHome: React.FC = () => {
           setStabilizeInitialToken(null);
         }}
         tokens={balances
-          .filter((b) => (parseFloat(b.amountFormatted || '0') || 0) > 0)
+          .filter(
+            (b) =>
+              !b.isPlainOnly &&
+              (parseFloat(b.intentsAmountFormatted ?? b.amountFormatted ?? '0') || 0) > 0
+          )
           .map((b) => {
             const symUpper = (b.symbol || '').toUpperCase();
             const matched = paymentTokens.find(
@@ -922,14 +935,14 @@ export const AppHome: React.FC = () => {
                 t.symbol.toUpperCase() === symUpper
             );
             return {
-              id: b.nearContractId ? `nep141:${b.nearContractId}` : b.defuse_asset_id,
+              id: b.defuse_asset_id,
               symbol: b.symbol,
               name: matched?.name || b.symbol,
               iconUrl: b.icon || matched?.iconUrl || '',
               decimals: b.decimals,
               nearContractId: b.nearContractId || matched?.nearContractId || '',
               priceUsd: b.priceUsd ?? matched?.priceUsd,
-              balance: b.amountFormatted,
+              balance: b.intentsAmountFormatted ?? b.amountFormatted,
             };
           })}
         initialToken={stabilizeInitialToken}

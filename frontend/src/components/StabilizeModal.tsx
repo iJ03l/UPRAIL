@@ -155,7 +155,9 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     const timer = setTimeout(async () => {
       try {
         const sourceId =
-          selectedToken.nearContractId
+          selectedToken.id && selectedToken.id.startsWith('nep')
+            ? selectedToken.id
+            : selectedToken.nearContractId
             ? `nep141:${selectedToken.nearContractId}`
             : selectedToken.id || selectedToken.symbol;
         const q = await api.getStabilizeQuote({
@@ -251,7 +253,9 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
         amount.trim() === selectedToken.balance.trim();
 
       const sourceId =
-        selectedToken.nearContractId
+        selectedToken.id && selectedToken.id.startsWith('nep')
+          ? selectedToken.id
+          : selectedToken.nearContractId
           ? `nep141:${selectedToken.nearContractId}`
           : selectedToken.id || selectedToken.symbol;
 

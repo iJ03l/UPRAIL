@@ -117,6 +117,11 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
     let balances: any[] = [];
     try {
       balances = await nearRpc.getIntentBalances(c.env, nearAccount);
+      for (const b of balances) {
+        b.intentsAmount = b.amount;
+        b.intentsAmountFormatted = b.amountFormatted;
+        b.isPlainOnly = false;
+      }
     } catch (rpcErr) {
       console.warn('[onchain/balances] RPC getIntentBalances error:', rpcErr);
     }
@@ -139,7 +144,12 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
             existing.decimals ?? p.decimals
           );
         } else {
-          balances.push(p);
+          balances.push({
+            ...p,
+            intentsAmount: '0',
+            intentsAmountFormatted: '0',
+            isPlainOnly: true,
+          });
         }
       }
     } catch (plainErr) {
@@ -198,17 +208,28 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
               existing.amount,
               existing.decimals ?? decimals
             );
+            const currentIntents = BigInt(existing.intentsAmount ?? '0');
+            existing.intentsAmount = (currentIntents + add).toString();
+            existing.intentsAmountFormatted = nearRpc.formatAmount(
+              existing.intentsAmount,
+              existing.decimals ?? decimals
+            );
+            existing.isPlainOnly = false;
           } else {
             const baseUnits = nearRpc.toBaseUnits(
               amount.toFixed(Math.min(decimals, 18)),
               decimals
             );
+            const fmt = nearRpc.formatAmount(baseUnits, decimals);
             const price = nearRpc.tokenUsdPrice(token?.symbol || cb.symbol, token?.priceUsd);
             balances.push({
               defuse_asset_id: cb.assetId,
               symbol: cb.symbol,
               amount: baseUnits,
-              amountFormatted: nearRpc.formatAmount(baseUnits, decimals),
+              amountFormatted: fmt,
+              intentsAmount: baseUnits,
+              intentsAmountFormatted: fmt,
+              isPlainOnly: false,
               decimals,
               nearContractId: token?.nearContractId || '',
               ...(token?.icon ? { icon: token.icon } : {}),

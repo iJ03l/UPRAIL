@@ -232,7 +232,7 @@ export async function resolveOriginToken(
   const lower = input.toLowerCase();
   const tokens = oneClickTokens || (await getOneClickTokens(env).catch(() => [] as OneClickToken[]));
 
-  // Canonicalize native NEAR / wNEAR
+  // Canonicalize NEAR / wNEAR in Intents
   if (
     lower === 'near' ||
     lower === 'wnear' ||
@@ -271,29 +271,9 @@ export async function resolveOriginToken(
     };
   }
 
-  // 2. Match via UPRAIL's supported token registry or Rhea Finance NEP-141 token registry
+  // 2. Match via UPRAIL's supported Intents token registry
   const registryTokens = await nearRpc.getSupportedTokens(env).catch(() => [] as nearRpc.OnchainToken[]);
-  let regMatch = nearRpc.resolveTokenForAsset(input, registryTokens);
-  if (!regMatch) {
-    regMatch = await nearRpc.resolveRheaToken(env, input).catch(() => null);
-  }
-  if (!regMatch) {
-    const cleanedContract = lower.startsWith('nep141:') ? lower.slice(7) : lower;
-    if (cleanedContract.includes('.')) {
-      const meta = await nearRpc.getFtContractMetadata(env, cleanedContract).catch(() => null);
-      if (meta && meta.symbol) {
-        regMatch = {
-          defuse_asset_id: `nep141:${meta.contractId}`,
-          symbol: meta.symbol,
-          name: meta.name || meta.symbol,
-          decimals: meta.decimals,
-          icon: '',
-          nearContractId: meta.contractId,
-          chain: 'near',
-        };
-      }
-    }
-  }
+  const regMatch = nearRpc.resolveTokenForAsset(input, registryTokens);
   if (regMatch) {
     const regAssetId = (
       regMatch.defuse_asset_id || `nep141:${regMatch.nearContractId}`
@@ -301,8 +281,8 @@ export async function resolveOriginToken(
     const liveMatch = tokens.find(
       (t) =>
         t.assetId.toLowerCase() === regAssetId ||
-        (regMatch!.nearContractId &&
-          t.assetId.toLowerCase() === `nep141:${regMatch!.nearContractId.toLowerCase()}`)
+        (regMatch.nearContractId &&
+          t.assetId.toLowerCase() === `nep141:${regMatch.nearContractId.toLowerCase()}`)
     );
     if (liveMatch) {
       const isNearWrap = liveMatch.assetId.toLowerCase() === 'nep141:wrap.near';
@@ -315,19 +295,6 @@ export async function resolveOriginToken(
         priceUsd:
           typeof liveMatch.price === 'number' ? liveMatch.price : regMatch.priceUsd,
         supportsOneClick: true,
-      };
-    }
-
-    // Native NEAR NEP-141 token routed via Rhea Finance
-    if (regMatch.nearContractId) {
-      return {
-        assetId: regMatch.defuse_asset_id || `nep141:${regMatch.nearContractId}`,
-        symbol: regMatch.symbol.toUpperCase(),
-        decimals: regMatch.decimals,
-        blockchain: 'near',
-        nearContractId: regMatch.nearContractId,
-        priceUsd: regMatch.priceUsd,
-        supportsOneClick: false,
       };
     }
   }
@@ -357,7 +324,7 @@ export async function resolveOriginToken(
 
   throw new StabilizeError(
     'UNSUPPORTED_TOKEN',
-    `No liquidity route found to stabilize "${input}" into USDC/USDT.`
+    `No 1Click Intents route found to stabilize "${input}" into USDC/USDT.`
   );
 }
 
@@ -408,10 +375,10 @@ export function computeStabilizeSplit(
 }
 
 /**
- * Computes the user's total spendable balance of `origin` across:
+ * Computes the user's total spendable Intents balance of `origin` across:
  * 1. Confidential Intents (`getConfidentialAssetBalance`)
  * 2. Public Intents (`getIntentAssetBalance`)
- * 3. Plain Vault sub-account (`getPlainBalances`)
+ * (Excludes plain/native sub-account balances.)
  */
 export async function getTotalSpendableOriginAtomic(
   env: Env,
@@ -425,36 +392,19 @@ export async function getTotalSpendableOriginAtomic(
   nearAccount: string;
 }> {
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
-  const [confBal, pubBal, plainBals] = await Promise.all([
+  const [confBal, pubBal] = await Promise.all([
     isConfidentialRailEnabled(env)
       ? getConfidentialAssetBalance(env, session.x_id, origin.assetId).catch(() => null)
       : Promise.resolve(null),
     nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null),
-    nearRpc.getPlainBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[]),
   ]);
 
   const confidentialAtomic = confBal?.amountAtomic ?? 0n;
   const publicIntentsAtomic = pubBal?.balance ?? 0n;
-
-  let plainAtomic = 0n;
-  for (const b of plainBals) {
-    const bId = (b.defuse_asset_id || '').toLowerCase();
-    const bContract = (b.nearContractId || '').toLowerCase();
-    const oId = origin.assetId.toLowerCase();
-    const oContract = (origin.nearContractId || '').toLowerCase();
-    if (
-      bId === oId ||
-      (oContract && (bContract === oContract || bId === `nep141:${oContract}`)) ||
-      (oId === 'nep141:wrap.near' && b.symbol.toUpperCase() === 'NEAR')
-    ) {
-      try {
-        plainAtomic += BigInt(b.amount || '0');
-      } catch {}
-    }
-  }
+  const plainAtomic = 0n;
 
   return {
-    totalAtomic: confidentialAtomic + publicIntentsAtomic + plainAtomic,
+    totalAtomic: confidentialAtomic + publicIntentsAtomic,
     confidentialAtomic,
     publicIntentsAtomic,
     plainAtomic,
@@ -463,10 +413,9 @@ export async function getTotalSpendableOriginAtomic(
 }
 
 /**
- * Returns an accurate live quote (via Rhea Finance for native NEAR / NEP-141 tokens
- * or 1Click for Intents assets) for stabilizing `amount` of `sourceAsset` into
- * `targetAsset` (`USDC` or `USDT`), including the exact 1% protocol fee split and
- * 5% default slippage tolerance.
+ * Returns an accurate live 1Click quote for stabilizing `amount` of `sourceAsset`
+ * held in Intents into `targetAsset` (`USDC` or `USDT`), including the exact 1%
+ * protocol fee split and 5% default slippage tolerance.
  */
 export async function getStabilizeQuote(
   env: Env,
@@ -501,100 +450,53 @@ export async function getStabilizeQuote(
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
   const deadline = new Date(Date.now() + QUOTE_TTL_MS).toISOString();
 
-  // Enforce 0.1 NEAR minimum on the native NEAR balance (not on Intents)
-  const MIN_NATIVE_NEAR_ATOMIC = 100_000_000_000_000_000_000_000n; // 0.1 NEAR
-  if (
-    origin.assetId.toLowerCase() === 'nep141:wrap.near' &&
-    grossAtomic < MIN_NATIVE_NEAR_ATOMIC
-  ) {
-    const spendable = await getTotalSpendableOriginAtomic(env, session, origin);
-    const intentsNearAtomic = spendable.confidentialAtomic + spendable.publicIntentsAtomic;
-    if (grossAtomic > intentsNearAtomic) {
-      throw new StabilizeError(
-        'MIN_NATIVE_NEAR',
-        'Minimum amount to stabilize on native NEAR balance is 0.1 NEAR.'
-      );
-    }
-  }
-
   let amountOutAtomic = 0n;
   let minAmountOutAtomic = 0n;
   let amountInUsd: string | null = null;
   let amountOutUsd: string | null = null;
-  let timeEstimateSeconds = 6;
-
-  // 1. If token is supported by 1Click, try 1Click quote first; if 1Click fails or token is
-  //    a native NEAR NEP-141, fall back to Rhea Finance (`getRheaStabilizeQuote`).
+  let timeEstimateSeconds = 10;
   let oneClickError: string | null = null;
-  if (origin.supportsOneClick !== false) {
-    try {
-      const headers: Record<string, string> = {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'UPRAIL/1.0',
-      };
-      const partnerKey = (env.ONE_CLICK_API_KEY || env.ONE_CLICK_JWT || '').trim();
-      if (partnerKey) headers['X-API-Key'] = partnerKey;
 
-      const resp = await fetch(`${oneClickApiBase(env)}/v0/quote`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          dry: true,
-          swapType: 'EXACT_INPUT',
-          originAsset: origin.assetId,
-          destinationAsset: destination.assetId,
-          amount: split.netInputAtomic.toString(),
-          recipient: nearAccount,
-          recipientType: 'INTENTS',
-          refundTo: nearAccount,
-          refundType: 'INTENTS',
-          depositType: 'INTENTS',
-          slippageTolerance: SLIPPAGE_BPS,
-          deadline,
-        }),
-      });
-      const raw = (await resp.json().catch(() => null)) as any;
-      if (!resp.ok || !raw?.quote) {
-        const errMsg = raw?.message || raw?.error || `HTTP ${resp.status}`;
-        throw new Error(String(errMsg));
-      }
-      const q = raw.quote;
-      amountOutAtomic = BigInt(q.amountOut || '0');
-      minAmountOutAtomic = BigInt(q.minAmountOut || q.amountOut || '0');
-      amountInUsd = q.amountInUsd || null;
-      amountOutUsd = q.amountOutUsd || null;
-      timeEstimateSeconds = Number(q.timeEstimate) || 10;
-    } catch (err: any) {
-      oneClickError = err?.message || String(err);
-    }
-  }
+  try {
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'UPRAIL/1.0',
+    };
+    const partnerKey = (env.ONE_CLICK_API_KEY || env.ONE_CLICK_JWT || '').trim();
+    if (partnerKey) headers['X-API-Key'] = partnerKey;
 
-  // 2. Fallback or primary route via Rhea Finance for native NEAR NEP-141 tokens
-  if (amountOutAtomic <= 0n && origin.nearContractId && destination.nearContractId) {
-    try {
-      const rheaQuote = await nearRpc.getRheaStabilizeQuote(
-        env,
-        origin.nearContractId,
-        destination.nearContractId,
-        split.netInputAtomic,
-        SLIPPAGE_BPS
-      );
-      amountOutAtomic = rheaQuote.amountOutAtomic;
-      minAmountOutAtomic = rheaQuote.minAmountOutAtomic;
-      const outFormatted = formatAtomic(amountOutAtomic.toString(), destination.decimals);
-      amountOutUsd = (Number(outFormatted) * (destination.priceUsd ?? 1)).toFixed(2);
-      if (typeof origin.priceUsd === 'number' && origin.priceUsd > 0) {
-        amountInUsd = (Number(split.netInputFormatted) * origin.priceUsd).toFixed(2);
-      } else {
-        amountInUsd = amountOutUsd;
-      }
-      timeEstimateSeconds = 5;
-    } catch (rheaErr: any) {
-      if (!oneClickError) {
-        oneClickError = rheaErr?.message || String(rheaErr);
-      }
+    const resp = await fetch(`${oneClickApiBase(env)}/v0/quote`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        dry: true,
+        swapType: 'EXACT_INPUT',
+        originAsset: origin.assetId,
+        destinationAsset: destination.assetId,
+        amount: split.netInputAtomic.toString(),
+        recipient: nearAccount,
+        recipientType: 'INTENTS',
+        refundTo: nearAccount,
+        refundType: 'INTENTS',
+        depositType: 'INTENTS',
+        slippageTolerance: SLIPPAGE_BPS,
+        deadline,
+      }),
+    });
+    const raw = (await resp.json().catch(() => null)) as any;
+    if (!resp.ok || !raw?.quote) {
+      const errMsg = raw?.message || raw?.error || `HTTP ${resp.status}`;
+      throw new Error(String(errMsg));
     }
+    const q = raw.quote;
+    amountOutAtomic = BigInt(q.amountOut || '0');
+    minAmountOutAtomic = BigInt(q.minAmountOut || q.amountOut || '0');
+    amountInUsd = q.amountInUsd || null;
+    amountOutUsd = q.amountOutUsd || null;
+    timeEstimateSeconds = Number(q.timeEstimate) || 10;
+  } catch (err: any) {
+    oneClickError = err?.message || String(err);
   }
 
   if (amountOutAtomic <= 0n) {
@@ -602,12 +504,12 @@ export async function getStabilizeQuote(
     if (/too low|minimum|insufficient|small/i.test(msg)) {
       throw new StabilizeError(
         'AMOUNT_TOO_LOW_FOR_ROUTE',
-        `Amount is below the minimum route size for ${origin.symbol} → ${destination.symbol}.`
+        `Amount is below the minimum 1Click route size for ${origin.symbol} → ${destination.symbol}.`
       );
     }
     throw new StabilizeError(
       'QUOTE_FAILED',
-      `Could not calculate route for ${origin.symbol} → ${destination.symbol}: ${msg}`,
+      `Could not calculate 1Click route for ${origin.symbol} → ${destination.symbol}: ${msg}`,
       502
     );
   }
@@ -672,13 +574,9 @@ export async function getStabilizeQuote(
 }
 
 /**
- * Executes a gas-sponsored stabilization swap into `USDC` or `USDT`:
- * - For native NEAR & NEP-141 tokens held on the user's sub-account (or native tokens
- *   routed via Rhea Finance): swaps via Rhea Finance (`v2.ref-finance.near` or
- *   `dclv2.ref-labs.near`), deposits the output `USDC`/`USDT` into the user's Intents
- *   balance (`intents.near`), and shields it into Confidential Intents.
- * - For Intents balances supported by 1Click: executes a confidential 1Click swap
- *   (`CONFIDENTIAL_INTENTS` -> `CONFIDENTIAL_INTENTS`) with 5% default slippage.
+ * Executes a confidential, gas-sponsored 1Click stabilization swap from the
+ * user's Intents balance into `USDC` or `USDT` (`CONFIDENTIAL_INTENTS` -> `CONFIDENTIAL_INTENTS`)
+ * with 5% default slippage.
  */
 export async function executeStabilize(
   env: Env,
@@ -708,7 +606,7 @@ export async function executeStabilize(
   if (spendable.totalAtomic <= 0n) {
     throw new StabilizeError(
       'INSUFFICIENT_BALANCE',
-      `You do not have any ${origin.symbol} balance to stabilize.`
+      `You do not have any ${origin.symbol} Intents balance to stabilize.`
     );
   }
 
@@ -732,154 +630,16 @@ export async function executeStabilize(
     const availFormatted = formatAtomic(spendable.totalAtomic.toString(), origin.decimals);
     throw new StabilizeError(
       'INSUFFICIENT_BALANCE',
-      `Insufficient ${origin.symbol} balance: requested ${formatAtomic(
+      `Insufficient ${origin.symbol} Intents balance: requested ${formatAtomic(
         grossAtomic.toString(),
         origin.decimals
       )} ${origin.symbol}, available ${availFormatted} ${origin.symbol}.`
     );
   }
 
-  // Enforce 0.1 NEAR minimum on the native NEAR balance (not on Intents)
-  const MIN_NATIVE_NEAR_ATOMIC = 100_000_000_000_000_000_000_000n; // 0.1 NEAR
-  const intentsNearAtomic = spendable.confidentialAtomic + spendable.publicIntentsAtomic;
-  if (
-    origin.assetId.toLowerCase() === 'nep141:wrap.near' &&
-    grossAtomic > intentsNearAtomic &&
-    grossAtomic < MIN_NATIVE_NEAR_ATOMIC
-  ) {
-    throw new StabilizeError(
-      'MIN_NATIVE_NEAR',
-      'Minimum amount to stabilize on native NEAR balance is 0.1 NEAR.'
-    );
-  }
-
   const split = computeStabilizeSplit(grossAtomic, origin.decimals, env.FEE_PERCENT);
 
-  // Branch A: Native NEAR / NEP-141 token held on the user's sub-account -> Swap on Rhea Finance
-  // and deposit the resulting USDC/USDT directly into the user's Intents balance!
-  const shouldUseRhea =
-    Boolean(origin.nearContractId && destination.nearContractId) &&
-    (origin.supportsOneClick === false || spendable.plainAtomic >= grossAtomic);
-
-  if (shouldUseRhea && origin.nearContractId && destination.nearContractId) {
-    let rheaResult;
-    try {
-      rheaResult = await nearRpc.executeRheaStabilizeSwap(
-        env,
-        session.x_id,
-        origin.nearContractId,
-        destination.nearContractId,
-        split.grossAtomic,
-        split.feeAtomic,
-        split.netInputAtomic,
-        SLIPPAGE_BPS
-      );
-    } catch (err: any) {
-      throw new StabilizeError(
-        'RHEA_SWAP_FAILED',
-        `Rhea Finance stabilization swap failed for ${origin.symbol} → ${destination.symbol}: ${
-          err?.message || String(err)
-        }`,
-        502
-      );
-    }
-
-    // Shield the newly deposited USDC/USDT into the user's Confidential Intents balance
-    let shieldedAtomic = 0n;
-    try {
-      const ensured = await ensureConfidentialFunds(
-        env,
-        session.x_id,
-        destination.assetId,
-        rheaResult.amountOutAtomic
-      );
-      shieldedAtomic = ensured.shieldedAtomic;
-    } catch (shieldErr) {
-      console.warn('[stabilize] non-fatal post-Rhea shield warning:', shieldErr);
-    }
-
-    const amountOutFormatted = formatAtomic(
-      rheaResult.amountOutAtomic.toString(),
-      destination.decimals
-    );
-    const minAmountOutFormatted = formatAtomic(
-      rheaResult.minAmountOutAtomic.toString(),
-      destination.decimals
-    );
-    const netInNum = Number(split.netInputFormatted);
-    const outNum = Number(amountOutFormatted);
-    const rateNum = netInNum > 0 && outNum > 0 ? outNum / netInNum : 0;
-    const exchangeRate =
-      rateNum >= 1
-        ? rateNum.toFixed(4).replace(/\.?0+$/, '')
-        : rateNum > 0
-        ? rateNum.toPrecision(4)
-        : '0';
-
-    const recordId = `stab_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-    if (env.DB) {
-      try {
-        await env.DB.prepare(
-          `INSERT INTO withdrawals (
-            id, x_id, asset, amount, destination_address, destination_chain,
-            status, tx_hash, deposit_address, privacy_rail, settlement_status,
-            created_at, updated_at, confirmed_at
-          ) VALUES (?, ?, ?, ?, ?, 'near', 'COMPLETED', ?, ?, 'confidential', 'SUCCESS', ?, ?, ?)`
-        )
-          .bind(
-            recordId,
-            session.x_id,
-            origin.assetId,
-            split.grossAmountFormatted,
-            `stabilize:${destination.symbol}:${amountOutFormatted}`,
-            rheaResult.depositTxHash || rheaResult.swapTxHash,
-            rheaResult.swapTxHash,
-            Date.now(),
-            Date.now(),
-            Date.now()
-          )
-          .run();
-      } catch (dbErr) {
-        console.warn('[stabilize] non-fatal ledger insert warning:', dbErr);
-      }
-    }
-
-    return {
-      id: recordId,
-      status: 'SUCCESS',
-      depositAddress: rheaResult.swapTxHash,
-      intentHash: rheaResult.depositTxHash || rheaResult.swapTxHash,
-      ...(rheaResult.feeTxHash ? { feeIntentHash: rheaResult.feeTxHash } : {}),
-      shieldedAtomic: shieldedAtomic.toString(),
-      sourceAsset: origin.assetId,
-      sourceSymbol: origin.symbol,
-      sourceDecimals: origin.decimals,
-      targetAsset: destination.assetId,
-      targetSymbol: destination.symbol as StabilizeTargetSymbol,
-      targetDecimals: destination.decimals,
-      grossAmount: split.grossAmountFormatted,
-      grossAmountAtomic: split.grossAtomic.toString(),
-      protocolFee: split.feeAmountFormatted,
-      protocolFeeAtomic: split.feeAtomic.toString(),
-      feePercent: split.feePercent,
-      netAmountIn: split.netInputFormatted,
-      netAmountInAtomic: split.netInputAtomic.toString(),
-      amountOut: amountOutFormatted,
-      amountOutAtomic: rheaResult.amountOutAtomic.toString(),
-      minAmountOut: minAmountOutFormatted,
-      minAmountOutAtomic: rheaResult.minAmountOutAtomic.toString(),
-      amountInUsd: amountOutFormatted,
-      amountOutUsd: amountOutFormatted,
-      protocolFeeUsd: null,
-      exchangeRate,
-      slippageBps: SLIPPAGE_BPS,
-      timeEstimateSeconds: 5,
-      confidential: true,
-      gasSponsored: true,
-    };
-  }
-
-  // Branch B: Confidential 1Click Swap (CONFIDENTIAL_INTENTS -> CONFIDENTIAL_INTENTS)
+  // Confidential 1Click Swap (CONFIDENTIAL_INTENTS -> CONFIDENTIAL_INTENTS)
   let shieldedAtomic = 0n;
   try {
     const ensured = await ensureConfidentialFunds(
