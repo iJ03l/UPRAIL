@@ -20,6 +20,8 @@ import {
   generateSwapIntent,
   requestQuote,
   submitSwapIntent,
+  getExecutionStatus,
+  isTerminalStatus,
 } from './oneclickClient';
 import { getUserSession, signGeneratedIntent } from './oneclickAuth';
 import {
@@ -734,9 +736,10 @@ export async function executeStabilize(
     );
   }
 
+  // Quick initial check (2.5s) so instant fills return immediately without blocking HTTP connection
   const settlement = await waitForSettlement(env, session.x_id, depositAddress, {
-    timeoutMs: 30_000,
-    intervalMs: 1_500,
+    timeoutMs: 2_500,
+    intervalMs: 800,
   }).catch(() => ({ status: 'PENDING', terminal: false, intentHash }));
 
   const settlementStatus = String(settlement.status || 'PENDING').toUpperCase();
@@ -862,5 +865,73 @@ export async function executeStabilize(
     timeEstimateSeconds: Number(q.timeEstimate) || 10,
     confidential: true,
     gasSponsored: true,
+  };
+}
+
+/**
+ * Polls the execution status of a submitted 1Click confidential stabilization swap
+ * and synchronizes internal ledger and cache state upon completion.
+ */
+export async function getStabilizeExecutionStatus(
+  env: Env,
+  session: Session,
+  depositAddress: string
+): Promise<{
+  status: string;
+  terminal: boolean;
+  intentHash?: string;
+  depositAddress: string;
+  swapDetails?: Record<string, unknown>;
+}> {
+  const userSession = await getUserSession(env, session.x_id);
+  const status = await getExecutionStatus(
+    env,
+    depositAddress,
+    undefined,
+    userSession.accessToken
+  );
+  const upper = (status.status || 'UNKNOWN').toUpperCase();
+  const terminal = isTerminalStatus(upper);
+
+  if (upper === 'SUCCESS') {
+    if (env.DB) {
+      try {
+        await env.DB.prepare(
+          `UPDATE withdrawals
+             SET status = 'COMPLETED', settlement_status = 'SUCCESS', confirmed_at = COALESCE(confirmed_at, ?), updated_at = ?
+           WHERE deposit_address = ? AND status != 'COMPLETED'`
+        )
+          .bind(Date.now(), Date.now(), depositAddress)
+          .run();
+      } catch (dbErr) {
+        console.warn('[stabilize] D1 completion update warning:', dbErr);
+      }
+    }
+    const nearAccount = await nearRpc.resolveUserNearAccount(env, session).catch(() => null);
+    if (nearAccount) {
+      await (env as any).CACHE?.delete(`plain_bal:${nearAccount}`).catch(() => {});
+    }
+  } else if (upper === 'FAILED' || upper === 'REFUNDED') {
+    if (env.DB) {
+      try {
+        await env.DB.prepare(
+          `UPDATE withdrawals
+             SET status = 'FAILED', settlement_status = ?, updated_at = ?
+           WHERE deposit_address = ? AND status != 'COMPLETED'`
+        )
+          .bind(upper, Date.now(), depositAddress)
+          .run();
+      } catch (dbErr) {
+        console.warn('[stabilize] D1 failure update warning:', dbErr);
+      }
+    }
+  }
+
+  return {
+    status: upper,
+    terminal,
+    intentHash: status.intentHash,
+    depositAddress,
+    ...(status.swapDetails ? { swapDetails: status.swapDetails } : {}),
   };
 }

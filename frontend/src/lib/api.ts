@@ -1916,6 +1916,27 @@ export const api = {
     }
     return data.result;
   },
+
+  async getStabilizeStatus(depositAddress: string): Promise<{
+    status: string;
+    terminal: boolean;
+    intentHash?: string;
+    depositAddress: string;
+    swapDetails?: Record<string, unknown>;
+  }> {
+    const base = API_BASE
+      ? `${API_BASE}/api/onchain/stabilize/status`
+      : '/api/onchain/stabilize/status';
+    const res = await fetch(`${base}?depositAddress=${encodeURIComponent(depositAddress)}`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch stabilization status');
+    }
+    return data;
+  },
 };
 
 /**

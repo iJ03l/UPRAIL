@@ -558,12 +558,26 @@ function releaseRpcSlot(): void {
 async function fetchRpc(targetUrl: string, body: string): Promise<Response> {
   await acquireRpcSlot();
   try {
-    return await fetch(targetUrl, {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'UPRAIL-Worker/1.0',
+    };
+    let cleanUrl = targetUrl;
+    try {
+      const u = new URL(targetUrl);
+      if (u.username || u.password) {
+        const token = u.password || u.username;
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-api-key'] = token;
+        u.username = '';
+        u.password = '';
+        cleanUrl = u.toString();
+      }
+    } catch {}
+
+    return await fetch(cleanUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'UPRAIL-Worker/1.0',
-      },
+      headers,
       body,
       signal: AbortSignal.timeout(12_000),
     });

@@ -93,9 +93,21 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [progressStep, setProgressStep] = useState<
+    'idle' | 'authorizing' | 'submitting' | 'settling' | 'success'
+  >('idle');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [result, setResult] = useState<StabilizeResult | null>(null);
   const [copiedHash, setCopiedHash] = useState(false);
+
+  useEffect(() => {
+    if (progressStep !== 'settling') return;
+    const interval = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [progressStep]);
 
   // Sync selectedToken with latest held balances when modal opens
   useEffect(() => {
@@ -103,6 +115,8 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     setResult(null);
     setSubmitError(null);
     setQuoteError(null);
+    setProgressStep('idle');
+    setElapsedSeconds(0);
 
     const def = pickDefaultToken();
     setSelectedToken(def);
@@ -242,11 +256,15 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     if (!selectedToken || !quote) return;
     setSubmitError(null);
     setIsSubmitting(true);
+    setProgressStep('authorizing');
+    setElapsedSeconds(0);
 
     try {
       const assertion = await authorizeWithPasskey(
         `Stabilize ${quote.grossAmount} ${selectedToken.symbol} to ${targetAsset}`
       );
+
+      setProgressStep('submitting');
 
       const isMax =
         selectedToken.balance &&
@@ -267,14 +285,60 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
       });
 
       setIsConfirmOpen(false);
-      setResult(res);
-      toast(`Stabilized ${res.grossAmount} ${res.sourceSymbol} → ${res.amountOut} ${res.targetSymbol}`);
-      onSuccess?.(res);
+
+      if (res.status === 'SUCCESS') {
+        setProgressStep('success');
+        setResult(res);
+        setIsSubmitting(false);
+        toast(`Stabilized ${res.grossAmount} ${res.sourceSymbol} → ${res.amountOut} ${res.targetSymbol}`);
+        onSuccess?.(res);
+        return;
+      }
+
+      // Enter settling mode with live polling against 1Click execution status
+      setProgressStep('settling');
+      const pollStart = Date.now();
+      const depositAddress = res.depositAddress;
+
+      let settled = false;
+      while (Date.now() - pollStart < 60_000) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          const statusRes = await api.getStabilizeStatus(depositAddress);
+          const upper = (statusRes.status || '').toUpperCase();
+          if (upper === 'SUCCESS') {
+            settled = true;
+            const completedResult = { ...res, status: 'SUCCESS' };
+            setProgressStep('success');
+            setResult(completedResult);
+            setIsSubmitting(false);
+            toast(`Stabilized ${res.grossAmount} ${res.sourceSymbol} → ${res.amountOut} ${res.targetSymbol}`);
+            onSuccess?.(completedResult);
+            break;
+          }
+          if (upper === 'FAILED' || upper === 'REFUNDED') {
+            settled = true;
+            setProgressStep('idle');
+            setIsSubmitting(false);
+            setSubmitError(`1Click reported swap as ${upper.toLowerCase()}. Funds were safely refunded to your vault.`);
+            break;
+          }
+        } catch {}
+      }
+
+      if (!settled) {
+        // Safe timeout: intent was submitted and will finish asynchronously
+        setProgressStep('success');
+        setResult(res);
+        setIsSubmitting(false);
+        toast(`Swap submitted! 1Click is settling ${res.amountOut} ${res.targetSymbol} in background.`);
+        onSuccess?.(res);
+      }
     } catch (err: any) {
+      setProgressStep('idle');
+      setIsSubmitting(false);
       setIsConfirmOpen(false);
       setSubmitError(err?.message || 'Stabilization swap failed.');
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -377,6 +441,123 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                 >
                   Done
                 </button>
+              </div>
+            ) : isSubmitting && progressStep !== 'idle' ? (
+              /* ── LIVE SETTLEMENT PROGRESS STEPPER ── */
+              <div className="py-2 space-y-5 animate-fade-in">
+                <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
+                      <RefreshCw className="w-5 h-5 animate-spin text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-display font-bold text-stone-950">
+                        {progressStep === 'authorizing'
+                          ? 'Authorizing with Passkey...'
+                          : progressStep === 'submitting'
+                          ? 'Submitting Swap Intent...'
+                          : 'Settling with 1Click Solver...'}
+                      </h3>
+                      <p className="text-xs text-stone-500 font-mono mt-0.5">
+                        {quote?.grossAmount} {selectedToken?.symbol} → {quote?.amountOut} {targetAsset}
+                      </p>
+                    </div>
+                  </div>
+                  {progressStep === 'settling' && (
+                    <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                      {elapsedSeconds}s
+                    </span>
+                  )}
+                </div>
+
+                {/* Progress Steps */}
+                <div className="space-y-3.5 px-1">
+                  {/* Step 1: Passkey Authorization */}
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                        progressStep === 'authorizing'
+                          ? 'bg-emerald-500 text-white animate-pulse'
+                          : 'bg-emerald-600 text-white'
+                      }`}
+                    >
+                      {progressStep === 'authorizing' ? (
+                        <Fingerprint className="w-3.5 h-3.5" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <span className="text-xs font-mono font-medium text-stone-800">
+                      Passkey Transaction Signature
+                    </span>
+                  </div>
+
+                  {/* Step 2: Intent Submission */}
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                        progressStep === 'authorizing'
+                          ? 'bg-stone-200 text-stone-400'
+                          : progressStep === 'submitting'
+                          ? 'bg-emerald-500 text-white animate-pulse'
+                          : 'bg-emerald-600 text-white'
+                      }`}
+                    >
+                      {progressStep === 'authorizing' ? (
+                        '2'
+                      ) : progressStep === 'submitting' ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <span
+                      className={`text-xs font-mono font-medium ${
+                        progressStep === 'authorizing' ? 'text-stone-400' : 'text-stone-800'
+                      }`}
+                    >
+                      Intent Submitted to 1Click Relay (Gas Sponsored)
+                    </span>
+                  </div>
+
+                  {/* Step 3: Solver Match & Settlement */}
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                        progressStep === 'settling'
+                          ? 'bg-emerald-500 text-white ring-4 ring-emerald-100'
+                          : 'bg-stone-200 text-stone-400'
+                      }`}
+                    >
+                      {progressStep === 'settling' ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : (
+                        '3'
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className={`text-xs font-mono font-medium ${
+                          progressStep === 'settling'
+                            ? 'text-stone-950 font-bold'
+                            : 'text-stone-400'
+                        }`}
+                      >
+                        Solver Matching & Settling {targetAsset}
+                      </span>
+                      {progressStep === 'settling' && (
+                        <p className="text-[11px] font-mono text-stone-500 mt-0.5">
+                          Defuser solvers matching liquidity route. Safe to leave open.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-stone-50 border border-stone-200/80 p-3 text-[11px] font-mono text-stone-500 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <span>Confidential Intents swap. Your vault balances update automatically once filled.</span>
+                </div>
               </div>
             ) : (
               /* ── MINIMAL STABILIZE FORM ── */

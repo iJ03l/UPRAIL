@@ -22,6 +22,7 @@ import { isConfidentialRailEnabled, getConfidentialBalances } from '../services/
 import { getUserSession } from '../services/oneclickAuth';
 import {
   executeStabilize,
+  getStabilizeExecutionStatus,
   getStabilizeQuote,
   StabilizeError,
 } from '../services/stabilize';
@@ -1004,5 +1005,37 @@ onchainRouter.post(
     }
   }
 );
+
+// ─── GET /api/onchain/stabilize/status ────────────────────────────────────────
+/**
+ * Polls the settlement status of an in-flight confidential stabilization swap
+ * by 1Click depositAddress, enabling responsive async UI progress tracking.
+ */
+onchainRouter.get(
+  '/stabilize/status',
+  requireAuth({ passkeyVerified: true }),
+  async (c) => {
+    const session = c.get('session')!;
+    const depositAddress = (c.req.query('depositAddress') || '').trim();
+    if (!depositAddress) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing depositAddress query parameter', code: 'MISSING_PARAM' },
+        400
+      );
+    }
+    try {
+      const status = await getStabilizeExecutionStatus(c.env, session, depositAddress);
+      return c.json(status);
+    } catch (err: any) {
+      console.warn('[onchain/stabilize/status] status check error:', err);
+      return c.json({
+        status: 'PENDING',
+        terminal: false,
+        depositAddress,
+      });
+    }
+  }
+);
+
 
 
