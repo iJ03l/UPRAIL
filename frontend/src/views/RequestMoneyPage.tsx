@@ -9,11 +9,12 @@ import { RequestShareModal } from '../components/RequestShareModal';
 import { usePayments } from '../hooks/usePayments';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { api, tokenUsdPrice, formatUsd } from '../lib/api';
-import { useSearchParams } from '../lib/router';
+import { useSearchParams, useNavigate } from '../lib/router';
 import type { PaymentRequest, Token } from '../types';
 import { ArrowDownLeft, AlertCircle, Clock, ShieldCheck, Fingerprint } from 'lucide-react';
 
 export const RequestMoneyPage: React.FC = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const prefillHandle = searchParams.get('handle') || searchParams.get('to') || '';
   const prefillAsset = searchParams.get('asset') || '';
@@ -124,7 +125,13 @@ export const RequestMoneyPage: React.FC = () => {
 
       {/* People You Pay Picker */}
       <PeopleYouPay
-        onSelectRecipient={(h, a, amt) => handleSelectFromPeople(h, a, amt)}
+        onSelectRecipient={(h, a, amt) => {
+          const q = new URLSearchParams();
+          q.set('recipient', h.replace(/^@+/, ''));
+          if (a) q.set('asset', a);
+          if (amt) q.set('amount', amt);
+          navigate(`/app/send?${q.toString()}`);
+        }}
         onRequestMoney={(h, a) => handleSelectFromPeople(h, a)}
         className="my-2"
       />

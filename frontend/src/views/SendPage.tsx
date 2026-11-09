@@ -27,12 +27,18 @@ export const SendPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedMode = searchParams.get('mode');
+  const requestedRecipient =
+    searchParams.get('recipient') || searchParams.get('to') || searchParams.get('handle');
+  const requestedAsset = searchParams.get('asset') || searchParams.get('token');
+  const requestedAmount = searchParams.get('amount');
+
   const {
     tokens,
     selectedToken,
     setSelectedToken,
     quote,
     isSubmitting,
+    txStage,
     error,
     sendPayment,
     sendToWallet,
@@ -45,12 +51,16 @@ export const SendPage: React.FC = () => {
   const [sendMode, setSendMode] = useState<'handle' | 'wallet'>(
     requestedMode === 'wallet' ? 'wallet' : 'handle'
   );
-  const [recipient, setRecipient] = useState('');
+  const [recipient, setRecipient] = useState(
+    requestedRecipient ? requestedRecipient.replace(/^@+/, '') : ''
+  );
   const [walletAddress, setWalletAddress] = useState('');
   const [destinationChain, setDestinationChain] = useState('');
   const [destinationChainTouched, setDestinationChainTouched] = useState(false);
   const [withdrawChains, setWithdrawChains] = useState<WithdrawChain[]>([]);
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(
+    requestedAmount && parseFloat(requestedAmount) > 0 ? requestedAmount : ''
+  );
   const [memo, setMemo] = useState('');
   const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -59,6 +69,30 @@ export const SendPage: React.FC = () => {
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isHandleValid, setIsHandleValid] = useState<boolean | null>(null);
+
+  // Sync recipient and amount if searchParams change
+  useEffect(() => {
+    if (requestedRecipient) {
+      setRecipient(requestedRecipient.replace(/^@+/, ''));
+      setSendMode('handle');
+    }
+  }, [requestedRecipient]);
+
+  useEffect(() => {
+    if (requestedAmount && parseFloat(requestedAmount) > 0) {
+      setAmount(requestedAmount);
+    }
+  }, [requestedAmount]);
+
+  useEffect(() => {
+    if (!requestedAsset || tokens.length === 0) return;
+    const match = tokens.find(
+      (t) =>
+        t.symbol.toLowerCase() === requestedAsset.toLowerCase() ||
+        t.id.toLowerCase() === requestedAsset.toLowerCase()
+    );
+    if (match) setSelectedToken(match);
+  }, [requestedAsset, tokens, setSelectedToken]);
 
   // Recalculate quote on token or amount changes
   useEffect(() => {
@@ -492,7 +526,11 @@ export const SendPage: React.FC = () => {
             {isSubmitting ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                <span>Waiting for your passkey...</span>
+                <span>
+                  {txStage === 'authorizing'
+                    ? 'Waiting for your passkey...'
+                    : 'Broadcasting confidential payment...'}
+                </span>
               </>
             ) : (
               <>

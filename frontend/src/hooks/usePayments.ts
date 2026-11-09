@@ -16,6 +16,8 @@ let globalHistoryCache: PaymentIntent[] = (() => {
   }
 })();
 
+export type TxStage = 'idle' | 'authorizing' | 'sending';
+
 export function usePayments() {
   const { authorizeWithPasskey } = usePasskeyTxAuth();
   const { tokens: onchainTokens, balances, balancesError, refreshBalances } = useOnchainData();
@@ -23,6 +25,7 @@ export function usePayments() {
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [txStage, setTxStage] = useState<TxStage>('idle');
   const [error, setError] = useState<string | null>(null);
   const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
   const [history, setHistory] = useState<PaymentIntent[]>(globalHistoryCache);
@@ -212,6 +215,7 @@ export function usePayments() {
   ): Promise<PaymentIntent> => {
     try {
       setIsSubmitting(true);
+      setTxStage('authorizing');
       setError(null);
 
       const cleanHandle = normalizeRecipientInput(recipientHandle).recipient;
@@ -232,10 +236,8 @@ export function usePayments() {
         throw new Error(msg);
       }
 
-      // Step 2: Send payment intent with passkey cryptographic assertion
-      // The quote shown in the UI is only a preview (it is not bound to this
-      // recipient). createPayment requests a fresh, recipient-bound quote so the
-      // signature always matches the payment being submitted.
+      // Step 2: Passkey authorized. Now send payment intent to network
+      setTxStage('sending');
       const payment = await api.createPayment({
         recipientHandle: cleanHandle,
         tokenId: selectedToken.id,
@@ -277,6 +279,7 @@ export function usePayments() {
       throw err;
     } finally {
       setIsSubmitting(false);
+      setTxStage('idle');
     }
   };
 
@@ -297,6 +300,7 @@ export function usePayments() {
   ): Promise<{ txHash: string; withdrawalId?: string; destinationAddress: string; shareLink?: string }> => {
     try {
       setIsSubmitting(true);
+      setTxStage('authorizing');
       setError(null);
 
       const destination = (destinationAddress || '').trim();
@@ -319,6 +323,8 @@ export function usePayments() {
         throw new Error(msg);
       }
 
+      // Step 2: Passkey authorized. Now send withdrawal to network
+      setTxStage('sending');
       const result = await api.withdraw({
         destinationAddress: destination,
         asset: tokenId,
@@ -362,6 +368,7 @@ export function usePayments() {
       throw err;
     } finally {
       setIsSubmitting(false);
+      setTxStage('idle');
     }
   };
 
@@ -403,6 +410,7 @@ export function usePayments() {
     quote,
     isQuoting,
     isSubmitting,
+    txStage,
     error,
     createdPayment,
     history,
