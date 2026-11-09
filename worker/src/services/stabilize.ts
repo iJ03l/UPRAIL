@@ -419,8 +419,8 @@ export async function getTotalSpendableOriginAtomic(
       try {
         const bal = BigInt(b.amount || '0');
         if (b.symbol.toUpperCase() === 'NEAR') {
-          // Reserve 0.005 NEAR for account storage staking (264 bytes) and gas
-          const reserve = 5000000000000000000000n;
+          // Reserve 0.02 NEAR for platform gas sponsorship & account storage staking
+          const reserve = 20000000000000000000000n;
           plainAtomic += bal > reserve ? bal - reserve : 0n;
         } else {
           plainAtomic += bal;
@@ -652,6 +652,18 @@ export async function executeStabilize(
   if (grossAtomic <= 0n) {
     throw new StabilizeError('INVALID_AMOUNT', 'Amount must be greater than zero.');
   }
+
+  const isNearOrigin =
+    origin.symbol.toUpperCase() === 'NEAR' ||
+    (origin.assetId || '').toLowerCase() === 'nep141:wrap.near';
+  const MIN_NEAR_STABILIZE_ATOMIC = 20000000000000000000000n; // 0.02 NEAR minimum
+  if (isNearOrigin && grossAtomic < MIN_NEAR_STABILIZE_ATOMIC) {
+    throw new StabilizeError(
+      'AMOUNT_TOO_LOW',
+      'Minimum amount to stabilize is 0.02 NEAR.'
+    );
+  }
+
   if (grossAtomic > spendable.totalAtomic) {
     const availFormatted = formatAtomic(spendable.totalAtomic.toString(), origin.decimals);
     throw new StabilizeError(

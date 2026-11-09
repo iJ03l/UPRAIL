@@ -1407,6 +1407,16 @@ async function handleConfidentialWithdraw(
   if (amountAtomic <= 0n) {
     return c.json<ErrorResponse>({ error: 'Invalid withdrawal amount', code: 'INVALID_AMOUNT' }, 400);
   }
+  const isNearAsset =
+    balance.symbol.toUpperCase() === 'NEAR' ||
+    (balance.assetId || '').toLowerCase() === 'nep141:wrap.near';
+  const MIN_NEAR_WITHDRAW_ATOMIC = 20000000000000000000000n; // 0.02 NEAR minimum
+  if (isNearAsset && amountAtomic < MIN_NEAR_WITHDRAW_ATOMIC) {
+    return c.json<ErrorResponse>(
+      { error: 'Minimum withdrawal amount is 0.02 NEAR', code: 'AMOUNT_BELOW_MINIMUM' },
+      400
+    );
+  }
   if (publicHolding !== null && amountAtomic > totalAtomic) {
     return c.json<ErrorResponse>(
       {

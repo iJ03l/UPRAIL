@@ -4921,8 +4921,13 @@ export async function getPlainBalances(
     }
 
     // Native NEAR is held outside any FT contract, so it has no FastNEAR row.
+    // Sub-accounts are sponsored by escrow with up to 0.02 NEAR strictly for
+    // account storage staking and network gas. That reserve is platform gas capital
+    // and is NOT spendable, withdrawable, or stabilizable balance for the user.
+    const PLATFORM_GAS_RESERVE = 20000000000000000000000n; // 0.02 NEAR platform gas reserve
     const native = await getPlainNearBalance(rpcUrl, nearAccount);
-    const totalNear = native + wNearHeld;
+    const spendableNative = native > PLATFORM_GAS_RESERVE ? native - PLATFORM_GAS_RESERVE : 0n;
+    const totalNear = spendableNative + wNearHeld;
     if (totalNear > 0n) {
       const nearPrice = tokenUsdPrice('NEAR', regByContract.get('wrap.near')?.priceUsd);
       out.push({
@@ -5305,7 +5310,7 @@ export async function depositPlainBalanceToIntents(
       }
       // On-chain sub-accounts require a minimum storage balance (264 bytes) and gas reserve.
       // Funds in this reserve are NOT spendable deposit principal and cannot be wrapped.
-      const NATIVE_NEAR_RESERVE = 5000000000000000000000n; // 0.005 NEAR reserve
+      const NATIVE_NEAR_RESERVE = 20000000000000000000000n; // 0.02 NEAR platform gas reserve
       const spendableNear = plainNear > NATIVE_NEAR_RESERVE ? plainNear - NATIVE_NEAR_RESERVE : 0n;
       const totalSpendable = plainFt + spendableNear;
       const wrapNeeded = BigInt(baseUnits) - plainFt;
@@ -6722,7 +6727,7 @@ export async function executeRheaStabilizeSwap(
   if (plainFt < grossAtomic) {
     if (contractIn === WRAP_NEAR_CONTRACT_ID) {
       const plainNear = (await getPlainNearBalanceStrict(rpcUrl, senderAccountId)) ?? 0n;
-      const NATIVE_NEAR_RESERVE = 5000000000000000000000n; // 0.005 NEAR reserve
+      const NATIVE_NEAR_RESERVE = 20000000000000000000000n; // 0.02 NEAR platform gas reserve
       const spendableNear = plainNear > NATIVE_NEAR_RESERVE ? plainNear - NATIVE_NEAR_RESERVE : 0n;
       const wrapNeeded = grossAtomic - plainFt;
       if (plainFt + spendableNear < grossAtomic) {

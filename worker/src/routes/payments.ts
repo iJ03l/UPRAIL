@@ -776,6 +776,13 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         return await failSend('UNSUPPORTED_ASSET', `Unsupported asset: ${body.asset}`, 400);
       }
       const grossAtomic = BigInt(nearRpc.toBaseUnits(body.amount, privateToken.decimals));
+      const isNearAsset =
+        (privateToken.symbol || '').toUpperCase() === 'NEAR' ||
+        (privateToken.defuse_asset_id || '').toLowerCase() === 'nep141:wrap.near';
+      const MIN_NEAR_SEND_ATOMIC = 20000000000000000000000n; // 0.02 NEAR minimum
+      if (isNearAsset && grossAtomic < MIN_NEAR_SEND_ATOMIC) {
+        return await failSend('AMOUNT_BELOW_MINIMUM', 'Minimum send amount is 0.02 NEAR', 400);
+      }
       const feeAtomic = BigInt(nearRpc.toBaseUnits(protocolFee, privateToken.decimals));
       const senderNear = await nearRpc.resolveUserNearAccount(c.env, session!);
 
