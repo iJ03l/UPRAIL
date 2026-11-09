@@ -5278,9 +5278,8 @@ export async function depositPlainBalanceToIntents(
       return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
     }
     if (plainFt >= BigInt(baseUnits)) {
-      // 45 TGas at 10^9 yocto/gas requires ~0.046 NEAR upfront plus ~0.002 NEAR storage;
-      // top up the user's sub-account from escrow if it only holds the initial 0.01 NEAR.
-      await ensureRegistrationGas(env, senderAccountId, 52000000000000000000000n);
+      // Ensure transaction gas reserve from escrow (0.015 NEAR max)
+      await ensureRegistrationGas(env, senderAccountId, 15000000000000000000000n);
       const res = await signAndBroadcastFunctionCall({
         ...senderKey,
         receiverId: contractId,
@@ -5304,9 +5303,13 @@ export async function depositPlainBalanceToIntents(
       if (plainNear === null) {
         return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
       }
-      const totalHeld = plainFt + plainNear;
+      // On-chain sub-accounts require a minimum storage balance (264 bytes) and gas reserve.
+      // Funds in this reserve are NOT spendable deposit principal and cannot be wrapped.
+      const NATIVE_NEAR_RESERVE = 5000000000000000000000n; // 0.005 NEAR reserve
+      const spendableNear = plainNear > NATIVE_NEAR_RESERVE ? plainNear - NATIVE_NEAR_RESERVE : 0n;
+      const totalSpendable = plainFt + spendableNear;
       const wrapNeeded = BigInt(baseUnits) - plainFt;
-      if (totalHeld >= BigInt(baseUnits) && wrapNeeded > 0n) {
+      if (totalSpendable >= BigInt(baseUnits) && wrapNeeded > 0n) {
         // Register NEP-145 storage for senderAccountId on wrap.near from escrow so
         // near_deposit credits 100% of wrapNeeded instead of carving 0.00125 NEAR for storage.
         const senderWrapStorage = await ensureReceiverStorageRegistered(
@@ -5321,10 +5324,8 @@ export async function depositPlainBalanceToIntents(
             reason: senderWrapStorage.reason || 'Could not register wrap.near storage for account',
           };
         }
-        // Sponsor gas + account storage reserve from escrow BEFORE near_deposit so the user
-        // can wrap 100% of their native NEAR balance (gas-sponsored).
-        const gasAndStorageHeadroom = 60000000000000000000000n; // 0.06 NEAR
-        await ensureRegistrationGas(env, senderAccountId, wrapNeeded + gasAndStorageHeadroom);
+        // Ensure standard transaction gas reserve from escrow (STRICTLY for tx gas, NEVER include wrapNeeded)
+        await ensureRegistrationGas(env, senderAccountId, 15000000000000000000000n);
 
         const wrap = await signAndBroadcastFunctionCall({
           ...senderKey,
@@ -5337,7 +5338,7 @@ export async function depositPlainBalanceToIntents(
         if (!wrap.ok) {
           return { deposited: false, reason: wrap.error || 'near_deposit (wrap.near) failed' };
         }
-        await ensureRegistrationGas(env, senderAccountId, 52000000000000000000000n);
+        await ensureRegistrationGas(env, senderAccountId, 15000000000000000000000n);
         const res = await signAndBroadcastFunctionCall({
           ...senderKey,
           receiverId: 'wrap.near',
@@ -5432,12 +5433,20 @@ function escrowSigningKey(
 // 5 TGas + 0.92 TGas action fee costs ~0.0059 NEAR at 10^9 yocto/Gas on mainnet;
 // 0.01 NEAR leaves ample headroom for account storage (0.00182 NEAR) and gas.
 const INTENTS_KEY_REGISTRATION_GAS = 10000000000000000000000n; // 0.01 NEAR
+// Absolute ceiling on gas sponsorship per account top-up (0.02 NEAR).
+// Escrow is STRICTLY a transaction gas sponsor — it NEVER funds user deposit principal,
+// swap principal, or wrap amounts under any circumstances.
+const MAX_SPONSORED_GAS_CAP = 20000000000000000000000n; // 0.02 NEAR
 
 /**
  * Guarantees the user's own account can pay for its `intents.near.add_public_key`
  * (or plain FT transfer) transaction. The gas is a platform integration cost, so
  * any shortfall is transferred in from the escrow wallet rather than being
  * charged against the user's balance. No-op once the account is already funded.
+ *
+ * CRITICAL SECURITY INVARIANT:
+ * requiredNear is strictly clamped to MAX_SPONSORED_GAS_CAP (0.02 NEAR).
+ * Escrow NEVER transfers more than gas dust to any user account.
  */
 export async function ensureRegistrationGas(
   env: Env,
@@ -5446,19 +5455,23 @@ export async function ensureRegistrationGas(
 ): Promise<boolean> {
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   try {
+    const cappedRequired = requiredNear > MAX_SPONSORED_GAS_CAP ? MAX_SPONSORED_GAS_CAP : requiredNear;
     const balance = await getPlainNearBalanceStrict(rpcUrl, accountId);
     if (balance === null) return false;
-    if (balance >= requiredNear) return true;
+    if (balance >= cappedRequired) return true;
 
     const sponsor = escrowSigningKey(env, rpcUrl);
     if ('error' in sponsor) {
       console.warn('[ensureRegistrationGas]', sponsor.error);
       return false;
     }
+    const transferAmount = cappedRequired - balance;
+    if (transferAmount <= 0n) return true;
+
     const res = await signAndBroadcastNearTransfer({
       ...sponsor,
       receiverId: accountId,
-      amount: requiredNear - balance,
+      amount: transferAmount,
     });
     if (!res.ok) {
       console.warn(`[ensureRegistrationGas] top-up failed for ${accountId}:`, res.error);
@@ -6709,8 +6722,10 @@ export async function executeRheaStabilizeSwap(
   if (plainFt < grossAtomic) {
     if (contractIn === WRAP_NEAR_CONTRACT_ID) {
       const plainNear = (await getPlainNearBalanceStrict(rpcUrl, senderAccountId)) ?? 0n;
+      const NATIVE_NEAR_RESERVE = 5000000000000000000000n; // 0.005 NEAR reserve
+      const spendableNear = plainNear > NATIVE_NEAR_RESERVE ? plainNear - NATIVE_NEAR_RESERVE : 0n;
       const wrapNeeded = grossAtomic - plainFt;
-      if (plainFt + plainNear < grossAtomic) {
+      if (plainFt + spendableNear < grossAtomic) {
         throw new Error('Insufficient plain NEAR balance to execute Rhea swap');
       }
       const wrapStorage = await ensureReceiverStorageRegistered(
@@ -6725,7 +6740,7 @@ export async function executeRheaStabilizeSwap(
       await ensureRegistrationGas(
         env,
         senderAccountId,
-        wrapNeeded + 80_000_000_000_000_000_000_000n
+        15_000_000_000_000_000_000_000n
       );
       const wrapRes = await signAndBroadcastFunctionCall({
         ...senderKey,
@@ -6773,7 +6788,7 @@ export async function executeRheaStabilizeSwap(
       sponsor
     );
     if (escrowStorage.registered) {
-      await ensureRegistrationGas(env, senderAccountId, 30_000_000_000_000_000_000_000n);
+      await ensureRegistrationGas(env, senderAccountId, 15_000_000_000_000_000_000_000n);
       const feeRes = await signAndBroadcastFunctionCall({
         ...senderKey,
         receiverId: contractIn,
@@ -6788,7 +6803,7 @@ export async function executeRheaStabilizeSwap(
 
   // 5. Execute Rhea Finance swap (ft_transfer_call to v2.ref-finance.near or dclv2.ref-labs.near)
   const beforeOut = (await getPlainFtBalanceStrict(rpcUrl, contractOut, senderAccountId)) ?? 0n;
-  await ensureRegistrationGas(env, senderAccountId, 200_000_000_000_000_000_000_000n);
+  await ensureRegistrationGas(env, senderAccountId, 20_000_000_000_000_000_000_000n);
 
   const swapRes = await signAndBroadcastFunctionCall({
     ...senderKey,
@@ -6824,7 +6839,7 @@ export async function executeRheaStabilizeSwap(
     throw new Error(intentsStorage.reason || `intents.near not registered on ${contractOut}`);
   }
 
-  await ensureRegistrationGas(env, senderAccountId, 60_000_000_000_000_000_000_000n);
+  await ensureRegistrationGas(env, senderAccountId, 15_000_000_000_000_000_000_000n);
   const depositRes = await signAndBroadcastFunctionCall({
     ...senderKey,
     receiverId: contractOut,

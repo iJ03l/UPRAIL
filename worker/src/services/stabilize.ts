@@ -417,7 +417,14 @@ export async function getTotalSpendableOriginAtomic(
       (oId === 'nep141:wrap.near' && b.symbol.toUpperCase() === 'NEAR')
     ) {
       try {
-        plainAtomic += BigInt(b.amount || '0');
+        const bal = BigInt(b.amount || '0');
+        if (b.symbol.toUpperCase() === 'NEAR') {
+          // Reserve 0.005 NEAR for account storage staking (264 bytes) and gas
+          const reserve = 5000000000000000000000n;
+          plainAtomic += bal > reserve ? bal - reserve : 0n;
+        } else {
+          plainAtomic += bal;
+        }
       } catch {}
     }
   }
