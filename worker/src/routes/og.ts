@@ -45,9 +45,11 @@ async function cached(c: Context<AppContext>, build: () => Promise<Response>) {
   } catch {}
 
   const res = await build();
-  try {
-    await cache.put(key, res.clone());
-  } catch {}
+  if (!(res.headers.get('cache-control') || '').includes('no-store')) {
+    try {
+      await cache.put(key, res.clone());
+    } catch {}
+  }
   return res;
 }
 
@@ -237,30 +239,78 @@ ogRouter.get('/request/:file', (c) => {
   });
 });
 
-async function fetchAvatarDataUri(urls: string[]): Promise<string | null> {
-  for (const rawUrl of urls) {
-    if (!rawUrl) continue;
-    try {
-      const resp = await fetch(rawUrl, {
-        signal: AbortSignal.timeout(2500),
-        headers: { 'User-Agent': 'UPRAIL-OG/1.0' },
-      });
-      if (!resp.ok) continue;
-      const ct = (resp.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
-      if (ct !== 'image/png' && ct !== 'image/jpeg' && ct !== 'image/jpg' && ct !== 'image/gif') {
-        continue;
-      }
-      const buf = await resp.arrayBuffer();
-      if (!buf.byteLength || buf.byteLength > 512 * 1024) continue;
-      const bytes = new Uint8Array(buf);
-      let bin = '';
-      for (let i = 0; i < bytes.length; i += 8192) {
-        bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      }
-      const mime = ct === 'image/jpg' ? 'image/jpeg' : ct;
-      return `data:${mime};base64,${btoa(bin)}`;
-    } catch {
-      /* try next fallback */
+async function resolveFxTwitterAvatarUrl(handle: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.fxtwitter.com/${encodeURIComponent(handle)}`, {
+      signal: AbortSignal.timeout(3000),
+      headers: { 'User-Agent': 'UPRAIL/1.0', Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as any;
+    const raw = typeof data?.user?.avatar_url === 'string' ? data.user.avatar_url.trim() : '';
+    if (!raw || !raw.startsWith('https://')) return null;
+    return raw.replace(/_normal\.(jpg|jpeg|png)$/i, '_400x400.$1');
+  } catch {
+    return null;
+  }
+}
+
+async function fetchImageAsDataUri(rawUrl: string): Promise<string | null> {
+  if (!rawUrl) return null;
+  try {
+    const resp = await fetch(rawUrl, {
+      signal: AbortSignal.timeout(4500),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; UPRAIL/1.0)',
+        Accept: 'image/png,image/jpeg,image/*,*/*;q=0.8',
+      },
+    });
+    if (!resp.ok) return null;
+    const ct = (resp.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
+    if (ct !== 'image/png' && ct !== 'image/jpeg' && ct !== 'image/jpg' && ct !== 'image/gif') {
+      return null;
+    }
+    const buf = await resp.arrayBuffer();
+    if (!buf.byteLength || buf.byteLength > 512 * 1024) return null;
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    const mime = ct === 'image/jpg' ? 'image/jpeg' : ct;
+    return `data:${mime};base64,${btoa(bin)}`;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveCoffeeAvatarDataUri(
+  env: any,
+  handle: string,
+  dbAvatarUrl: string | null
+): Promise<string | null> {
+  const kvKey = `avatar_uri_v1:${handle.toLowerCase()}`;
+  try {
+    const cachedUri = await env.CACHE?.get(kvKey);
+    if (typeof cachedUri === 'string' && cachedUri.startsWith('data:image/')) {
+      return cachedUri;
+    }
+  } catch {}
+
+  const candidates: string[] = [];
+  if (dbAvatarUrl) candidates.push(dbAvatarUrl);
+  const fxUrl = await resolveFxTwitterAvatarUrl(handle);
+  if (fxUrl) candidates.push(fxUrl);
+  candidates.push(`https://unavatar.io/x/${encodeURIComponent(handle)}`);
+  candidates.push(`https://unavatar.io/twitter/${encodeURIComponent(handle)}`);
+
+  for (const url of candidates) {
+    const dataUri = await fetchImageAsDataUri(url);
+    if (dataUri) {
+      try {
+        await env.CACHE?.put(kvKey, dataUri, { expirationTtl: 21600 });
+      } catch {}
+      return dataUri;
     }
   }
   return null;
@@ -287,19 +337,13 @@ ogRouter.get('/coffee/:file', (c) => {
       }
     } catch {}
 
-    const avatarDataUri = await fetchAvatarDataUri(
-      [
-        dbAvatarUrl || '',
-        `https://unavatar.io/x/${encodeURIComponent(displayHandle)}`,
-        `https://unavatar.io/twitter/${encodeURIComponent(displayHandle)}`,
-      ].filter(Boolean)
-    );
+    const avatarDataUri = await resolveCoffeeAvatarDataUri(c.env, displayHandle, dbAvatarUrl);
 
     return renderCoffeeOgCard({
       handle: displayHandle,
       name: displayName,
       avatarDataUri,
-      cacheControl: 'public, max-age=300, s-maxage=300',
+      cacheControl: avatarDataUri ? 'public, max-age=600, s-maxage=600' : 'no-store',
     });
   });
 });

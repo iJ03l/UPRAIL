@@ -363,7 +363,7 @@ const RESERVED_ROOT_PATHS = new Set([
  * images per URL for a long time, so the version query gives them a new cache
  * key without changing the payment id.
  */
-const OG_CARD_VERSION = '4';
+const OG_CARD_VERSION = '5';
 
 // Wallet-send receipt deep links: /receipt/<withdrawalId> and
 // /app/receipt/<withdrawalId>, rewritten onto the static receipt page.
@@ -742,7 +742,7 @@ app.notFound(async (c) => {
         }
         return renderShareCardHtml({
           title: `PAY ME HERE — @${displayHandle}`,
-          description: `Support @${displayHandle} privately from 35+ blockchains. No login or wallet needed.`,
+          description: `Support or make a payment to @${displayHandle} by clicking this link. No login or wallet needed.`,
           imageUrl: `${url.origin}/og/coffee/${encodeURIComponent(displayHandle)}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });

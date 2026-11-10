@@ -37,7 +37,7 @@ import type { PaymentIntent, PaymentRequest, Token } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
 import { StabilizeModal } from '../components/StabilizeModal';
-import { CoffeeModal, SolidCoffeeIcon } from '../components/CoffeeModal';
+import { CoffeeModal, CoinPouchIcon } from '../components/CoffeeModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
@@ -444,11 +444,11 @@ export const AppHome: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsCoffeeModalOpen(true)}
-                    title="Buy Me a Coffee — Public tip link"
+                    title="Buy Me a Coffee — Public pay link"
                     aria-label="Buy Me a Coffee"
-                    className="inline-flex items-center justify-center p-2 rounded-xl bg-stone-100 hover:bg-amber-50 dark:hover:bg-amber-950/50 text-stone-800 hover:text-amber-700 dark:hover:text-amber-300 border border-stone-200 hover:border-amber-300/80 dark:hover:border-amber-800/70 transition-all cursor-pointer shadow-2xs"
+                    className="inline-flex items-center justify-center p-1 bg-transparent border-0 shadow-none hover:scale-110 active:scale-95 transition-transform cursor-pointer focus:outline-none"
                   >
-                    <SolidCoffeeIcon className="w-4 h-4" />
+                    <CoinPouchIcon className="w-8 h-8 drop-shadow-xs" />
                   </button>
                 </div>
               </div>

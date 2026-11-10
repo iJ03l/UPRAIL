@@ -290,9 +290,8 @@ export const PublicCoffeeView: React.FC = () => {
 
       {/* Responsive Header — Real UPRAIL Logo, Fixed Icon Pill & Theme Toggle */}
       <header className="sticky top-0 z-30 w-full border-b border-stone-200/80 bg-surface-glass backdrop-blur-md">
-        <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 h-16 sm:h-[72px] flex items-center justify-between gap-2">
-          <GlitchLogo href="/" size="sm" className="sm:hidden flex-shrink-0" />
-          <GlitchLogo href="/" size="md" className="hidden sm:inline-flex flex-shrink-0" />
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-10 h-16 sm:h-[72px] flex items-center justify-between gap-2">
+          <GlitchLogo href="/" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
 
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-white border border-stone-200/80 text-[10px] sm:text-[11px] font-mono text-stone-600 shadow-2xs">

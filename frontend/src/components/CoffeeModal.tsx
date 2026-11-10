@@ -16,6 +16,55 @@ import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useToast } from './Toast';
 import type { CoffeeSettingsResponse } from '../types';
 
+export const CoinPouchIcon: React.FC<{ className?: string }> = ({ className = 'w-8 h-8' }) => (
+  <svg
+    viewBox="0 0 28 28"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+    aria-hidden="true"
+  >
+    {/* Cinch top ruffle */}
+    <path
+      d="M10.2 3.2C10.8 2.6 11.7 2.8 12.4 3.4C13.2 2.5 14.8 2.5 15.6 3.4C16.3 2.8 17.2 2.6 17.8 3.2L16.3 7.6H11.7L10.2 3.2Z"
+      fill="#F59E0B"
+      stroke="#78350F"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
+    />
+    {/* Plump coin pouch belly */}
+    <path
+      d="M11.6 8.2C7.2 9.4 4.8 13.8 5.1 18.6C5.4 22.8 8.6 25 14 25C19.4 25 22.6 22.8 22.9 18.6C23.2 13.8 20.8 9.4 16.4 8.2H11.6Z"
+      fill="#FBBF24"
+      stroke="#78350F"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    {/* Tied rope / knot around neck with hanging ends */}
+    <path
+      d="M10.8 7.8C12.2 8.5 15.8 8.5 17.2 7.8"
+      stroke="#92400E"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+    />
+    <path
+      d="M14.2 8.2L16.6 10.7M13.8 8.2L12.1 10.6"
+      stroke="#92400E"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    />
+    {/* Coins visible inside the pouch */}
+    <circle cx="11.8" cy="17.6" r="4.1" fill="#FDE68A" stroke="#92400E" strokeWidth="1.35" />
+    <circle cx="15.8" cy="15.8" r="4.1" fill="#FEF3C7" stroke="#92400E" strokeWidth="1.35" />
+    <path
+      d="M15.8 13.6V18M17.1 14.5C16.7 14.1 16 14 15.4 14.2C14.8 14.4 14.7 15.1 15.4 15.4L16.2 15.8C16.9 16.1 16.8 16.9 16.1 17.1C15.5 17.3 14.8 17.1 14.5 16.7"
+      stroke="#92400E"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 export const SolidCoffeeIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
   <svg
     viewBox="0 0 24 24"

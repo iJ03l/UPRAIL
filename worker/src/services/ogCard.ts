@@ -109,24 +109,23 @@ export async function renderCoffeeOgCard(opts: CoffeeOgCardOptions): Promise<Res
   const initial = (handle.charAt(0) || 'U').toUpperCase();
 
   const avatarMarkup = opts.avatarDataUri
-    ? `<img src="${opts.avatarDataUri}" width="144" height="144" style="border-radius:72px;border:3px solid #E5E2DC;object-fit:cover;" />`
-    : `<div style="display:flex;align-items:center;justify-content:center;width:144px;height:144px;border-radius:72px;background:${INK};color:#FFFFFF;font-size:58px;font-weight:700;">${esc(initial)}</div>`;
+    ? `<div style="display:flex;width:148px;height:148px;border-radius:74px;overflow:hidden;border:3px solid #E5E2DC;flex-shrink:0;"><img src="${opts.avatarDataUri}" width="148" height="148" style="object-fit:cover;" /></div>`
+    : `<div style="display:flex;align-items:center;justify-content:center;width:148px;height:148px;border-radius:74px;background:${INK};color:#FFFFFF;font-size:58px;font-weight:700;flex-shrink:0;">${esc(initial)}</div>`;
 
   const html = `
   <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:60px 72px;background:#F7F6F3;border:2px solid #ECE9E4;font-family:'DejaVu';">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <div style="display:flex;align-items:center;">
-        <img src="${BRAND_ICON}" width="48" height="46" />
-        <img src="${BRAND_WORDMARK}" width="110" height="37" style="margin-left:14px;" />
-      </div>
-      <div style="display:flex;font-size:18px;font-weight:700;letter-spacing:1px;color:${MUTED};">uprail.world/${esc(handle)}</div>
+    <div style="display:flex;align-items:center;width:100%;">
+      <img src="${BRAND_ICON}" width="48" height="46" />
+      <img src="${BRAND_WORDMARK}" width="110" height="37" style="margin-left:14px;" />
+      <div style="display:flex;font-size:18px;font-weight:700;letter-spacing:1px;color:${MUTED};margin-left:auto;">uprail.world/${esc(handle)}</div>
     </div>
 
-    <div style="display:flex;align-items:center;margin-top:86px;">
+    <div style="display:flex;align-items:center;margin-top:84px;width:100%;">
       ${avatarMarkup}
-      <div style="display:flex;flex-direction:column;margin-left:38px;">
-        <div style="display:flex;font-size:22px;font-weight:700;letter-spacing:3px;color:${ACCENT};">@${esc(handle)}</div>
-        <div style="display:flex;font-size:88px;font-weight:700;color:${INK};line-height:1.02;letter-spacing:-2px;margin-top:12px;">PAY ME HERE</div>
+      <div style="display:flex;flex-direction:column;margin-left:38px;flex:1;">
+        <div style="display:flex;font-size:22px;font-weight:700;letter-spacing:2px;color:${ACCENT};">@${esc(handle)}</div>
+        <div style="display:flex;font-size:84px;font-weight:700;color:${INK};line-height:1.02;letter-spacing:-2px;margin-top:10px;">PAY ME HERE</div>
+        <div style="display:flex;font-size:24px;color:${MUTED};margin-top:16px;">Support or make a payment to @${esc(handle)} by clicking this link</div>
       </div>
     </div>
 
