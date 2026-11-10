@@ -18,6 +18,7 @@ import {
   AlertCircle,
   ExternalLink,
   Clock,
+  Coffee,
 } from 'lucide-react';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
@@ -37,6 +38,7 @@ import type { PaymentIntent, PaymentRequest, Token } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
 import { StabilizeModal } from '../components/StabilizeModal';
+import { CoffeeModal } from '../components/CoffeeModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
@@ -75,6 +77,21 @@ export const AppHome: React.FC = () => {
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState<boolean>(false);
   const [isStabilizeModalOpen, setIsStabilizeModalOpen] = useState<boolean>(false);
   const [stabilizeInitialToken, setStabilizeInitialToken] = useState<Token | null>(null);
+  const [isCoffeeModalOpen, setIsCoffeeModalOpen] = useState<boolean>(false);
+  const [coffeeEnabled, setCoffeeEnabled] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getCoffeeSettings()
+      .then((res) => {
+        if (!cancelled) setCoffeeEnabled(Boolean(res.enabled));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleManualRefresh = async () => {
     if (isRefreshing) return;
@@ -416,27 +433,42 @@ export const AppHome: React.FC = () => {
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStabilizeInitialToken(null);
-                    setIsStabilizeModalOpen(true);
-                  }}
-                  title="Convert held crypto to USDC or USDT"
-                  className="relative overflow-hidden inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700/80 text-xs font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group flex-shrink-0"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[6.5px] leading-[7.5px] tracking-[0.12em] text-white/20 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
+                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStabilizeInitialToken(null);
+                      setIsStabilizeModalOpen(true);
+                    }}
+                    title="Convert held crypto to USDC or USDT"
+                    className="relative overflow-hidden inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700/80 text-xs font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group"
                   >
-                    <span>░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░</span>
-                    <span>▒░╬─┼─USDC/USDT─┼─╬░▒▓█╬░</span>
-                    <span>▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓</span>
-                    <span>░▒▓█╬─┼─1CLICK─┼─╬█▓▒░▒▓█</span>
-                  </span>
-                  <ArrowLeftRight className="relative z-10 w-3.5 h-3.5 text-emerald-100 group-hover:text-white transition-colors drop-shadow-xs" />
-                  <span className="relative z-10 drop-shadow-xs">Stabilize</span>
-                </button>
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[6.5px] leading-[7.5px] tracking-[0.12em] text-white/20 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
+                    >
+                      <span>░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░</span>
+                      <span>▒░╬─┼─USDC/USDT─┼─╬░▒▓█╬░</span>
+                      <span>▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓</span>
+                      <span>░▒▓█╬─┼─1CLICK─┼─╬█▓▒░▒▓█</span>
+                    </span>
+                    <ArrowLeftRight className="relative z-10 w-3.5 h-3.5 text-emerald-100 group-hover:text-white transition-colors drop-shadow-xs" />
+                    <span className="relative z-10 drop-shadow-xs">Stabilize</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsCoffeeModalOpen(true)}
+                    title="Buy Me a Coffee — Public tip link"
+                    aria-label="Buy Me a Coffee"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-100 hover:bg-amber-50 text-stone-700 hover:text-amber-800 border border-stone-200 hover:border-amber-300/80 text-[11px] font-mono font-bold transition-all cursor-pointer shadow-2xs"
+                  >
+                    <Coffee className="w-3.5 h-3.5" />
+                    {coffeeEnabled && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
               </div>
               {/* The headline is a priced subtotal whenever any holding is
                   priced — a dash is useless. Say how much is missing so the
@@ -969,6 +1001,13 @@ export const AppHome: React.FC = () => {
         onSuccess={() => {
           void handleManualRefresh();
         }}
+      />
+
+      <CoffeeModal
+        isOpen={isCoffeeModalOpen}
+        onClose={() => setIsCoffeeModalOpen(false)}
+        xHandle={user?.handle || ''}
+        onStatusChange={(next) => setCoffeeEnabled(next)}
       />
     </div>
   );

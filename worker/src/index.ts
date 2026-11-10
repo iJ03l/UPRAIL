@@ -29,6 +29,7 @@ import { launchpadsRouter } from './routes/launchpads';
 import { ogRouter } from './routes/og';
 import { contactsRouter } from './routes/contacts';
 import { requestsRouter } from './routes/requests';
+import { coffeeRouter } from './routes/coffee';
 import { oauthRouter } from './routes/oauth';
 import { approvalRouter } from './routes/approval';
 import { getAuthorizationServer } from './oauth/authorization';
@@ -44,6 +45,7 @@ import {
 } from './services/confidentialRail';
 import { syncAllLaunchpadClaims } from './services/launchpadIntegrations';
 import { pruneExpiredAuthChallenges } from './services/maintenance';
+import { reconcilePendingCoffeeDonations } from './services/coffee';
 import {
   creatorFeeCardKeyValid,
   emptyCreatorFeeCardSummary,
@@ -232,6 +234,9 @@ apiRouter.route('/contacts', contactsRouter);
 // UPRAIL payment requests (peer-to-peer 𝕏 handle requests)
 apiRouter.route('/requests', requestsRouter);
 
+// Buy Me a Coffee public tip links & ephemeral cross-chain deposits
+apiRouter.route('/coffee', coffeeRouter);
+
 app.route('/api', apiRouter);
 
 // Dynamic social cards for share links (claim / invite / receipt / request).
@@ -256,6 +261,15 @@ const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
 
 // Payment request deep links: /request/<requestId> and /app/request/<requestId>
 const REQUEST_DEEP_LINK = /^\/(?:app\/)?request\/([A-Za-z0-9_-]{1,64})\/?$/;
+
+// Buy Me a Coffee handle deep links: uprail.world/<handle> or /tip/<handle>
+const COFFEE_HANDLE_RE = /^\/(?:tip\/)?@?([A-Za-z0-9_]{1,15})\/?$/;
+const RESERVED_ROOT_PATHS = new Set([
+  'app', 'api', 'auth', 'og', 'docs', 'login', 'parking', 'send', 'request',
+  'contacts', 'receive', 'claim', 'fees', 'agents', 'receipt', 'history',
+  'privacy', 'terms', 'invite', 'refer', 'tip', 'health', 'oauth',
+  'robots', 'sitemap', 'favicon',
+]);
 
 /**
  * Bump when the generated card artwork/layout changes. Social platforms cache
@@ -594,6 +608,50 @@ app.notFound(async (c) => {
       }
     }
 
+    // Buy Me a Coffee deep links: uprail.world/<handle> or /tip/<handle>
+    const coffeeMatch = !STATIC_ASSET_RE.test(url.pathname) ? url.pathname.match(COFFEE_HANDLE_RE) : null;
+    if (coffeeMatch && !RESERVED_ROOT_PATHS.has(coffeeMatch[1].toLowerCase())) {
+      const coffeeHandle = coffeeMatch[1].toLowerCase();
+      if (isBot) {
+        let displayHandle = coffeeHandle;
+        let enabled = false;
+        if (c.env.DB) {
+          try {
+            const row = await c.env.DB.prepare(
+              'SELECT x_handle, coffee_enabled FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1'
+            )
+              .bind(coffeeHandle)
+              .first<{ x_handle: string; coffee_enabled: number }>();
+            if (row) {
+              displayHandle = row.x_handle;
+              enabled = Number(row.coffee_enabled) === 1;
+            }
+          } catch {}
+        }
+        return renderShareCardHtml({
+          title: enabled
+            ? `Buy @${displayHandle} a coffee on UPRAIL`
+            : `Support @${displayHandle} on UPRAIL`,
+          description:
+            'Send USDC, USDT, SOL, ETH or BTC from 35+ blockchains in one tap — zero account or wallet connection needed.',
+          imageUrl: 'https://app.uprail.world/og/og-landing.png',
+          url: url.href,
+        });
+      }
+
+      const target = new URL('/tip', url);
+      target.search = url.search;
+      const assetResponse = await c.env.ASSETS.fetch(
+        new Request(target, {
+          method: 'GET',
+          headers: c.req.raw.headers,
+        })
+      );
+      if (assetResponse.ok) {
+        return assetResponse;
+      }
+    }
+
     if (isBot && !STATIC_ASSET_RE.test(url.pathname)) {
       // Invite links arrive as `/login?invite=CODE` (plus `/invite/CODE` and
       // legacy `/refer…` shapes), so the code lives in the query string, not
@@ -828,6 +886,16 @@ export default {
       }
     } catch (e) {
       console.warn('[cron] OAuth purge failed:', e);
+    }
+
+    // 9. Reconcile any pending Buy Me a Coffee cross-chain deposits.
+    try {
+      const coffee = await reconcilePendingCoffeeDonations(env, { limit: 20 });
+      if (coffee.completed > 0) {
+        console.log(`[cron] settled ${coffee.completed}/${coffee.checked} coffee donation(s)`);
+      }
+    } catch (e) {
+      console.warn('[cron] coffee donation reconciliation failed:', e);
     }
   },
 };

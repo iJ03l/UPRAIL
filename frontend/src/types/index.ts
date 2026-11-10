@@ -331,4 +331,66 @@ export interface StabilizeResult extends StabilizeQuote {
   shieldedAtomic: string;
 }
 
+export interface CoffeeChainOption {
+  chain: string;
+  chainName: string;
+  assetId: string;
+  decimals: number;
+  priceUsd?: number;
+}
+
+export interface CoffeeTokenOption {
+  symbol: string;
+  name: string;
+  isStable: boolean;
+  chains: CoffeeChainOption[];
+}
+
+export interface CoffeeCreatorProfile {
+  found: boolean;
+  enabled: boolean;
+  handle: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
+export interface CoffeeDonation {
+  id: string;
+  recipientHandle: string;
+  originSymbol: string;
+  originChain: string;
+  originChainName: string;
+  targetSymbol: string;
+  grossAmount: string;
+  amountToSend: string;
+  estimatedNetOut: string;
+  protocolFee: string;
+  feePercent: number;
+  depositAddress: string;
+  depositMemo?: string;
+  status: string;
+  payoutTxHash?: string | null;
+  intentHash?: string | null;
+  expiresAt: number;
+  createdAt: number;
+}
+
+export interface CoffeeSettingsResponse {
+  enabled: boolean;
+  handle: string;
+  url: string;
+  recentDonations: Array<{
+    id: string;
+    originSymbol: string;
+    originChain: string;
+    targetSymbol: string;
+    grossAmount: string;
+    netAmount: string;
+    protocolFee: string;
+    status: string;
+    payoutTxHash?: string | null;
+    createdAt: number;
+  }>;
+}
+
 

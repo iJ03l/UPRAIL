@@ -56,6 +56,12 @@ const ForbiddenOnApex: React.FC = () => (
  * Runs after mount so server-rendered HTML always matches the first client
  * render (static export has no server-side request context).
  */
+const COFFEE_PATH_RE = /^\/(?:tip\/)?@?([A-Za-z0-9_]{1,15})\/?$/;
+const APEX_REDIRECT_PATHS = new Set([
+  'login', 'parking', 'send', 'request', 'contacts', 'receive', 'claim',
+  'fees', 'agents', 'receipt', 'history', 'privacy', 'terms', 'invite', 'refer',
+]);
+
 export const DomainGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mode, setMode] = useState<GateMode | null>(null);
 
@@ -69,13 +75,19 @@ export const DomainGate: React.FC<{ children: React.ReactNode }> = ({ children }
       return;
     }
 
-    if (pathname === '/' || pathname === '') {
+    if (pathname === '/' || pathname === '' || pathname === '/tip' || pathname === '/tip/') {
       setMode('render');
       return;
     }
 
     if (pathname.startsWith('/app')) {
       setMode('forbidden');
+      return;
+    }
+
+    const coffeeMatch = pathname.match(COFFEE_PATH_RE);
+    if (coffeeMatch && !APEX_REDIRECT_PATHS.has(coffeeMatch[1].toLowerCase())) {
+      setMode('render');
       return;
     }
 

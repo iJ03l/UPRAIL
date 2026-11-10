@@ -1937,6 +1937,87 @@ export const api = {
     }
     return data;
   },
+
+  async getCoffeeSettings(): Promise<import('../types').CoffeeSettingsResponse> {
+    const base = API_BASE ? `${API_BASE}/api/coffee/me` : '/api/coffee/me';
+    const res = await fetch(base, { method: 'GET', credentials: 'include' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load Buy Me a Coffee settings');
+    }
+    return data;
+  },
+
+  async toggleCoffee(enabled?: boolean): Promise<{ enabled: boolean; handle: string; url: string }> {
+    const base = API_BASE ? `${API_BASE}/api/coffee/toggle` : '/api/coffee/toggle';
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(typeof enabled === 'boolean' ? { enabled } : {}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to update Buy Me a Coffee status');
+    }
+    return data;
+  },
+
+  async getCoffeeProfile(handle: string): Promise<import('../types').CoffeeCreatorProfile> {
+    const clean = (handle || '').trim().replace(/^@+/, '');
+    const base = API_BASE
+      ? `${API_BASE}/api/coffee/profile/${encodeURIComponent(clean)}`
+      : `/api/coffee/profile/${encodeURIComponent(clean)}`;
+    const res = await fetch(base, { method: 'GET' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load creator profile');
+    }
+    return data;
+  },
+
+  async getCoffeeOptions(): Promise<import('../types').CoffeeTokenOption[]> {
+    const base = API_BASE ? `${API_BASE}/api/coffee/options` : '/api/coffee/options';
+    const res = await fetch(base, { method: 'GET' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load token options');
+    }
+    return data.tokens || [];
+  },
+
+  async createCoffeeDonation(params: {
+    handle: string;
+    amountUsd: number;
+    originSymbol: string;
+    originChain: string;
+    originAsset?: string;
+    targetSymbol?: 'USDC' | 'USDT';
+  }): Promise<import('../types').CoffeeDonation> {
+    const base = API_BASE ? `${API_BASE}/api/coffee/donate` : '/api/coffee/donate';
+    const res = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to generate deposit address');
+    }
+    return data.donation;
+  },
+
+  async getCoffeeDonationStatus(donationId: string): Promise<import('../types').CoffeeDonation> {
+    const base = API_BASE
+      ? `${API_BASE}/api/coffee/status/${encodeURIComponent(donationId)}`
+      : `/api/coffee/status/${encodeURIComponent(donationId)}`;
+    const res = await fetch(base, { method: 'GET' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to check donation status');
+    }
+    return data.donation;
+  },
 };
 
 /**
