@@ -18,7 +18,6 @@ import {
   AlertCircle,
   ExternalLink,
   Clock,
-  Coffee,
 } from 'lucide-react';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
@@ -38,7 +37,7 @@ import type { PaymentIntent, PaymentRequest, Token } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
 import { StabilizeModal } from '../components/StabilizeModal';
-import { CoffeeModal } from '../components/CoffeeModal';
+import { CoffeeModal, SolidCoffeeIcon } from '../components/CoffeeModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
@@ -78,20 +77,6 @@ export const AppHome: React.FC = () => {
   const [isStabilizeModalOpen, setIsStabilizeModalOpen] = useState<boolean>(false);
   const [stabilizeInitialToken, setStabilizeInitialToken] = useState<Token | null>(null);
   const [isCoffeeModalOpen, setIsCoffeeModalOpen] = useState<boolean>(false);
-  const [coffeeEnabled, setCoffeeEnabled] = useState<boolean>(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getCoffeeSettings()
-      .then((res) => {
-        if (!cancelled) setCoffeeEnabled(Boolean(res.enabled));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const handleManualRefresh = async () => {
     if (isRefreshing) return;
@@ -461,12 +446,9 @@ export const AppHome: React.FC = () => {
                     onClick={() => setIsCoffeeModalOpen(true)}
                     title="Buy Me a Coffee — Public tip link"
                     aria-label="Buy Me a Coffee"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-stone-100 hover:bg-amber-50 text-stone-700 hover:text-amber-800 border border-stone-200 hover:border-amber-300/80 text-[11px] font-mono font-bold transition-all cursor-pointer shadow-2xs"
+                    className="inline-flex items-center justify-center p-2 rounded-xl bg-stone-100 hover:bg-amber-50 dark:hover:bg-amber-950/50 text-stone-800 hover:text-amber-700 dark:hover:text-amber-300 border border-stone-200 hover:border-amber-300/80 dark:hover:border-amber-800/70 transition-all cursor-pointer shadow-2xs"
                   >
-                    <Coffee className="w-3.5 h-3.5" />
-                    {coffeeEnabled && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
-                    )}
+                    <SolidCoffeeIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -1007,7 +989,6 @@ export const AppHome: React.FC = () => {
         isOpen={isCoffeeModalOpen}
         onClose={() => setIsCoffeeModalOpen(false)}
         xHandle={user?.handle || ''}
-        onStatusChange={(next) => setCoffeeEnabled(next)}
       />
     </div>
   );

@@ -1948,13 +1948,19 @@ export const api = {
     return data;
   },
 
-  async toggleCoffee(enabled?: boolean): Promise<{ enabled: boolean; handle: string; url: string }> {
+  async toggleCoffee(params: {
+    enabled?: boolean;
+    passkeyAssertion: unknown;
+  }): Promise<{ enabled: boolean; handle: string; url: string }> {
     const base = API_BASE ? `${API_BASE}/api/coffee/toggle` : '/api/coffee/toggle';
     const res = await fetch(base, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(typeof enabled === 'boolean' ? { enabled } : {}),
+      body: JSON.stringify({
+        ...(typeof params.enabled === 'boolean' ? { enabled: params.enabled } : {}),
+        passkeyAssertion: params.passkeyAssertion,
+      }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {

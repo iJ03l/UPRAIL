@@ -13,7 +13,7 @@
 import { Hono, type Context } from 'hono';
 import type { AppContext } from '../types';
 import { grossPaymentAmount, plainAmount, resolveShareTicker } from '../services/share';
-import { renderOgCard } from '../services/ogCard';
+import { renderOgCard, renderCoffeeOgCard } from '../services/ogCard';
 import {
   creatorFeeCardKeyValid,
   emptyCreatorFeeCardSummary,
@@ -233,6 +233,73 @@ ogRouter.get('/request/:file', (c) => {
       headline: amountLabel || 'Payment requested',
       subline: requester ? `requested by @${requester}` : 'via UPRAIL',
       detail,
+    });
+  });
+});
+
+async function fetchAvatarDataUri(urls: string[]): Promise<string | null> {
+  for (const rawUrl of urls) {
+    if (!rawUrl) continue;
+    try {
+      const resp = await fetch(rawUrl, {
+        signal: AbortSignal.timeout(2500),
+        headers: { 'User-Agent': 'UPRAIL-OG/1.0' },
+      });
+      if (!resp.ok) continue;
+      const ct = (resp.headers.get('content-type') || '').toLowerCase().split(';')[0].trim();
+      if (ct !== 'image/png' && ct !== 'image/jpeg' && ct !== 'image/jpg' && ct !== 'image/gif') {
+        continue;
+      }
+      const buf = await resp.arrayBuffer();
+      if (!buf.byteLength || buf.byteLength > 512 * 1024) continue;
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 8192) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      }
+      const mime = ct === 'image/jpg' ? 'image/jpeg' : ct;
+      return `data:${mime};base64,${btoa(bin)}`;
+    } catch {
+      /* try next fallback */
+    }
+  }
+  return null;
+}
+
+ogRouter.get('/coffee/:file', (c) => {
+  const handle = pngId(c.req.param('file')).toLowerCase();
+  if (!handle) return c.text('Not found', 404);
+
+  return cached(c, async () => {
+    let displayHandle = handle;
+    let displayName = handle;
+    let dbAvatarUrl: string | null = null;
+    try {
+      const row = await c.env.DB.prepare(
+        'SELECT x_handle, x_name, avatar_url FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1'
+      )
+        .bind(handle)
+        .first<{ x_handle: string; x_name: string | null; avatar_url: string | null }>();
+      if (row) {
+        displayHandle = row.x_handle || handle;
+        displayName = row.x_name || displayHandle;
+        dbAvatarUrl = row.avatar_url || null;
+      }
+    } catch {}
+
+    const avatarDataUri = await fetchAvatarDataUri(
+      [
+        dbAvatarUrl || '',
+        `https://unavatar.io/x/${encodeURIComponent(displayHandle)}`,
+        `https://unavatar.io/twitter/${encodeURIComponent(displayHandle)}`,
+      ].filter(Boolean)
+    );
+
+    return renderCoffeeOgCard({
+      handle: displayHandle,
+      name: displayName,
+      avatarDataUri,
+      cacheControl: 'public, max-age=300, s-maxage=300',
     });
   });
 });

@@ -2,19 +2,24 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Coffee,
   Copy,
   Check,
   Loader2,
-  Shield,
+  Unlock,
   ArrowLeft,
   CheckCircle2,
   Clock,
   ChevronDown,
   AlertCircle,
   ExternalLink,
+  Sun,
+  Moon,
+  Bot,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { GlitchLogo } from '../components/GlitchLogo';
+import { useTheme } from '../components/ThemeProvider';
+import { SolidCoffeeIcon } from '../components/CoffeeModal';
 import { TokenIcon } from '../components/TokenIcon';
 import { ChainLogo } from '../components/ChainLogo';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
@@ -55,8 +60,16 @@ function formatCountdown(expiresAt: number, now: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+function shortenId(id: string): string {
+  if (!id || id.length <= 18) return id;
+  return `${id.slice(0, 8)}…${id.slice(-6)}`;
+}
+
 export const PublicCoffeeView: React.FC = () => {
   const { toast } = useToast();
+  const { resolved, setMode } = useTheme();
+  const isDark = resolved === 'dark';
+
   const [handle, setHandle] = useState<string>('');
   const [profile, setProfile] = useState<CoffeeCreatorProfile | null>(null);
   const [tokens, setTokens] = useState<CoffeeTokenOption[]>([]);
@@ -76,6 +89,8 @@ export const PublicCoffeeView: React.FC = () => {
   const [donation, setDonation] = useState<CoffeeDonation | null>(null);
   const [copiedAddr, setCopiedAddr] = useState(false);
   const [copiedMemo, setCopiedMemo] = useState(false);
+  const [copiedReceiptId, setCopiedReceiptId] = useState(false);
+  const [showAgentInfo, setShowAgentInfo] = useState(false);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   useEffect(() => {
@@ -90,11 +105,21 @@ export const PublicCoffeeView: React.FC = () => {
     setIsLoading(true);
     setLoadError(null);
 
-    Promise.all([api.getCoffeeProfile(h), api.getCoffeeOptions()])
-      .then(([prof, opts]) => {
+    const search = new URLSearchParams(window.location.search);
+    const receiptId = search.get('receipt');
+
+    Promise.all([
+      api.getCoffeeProfile(h),
+      api.getCoffeeOptions(),
+      receiptId ? api.getCoffeeDonationStatus(receiptId).catch(() => null) : Promise.resolve(null),
+    ])
+      .then(([prof, opts, existingReceipt]) => {
         if (cancelled) return;
         setProfile(prof);
         setTokens(opts);
+        if (existingReceipt) {
+          setDonation(existingReceipt);
+        }
         if (opts.length > 0) {
           const usdc = opts.find((t) => t.symbol === 'USDC') || opts[0];
           setSelectedSymbol(usdc.symbol);
@@ -209,15 +234,18 @@ export const PublicCoffeeView: React.FC = () => {
     }
   };
 
-  const copyText = async (text: string, which: 'addr' | 'memo') => {
+  const copyText = async (text: string, which: 'addr' | 'memo' | 'receipt' | 'agent') => {
     try {
       await navigator.clipboard.writeText(text);
       if (which === 'addr') {
         setCopiedAddr(true);
         setTimeout(() => setCopiedAddr(false), 2000);
-      } else {
+      } else if (which === 'memo') {
         setCopiedMemo(true);
         setTimeout(() => setCopiedMemo(false), 2000);
+      } else if (which === 'receipt') {
+        setCopiedReceiptId(true);
+        setTimeout(() => setCopiedReceiptId(false), 2000);
       }
       toast('Copied to clipboard');
     } catch {
@@ -225,30 +253,69 @@ export const PublicCoffeeView: React.FC = () => {
     }
   };
 
+  const agentCurlSnippet = profile
+    ? `curl -sS -X POST https://uprail.world/${profile.handle} -H "Content-Type: application/json" -d '{"amountUsd":${effectiveAmountUsd || 5},"originSymbol":"${activeToken?.symbol || 'USDC'}","originChain":"${activeChainObj?.chain || 'base'}"}'`
+    : '';
+
+  const structuredPaymentMeta = profile
+    ? JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'PayAction',
+        protocol: 'uprail-coffee-v1',
+        recipient: `@${profile.handle}`,
+        url: `https://uprail.world/${profile.handle}`,
+        authRequired: false,
+        payEndpoint: `https://uprail.world/${profile.handle}`,
+        discoveryEndpoint: `https://uprail.world/${profile.handle}?format=json`,
+        acceptedBody: {
+          amountUsd: 'number (>= 1)',
+          originSymbol: 'USDC | USDT | SOL | ETH | NEAR | BTC',
+          originChain: 'base | arbitrum | solana | ethereum | polygon | near | ...',
+        },
+        statusEndpointTemplate: 'https://api.uprail.world/api/coffee/status/{id}',
+      })
+    : null;
+
   return (
-    <div className="min-h-screen bg-[#F7F5F0] text-stone-950 flex flex-col justify-between font-sans selection:bg-stone-900 selection:text-white">
-      {/* Minimal Top Bar */}
-      <header className="w-full max-w-2xl mx-auto px-4 sm:px-6 pt-5 pb-2 flex items-center justify-between">
-        <a
-          href="https://uprail.world"
-          className="inline-flex items-center gap-2 text-stone-950 hover:opacity-80 transition-opacity"
-        >
-          <span className="w-6 h-6 rounded-lg bg-stone-950 text-white font-display font-black text-xs flex items-center justify-center tracking-tighter">
-            UP
-          </span>
-          <span className="font-display font-extrabold text-sm tracking-tight">
-            UPRAIL
-          </span>
-        </a>
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-stone-200/80 text-[10px] font-mono text-stone-500 uppercase tracking-wider">
-          <Shield className="w-3 h-3 text-emerald-600" />
-          <span>No login needed</span>
-        </span>
+    <div
+      className="min-h-screen bg-surface text-stone-900 flex flex-col justify-between font-sans selection:bg-stone-900 selection:text-white"
+      data-uprail-agent-pay={profile?.enabled ? `https://uprail.world/${profile.handle}` : undefined}
+    >
+      {structuredPaymentMeta && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: structuredPaymentMeta }}
+        />
+      )}
+
+      {/* Responsive Header — Real UPRAIL Logo, Fixed Icon Pill & Theme Toggle */}
+      <header className="sticky top-0 z-30 w-full border-b border-stone-200/80 bg-surface-glass backdrop-blur-md">
+        <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 h-16 sm:h-[72px] flex items-center justify-between gap-2">
+          <GlitchLogo href="/" size="sm" className="sm:hidden flex-shrink-0" />
+          <GlitchLogo href="/" size="md" className="hidden sm:inline-flex flex-shrink-0" />
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-white border border-stone-200/80 text-[10px] sm:text-[11px] font-mono text-stone-600 shadow-2xs">
+              <Unlock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+              <span>No login needed</span>
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setMode(isDark ? 'light' : 'dark')}
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-stone-100 border border-stone-200/80 flex items-center justify-center text-stone-600 hover:text-stone-950 transition-colors cursor-pointer"
+            >
+              {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </div>
       </header>
 
       {/* Main Centered Container */}
       <main className="flex-1 flex items-center justify-center px-4 py-6 sm:py-10">
-        <div className="w-full max-w-md">
+        <div className="w-full max-w-md space-y-3">
           {isLoading ? (
             <div className="bg-white rounded-3xl border border-stone-200/90 shadow-sm p-10 flex flex-col items-center justify-center gap-3">
               <Loader2 className="w-6 h-6 animate-spin text-stone-400" />
@@ -262,14 +329,14 @@ export const PublicCoffeeView: React.FC = () => {
           ) : !profile?.found ? (
             <div className="bg-white rounded-3xl border border-stone-200/90 shadow-sm p-8 text-center space-y-4">
               <div className="w-12 h-12 rounded-2xl bg-stone-100 flex items-center justify-center mx-auto text-stone-500">
-                <Coffee className="w-6 h-6" />
+                <SolidCoffeeIcon className="w-6 h-6" />
               </div>
               <div className="space-y-1">
                 <h1 className="text-lg font-display font-extrabold text-stone-950">
                   {handle ? `@${handle} isn’t on UPRAIL yet` : 'Creator not found'}
                 </h1>
                 <p className="text-xs text-stone-500 leading-relaxed">
-                  You can still send money to any X handle via UPRAIL’s private escrow.
+                  You can still send money to any X handle privately on UPRAIL.
                 </p>
               </div>
               <a
@@ -294,7 +361,7 @@ export const PublicCoffeeView: React.FC = () => {
                   @{profile.handle}
                 </h1>
                 <p className="text-xs text-stone-500 leading-relaxed">
-                  This creator hasn’t toggled on their Buy Me a Coffee page yet.
+                  This creator hasn’t activated their payment page yet.
                 </p>
               </div>
               <a
@@ -305,9 +372,9 @@ export const PublicCoffeeView: React.FC = () => {
               </a>
             </div>
           ) : donation ? (
-            /* ─── STANDBY EPHEMERAL WALLET VIEW ───────────────────────────────── */
+            /* ─── STANDBY WALLET OR MINIMAL RECEIPT VIEW ───────────────────── */
             <div className="bg-white rounded-3xl border border-stone-200/90 shadow-sm overflow-hidden animate-in fade-in duration-200">
-              {/* Top Creator Strip */}
+              {/* Top Strip */}
               <div className="px-6 py-4 bg-stone-50/80 border-b border-stone-100 flex items-center justify-between gap-3">
                 <button
                   type="button"
@@ -332,22 +399,70 @@ export const PublicCoffeeView: React.FC = () => {
               </div>
 
               {donation.status === 'COMPLETED' ? (
-                <div className="p-7 text-center space-y-5">
-                  <div className="w-14 h-14 rounded-3xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto text-emerald-600">
-                    <CheckCircle2 className="w-7 h-7" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <h2 className="text-xl font-display font-extrabold text-stone-950">
-                      Coffee Delivered!
-                    </h2>
-                    <p className="text-xs sm:text-sm text-stone-600">
-                      <strong className="font-mono text-stone-950">
-                        {donation.estimatedNetOut} {donation.targetSymbol}
-                      </strong>{' '}
-                      has been settled privately to{' '}
-                      <strong className="text-stone-950">@{donation.recipientHandle}</strong>.
+                /* ─── MINIMAL COFFEE RECEIPT (ZERO MENTION OF ESCROW) ──────── */
+                <div className="p-6 sm:p-7 space-y-6">
+                  <div className="text-center space-y-2.5">
+                    <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto text-emerald-600">
+                      <CheckCircle2 className="w-7 h-7" />
+                    </div>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-700">
+                      Receipt · Delivered
+                    </span>
+                    <div className="text-3xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums font-mono">
+                      {donation.estimatedNetOut} {donation.targetSymbol}
+                    </div>
+                    <p className="text-xs text-stone-500">
+                      Delivered privately to <span className="font-semibold text-stone-900">@{donation.recipientHandle}</span>
                     </p>
                   </div>
+
+                  {/* Minimal Hairline Receipt Table */}
+                  <div className="rounded-2xl bg-stone-50 border border-stone-200/80 divide-y divide-stone-200/70 text-xs font-mono">
+                    <div className="flex items-center justify-between px-4 py-3 gap-2">
+                      <span className="text-stone-500">To</span>
+                      <span className="font-bold text-stone-900">@{donation.recipientHandle}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 gap-2">
+                      <span className="text-stone-500">Paid</span>
+                      <span className="font-semibold text-stone-900 tabular-nums">
+                        {donation.amountToSend} {donation.originSymbol}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 gap-2">
+                      <span className="text-stone-500">Network</span>
+                      <span className="font-semibold text-stone-900">{donation.originChainName}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 gap-2">
+                      <span className="text-stone-500">Receipt</span>
+                      <button
+                        type="button"
+                        onClick={() => void copyText(donation.id, 'receipt')}
+                        className="inline-flex items-center gap-1.5 font-semibold text-stone-900 hover:text-stone-600 cursor-pointer"
+                      >
+                        <span>{shortenId(donation.id)}</span>
+                        {copiedReceiptId ? (
+                          <Check className="w-3 h-3 text-emerald-600" />
+                        ) : (
+                          <Copy className="w-3 h-3 text-stone-400" />
+                        )}
+                      </button>
+                    </div>
+                    {donation.payoutTxHash && !donation.payoutTxHash.startsWith('agent:') && (
+                      <div className="flex items-center justify-between px-4 py-3 gap-2">
+                        <span className="text-stone-500">Proof</span>
+                        <a
+                          href={`https://nearblocks.io/txns/${donation.payoutTxHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-semibold text-stone-900 hover:underline"
+                        >
+                          <span>{shortenId(donation.payoutTxHash)}</span>
+                          <ExternalLink className="w-3 h-3 text-stone-400" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => setDonation(null)}
@@ -378,11 +493,11 @@ export const PublicCoffeeView: React.FC = () => {
               ) : (
                 <div className="p-6 space-y-5">
                   {/* Live Standby Banner */}
-                  <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-amber-50/90 border border-amber-200/80 text-amber-900">
+                  <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-amber-900 dark:text-amber-200">
                     <div className="flex items-center gap-2 text-xs font-mono font-semibold">
                       {donation.status === 'PROCESSING' || donation.status === 'SETTLING' ? (
                         <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700 dark:text-amber-300" />
                           <span>Deposit detected · Delivering…</span>
                         </>
                       ) : (
@@ -392,7 +507,7 @@ export const PublicCoffeeView: React.FC = () => {
                         </>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 text-[11px] font-mono text-amber-700">
+                    <div className="flex items-center gap-1 text-[11px] font-mono text-amber-700 dark:text-amber-300">
                       <Clock className="w-3 h-3" />
                       <span>{formatCountdown(donation.expiresAt, nowMs)}</span>
                     </div>
@@ -411,9 +526,9 @@ export const PublicCoffeeView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* QR Code */}
+                  {/* QR Code — crisp white backing for scannability in both dark & light themes */}
                   <div className="flex justify-center">
-                    <div className="p-3 bg-white rounded-2xl border border-stone-200 shadow-2xs">
+                    <div className="p-3 bg-white rounded-2xl border border-stone-200 shadow-2xs" style={{ backgroundColor: '#ffffff' }}>
                       <QRCodeDisplay value={donation.depositAddress} size={172} />
                     </div>
                   </div>
@@ -444,10 +559,10 @@ export const PublicCoffeeView: React.FC = () => {
 
                   {donation.depositMemo && (
                     <div className="space-y-1.5">
-                      <label className="block text-[10px] font-mono uppercase tracking-wider text-amber-700 font-bold">
+                      <label className="block text-[10px] font-mono uppercase tracking-wider text-amber-700 dark:text-amber-300 font-bold">
                         Required Memo / Tag
                       </label>
-                      <div className="flex items-center gap-2 p-2.5 pl-3.5 rounded-2xl bg-amber-50 border border-amber-200">
+                      <div className="flex items-center gap-2 p-2.5 pl-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60">
                         <span className="font-mono text-xs text-stone-950 flex-1 select-all">
                           {donation.depositMemo}
                         </span>
@@ -466,11 +581,11 @@ export const PublicCoffeeView: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Fee & Settlement Breakdown */}
+                  {/* Settlement destination note (no fee percentage text) */}
                   <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-[11px] font-mono text-stone-500">
-                    <span>Creator receives (after 1% fee)</span>
+                    <span>@{donation.recipientHandle} receives</span>
                     <span className="font-semibold text-stone-900">
-                      ~{donation.estimatedNetOut} {donation.targetSymbol}
+                      {donation.estimatedNetOut} {donation.targetSymbol}
                     </span>
                   </div>
                 </div>
@@ -478,237 +593,270 @@ export const PublicCoffeeView: React.FC = () => {
             </div>
           ) : (
             /* ─── SELECTION FORM (AMOUNT + TOKEN + CHAIN + CONFIRM) ────────── */
-            <div className="bg-white rounded-3xl border border-stone-200/90 shadow-sm p-5 sm:p-7 space-y-6">
-              {/* Creator Identity */}
-              <div className="flex items-center gap-3.5">
-                {profile.avatarUrl ? (
-                  <img
-                    src={profile.avatarUrl}
-                    alt={profile.handle}
-                    className="w-12 h-12 rounded-2xl object-cover border border-stone-200 flex-shrink-0"
-                  />
-                ) : (
-                  <div className="w-12 h-12 rounded-2xl bg-stone-950 text-white flex items-center justify-center font-display font-bold text-lg flex-shrink-0">
-                    {profile.handle.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200/70 text-amber-800 text-[10px] font-mono font-bold uppercase tracking-wider mb-1">
-                    <Coffee className="w-3 h-3" />
-                    <span>Buy a coffee</span>
-                  </div>
-                  <h1 className="text-lg sm:text-xl font-display font-extrabold text-stone-950 tracking-tight truncate">
-                    @{profile.handle}
-                  </h1>
-                </div>
-              </div>
-
-              {/* 1. Prefilled Amounts + Custom */}
-              <div className="space-y-2">
-                <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
-                  Amount (USD)
-                </label>
-                <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
-                  {PRESET_AMOUNTS.map((amt) => {
-                    const active = selectedPreset === amt;
-                    return (
-                      <button
-                        key={amt}
-                        type="button"
-                        onClick={() => setSelectedPreset(amt)}
-                        className={`py-2.5 rounded-2xl text-xs sm:text-sm font-display font-bold transition-all cursor-pointer border ${
-                          active
-                            ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
-                            : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
-                        }`}
-                      >
-                        ${amt}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPreset('custom')}
-                    className={`py-2.5 rounded-2xl text-xs font-display font-bold transition-all cursor-pointer border ${
-                      selectedPreset === 'custom'
-                        ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
-                        : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
-                    }`}
-                  >
-                    Custom
-                  </button>
-                </div>
-
-                {selectedPreset === 'custom' && (
-                  <div className="relative mt-2 animate-in fade-in duration-150">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono text-sm font-bold text-stone-400">
-                      $
-                    </span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="10000"
-                      step="any"
-                      value={customAmount}
-                      onChange={(e) => setCustomAmount(e.target.value)}
-                      placeholder="Enter USD amount"
-                      className="w-full pl-8 pr-4 py-2.5 rounded-2xl bg-stone-50 border border-stone-200 focus:border-stone-950 focus:bg-white outline-none font-mono text-sm font-bold text-stone-950 transition-colors"
+            <>
+              <div className="bg-white rounded-3xl border border-stone-200/90 shadow-sm p-5 sm:p-7 space-y-6">
+                {/* Creator Identity */}
+                <div className="flex items-center gap-3.5">
+                  {profile.avatarUrl ? (
+                    <img
+                      src={profile.avatarUrl}
+                      alt={profile.handle}
+                      className="w-12 h-12 rounded-2xl object-cover border border-stone-200 flex-shrink-0"
                     />
-                  </div>
-                )}
-              </div>
-
-              {/* 2. Token Picker (USDC & USDT pinned on top) */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-mono uppercase tracking-wider text-stone-500">
-                    Token
-                  </label>
-                  {otherTokens.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowMoreTokens((v) => !v)}
-                      className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
-                    >
-                      <span>{showMoreTokens ? 'Hide others' : 'More tokens'}</span>
-                      <ChevronDown
-                        className={`w-3 h-3 transition-transform ${
-                          showMoreTokens ? 'rotate-180' : ''
-                        }`}
-                      />
-                    </button>
-                  )}
-                </div>
-
-                {/* USDC & USDT always pinned on top */}
-                <div className="grid grid-cols-2 gap-2">
-                  {pinnedStables.map((t) => {
-                    const active = selectedSymbol === t.symbol;
-                    return (
-                      <button
-                        key={t.symbol}
-                        type="button"
-                        onClick={() => handleSelectToken(t.symbol)}
-                        className={`flex items-center gap-2.5 p-3 rounded-2xl border text-left transition-all cursor-pointer ${
-                          active
-                            ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
-                            : 'bg-stone-50 hover:bg-stone-100 text-stone-900 border-stone-200/80'
-                        }`}
-                      >
-                        <TokenIcon symbol={t.symbol} size="sm" />
-                        <div className="min-w-0">
-                          <div className="text-xs font-display font-extrabold leading-tight">
-                            {t.symbol}
-                          </div>
-                          <div
-                            className={`text-[10px] font-mono truncate ${
-                              active ? 'text-stone-300' : 'text-stone-500'
-                            }`}
-                          >
-                            {t.name}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Other tokens toggleable */}
-                {(showMoreTokens ||
-                  (selectedSymbol !== 'USDC' && selectedSymbol !== 'USDT')) &&
-                  otherTokens.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1 animate-in fade-in duration-150">
-                      {otherTokens.map((t) => {
-                        const active = selectedSymbol === t.symbol;
-                        return (
-                          <button
-                            key={t.symbol}
-                            type="button"
-                            onClick={() => handleSelectToken(t.symbol)}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-semibold transition-all cursor-pointer ${
-                              active
-                                ? 'bg-stone-950 text-white border-stone-950'
-                                : 'bg-white hover:bg-stone-50 text-stone-700 border-stone-200'
-                            }`}
-                          >
-                            <TokenIcon symbol={t.symbol} size={14} />
-                            <span>{t.symbol}</span>
-                          </button>
-                        );
-                      })}
+                  ) : (
+                    <div className="w-12 h-12 rounded-2xl bg-stone-950 text-white flex items-center justify-center font-display font-bold text-lg flex-shrink-0">
+                      {profile.handle.charAt(0).toUpperCase()}
                     </div>
                   )}
-              </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 text-[10px] font-mono font-bold uppercase tracking-wider mb-1">
+                      <SolidCoffeeIcon className="w-3 h-3" />
+                      <span>Buy a coffee</span>
+                    </div>
+                    <h1 className="text-lg sm:text-xl font-display font-extrabold text-stone-950 tracking-tight truncate">
+                      @{profile.handle}
+                    </h1>
+                  </div>
+                </div>
 
-              {/* 3. Chain Picker */}
-              <div className="space-y-2">
-                <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
-                  Sending From Chain
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-0.5">
-                  {availableChains.map((c) => {
-                    const active = activeChainObj?.chain === c.chain;
-                    return (
+                {/* 1. Prefilled Amounts + Custom */}
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
+                    Amount (USD)
+                  </label>
+                  <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+                    {PRESET_AMOUNTS.map((amt) => {
+                      const active = selectedPreset === amt;
+                      return (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setSelectedPreset(amt)}
+                          className={`py-2.5 rounded-2xl text-xs sm:text-sm font-display font-bold transition-all cursor-pointer border ${
+                            active
+                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                              : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
+                          }`}
+                        >
+                          ${amt}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPreset('custom')}
+                      className={`py-2.5 rounded-2xl text-xs font-display font-bold transition-all cursor-pointer border ${
+                        selectedPreset === 'custom'
+                          ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
+                      }`}
+                    >
+                      Custom
+                    </button>
+                  </div>
+
+                  {selectedPreset === 'custom' && (
+                    <div className="relative mt-2 animate-in fade-in duration-150">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono text-sm font-bold text-stone-400">
+                        $
+                      </span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10000"
+                        step="any"
+                        value={customAmount}
+                        onChange={(e) => setCustomAmount(e.target.value)}
+                        placeholder="Enter USD amount"
+                        className="w-full pl-8 pr-4 py-2.5 rounded-2xl bg-stone-50 border border-stone-200 focus:border-stone-950 focus:bg-white outline-none font-mono text-sm font-bold text-stone-950 transition-colors"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Token Picker (USDC & USDT pinned on top) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-mono uppercase tracking-wider text-stone-500">
+                      Token
+                    </label>
+                    {otherTokens.length > 0 && (
                       <button
-                        key={c.chain}
                         type="button"
-                        onClick={() => setSelectedChain(c.chain)}
-                        className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                          active
-                            ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
-                            : 'bg-stone-50 hover:bg-stone-100 text-stone-800 border-stone-200/80'
-                        }`}
+                        onClick={() => setShowMoreTokens((v) => !v)}
+                        className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
                       >
-                        <ChainLogo chainId={c.chain} className="w-4 h-4 flex-shrink-0" />
-                        <span className="text-xs font-display font-bold truncate">
-                          {c.chainName}
-                        </span>
+                        <span>{showMoreTokens ? 'Hide others' : 'More tokens'}</span>
+                        <ChevronDown
+                          className={`w-3 h-3 transition-transform ${
+                            showMoreTokens ? 'rotate-180' : ''
+                          }`}
+                        />
                       </button>
-                    );
-                  })}
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    {pinnedStables.map((t) => {
+                      const active = selectedSymbol === t.symbol;
+                      return (
+                        <button
+                          key={t.symbol}
+                          type="button"
+                          onClick={() => handleSelectToken(t.symbol)}
+                          className={`flex items-center gap-2.5 p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                            active
+                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                              : 'bg-stone-50 hover:bg-stone-100 text-stone-900 border-stone-200/80'
+                          }`}
+                        >
+                          <TokenIcon symbol={t.symbol} size="sm" />
+                          <div className="min-w-0">
+                            <div className="text-xs font-display font-extrabold leading-tight">
+                              {t.symbol}
+                            </div>
+                            <div
+                              className={`text-[10px] font-mono truncate ${
+                                active ? 'text-stone-300' : 'text-stone-500'
+                              }`}
+                            >
+                              {t.name}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {(showMoreTokens ||
+                    (selectedSymbol !== 'USDC' && selectedSymbol !== 'USDT')) &&
+                    otherTokens.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1 animate-in fade-in duration-150">
+                        {otherTokens.map((t) => {
+                          const active = selectedSymbol === t.symbol;
+                          return (
+                            <button
+                              key={t.symbol}
+                              type="button"
+                              onClick={() => handleSelectToken(t.symbol)}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-semibold transition-all cursor-pointer ${
+                                active
+                                  ? 'bg-stone-950 text-white border-stone-950'
+                                  : 'bg-white hover:bg-stone-50 text-stone-700 border-stone-200'
+                              }`}
+                            >
+                              <TokenIcon symbol={t.symbol} size={14} />
+                              <span>{t.symbol}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                </div>
+
+                {/* 3. Chain Picker */}
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
+                    Sending From Chain
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-0.5">
+                    {availableChains.map((c) => {
+                      const active = activeChainObj?.chain === c.chain;
+                      return (
+                        <button
+                          key={c.chain}
+                          type="button"
+                          onClick={() => setSelectedChain(c.chain)}
+                          className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                            active
+                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                              : 'bg-stone-50 hover:bg-stone-100 text-stone-800 border-stone-200/80'
+                          }`}
+                        >
+                          <ChainLogo chainId={c.chain} className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-xs font-display font-bold truncate">
+                            {c.chainName}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {donateError && (
+                  <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs font-mono text-red-700 dark:text-red-300">
+                    {donateError}
+                  </div>
+                )}
+
+                {/* 4. Confirm Button */}
+                <div className="space-y-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => void handleConfirm()}
+                    disabled={isCreating || effectiveAmountUsd < 1 || !activeChainObj}
+                    className="w-full py-3.5 px-5 rounded-2xl bg-stone-950 hover:bg-stone-800 disabled:bg-stone-300 text-white font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isCreating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Preparing deposit address…</span>
+                      </>
+                    ) : (
+                      <>
+                        <SolidCoffeeIcon className="w-4 h-4" />
+                        <span>
+                          Confirm · ${effectiveAmountUsd > 0 ? effectiveAmountUsd : '0'}{' '}
+                          {activeToken?.symbol || 'USDC'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                  <p className="text-center text-[11px] font-mono text-stone-400">
+                    Reveals a one-time deposit address · Settled privately to @{profile.handle}
+                  </p>
                 </div>
               </div>
 
-              {donateError && (
-                <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-xs font-mono text-red-700">
-                  {donateError}
-                </div>
-              )}
-
-              {/* 4. Confirm Button */}
-              <div className="space-y-2.5 pt-1">
+              {/* Unobtrusive Agent Pay Endpoint Disclosure */}
+              <div className="text-center">
                 <button
                   type="button"
-                  onClick={() => void handleConfirm()}
-                  disabled={isCreating || effectiveAmountUsd < 1 || !activeChainObj}
-                  className="w-full py-3.5 px-5 rounded-2xl bg-stone-950 hover:bg-stone-800 disabled:bg-stone-300 text-white font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  onClick={() => setShowAgentInfo((v) => !v)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono text-stone-500 hover:text-stone-900 border border-stone-200/70 bg-white/80 hover:bg-white transition-colors cursor-pointer"
                 >
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Preparing ephemeral wallet…</span>
-                    </>
-                  ) : (
-                    <>
-                      <Coffee className="w-4 h-4" />
-                      <span>
-                        Confirm · ${effectiveAmountUsd > 0 ? effectiveAmountUsd : '0'}{' '}
-                        {activeToken?.symbol || 'USDC'}
-                      </span>
-                    </>
-                  )}
+                  <Bot className="w-3 h-3" />
+                  <span>Agent Pay API</span>
+                  <ChevronDown
+                    className={`w-3 h-3 transition-transform ${showAgentInfo ? 'rotate-180' : ''}`}
+                  />
                 </button>
-                <p className="text-center text-[11px] font-mono text-stone-400">
-                  Reveals a one-time deposit address · 1% fee · 99% to @{profile.handle}
-                </p>
+                {showAgentInfo && (
+                  <div className="mt-2 p-3.5 rounded-2xl bg-white border border-stone-200/90 text-left space-y-2 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-stone-500">
+                      <span>Direct HTTP Payment (No Auth)</span>
+                      <button
+                        type="button"
+                        onClick={() => void copyText(agentCurlSnippet, 'agent')}
+                        className="inline-flex items-center gap-1 text-stone-700 hover:text-stone-950 font-bold cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                    <pre className="text-[10px] font-mono text-stone-700 bg-stone-50 border border-stone-200/70 rounded-xl p-2.5 overflow-x-auto whitespace-pre-wrap break-all">
+                      {agentCurlSnippet}
+                    </pre>
+                  </div>
+                )}
               </div>
-            </div>
+            </>
           )}
         </div>
       </main>
 
       {/* Minimal Footer */}
-      <footer className="w-full max-w-2xl mx-auto px-4 pb-6 pt-2 text-center text-[11px] font-mono text-stone-400">
+      <footer className="w-full max-w-3xl mx-auto px-4 pb-6 pt-2 text-center text-[11px] font-mono text-stone-400">
         Powered by{' '}
         <a
           href="https://uprail.world"

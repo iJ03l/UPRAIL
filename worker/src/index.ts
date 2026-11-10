@@ -9,7 +9,7 @@
  *  - NEAR RPC: QuikNode NEAR mainnet (NEAR_RPC_URL env var)
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { AppContext, ErrorResponse } from './types';
 import { PaymentStatus } from './types';
 import { corsMiddleware } from './middleware/cors';
@@ -45,7 +45,13 @@ import {
 } from './services/confidentialRail';
 import { syncAllLaunchpadClaims } from './services/launchpadIntegrations';
 import { pruneExpiredAuthChallenges } from './services/maintenance';
-import { reconcilePendingCoffeeDonations } from './services/coffee';
+import {
+  CoffeeError,
+  createCoffeeDonation,
+  getCoffeeCreatorProfile,
+  getCoffeeOptions,
+  reconcilePendingCoffeeDonations,
+} from './services/coffee';
 import {
   creatorFeeCardKeyValid,
   emptyCreatorFeeCardSummary,
@@ -239,8 +245,89 @@ apiRouter.route('/coffee', coffeeRouter);
 
 app.route('/api', apiRouter);
 
-// Dynamic social cards for share links (claim / invite / receipt / request).
+// Dynamic social cards for share links (claim / invite / receipt / request / coffee).
 app.route('/og', ogRouter);
+
+// Agent discovery documentation for external web & crypto agents
+app.get('/llms.txt', (c) => {
+  const txt = `# UPRAIL (uprail.world)
+UPRAIL lets anyone pay an X handle privately from 35+ blockchains with zero login or UPRAIL account required.
+
+## Public Creator Tip / Payment Links (uprail.world/<handle>)
+Any external agent or script can pay a creator directly at their link:
+
+1. Inspect creator profile & accepted chains/tokens:
+   GET https://uprail.world/<handle>?format=json
+   (or send Accept: application/json)
+
+2. Create a one-time cross-chain deposit address (no auth required):
+   POST https://uprail.world/<handle>
+   Content-Type: application/json
+   {
+     "amountUsd": 5,
+     "originSymbol": "USDC",
+     "originChain": "base"
+   }
+
+3. Transfer exact \`amountToSend\` on \`originChain\` to \`depositAddress\` (including \`depositMemo\` if present).
+
+4. Poll settlement status until \`status === "COMPLETED"\`:
+   GET https://api.uprail.world/api/coffee/status/<id>
+`;
+  return c.text(txt, 200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
+});
+
+async function handlePublicCoffeeAgentPost(c: Context<AppContext>, rawHandle: string): Promise<Response> {
+  const handle = (rawHandle || '').trim().replace(/^@+/, '').toLowerCase();
+  if (!/^[a-z0-9_]{1,15}$/.test(handle)) {
+    return c.json<ErrorResponse>({ error: 'Invalid creator handle', code: 'INVALID_HANDLE' }, 400);
+  }
+  try {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, any>;
+    const amountUsd = Number(body.amountUsd ?? body.amount_usd ?? body.amount ?? 5);
+    const originSymbol = String(body.originSymbol ?? body.token ?? body.asset ?? 'USDC').trim();
+    const originChain = String(body.originChain ?? body.chain ?? body.network ?? 'base').trim();
+    const originAsset = typeof body.originAsset === 'string' ? body.originAsset.trim() : undefined;
+
+    const donation = await createCoffeeDonation(c.env, {
+      handle,
+      amountUsd,
+      originSymbol,
+      originChain,
+      originAsset,
+    });
+
+    return c.json(
+      {
+        protocol: 'uprail-coffee-v1',
+        ...donation,
+        statusUrl: `https://api.uprail.world/api/coffee/status/${donation.id}`,
+        instructions: `Send exact ${donation.amountToSend} ${donation.originSymbol} on ${donation.originChainName} to ${donation.depositAddress}${donation.depositMemo ? ` with memo ${donation.depositMemo}` : ''}, then poll statusUrl until status === "COMPLETED".`,
+      },
+      201
+    );
+  } catch (err: any) {
+    if (err instanceof CoffeeError) {
+      return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+    }
+    return c.json<ErrorResponse>(
+      { error: publicErrorMessage(err, 'Failed to prepare payment'), code: 'COFFEE_DONATE_ERROR' },
+      502
+    );
+  }
+}
+
+app.post('/tip/:handle', rateLimit({ limit: 30, prefix: 'coffee_agent_post' }), (c) =>
+  handlePublicCoffeeAgentPost(c, c.req.param('handle'))
+);
+
+app.post('/:handle', rateLimit({ limit: 30, prefix: 'coffee_agent_post' }), (c, next) => {
+  const handle = c.req.param('handle').replace(/^@+/, '').toLowerCase();
+  if (RESERVED_ROOT_PATHS.has(handle) || !/^[a-z0-9_]{1,15}$/.test(handle)) {
+    return next();
+  }
+  return handlePublicCoffeeAgentPost(c, handle);
+});
 
 // Global Error Handler
 app.onError((err, c) => {
@@ -268,7 +355,7 @@ const RESERVED_ROOT_PATHS = new Set([
   'app', 'api', 'auth', 'og', 'docs', 'login', 'parking', 'send', 'request',
   'contacts', 'receive', 'claim', 'fees', 'agents', 'receipt', 'history',
   'privacy', 'terms', 'invite', 'refer', 'tip', 'health', 'oauth',
-  'robots', 'sitemap', 'favicon',
+  'robots', 'sitemap', 'favicon', 'llms',
 ]);
 
 /**
@@ -276,7 +363,7 @@ const RESERVED_ROOT_PATHS = new Set([
  * images per URL for a long time, so the version query gives them a new cache
  * key without changing the payment id.
  */
-const OG_CARD_VERSION = '3';
+const OG_CARD_VERSION = '4';
 
 // Wallet-send receipt deep links: /receipt/<withdrawalId> and
 // /app/receipt/<withdrawalId>, rewritten onto the static receipt page.
@@ -612,29 +699,51 @@ app.notFound(async (c) => {
     const coffeeMatch = !STATIC_ASSET_RE.test(url.pathname) ? url.pathname.match(COFFEE_HANDLE_RE) : null;
     if (coffeeMatch && !RESERVED_ROOT_PATHS.has(coffeeMatch[1].toLowerCase())) {
       const coffeeHandle = coffeeMatch[1].toLowerCase();
+      const accept = (c.req.header('accept') || '').toLowerCase();
+      const wantsJson =
+        url.searchParams.get('format') === 'json' ||
+        (accept.includes('application/json') && !accept.includes('text/html'));
+
+      if (wantsJson) {
+        const [profile, options] = await Promise.all([
+          getCoffeeCreatorProfile(c.env, coffeeHandle),
+          getCoffeeOptions(c.env).catch(() => []),
+        ]);
+        return c.json({
+          protocol: 'uprail-coffee-v1',
+          ...profile,
+          payEndpoint: `${url.origin}/${encodeURIComponent(profile.handle)}`,
+          donateEndpoint: 'https://api.uprail.world/api/coffee/donate',
+          statusEndpointTemplate: 'https://api.uprail.world/api/coffee/status/{id}',
+          supportedTokens: options.map((t) => ({
+            symbol: t.symbol,
+            name: t.name,
+            chains: t.chains.map((ch) => ({ chain: ch.chain, chainName: ch.chainName })),
+          })),
+          instructions: profile.enabled
+            ? `POST ${url.origin}/${profile.handle} with JSON {"amountUsd": 5, "originSymbol": "USDC", "originChain": "base"} (no login required) to receive a one-time depositAddress and exact amountToSend.`
+            : `@${profile.handle} has not activated this payment link yet.`,
+        });
+      }
+
       if (isBot) {
         let displayHandle = coffeeHandle;
-        let enabled = false;
         if (c.env.DB) {
           try {
             const row = await c.env.DB.prepare(
-              'SELECT x_handle, coffee_enabled FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1'
+              'SELECT x_handle FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1'
             )
               .bind(coffeeHandle)
-              .first<{ x_handle: string; coffee_enabled: number }>();
-            if (row) {
+              .first<{ x_handle: string }>();
+            if (row?.x_handle) {
               displayHandle = row.x_handle;
-              enabled = Number(row.coffee_enabled) === 1;
             }
           } catch {}
         }
         return renderShareCardHtml({
-          title: enabled
-            ? `Buy @${displayHandle} a coffee on UPRAIL`
-            : `Support @${displayHandle} on UPRAIL`,
-          description:
-            'Send USDC, USDT, SOL, ETH or BTC from 35+ blockchains in one tap — zero account or wallet connection needed.',
-          imageUrl: 'https://app.uprail.world/og/og-landing.png',
+          title: `PAY ME HERE — @${displayHandle}`,
+          description: `Support @${displayHandle} privately from 35+ blockchains. No login or wallet needed.`,
+          imageUrl: `${url.origin}/og/coffee/${encodeURIComponent(displayHandle)}.png?v=${OG_CARD_VERSION}`,
           url: url.href,
         });
       }

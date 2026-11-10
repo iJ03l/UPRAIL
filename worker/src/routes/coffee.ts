@@ -15,6 +15,7 @@
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse } from '../types';
 import { requireAuth } from '../middleware/session';
+import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { rateLimit } from '../middleware/rateLimit';
 import { publicErrorMessage } from '../utils/errors';
 import {
@@ -81,10 +82,12 @@ coffeeRouter.get('/me', requireAuth(), async (c) => {
   }
 });
 
-coffeeRouter.post('/toggle', requireAuth(), async (c) => {
+coffeeRouter.post('/toggle', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
   const session = c.get('session')!;
   try {
-    const body = await c.req.json<{ enabled?: boolean }>().catch(() => ({} as { enabled?: boolean }));
+    const body =
+      (c.get('parsedBody' as any) as { enabled?: boolean } | undefined) ||
+      (await c.req.json<{ enabled?: boolean }>().catch(() => ({} as { enabled?: boolean })));
     const existing = await c.env.DB.prepare(
       'SELECT x_handle, coffee_enabled FROM x_identities WHERE x_id = ? LIMIT 1'
     )
@@ -122,7 +125,20 @@ coffeeRouter.get('/profile/:handle', async (c) => {
   try {
     const profile = await getCoffeeCreatorProfile(c.env, handle);
     c.header('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
-    return c.json(profile);
+    return c.json({
+      ...profile,
+      coffeeUrl: coffeeUrlForHandle(profile.handle),
+      agent: {
+        supported: profile.found && profile.enabled,
+        protocol: 'uprail-coffee-v1',
+        authRequired: false,
+        payUrl: coffeeUrlForHandle(profile.handle),
+        donateUrl: 'https://api.uprail.world/api/coffee/donate',
+        optionsUrl: 'https://api.uprail.world/api/coffee/options',
+        statusUrlTemplate: 'https://api.uprail.world/api/coffee/status/{id}',
+        llmsTxt: 'https://uprail.world/llms.txt',
+      },
+    });
   } catch (err: any) {
     return c.json<ErrorResponse>(
       { error: publicErrorMessage(err, 'Failed to load creator profile'), code: 'PROFILE_ERROR' },

@@ -96,3 +96,70 @@ export async function renderOgCard(opts: OgCardOptions): Promise<Response> {
     },
   });
 }
+
+export interface CoffeeOgCardOptions {
+  handle: string;
+  name?: string;
+  avatarDataUri?: string | null;
+  cacheControl?: string;
+}
+
+export async function renderCoffeeOgCard(opts: CoffeeOgCardOptions): Promise<Response> {
+  const handle = opts.handle.replace(/^@+/, '').toLowerCase();
+  const initial = (handle.charAt(0) || 'U').toUpperCase();
+
+  const avatarMarkup = opts.avatarDataUri
+    ? `<img src="${opts.avatarDataUri}" width="144" height="144" style="border-radius:72px;border:3px solid #E5E2DC;object-fit:cover;" />`
+    : `<div style="display:flex;align-items:center;justify-content:center;width:144px;height:144px;border-radius:72px;background:${INK};color:#FFFFFF;font-size:58px;font-weight:700;">${esc(initial)}</div>`;
+
+  const html = `
+  <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:60px 72px;background:#F7F6F3;border:2px solid #ECE9E4;font-family:'DejaVu';">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;">
+        <img src="${BRAND_ICON}" width="48" height="46" />
+        <img src="${BRAND_WORDMARK}" width="110" height="37" style="margin-left:14px;" />
+      </div>
+      <div style="display:flex;font-size:18px;font-weight:700;letter-spacing:1px;color:${MUTED};">uprail.world/${esc(handle)}</div>
+    </div>
+
+    <div style="display:flex;align-items:center;margin-top:86px;">
+      ${avatarMarkup}
+      <div style="display:flex;flex-direction:column;margin-left:38px;">
+        <div style="display:flex;font-size:22px;font-weight:700;letter-spacing:3px;color:${ACCENT};">@${esc(handle)}</div>
+        <div style="display:flex;font-size:88px;font-weight:700;color:${INK};line-height:1.02;letter-spacing:-2px;margin-top:12px;">PAY ME HERE</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;margin-top:auto;">
+      <div style="display:flex;align-items:center;margin-top:24px;">
+        <div style="display:flex;font-size:18px;font-weight:700;letter-spacing:0.5px;color:${MUTED};">USDC · USDT · 35+ chains · No login needed</div>
+        <div style="display:flex;font-size:16px;font-weight:700;letter-spacing:1px;color:${FOOT};margin-left:auto;">UPRAIL</div>
+      </div>
+      <div style="display:flex;align-items:center;margin-top:16px;">
+        <div style="display:flex;width:10px;height:10px;border-radius:5px;background:${ACCENT};"></div>
+        <div style="display:flex;flex:1;border-top:2px dashed #DAD8D3;margin:0 8px;"></div>
+        <div style="display:flex;width:8px;height:8px;border-radius:4px;background:#C7C5C0;"></div>
+        <div style="display:flex;flex:1;border-top:2px dashed #DAD8D3;margin:0 8px;"></div>
+        <div style="display:flex;width:8px;height:8px;border-radius:4px;background:#C7C5C0;"></div>
+      </div>
+    </div>
+  </div>`;
+
+  const image = new ImageResponse(html, {
+    width: 1200,
+    height: 630,
+    format: 'png',
+    fonts: [
+      { name: 'DejaVu', data: FONT_REGULAR, weight: 400, style: 'normal' },
+      { name: 'DejaVu', data: FONT_BOLD, weight: 700, style: 'normal' },
+    ],
+  });
+
+  return new Response(image.body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'image/png',
+      'Cache-Control': opts.cacheControl || 'public, max-age=300, s-maxage=300',
+    },
+  });
+}
