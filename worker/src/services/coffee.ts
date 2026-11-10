@@ -185,6 +185,17 @@ function matchesChain(tokenChain: string, requestedChain: string): boolean {
   return aliases.includes(a);
 }
 
+function canonicalCoffeeSymbol(t: OneClickToken): string {
+  const sym = (t.symbol || '').trim().toUpperCase();
+  const assetId = (t.assetId || '').trim().toLowerCase();
+  const chain = (t.blockchain || '').trim().toLowerCase();
+  // 1Click registers native NEAR (nep141:wrap.near) as symbol "wNEAR" on chain "near".
+  if (assetId === 'nep141:wrap.near' || (sym === 'WNEAR' && chain === 'near')) {
+    return 'NEAR';
+  }
+  return sym;
+}
+
 /**
  * Returns curated + live supported token and chain combinations from 1Click,
  * always pinning USDC and USDT at the very top.
@@ -194,7 +205,7 @@ export async function getCoffeeOptions(env: Env): Promise<CoffeeTokenOption[]> {
   const bySymbol = new Map<string, Map<string, CoffeeChainOption>>();
 
   for (const t of tokens) {
-    const sym = (t.symbol || '').trim().toUpperCase();
+    const sym = canonicalCoffeeSymbol(t);
     const chain = (t.blockchain || '').trim().toLowerCase();
     if (!sym || !chain || !t.assetId) continue;
 
@@ -203,7 +214,7 @@ export async function getCoffeeOptions(env: Env): Promise<CoffeeTokenOption[]> {
 
     if (!bySymbol.has(sym)) bySymbol.set(sym, new Map());
     const chainMap = bySymbol.get(sym)!;
-    if (!chainMap.has(chain)) {
+    if (!chainMap.has(chain) || t.assetId.toLowerCase() === 'nep141:wrap.near') {
       chainMap.set(chain, {
         chain,
         chainName: formatChainName(chain),
@@ -293,11 +304,14 @@ function findOriginToken(
   }
 
   const sym = originSymbol.trim().toUpperCase();
-  const match = tokens.find(
+  const matches = tokens.filter(
     (t) =>
-      t.symbol.trim().toUpperCase() === sym &&
+      canonicalCoffeeSymbol(t) === sym &&
       matchesChain(t.blockchain, originChain)
   );
+  const match =
+    matches.find((t) => t.assetId.toLowerCase() === 'nep141:wrap.near') ||
+    matches[0];
   if (!match) {
     throw new CoffeeError(
       'UNSUPPORTED_ROUTE',
@@ -506,7 +520,7 @@ export async function createCoffeeDonation(
       recipientNearAccount,
       originToken.assetId,
       originToken.blockchain,
-      originToken.symbol.toUpperCase(),
+      canonicalCoffeeSymbol(originToken),
       targetDesc.symbol,
       targetDesc.assetId,
       amountToSend,

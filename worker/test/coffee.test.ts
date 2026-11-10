@@ -178,6 +178,51 @@ test('getCoffeeOptions pins USDC and USDT first and deduplicates chains', async 
   assert.equal(opts[0].chains[0].chain, 'base');
 });
 
+test('getCoffeeOptions canonicalizes nep141:wrap.near (wNEAR on near) under NEAR before BNB Chain', async () => {
+  const sampleTokens = [
+    {
+      assetId: 'nep245:v2_1.omni.hot.tg:56_SZzgw3HSudhZcTwPWUTi2RJB19t',
+      blockchain: 'bsc',
+      symbol: 'NEAR',
+      decimals: 18,
+      price: 3.59,
+    },
+    {
+      assetId: 'nep141:wrap.near',
+      blockchain: 'near',
+      symbol: 'wNEAR',
+      decimals: 24,
+      price: 3.59,
+    },
+    {
+      assetId: '1cs_v1:sol:spl:3ZLekZYq2qkZiSpnSvabjit34tUkjSwD1JFuW9as9wBG',
+      blockchain: 'sol',
+      symbol: 'wNEAR',
+      decimals: 9,
+      price: 3.59,
+    },
+  ];
+  const mockEnv: any = {
+    CACHE: {
+      async get() {
+        return sampleTokens;
+      },
+      async put() {},
+    },
+  };
+
+  const opts = await getCoffeeOptions(mockEnv);
+  assert.equal(opts.length, 1);
+  assert.equal(opts[0].symbol, 'NEAR');
+  assert.deepEqual(
+    opts[0].chains.map((c) => ({ chain: c.chain, assetId: c.assetId })),
+    [
+      { chain: 'near', assetId: 'nep141:wrap.near' },
+      { chain: 'bsc', assetId: 'nep245:v2_1.omni.hot.tg:56_SZzgw3HSudhZcTwPWUTi2RJB19t' },
+    ]
+  );
+});
+
 test('getCoffeeCreatorProfile returns enabled state accurately', async () => {
   const dbEnabled = makeMockDb({
     x_id: 'x_1',
