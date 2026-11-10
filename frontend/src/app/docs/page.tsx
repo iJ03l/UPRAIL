@@ -89,7 +89,7 @@ export default function DocsOverviewPage() {
                 <li>• Web App (Touch ID / Face ID)</li>
                 <li>• Autonomous AI (Claude, Grok, Cursor)</li>
                 <li>• Launchpads (Nearly, JustHoot, Intear)</li>
-                <li>• P2P Payment Requests</li>
+                <li>• P2P Requests &amp; Buy Me a Coffee Links</li>
               </ul>
             </div>
 
@@ -420,9 +420,13 @@ export default function DocsOverviewPage() {
           <a className="text-stone-900 underline font-bold" href="/docs/near">
             near.com Integration Guide
           </a>
-          , or route meme royalties via{' '}
+          , route meme royalties via{' '}
           <a className="text-stone-900 underline font-bold" href="/docs/fees">
             Creator Fees
+          </a>
+          , or launch a bio tip storefront with{' '}
+          <a className="text-stone-900 underline font-bold" href="/docs/coffee">
+            Buy Me a Coffee
           </a>
           .
         </Callout>

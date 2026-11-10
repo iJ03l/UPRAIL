@@ -582,7 +582,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
 
                   <div className="flex items-center justify-between pt-4 border-t border-[#E5D6C0] dark:border-[#3B2B20] gap-3">
                     <a
-                      href="https://docs.uprail.world"
+                      href="https://docs.uprail.world/docs/coffee"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs font-mono text-[#7C6352] hover:text-[#1E140E] dark:text-[#BBA798] dark:hover:text-white transition-colors inline-flex items-center gap-1"

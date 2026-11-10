@@ -8,6 +8,7 @@ const LINKS: { to: string; label: string }[] = [
   { to: '/docs/near', label: 'near.com Integration' },
   { to: '/docs/agents', label: 'AI Agents & MCP' },
   { to: '/docs/fees', label: 'Creator fees' },
+  { to: '/docs/coffee', label: 'Buy Me a Coffee' },
 ];
 
 export const DocsNav: React.FC = () => {
