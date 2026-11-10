@@ -100,22 +100,22 @@ const ArcCard: React.FC<ArcCardProps> = ({
 }) => {
   const offset = useTransform(progress, (p) => index - p);
 
-  const x = useTransform(offset, [-2, -1, 0, 1, 2], ['-180%', '-94%', '0%', '94%', '180%']);
+  const x = useTransform(offset, [-2, -1, 0, 1, 2], ['-225%', '-116%', '0%', '116%', '225%']);
   const y = useTransform(
     offset,
     [-2, -1, -0.45, 0, 0.45, 1, 2],
-    shouldReduceMotion ? [0, 0, 0, 0, 0, 0, 0] : [132, 42, 9, 0, 9, 42, 132]
+    shouldReduceMotion ? [0, 0, 0, 0, 0, 0, 0] : [145, 48, 10, 0, 10, 48, 145]
   );
   const rotate = useTransform(
     offset,
     [-2, -1, 0, 1, 2],
     shouldReduceMotion ? [0, 0, 0, 0, 0] : [-10, -5, 0, 5, 10]
   );
-  const scale = useTransform(offset, [-2, -1, 0, 1, 2], [0.76, 0.86, 1, 0.86, 0.76]);
+  const scale = useTransform(offset, [-2, -1, 0, 1, 2], [0.64, 0.78, 1.04, 0.78, 0.64]);
   const opacity = useTransform(
     offset,
     [-2.2, -1.35, -0.75, 0, 0.75, 1.35, 2.2],
-    [0, 0.18, 0.45, 1, 0.45, 0.18, 0]
+    [0, 0.16, 0.42, 1, 0.42, 0.16, 0]
   );
   const zIndex = useTransform(offset, (v) => Math.round(30 - Math.abs(v) * 10));
 
@@ -169,7 +169,7 @@ const ArcCard: React.FC<ArcCardProps> = ({
       onClick={() => {
         if (!isCenter) onSelect(index);
       }}
-      className={`absolute top-4 w-[300px] sm:w-[410px] md:w-[450px] min-h-[290px] sm:min-h-[320px] rounded-[2rem] border p-7 sm:p-9 shadow-xl flex flex-col justify-between select-none ${surfaceClass} ${
+      className={`absolute top-6 w-[310px] sm:w-[440px] md:w-[500px] min-h-[320px] sm:min-h-[360px] rounded-[2rem] border p-7 sm:p-10 shadow-xl flex flex-col justify-between select-none ${surfaceClass} ${
         isCenter ? 'pointer-events-auto cursor-default' : 'cursor-pointer'
       }`}
     >
@@ -278,14 +278,14 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
     <section
       id="capabilities"
       ref={trackRef}
-      className="relative w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-20 min-h-[260vh] sm:min-h-[290vh]"
+      className="relative w-full max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-20 min-h-[260vh] sm:min-h-[290vh]"
     >
       <div className="sticky top-20 sm:top-24 py-4 sm:py-6 flex flex-col justify-center space-y-6">
-        {/* Minimal Centered Header & Controls */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="text-center sm:text-left space-y-1">
+        {/* Clean Header + Prev/Next Arrows */}
+        <div className="flex items-end justify-between gap-4 max-w-6xl w-full mx-auto">
+          <div className="space-y-1">
             <span className="text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
-              // Capabilities · {CARDS[activeIndex].num} / 04
+              // Capabilities
             </span>
             <h2 className="text-2xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950 dark:text-white leading-[1.06]">
               Four ways value moves.
@@ -293,57 +293,35 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="inline-flex items-center gap-1 p-1 rounded-2xl bg-stone-100/90 dark:bg-stone-900/90 border border-stone-200 dark:border-stone-800 backdrop-blur-sm">
-              {CARDS.map((card, idx) => {
-                const isActive = idx === activeIndex;
-                return (
-                  <button
-                    key={card.id}
-                    type="button"
-                    onClick={() => scrollToStep(idx)}
-                    className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] font-mono font-bold transition-colors cursor-pointer ${
-                      isActive
-                        ? idx === 3
-                          ? 'bg-[#E05326] text-white'
-                          : 'bg-stone-950 text-white dark:bg-white dark:text-stone-950'
-                        : 'text-stone-500 hover:text-stone-950 dark:hover:text-white'
-                    }`}
-                  >
-                    {card.num}
-                  </button>
-                );
-              })}
-            </div>
-
             <button
               type="button"
               aria-label="Previous capability"
               disabled={activeIndex === 0}
               onClick={() => scrollToStep(activeIndex - 1)}
-              className="w-8 h-8 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-950 text-stone-700 dark:text-stone-200 disabled:opacity-35 flex items-center justify-center hover:border-stone-400 transition-colors cursor-pointer"
+              className="w-9 h-9 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-950 text-stone-700 dark:text-stone-200 disabled:opacity-35 flex items-center justify-center hover:border-stone-400 transition-colors cursor-pointer"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
+              <ArrowLeft className="w-4 h-4" />
             </button>
             <button
               type="button"
               aria-label="Next capability"
               disabled={activeIndex === 3}
               onClick={() => scrollToStep(activeIndex + 1)}
-              className="w-8 h-8 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-950 text-stone-700 dark:text-stone-200 disabled:opacity-35 flex items-center justify-center hover:border-stone-400 transition-colors cursor-pointer"
+              className="w-9 h-9 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-950 text-stone-700 dark:text-stone-200 disabled:opacity-35 flex items-center justify-center hover:border-stone-400 transition-colors cursor-pointer"
             >
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {/* Continuous Scroll-Driven Right-to-Left Arc Stage */}
         <div
-          className="relative w-full h-[380px] sm:h-[420px] flex items-start justify-center overflow-x-clip overflow-y-visible"
+          className="relative w-full h-[420px] sm:h-[470px] flex items-start justify-center overflow-x-clip overflow-y-visible"
           style={{
             WebkitMaskImage:
-              'linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%)',
+              'linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)',
             maskImage:
-              'linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%)',
+              'linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)',
           }}
         >
           {CARDS.map((card, index) => (
