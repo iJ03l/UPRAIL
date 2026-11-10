@@ -284,7 +284,11 @@ async function handlePublicCoffeeAgentPost(c: Context<AppContext>, rawHandle: st
   }
   try {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, any>;
-    const amountUsd = Number(body.amountUsd ?? body.amount_usd ?? body.amount ?? 5);
+    const rawToken = body.amountToken ?? body.amount_token ?? body.tokenAmount;
+    const amountUsd =
+      rawToken === undefined || rawToken === null || String(rawToken).trim() === ''
+        ? Number(body.amountUsd ?? body.amount_usd ?? body.amount ?? 5)
+        : undefined;
     const originSymbol = String(body.originSymbol ?? body.token ?? body.asset ?? 'USDC').trim();
     const originChain = String(body.originChain ?? body.chain ?? body.network ?? 'base').trim();
     const originAsset = typeof body.originAsset === 'string' ? body.originAsset.trim() : undefined;
@@ -292,6 +296,7 @@ async function handlePublicCoffeeAgentPost(c: Context<AppContext>, rawHandle: st
     const donation = await createCoffeeDonation(c.env, {
       handle,
       amountUsd,
+      amountToken: rawToken,
       originSymbol,
       originChain,
       originAsset,

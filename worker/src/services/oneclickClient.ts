@@ -29,7 +29,7 @@ export class OneClickError extends Error {
 
 export interface OneClickQuoteRequest {
   dry?: boolean;
-  swapType?: 'EXACT_INPUT' | 'EXACT_OUTPUT';
+  swapType?: 'EXACT_INPUT' | 'EXACT_OUTPUT' | 'FLEX_INPUT';
   originAsset: string;
   destinationAsset: string;
   amount: string;
@@ -48,6 +48,7 @@ export interface OneClickQuote {
   depositMemo?: string;
   deadline?: string;
   amountIn?: string;
+  minAmountIn?: string;
   amountOut?: string;
   minAmountOut?: string;
   quoteId?: string;
@@ -334,6 +335,7 @@ export async function requestQuote(
       depositMemo: stringValue(quote.depositMemo),
       deadline,
       amountIn,
+      minAmountIn: stringValue(quote.minAmountIn),
       amountOut: stringValue(quote.amountOut),
       minAmountOut: stringValue(quote.minAmountOut),
       quoteId: stringValue(quote.quoteId),

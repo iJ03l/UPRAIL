@@ -165,7 +165,8 @@ coffeeRouter.post('/donate', rateLimit({ limit: 30, prefix: 'coffee_donate' }), 
   try {
     const body = await c.req.json<{
       handle: string;
-      amountUsd: number;
+      amountUsd?: number;
+      amountToken?: string | number;
       originSymbol: string;
       originChain: string;
       originAsset?: string;

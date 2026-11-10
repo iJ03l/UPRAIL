@@ -30,7 +30,34 @@ import type {
   CoffeeDonation,
 } from '../types';
 
-const PRESET_AMOUNTS = [2, 5, 10, 25];
+const TOKEN_PRESETS: Record<string, number[]> = {
+  USDC: [2, 5, 10, 25],
+  USDT: [2, 5, 10, 25],
+  NEAR: [0.5, 1, 2, 5],
+  SOL: [0.02, 0.05, 0.1, 0.25],
+  ETH: [0.001, 0.005, 0.01, 0.05],
+  BTC: [0.00005, 0.0001, 0.0005, 0.001],
+  BNB: [0.005, 0.01, 0.05, 0.1],
+  POL: [5, 10, 25, 50],
+  AVAX: [0.1, 0.25, 0.5, 1],
+  SUI: [1, 2, 5, 10],
+  XRP: [1, 2, 5, 10],
+  DOGE: [10, 25, 50, 100],
+};
+
+function getPresetsForToken(symbol: string, priceUsd?: number): number[] {
+  const sym = symbol.trim().toUpperCase();
+  if (TOKEN_PRESETS[sym]) return TOKEN_PRESETS[sym];
+  if (priceUsd && priceUsd > 0) {
+    return [2, 5, 10, 25].map((usd) => {
+      const raw = usd / priceUsd;
+      if (raw >= 10) return Math.round(raw);
+      if (raw >= 1) return Number(raw.toFixed(1));
+      return Number(raw.toPrecision(2));
+    });
+  }
+  return [1, 2, 5, 10];
+}
 
 function extractHandleFromLocation(): string {
   if (typeof window === 'undefined') return '';
@@ -76,7 +103,7 @@ export const PublicCoffeeView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Selection state
+  // Selection state — amount is always in the selected token's native units
   const [selectedPreset, setSelectedPreset] = useState<number | 'custom'>(5);
   const [customAmount, setCustomAmount] = useState<string>('15');
   const [selectedSymbol, setSelectedSymbol] = useState<string>('USDC');
@@ -164,12 +191,6 @@ export const PublicCoffeeView: React.FC = () => {
     return () => clearInterval(timer);
   }, [donation?.id, donation?.status]);
 
-  const effectiveAmountUsd = useMemo(() => {
-    if (selectedPreset !== 'custom') return selectedPreset;
-    const parsed = parseFloat(customAmount);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-  }, [selectedPreset, customAmount]);
-
   const pinnedStables = useMemo(
     () => tokens.filter((t) => t.symbol === 'USDC' || t.symbol === 'USDT'),
     [tokens]
@@ -195,23 +216,82 @@ export const PublicCoffeeView: React.FC = () => {
     [availableChains, selectedChain]
   );
 
+  const isStableSelected = Boolean(
+    activeToken?.isStable || activeToken?.symbol === 'USDC' || activeToken?.symbol === 'USDT'
+  );
+
+  const tokenPresets = useMemo(
+    () => getPresetsForToken(activeToken?.symbol || 'USDC', activeChainObj?.priceUsd),
+    [activeToken?.symbol, activeChainObj?.priceUsd]
+  );
+
+  const effectiveTokenAmountStr = useMemo(() => {
+    if (selectedPreset !== 'custom') return String(selectedPreset);
+    return customAmount.trim();
+  }, [selectedPreset, customAmount]);
+
+  const effectiveTokenAmount = useMemo(() => {
+    const parsed = parseFloat(effectiveTokenAmountStr);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  }, [effectiveTokenAmountStr]);
+
+  const effectiveUsdEstimate = useMemo(() => {
+    if (effectiveTokenAmount <= 0) return 0;
+    if (isStableSelected) return effectiveTokenAmount;
+    const price = activeChainObj?.priceUsd;
+    return price && price > 0 ? effectiveTokenAmount * price : 0;
+  }, [effectiveTokenAmount, isStableSelected, activeChainObj?.priceUsd]);
+
+  const belowMinimumUsd = useMemo(() => {
+    if (effectiveTokenAmount <= 0) return true;
+    if (isStableSelected) return effectiveTokenAmount < 1;
+    const price = activeChainObj?.priceUsd;
+    if (price && price > 0) return effectiveTokenAmount * price < 0.99;
+    return false;
+  }, [effectiveTokenAmount, isStableSelected, activeChainObj?.priceUsd]);
+
   const handleSelectToken = (symbol: string) => {
     setSelectedSymbol(symbol);
+    setDonateError(null);
     const nextToken = tokens.find((t) => t.symbol === symbol);
+    let nextChainObj = nextToken?.chains[0];
     if (nextToken && nextToken.chains.length > 0) {
       const keep = nextToken.chains.find((c) => c.chain === selectedChain);
-      if (!keep) {
+      if (keep) {
+        nextChainObj = keep;
+      } else {
         const preferred =
           nextToken.chains.find((c) => c.chain === 'base') || nextToken.chains[0];
+        nextChainObj = preferred;
         setSelectedChain(preferred.chain);
       }
     }
+    const presets = getPresetsForToken(symbol, nextChainObj?.priceUsd);
+    const price = nextChainObj?.priceUsd;
+    const isStable = symbol === 'USDC' || symbol === 'USDT';
+    const defaultChoice =
+      presets.find((p, idx) => idx >= 1 && (isStable || !price || p * price >= 1)) ??
+      presets.find((p) => isStable || !price || p * price >= 1) ??
+      presets[1] ??
+      presets[0];
+    setSelectedPreset(defaultChoice);
+    setCustomAmount(String(presets[presets.length - 1] ?? defaultChoice));
   };
 
   const handleConfirm = async () => {
     if (!profile || !activeToken || !activeChainObj) return;
-    if (effectiveAmountUsd < 1) {
-      setDonateError('Minimum amount is $1.');
+    if (effectiveTokenAmount <= 0) {
+      setDonateError(`Enter a valid ${activeToken.symbol} amount.`);
+      return;
+    }
+    if (belowMinimumUsd) {
+      const minHint =
+        !isStableSelected && activeChainObj.priceUsd && activeChainObj.priceUsd > 0
+          ? ` (at least ~${(1 / activeChainObj.priceUsd)
+              .toFixed(Math.min(activeChainObj.decimals, 4))
+              .replace(/\.?0+$/, '')} ${activeToken.symbol})`
+          : '';
+      setDonateError(`Minimum amount is $1.00 USD${minHint}.`);
       return;
     }
     setIsCreating(true);
@@ -219,7 +299,8 @@ export const PublicCoffeeView: React.FC = () => {
     try {
       const res = await api.createCoffeeDonation({
         handle: profile.handle,
-        amountUsd: effectiveAmountUsd,
+        amountToken: effectiveTokenAmountStr,
+        ...(isStableSelected ? { amountUsd: effectiveTokenAmount } : {}),
         originSymbol: activeToken.symbol,
         originChain: activeChainObj.chain,
         originAsset: activeChainObj.assetId,
@@ -254,7 +335,19 @@ export const PublicCoffeeView: React.FC = () => {
   };
 
   const agentCurlSnippet = profile
-    ? `curl -sS -X POST https://uprail.world/${profile.handle} -H "Content-Type: application/json" -d '{"amountUsd":${effectiveAmountUsd || 5},"originSymbol":"${activeToken?.symbol || 'USDC'}","originChain":"${activeChainObj?.chain || 'base'}"}'`
+    ? `curl -sS -X POST https://uprail.world/${profile.handle} -H "Content-Type: application/json" -d '${
+        isStableSelected
+          ? JSON.stringify({
+              amountUsd: effectiveTokenAmount || 5,
+              originSymbol: activeToken?.symbol || 'USDC',
+              originChain: activeChainObj?.chain || 'base',
+            })
+          : JSON.stringify({
+              amountToken: effectiveTokenAmountStr || '1',
+              originSymbol: activeToken?.symbol || 'NEAR',
+              originChain: activeChainObj?.chain || 'near',
+            })
+      }'`
     : '';
 
   const structuredPaymentMeta = profile
@@ -268,7 +361,8 @@ export const PublicCoffeeView: React.FC = () => {
         payEndpoint: `https://uprail.world/${profile.handle}`,
         discoveryEndpoint: `https://uprail.world/${profile.handle}?format=json`,
         acceptedBody: {
-          amountUsd: 'number (>= 1)',
+          amountToken: 'string | number (exact origin token amount, recommended)',
+          amountUsd: 'number (>= 1, alternative for USD quotes)',
           originSymbol: 'USDC | USDT | SOL | ETH | NEAR | BTC',
           originChain: 'base | arbitrum | solana | ethereum | polygon | near | ...',
         },
@@ -494,7 +588,12 @@ export const PublicCoffeeView: React.FC = () => {
                   {/* Live Standby Banner */}
                   <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-amber-900 dark:text-amber-200">
                     <div className="flex items-center gap-2 text-xs font-mono font-semibold">
-                      {donation.status === 'PROCESSING' || donation.status === 'SETTLING' ? (
+                      {donation.status === 'INCOMPLETE_DEPOSIT' ? (
+                        <>
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
+                          <span>Partial deposit detected · Waiting for remainder or refund…</span>
+                        </>
+                      ) : donation.status === 'PROCESSING' || donation.status === 'SETTLING' ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700 dark:text-amber-300" />
                           <span>Deposit detected · Delivering…</span>
@@ -512,10 +611,10 @@ export const PublicCoffeeView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Exact Amount & Chain */}
+                  {/* Amount & Chain */}
                   <div className="text-center space-y-1">
                     <p className="text-[11px] font-mono uppercase tracking-wider text-stone-400">
-                      Send exactly on {donation.originChainName}
+                      Send on {donation.originChainName}
                     </p>
                     <div className="flex items-center justify-center gap-2">
                       <TokenIcon symbol={donation.originSymbol} size="sm" />
@@ -618,62 +717,7 @@ export const PublicCoffeeView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 1. Prefilled Amounts + Custom */}
-                <div className="space-y-2">
-                  <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
-                    Amount (USD)
-                  </label>
-                  <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
-                    {PRESET_AMOUNTS.map((amt) => {
-                      const active = selectedPreset === amt;
-                      return (
-                        <button
-                          key={amt}
-                          type="button"
-                          onClick={() => setSelectedPreset(amt)}
-                          className={`py-2.5 rounded-2xl text-xs sm:text-sm font-display font-bold transition-all cursor-pointer border ${
-                            active
-                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
-                              : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
-                          }`}
-                        >
-                          ${amt}
-                        </button>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPreset('custom')}
-                      className={`py-2.5 rounded-2xl text-xs font-display font-bold transition-all cursor-pointer border ${
-                        selectedPreset === 'custom'
-                          ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
-                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
-                      }`}
-                    >
-                      Custom
-                    </button>
-                  </div>
-
-                  {selectedPreset === 'custom' && (
-                    <div className="relative mt-2 animate-in fade-in duration-150">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono text-sm font-bold text-stone-400">
-                        $
-                      </span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="10000"
-                        step="any"
-                        value={customAmount}
-                        onChange={(e) => setCustomAmount(e.target.value)}
-                        placeholder="Enter USD amount"
-                        className="w-full pl-8 pr-4 py-2.5 rounded-2xl bg-stone-50 border border-stone-200 focus:border-stone-950 focus:bg-white outline-none font-mono text-sm font-bold text-stone-950 transition-colors"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. Token Picker (USDC & USDT pinned on top) */}
+                {/* 1. Token Picker (USDC & USDT pinned on top) */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-mono uppercase tracking-wider text-stone-500">
@@ -753,6 +797,91 @@ export const PublicCoffeeView: React.FC = () => {
                     )}
                 </div>
 
+                {/* 2. Prefilled Token Amounts + Custom Direct Token Input */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
+                      Amount ({activeToken?.symbol || 'USDC'})
+                    </label>
+                    {!isStableSelected && effectiveUsdEstimate > 0 && (
+                      <span
+                        className={`text-[11px] font-mono ${
+                          belowMinimumUsd ? 'text-amber-600' : 'text-stone-400'
+                        }`}
+                      >
+                        ≈ ${effectiveUsdEstimate.toFixed(2)} USD
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+                    {tokenPresets.map((amt) => {
+                      const active = selectedPreset === amt;
+                      return (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setSelectedPreset(amt)}
+                          className={`py-2.5 rounded-2xl text-xs sm:text-sm font-display font-bold transition-all cursor-pointer border ${
+                            active
+                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                              : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
+                          }`}
+                        >
+                          {isStableSelected ? `$${amt}` : amt}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPreset('custom');
+                        if (!customAmount) {
+                          setCustomAmount(String(tokenPresets[1] ?? tokenPresets[0] ?? '1'));
+                        }
+                      }}
+                      className={`py-2.5 rounded-2xl text-xs font-display font-bold transition-all cursor-pointer border ${
+                        selectedPreset === 'custom'
+                          ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
+                      }`}
+                    >
+                      Custom
+                    </button>
+                  </div>
+
+                  {selectedPreset === 'custom' && (
+                    <div className="relative mt-2 animate-in fade-in duration-150">
+                      {isStableSelected && (
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono text-sm font-bold text-stone-400">
+                          $
+                        </span>
+                      )}
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={customAmount}
+                        onChange={(e) => setCustomAmount(e.target.value)}
+                        placeholder={`Enter ${activeToken?.symbol || 'token'} amount`}
+                        className={`w-full ${
+                          isStableSelected ? 'pl-8 pr-4' : 'pl-4 pr-16'
+                        } py-2.5 rounded-2xl bg-stone-50 border border-stone-200 focus:border-stone-950 focus:bg-white outline-none font-mono text-sm font-bold text-stone-950 transition-colors`}
+                      />
+                      {!isStableSelected && (
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 font-mono text-xs font-bold text-stone-500">
+                          {activeToken?.symbol}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {belowMinimumUsd && effectiveTokenAmount > 0 && (
+                    <p className="text-[11px] font-mono text-amber-600">
+                      Minimum deposit is $1.00 USD equivalent.
+                    </p>
+                  )}
+                </div>
+
                 {/* 3. Chain Picker */}
                 <div className="space-y-2">
                   <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
@@ -793,7 +922,7 @@ export const PublicCoffeeView: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => void handleConfirm()}
-                    disabled={isCreating || effectiveAmountUsd < 1 || !activeChainObj}
+                    disabled={isCreating || belowMinimumUsd || !activeChainObj}
                     className="w-full py-3.5 px-5 rounded-2xl bg-stone-950 hover:bg-stone-800 disabled:bg-stone-300 text-white font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isCreating ? (
@@ -805,8 +934,9 @@ export const PublicCoffeeView: React.FC = () => {
                       <>
                         <SolidCoffeeIcon className="w-4 h-4" />
                         <span>
-                          Confirm · ${effectiveAmountUsd > 0 ? effectiveAmountUsd : '0'}{' '}
-                          {activeToken?.symbol || 'USDC'}
+                          {isStableSelected
+                            ? `Confirm · $${effectiveTokenAmount > 0 ? effectiveTokenAmountStr : '0'} ${activeToken?.symbol || 'USDC'}`
+                            : `Confirm · ${effectiveTokenAmount > 0 ? effectiveTokenAmountStr : '0'} ${activeToken?.symbol || 'USDC'}`}
                         </span>
                       </>
                     )}

@@ -369,3 +369,84 @@ test('createCoffeeDonation generates quote with 1% protocol fee split and expire
     globalThis.fetch = origFetch;
   }
 });
+
+test('createCoffeeDonation supports direct amountToken input with FLEX_INPUT for NEAR', async () => {
+  const db = makeMockDb({
+    x_id: 'x_1',
+    x_handle: 'uprailworld',
+    x_name: 'UPRAIL',
+    near_account: 'u_fc982587d85af44f.escrow.uprail.near',
+    avatar_url: null,
+    coffee_enabled: 1,
+  });
+
+  const sampleTokens = [
+    {
+      assetId: 'nep141:wrap.near',
+      blockchain: 'near',
+      symbol: 'NEAR',
+      decimals: 24,
+      price: 3.55,
+    },
+    {
+      assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+      blockchain: 'near',
+      symbol: 'USDC',
+      decimals: 6,
+      price: 1,
+    },
+  ];
+
+  const quoteBodies: any[] = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url: any, init?: any) => {
+    const u = String(url);
+    if (u.endsWith('/v0/quote')) {
+      quoteBodies.push(JSON.parse(String(init?.body || '{}')));
+      return new Response(
+        JSON.stringify({
+          quote: {
+            depositAddress: 'abc123nearimplicitdepositaddress',
+            deadline: new Date(Date.now() + 3600_000).toISOString(),
+            amountIn: '1000000000000000000000000',
+            minAmountIn: '970000000000000000000000',
+            amountOut: '3550000',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response(JSON.stringify({}), { status: 404 });
+  };
+
+  try {
+    const env: any = {
+      DB: db,
+      ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+      FEE_PERCENT: '0.01',
+      CONFIDENTIAL_RAIL_ENABLED: 'false',
+      CACHE: {
+        async get() {
+          return sampleTokens;
+        },
+        async put() {},
+      },
+    };
+
+    const donation = await createCoffeeDonation(env, {
+      handle: 'uprailworld',
+      amountToken: '1',
+      originSymbol: 'NEAR',
+      originChain: 'near',
+    });
+
+    assert.equal(quoteBodies.length, 1);
+    assert.equal(quoteBodies[0].swapType, 'FLEX_INPUT');
+    assert.equal(quoteBodies[0].amount, '1000000000000000000000000');
+    assert.equal(donation.grossAmount, '1');
+    assert.equal(donation.amountToSend, '1');
+    assert.equal(donation.depositAddress, 'abc123nearimplicitdepositaddress');
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});

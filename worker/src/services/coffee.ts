@@ -68,7 +68,8 @@ export interface CoffeeCreatorProfile {
 
 export interface CreateCoffeeDonationInput {
   handle: string;
-  amountUsd: number;
+  amountUsd?: number;
+  amountToken?: string | number;
   originSymbol: string;
   originChain: string;
   originAsset?: string;
@@ -356,6 +357,43 @@ function computeOriginAmount(
   return { formatted, atomic };
 }
 
+function computeOriginFromTokenAmount(
+  rawTokenAmount: string | number,
+  origin: OneClickToken
+): { formatted: string; atomic: string } {
+  const cleaned = String(rawTokenAmount).trim();
+  const parsed = Number(cleaned);
+  if (!cleaned || !/^\d+(\.\d+)?$/.test(cleaned) || !Number.isFinite(parsed) || parsed <= 0) {
+    throw new CoffeeError('INVALID_AMOUNT', 'Enter a valid positive token amount.', 400);
+  }
+  const price = typeof origin.price === 'number' && origin.price > 0 ? origin.price : 0;
+  if (price > 0) {
+    const estUsd = parsed * price;
+    if (estUsd < 0.99) {
+      const minToken = (1 / price).toFixed(Math.min(origin.decimals, 6)).replace(/\.?0+$/, '');
+      throw new CoffeeError(
+        'INVALID_AMOUNT',
+        `Minimum amount is $1.00 USD (at least ~${minToken} ${canonicalCoffeeSymbol(origin)}).`,
+        400
+      );
+    }
+    if (estUsd > 10000) {
+      throw new CoffeeError('INVALID_AMOUNT', 'Maximum amount is $10,000 USD.', 400);
+    }
+  }
+  const maxFrac = Math.min(origin.decimals, 12);
+  const dotIdx = cleaned.indexOf('.');
+  const formatted =
+    dotIdx === -1
+      ? cleaned
+      : cleaned.slice(0, dotIdx + 1 + maxFrac).replace(/\.?0+$/, '') || '0';
+  const atomic = nearRpc.toBaseUnits(formatted, origin.decimals);
+  if (!atomic || atomic === '0' || BigInt(atomic) <= 0n) {
+    throw new CoffeeError('INVALID_AMOUNT', 'Donation amount is too small.', 400);
+  }
+  return { formatted, atomic };
+}
+
 function formatDonationRow(row: any): CoffeeDonationView {
   return {
     id: row.id,
@@ -381,7 +419,8 @@ function formatDonationRow(row: any): CoffeeDonationView {
 
 /**
  * Creates a one-time ephemeral deposit quote into escrow.uprail.near for a creator's
- * Buy Me a Coffee link.
+ * Buy Me a Coffee link. Uses FLEX_INPUT so small gas/sweep deductions (such as
+ * NEAR implicit-account storage leaves) never trap the transfer in INCOMPLETE_DEPOSIT.
  */
 export async function createCoffeeDonation(
   env: Env,
@@ -392,13 +431,21 @@ export async function createCoffeeDonation(
     throw new CoffeeError('INVALID_HANDLE', 'Creator handle is required.', 400);
   }
 
-  const amountUsd = Number(input.amountUsd);
-  if (!Number.isFinite(amountUsd) || amountUsd < 1 || amountUsd > 10000) {
-    throw new CoffeeError(
-      'INVALID_AMOUNT',
-      'Donation amount must be between $1 and $10,000.',
-      400
-    );
+  const hasTokenAmount =
+    input.amountToken !== undefined &&
+    input.amountToken !== null &&
+    String(input.amountToken).trim() !== '';
+
+  let amountUsd = 0;
+  if (!hasTokenAmount) {
+    amountUsd = Number(input.amountUsd);
+    if (!Number.isFinite(amountUsd) || amountUsd < 1 || amountUsd > 10000) {
+      throw new CoffeeError(
+        'INVALID_AMOUNT',
+        'Provide a valid token amount (amountToken) or USD amount between $1 and $10,000.',
+        400
+      );
+    }
   }
 
   const creator = await env.DB.prepare(
@@ -438,10 +485,9 @@ export async function createCoffeeDonation(
     input.originChain,
     input.originAsset
   );
-  const { formatted: amountToSend, atomic: originAtomic } = computeOriginAmount(
-    amountUsd,
-    originToken
-  );
+  const { formatted: amountToSend, atomic: originAtomic } = hasTokenAmount
+    ? computeOriginFromTokenAmount(input.amountToken!, originToken)
+    : computeOriginAmount(amountUsd, originToken);
 
   // If the donor picked USDT as their token, default settlement to USDT; otherwise USDC (unless overridden)
   const desiredTarget: StabilizeTargetSymbol =
@@ -464,6 +510,7 @@ export async function createCoffeeDonation(
     quoteResp = await requestQuote(
       env,
       {
+        swapType: 'FLEX_INPUT',
         originAsset: originToken.assetId,
         destinationAsset: targetDesc.assetId,
         amount: originAtomic,
@@ -480,6 +527,7 @@ export async function createCoffeeDonation(
     );
   } else {
     quoteResp = await requestQuote(env, {
+      swapType: 'FLEX_INPUT',
       originAsset: originToken.assetId,
       destinationAsset: targetDesc.assetId,
       amount: originAtomic,
@@ -635,6 +683,10 @@ export async function checkAndSettleCoffeeDonation(
       return formatDonationRow({ ...row, status: 'PROCESSING' });
     }
     return formatDonationRow(row);
+  }
+
+  if (remoteStatus === 'INCOMPLETE_DEPOSIT') {
+    return formatDonationRow({ ...row, status: 'INCOMPLETE_DEPOSIT' });
   }
 
   if (remoteStatus !== 'SUCCESS') {

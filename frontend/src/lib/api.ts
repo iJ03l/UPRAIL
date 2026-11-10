@@ -1994,7 +1994,8 @@ export const api = {
 
   async createCoffeeDonation(params: {
     handle: string;
-    amountUsd: number;
+    amountUsd?: number;
+    amountToken?: string | number;
     originSymbol: string;
     originChain: string;
     originAsset?: string;
