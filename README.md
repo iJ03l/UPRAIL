@@ -50,7 +50,7 @@ make check-mainnet
 🎉 ALL ON-CHAIN SPONSOR & MAINNET CHECKS PASSED SUCCESSFULLY!
 ```
 
-### 2. Run Full Automated Test Suite (163 Tests, 0 Failures)
+### 2. Run Full Automated Test Suite (164 Tests, 0 Failures)
 Run the complete unit, Miniflare integration, and security test harness:
 ```bash
 make test
@@ -58,9 +58,9 @@ make test
 ```
 **Expected Output:**
 ```text
-ℹ tests 163
+ℹ tests 164
 ℹ suites 39
-ℹ pass 163
+ℹ pass 164
 ℹ fail 0
 ```
 
@@ -114,7 +114,7 @@ Where each hackathon criterion is implemented and tested in the codebase:
 UPRAIL bridges this gap by mapping any X handle (`@handle`) to a deterministic, passkey-gated NEAR vault and routing transfers through **NEAR Intents** and **NEAR Confidential Intents** (`intents.near` + 1Click confidential execution):
 
 - **Universal Ingress to near.com via Public Identity:** Solves the near.com rotating address barrier. Anyone in the world can deposit or send funds to your persistent public identity (`@handle`) from 35+ chains without requiring a live session quote from you. Funds settle into your passkey-secured vault on NEAR Intents (`intents.near`), ready to be routed into any personal wallet or spent across the NEAR ecosystem.
-- **Buy Me a Coffee (`uprail.world/<handle>`):** Creators flip a single dashboard toggle to activate a sleek public tip page (`uprail.world/<handle>`). Supporters need **no UPRAIL account and no wallet connection**—they pick an amount (`$2`, `$5`, `$10`, `$25`, or custom), pick `USDC`/`USDT` (or major tokens), pick any origin chain, and receive a one-time ephemeral deposit address that routes through escrow (1% protocol fee) straight to the creator's vault.
+- **Buy Me a Coffee (`uprail.world/<handle>`):** Creators toggle their public link on/off behind a hardware WebAuthn passkey gate on the dashboard. Supporters and autonomous agents need **no UPRAIL account and no wallet connection**—they pick an amount (`$2`, `$5`, `$10`, `$25`, or custom), pick `USDC`/`USDT` (or `NEAR`, `SOL`, `ETH`, `BTC`, etc.), pick any origin chain, and receive a one-time deposit address generated with `CONFIDENTIAL_INTENTS` (`confidentiality: "advanced"`) that settles 99% net via `payEscrowPrivate` straight into the creator's confidential vault, complete with minimal privacy-preserving receipts, JSON-LD `PayAction` / `POST` agent support, and dynamic X-avatar OpenGraph preview cards.
 - **Send to any `@handle` without a recipient wallet:** Senders pay `@handle` in `USDC`, `USDT`, `NEAR`, `ETH`, `SOL`, `BTC`, or NEP-141 tokens. Registered recipients receive funds directly into their confidential/intents vault; unregistered handles receive funds into a pooled escrow and claim whenever they sign in.
 - **"People You Pay" (Persistent Identity Contacts & Quick-Actions):** P2P transfers are social and recurring. UPRAIL maintains a user-controlled, persistent contact memory merging pinned favorites, custom nicknames, and historical transfer recency—enabling single-tap sends and requests without re-typing handles or token parameters.
 - **UPRAIL Requests (Social Invoicing & Network-Effect Ingress):** Allow users to request money from any X handle with custom amounts, reasons, and expiry. Recipients receive a minimal, playful social card (`/request/:id`) and can accept or decline voluntarily in one tap. Unregistered recipients can view requests without an account upfront, and upon passkey onboarding, settle directly from their vault.
@@ -272,7 +272,21 @@ curl -s https://api.uprail.world/api/agent/openapi.json | jq '{openapi, info, pa
      -H "Content-Type: application/json" \
      -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq .
    ```
-   - **Expected result:** Returns all 7 MCP tools (`pay_handle`, `check_approval`, `withdraw_to_wallet`, `receive_payment`, `get_balance`, `list_payments`, `resolve_handle`) scoped to your key's USD spend caps.
+   - **Expected result:** Returns all 13 MCP tools (`pay_handle`, `check_approval`, `withdraw_to_wallet`, `receive_payment`, `get_balance`, `list_payments`, `resolve_handle`, `list_contacts`, `save_contact`, `request_payment`, `list_requests`, `accept_request`, `decline_request`) scoped to your key's USD spend caps.
+
+#### Flow 5: Buy Me a Coffee (`uprail.world/<handle>`) — Humans & Visiting AI Agents
+1. **Enable Link (Passkey-Gated):** On your dashboard ([https://app.uprail.world/app](https://app.uprail.world/app)), click the coin-pouch button under **Stabilize** and flip the toggle (verified by Face ID / Touch ID). Your public link `https://uprail.world/<handle>` is immediately live with a custom `PAY ME HERE` OpenGraph preview card showing your X profile picture.
+2. **Pay Without an Account (Human Flow):** Anyone visits `https://uprail.world/<handle>`, picks `$2 / $5 / $10 / $25 / Custom`, chooses `USDC` / `USDT` / `NEAR` / `SOL` / `ETH` / `BTC`, picks an origin chain, and gets a one-time confidential deposit address + QR code. Once sent, `checkAndSettleCoffeeDonation` settles 99% net via `payEscrowPrivate` and displays a minimal receipt.
+3. **Pay Programmatically (Any Visiting Agent):**
+   ```bash
+   # Discover supported routes & machine-readable instructions
+   curl -s "https://uprail.world/uprailworld?format=json" | jq .
+
+   # Create a one-time confidential deposit quote directly
+   curl -s -X POST https://uprail.world/uprailworld \
+     -H "Content-Type: application/json" \
+     -d '{"amountUsd":5,"originSymbol":"NEAR","originChain":"near"}' | jq .
+   ```
 
 ---
 
@@ -336,11 +350,11 @@ flowchart TD
 - **Confidential Intents Execution:** Integrates 1Click confidential quotes and execution with fail-closed downgrade protection.
 - **Hardware Passkey Biometrics + Recovery:** WebAuthn P-256 (`ES256`) per-transaction assertions on every fund-moving endpoint, backed by one-time recovery codes and self-custody private key export.
 - **Zero-Gas User Experience:** Protocol relayer sponsors sub-account creation, NEP-145 token storage registration, and `intents.near::execute_intents` gas.
-- **Buy Me a Coffee (`uprail.world/<handle>`):** One-toggle public creator tip links allowing anyone—with zero UPRAIL login or browser wallet—to pick a preset/custom USD amount, USDC/USDT or major asset, and any origin chain to reveal a standby one-time deposit address that settles 99% net directly to the creator's vault.
+- **Buy Me a Coffee (`uprail.world/<handle>`):** Passkey-gated dashboard toggle activating walletless creator tip pages with preset/custom USD amounts, `USDC`/`USDT`/`NEAR`/major tokens across 35+ routes, one-time confidential 1Click deposit addresses, private `payEscrowPrivate` vault settlement, visiting-agent JSON/POST discovery, light/dark mode, and minimal receipts.
 - **Cross-Chain Withdrawals (35+ Chains):** Withdraw from UPRAIL directly to external wallets on NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and more.
 - **AI Chat Payments (OAuth 2.1 + Remote MCP):** Streamable HTTP MCP server (`/api/mcp`) and OpenAPI 3.1.0 spec (`/api/agent/openapi.json`) with Passkey-approved per-tx and daily USD caps, live oracle valuation, and idempotency keys.
 - **Launchpad Creator-Fee Routing:** Payout adapter (`POST /api/fees/adapter`) supporting Nearly, JustHoot v2, and Intear Launchpad (`launch.intear.near` / `dex.intear.near`). Launchpads keep their fee receiver and direct creator fees to an X handle onchain.
-- **Dynamic Edge OpenGraph Cards:** Generates custom `1200x630` PNG social preview cards at the edge for claim links, receipts, and creator fees.
+- **Dynamic Edge OpenGraph Cards:** Generates custom `1200x630` PNG social preview cards at the edge for Buy Me a Coffee links (`/og/coffee/<handle>.png` with X avatars), claim links, receipts, and creator fees.
 
 ---
 
@@ -364,7 +378,7 @@ flowchart TD
 │   ├── src/routes/                        # auth, payments, claim, coffee, onchain, agent, mcp, fees, launchpads, invites, og
 │   ├── src/services/                      # nearRpc, confidentialRail, coffee, stabilize, oneclickClient, oneclickAuth,
 │   │                                      # oneclickWithdraw, intentsNonce, launchpadFees, launchpadIntegrations, refunds
-│   └── test/                              # 15+ automated test suites (163 tests: Miniflare integration + unit tests)
+│   └── test/                              # 15+ automated test suites (164 tests: Miniflare integration + unit tests)
 │
 ├── go-near-service/                       # Go 1.25 Settlement Microservice
 │   ├── cmd/server/main.go                 # Chi HTTP server, graceful shutdown, route wiring

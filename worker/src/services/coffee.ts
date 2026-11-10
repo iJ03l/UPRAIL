@@ -542,7 +542,7 @@ export async function createCoffeeDonation(
   return {
     id: donationId,
     recipientHandle: creator.x_handle,
-    originSymbol: originToken.symbol.toUpperCase(),
+    originSymbol: canonicalCoffeeSymbol(originToken),
     originChain: originToken.blockchain,
     originChainName: formatChainName(originToken.blockchain),
     targetSymbol: targetDesc.symbol,
@@ -676,6 +676,9 @@ export async function checkAndSettleCoffeeDonation(
         recipientAccount: row.recipient_near_account,
         timeoutMs: 25_000,
       });
+      if (payout.status === 'FAILED' || payout.status === 'REFUNDED') {
+        throw new Error(`Confidential payout ${payout.status.toLowerCase()}`);
+      }
       payoutTxHash = payout.intentHash || payout.depositAddress || null;
     } else {
       const payout = await nearRpc.executeTransferFromEscrowIntent(
