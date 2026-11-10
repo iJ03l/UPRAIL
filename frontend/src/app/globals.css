@@ -74,7 +74,7 @@
     background-color: var(--bg);
     color: var(--fg);
     font-family: "Cabinet Grotesk", "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   h1, h2, h3, .heading-display {
