@@ -153,9 +153,36 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     return price !== null ? numericAmount * price : null;
   }, [selectedToken, numericAmount]);
 
+  const effectiveUsd = useMemo(() => {
+    if (estimatedInputUsd !== null) return estimatedInputUsd;
+    const qIn = quote?.amountInUsd ? parseFloat(quote.amountInUsd) : NaN;
+    if (Number.isFinite(qIn) && qIn > 0) return qIn;
+    const qOut = quote?.amountOutUsd ? parseFloat(quote.amountOutUsd) : NaN;
+    return Number.isFinite(qOut) && qOut > 0 ? qOut : null;
+  }, [estimatedInputUsd, quote]);
+
+  const isNearSelected = useMemo(() => {
+    if (!selectedToken) return false;
+    const sym = selectedToken.symbol.toUpperCase();
+    const id = (selectedToken.id || '').toLowerCase();
+    return sym === 'NEAR' || sym === 'WNEAR' || id === 'nep141:wrap.near';
+  }, [selectedToken]);
+
+  const belowMinNear = isNearSelected && numericAmount > 0 && numericAmount < 0.05;
+  const belowMinUsd = effectiveUsd !== null && numericAmount > 0 && effectiveUsd < 1;
+  const belowMinimum = belowMinNear || belowMinUsd;
+  const minimumErrorMessage = belowMinNear
+    ? 'Minimum NEAR amount to stabilize is 0.05 NEAR.'
+    : belowMinUsd
+    ? 'Minimum amount to stabilize is $1.00 USD.'
+    : null;
+
+  const belowEstimatedMin =
+    belowMinNear || (estimatedInputUsd !== null && numericAmount > 0 && estimatedInputUsd < 1);
+
   // Live debounced quote calculation (1Click or Rhea Finance)
   useEffect(() => {
-    if (!isOpen || !selectedToken || numericAmount <= 0 || result) {
+    if (!isOpen || !selectedToken || numericAmount <= 0 || exceedsBalance || belowEstimatedMin || result) {
       setQuote(null);
       setQuoteError(null);
       setIsQuoting(false);
@@ -207,6 +234,8 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     targetAsset,
     amount,
     numericAmount,
+    exceedsBalance,
+    belowEstimatedMin,
     result,
   ]);
 
@@ -245,6 +274,10 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
       );
       return;
     }
+    if (belowMinimum && minimumErrorMessage) {
+      setSubmitError(minimumErrorMessage);
+      return;
+    }
     if (!quote) {
       setSubmitError('Waiting for live quote calculation.');
       return;
@@ -253,7 +286,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   };
 
   const handleExecuteStabilize = async () => {
-    if (!selectedToken || !quote) return;
+    if (!selectedToken || !quote || belowMinimum || exceedsBalance) return;
     setSubmitError(null);
     setIsSubmitting(true);
     setProgressStep('authorizing');
@@ -753,7 +786,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                     </div>
 
                     {/* Error Feedback */}
-                    {(exceedsBalance || quoteError || submitError) && (
+                    {(exceedsBalance || belowMinimum || quoteError || submitError) && (
                       <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
                         <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
                         <span>
@@ -761,7 +794,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                             ? `Insufficient ${selectedToken?.symbol} balance. Available: ${formatTokenAmount(
                                 selectedToken?.balance || '0'
                               )} ${selectedToken?.symbol}`
-                            : submitError || quoteError}
+                            : minimumErrorMessage || submitError || quoteError}
                         </span>
                       </div>
                     )}
@@ -773,6 +806,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                         !selectedToken ||
                         numericAmount <= 0 ||
                         exceedsBalance ||
+                        belowMinimum ||
                         isQuoting ||
                         !quote ||
                         isSubmitting ||

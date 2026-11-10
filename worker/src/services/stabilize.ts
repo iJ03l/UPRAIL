@@ -405,6 +405,8 @@ export async function getTotalSpendableOriginAtomic(
   const confidentialAtomic = confBal?.amountAtomic ?? 0n;
   const publicIntentsAtomic = pubBal?.balance ?? 0n;
 
+  // getPlainBalances() already subtracts PLATFORM_GAS_RESERVE (0.02 NEAR) + storage stake
+  // from native NEAR and merges wNEAR, so do not subtract the reserve a second time here.
   let plainAtomic = 0n;
   for (const b of plainBals) {
     const bId = (b.defuse_asset_id || '').toLowerCase();
@@ -417,14 +419,7 @@ export async function getTotalSpendableOriginAtomic(
       (oId === 'nep141:wrap.near' && b.symbol.toUpperCase() === 'NEAR')
     ) {
       try {
-        const bal = BigInt(b.amount || '0');
-        if (b.symbol.toUpperCase() === 'NEAR') {
-          // Reserve 0.02 NEAR for platform gas sponsorship & account storage staking
-          const reserve = 20000000000000000000000n;
-          plainAtomic += bal > reserve ? bal - reserve : 0n;
-        } else {
-          plainAtomic += bal;
-        }
+        plainAtomic += BigInt(b.amount || '0');
       } catch {}
     }
   }
@@ -436,6 +431,39 @@ export async function getTotalSpendableOriginAtomic(
     plainAtomic,
     nearAccount,
   };
+}
+
+export const MIN_STABILIZE_USD = 1;
+export const MIN_NEAR_STABILIZE_ATOMIC = 50000000000000000000000n; // 0.05 NEAR
+
+function assertStabilizeMinimum(
+  origin: StabilizeTokenDescriptor,
+  grossAtomic: bigint,
+  rawAmount: string,
+  quotedUsd?: string | null
+): void {
+  const isNearOrigin =
+    origin.symbol.toUpperCase() === 'NEAR' ||
+    (origin.assetId || '').toLowerCase() === 'nep141:wrap.near';
+  if (isNearOrigin && grossAtomic < MIN_NEAR_STABILIZE_ATOMIC) {
+    throw new StabilizeError(
+      'AMOUNT_TOO_LOW',
+      'Minimum NEAR amount to stabilize is 0.05 NEAR.'
+    );
+  }
+  const usdFromQuote = quotedUsd ? Number(quotedUsd) : NaN;
+  const usdFromPrice =
+    typeof origin.priceUsd === 'number' && origin.priceUsd > 0
+      ? Number(rawAmount) * origin.priceUsd
+      : NaN;
+  const effectiveUsd =
+    Number.isFinite(usdFromQuote) && usdFromQuote > 0 ? usdFromQuote : usdFromPrice;
+  if (Number.isFinite(effectiveUsd) && effectiveUsd > 0 && effectiveUsd < MIN_STABILIZE_USD) {
+    throw new StabilizeError(
+      'AMOUNT_TOO_LOW',
+      `Minimum amount to stabilize is $${MIN_STABILIZE_USD.toFixed(2)} USD.`
+    );
+  }
 }
 
 /**
@@ -471,6 +499,8 @@ export async function getStabilizeQuote(
   } catch {
     throw new StabilizeError('INVALID_AMOUNT', `Invalid amount "${rawAmount}".`);
   }
+
+  assertStabilizeMinimum(origin, grossAtomic, rawAmount);
 
   const split = computeStabilizeSplit(grossAtomic, origin.decimals, env.FEE_PERCENT);
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
@@ -539,6 +569,8 @@ export async function getStabilizeQuote(
       502
     );
   }
+
+  assertStabilizeMinimum(origin, grossAtomic, rawAmount, amountInUsd || amountOutUsd);
 
   const amountOutFormatted = formatAtomic(amountOutAtomic.toString(), destination.decimals);
   const minAmountOutFormatted = formatAtomic(
@@ -628,6 +660,9 @@ export async function executeStabilize(
     );
   }
 
+  const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
+  await (env as any).CACHE?.delete(`plain_bal:${nearAccount}`).catch(() => {});
+
   const spendable = await getTotalSpendableOriginAtomic(env, session, origin);
   if (spendable.totalAtomic <= 0n) {
     throw new StabilizeError(
@@ -653,16 +688,8 @@ export async function executeStabilize(
     throw new StabilizeError('INVALID_AMOUNT', 'Amount must be greater than zero.');
   }
 
-  const isNearOrigin =
-    origin.symbol.toUpperCase() === 'NEAR' ||
-    (origin.assetId || '').toLowerCase() === 'nep141:wrap.near';
-  const MIN_NEAR_STABILIZE_ATOMIC = 20000000000000000000000n; // 0.02 NEAR minimum
-  if (isNearOrigin && grossAtomic < MIN_NEAR_STABILIZE_ATOMIC) {
-    throw new StabilizeError(
-      'AMOUNT_TOO_LOW',
-      'Minimum amount to stabilize is 0.02 NEAR.'
-    );
-  }
+  const formattedGross = formatAtomic(grossAtomic.toString(), origin.decimals);
+  assertStabilizeMinimum(origin, grossAtomic, formattedGross);
 
   if (grossAtomic > spendable.totalAtomic) {
     const availFormatted = formatAtomic(spendable.totalAtomic.toString(), origin.decimals);

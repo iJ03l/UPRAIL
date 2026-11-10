@@ -4074,18 +4074,9 @@ async function getPlainFtBalance(
   }
 }
 
-/** Plain native NEAR balance in yoctoNEAR (0n on any failure). */
+/** Liquid plain native NEAR balance in yoctoNEAR after storage staking (0n on any failure). */
 async function getPlainNearBalance(rpcUrl: string, accountId: string): Promise<bigint> {
-  try {
-    const res: any = await nearRpc(rpcUrl, 'query', {
-      request_type: 'view_account',
-      finality: 'final',
-      account_id: accountId,
-    });
-    return BigInt(res?.amount ?? res?.result?.amount ?? '0');
-  } catch {
-    return 0n;
-  }
+  return (await getLiquidNearBalanceStrict(rpcUrl, accountId)) ?? 0n;
 }
 
 /**
@@ -4119,6 +4110,25 @@ async function getPlainNearBalanceStrict(
       account_id: accountId,
     });
     return BigInt(res?.amount ?? res?.result?.amount ?? '0');
+  } catch {
+    return null;
+  }
+}
+
+async function getLiquidNearBalanceStrict(
+  rpcUrl: string,
+  accountId: string
+): Promise<bigint | null> {
+  try {
+    const res: any = await nearRpc(rpcUrl, 'query', {
+      request_type: 'view_account',
+      finality: 'final',
+      account_id: accountId,
+    });
+    const amount = BigInt(res?.amount ?? res?.result?.amount ?? '0');
+    const storageBytes = BigInt(res?.storage_usage ?? res?.result?.storage_usage ?? '0');
+    const storageStake = storageBytes * 10_000_000_000_000_000_000n;
+    return amount > storageStake ? amount - storageStake : 0n;
   } catch {
     return null;
   }
@@ -5290,7 +5300,7 @@ export async function depositPlainBalanceToIntents(
         receiverId: contractId,
         method: 'ft_transfer_call',
         args: JSON.stringify({ receiver_id: intentsId, amount: baseUnits, msg: creditAddress }),
-        gas: 45_000_000_000_000n,
+        gas: 30_000_000_000_000n,
         deposit: 1n,
       });
       if (res.ok) {
@@ -5304,14 +5314,13 @@ export async function depositPlainBalanceToIntents(
     //    (with NEP-145 storage on wrap.near and gas reserve sponsored by escrow),
     //    then execute ft_transfer_call for the full baseUnits.
     if (isNearNative && contractId === 'wrap.near') {
-      const plainNear = await getPlainNearBalanceStrict(rpcUrl, senderAccountId);
-      if (plainNear === null) {
+      const liquidNear = await getLiquidNearBalanceStrict(rpcUrl, senderAccountId);
+      if (liquidNear === null) {
         return { deposited: false, reason: 'PLAIN_BALANCE_UNAVAILABLE' };
       }
-      // On-chain sub-accounts require a minimum storage balance (264 bytes) and gas reserve.
-      // Funds in this reserve are NOT spendable deposit principal and cannot be wrapped.
+      // Funds in this reserve cover execution gas and are NOT spendable deposit principal.
       const NATIVE_NEAR_RESERVE = 20000000000000000000000n; // 0.02 NEAR platform gas reserve
-      const spendableNear = plainNear > NATIVE_NEAR_RESERVE ? plainNear - NATIVE_NEAR_RESERVE : 0n;
+      const spendableNear = liquidNear > NATIVE_NEAR_RESERVE ? liquidNear - NATIVE_NEAR_RESERVE : 0n;
       const totalSpendable = plainFt + spendableNear;
       const wrapNeeded = BigInt(baseUnits) - plainFt;
       if (totalSpendable >= BigInt(baseUnits) && wrapNeeded > 0n) {
@@ -5343,13 +5352,14 @@ export async function depositPlainBalanceToIntents(
         if (!wrap.ok) {
           return { deposited: false, reason: wrap.error || 'near_deposit (wrap.near) failed' };
         }
-        await ensureRegistrationGas(env, senderAccountId, 15000000000000000000000n);
+        await (env as any).CACHE?.delete(`plain_bal:${senderAccountId}`).catch(() => {});
+        await ensureRegistrationGas(env, senderAccountId, 20000000000000000000000n);
         const res = await signAndBroadcastFunctionCall({
           ...senderKey,
           receiverId: 'wrap.near',
           method: 'ft_transfer_call',
           args: JSON.stringify({ receiver_id: intentsId, amount: baseUnits, msg: creditAddress }),
-          gas: 45_000_000_000_000n,
+          gas: 30_000_000_000_000n,
           deposit: 1n,
         });
         if (res.ok) {

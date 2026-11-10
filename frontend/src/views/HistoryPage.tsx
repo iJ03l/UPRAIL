@@ -23,7 +23,7 @@ import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { PaymentIntent, PaymentRequest } from '../types';
-import { cancellationReason, historyStatusLabel } from '../lib/statusLabels';
+import { activityStatusMeta, cancellationReason } from '../lib/statusLabels';
 
 export const HistoryPage: React.FC = () => {
   const { user } = useXAuth();
@@ -83,7 +83,7 @@ export const HistoryPage: React.FC = () => {
   const unifiedHistory = useMemo(() => {
     type UnifiedHistoryItem = {
       id: string;
-      type: 'payment' | 'deposit' | 'withdrawal';
+      type: 'payment' | 'deposit' | 'withdrawal' | 'request';
       isSent: boolean;
       title: string;
       subtitle: string;
@@ -154,7 +154,7 @@ export const HistoryPage: React.FC = () => {
       );
       list.push({
         id: req.id,
-        type: 'payment',
+        type: 'request',
         isSent,
         title: isSent ? `Request to @${req.requested_handle}` : `Request from @${req.requester_handle}`,
         subtitle: req.memo || 'UPRAIL Payment Request',
@@ -265,7 +265,7 @@ export const HistoryPage: React.FC = () => {
       if (statusFilter === 'all') {
         matchesFilter = true;
       } else if (statusFilter === 'requests') {
-        matchesFilter = item.subtitle?.includes('Payment Request') || item.title?.includes('Request');
+        matchesFilter = item.type === 'request' || item.subtitle?.includes('Payment Request') || item.title?.includes('Request');
       } else if (statusFilter === 'deposits') {
         matchesFilter = item.type === 'deposit';
       } else if (statusFilter === 'withdrawals') {
@@ -322,6 +322,7 @@ export const HistoryPage: React.FC = () => {
             { id: 'ready', label: 'Waiting' },
             { id: 'claimed', label: 'Received' },
             { id: 'pending', label: 'Pending' },
+            { id: 'declined', label: 'Declined' },
             { id: 'expired', label: 'Expired' },
             { id: 'refunded', label: 'Refunded' },
             { id: 'cancelled', label: 'Cancelled' },
@@ -420,21 +421,20 @@ export const HistoryPage: React.FC = () => {
                             ≈ {formatUsd(tx.amountUsd)}
                           </span>
                         )}
-                        <span
-                          className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
-                            tx.status === 'success' || tx.status === 'claimed'
-                              ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                              : tx.status === 'failed'
-                              ? 'text-red-700 bg-red-50 border-red-200'
-                              : tx.status === 'cancelled'
-                              ? 'text-amber-700 bg-amber-50 border-amber-200'
-                              : 'text-stone-600 bg-stone-100 border-stone-200'
-                          }`}
-                        >
-                          {tx.isSent
-                            ? (tx.status === 'claimed' || tx.status === 'success' ? 'DELIVERED' : tx.status === 'cancelled' ? 'CANCELLED' : 'WAITING FOR CLAIM')
-                            : (tx.status === 'claimed' || tx.status === 'success' ? 'RECEIVED' : historyStatusLabel(tx.status))}
-                        </span>
+                        {(() => {
+                          const statusMeta = activityStatusMeta({
+                            type: tx.type,
+                            isSent: tx.isSent,
+                            status: tx.status,
+                          });
+                          return (
+                            <span
+                              className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${statusMeta.className}`}
+                            >
+                              {statusMeta.label}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 

@@ -41,7 +41,7 @@ import { CoffeeModal, CoinPouchIcon } from '../components/CoffeeModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
-import { cancellationReason, historyStatusLabel } from '../lib/statusLabels';
+import { activityStatusMeta, cancellationReason } from '../lib/statusLabels';
 
 export const AppHome: React.FC = () => {
   const navigate = useNavigate();
@@ -419,27 +419,61 @@ export const AppHome: React.FC = () => {
                 )}
 
                 <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStabilizeInitialToken(null);
-                      setIsStabilizeModalOpen(true);
-                    }}
-                    title="Convert held crypto to USDC or USDT"
-                    className="relative overflow-hidden inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700/80 text-xs font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all cursor-pointer group"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[6.5px] leading-[7.5px] tracking-[0.12em] text-white/20 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
-                    >
-                      <span>░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░</span>
-                      <span>▒░╬─┼─USDC/USDT─┼─╬░▒▓█╬░</span>
-                      <span>▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓</span>
-                      <span>░▒▓█╬─┼─1CLICK─┼─╬█▓▒░▒▓█</span>
-                    </span>
-                    <ArrowLeftRight className="relative z-10 w-3.5 h-3.5 text-emerald-100 group-hover:text-white transition-colors drop-shadow-xs" />
-                    <span className="relative z-10 drop-shadow-xs">Stabilize</span>
-                  </button>
+                  {(() => {
+                    const hasEligibleStabilize = balances.some((b) => {
+                      const symUpper = (b.symbol || '').toUpperCase();
+                      const is1Click =
+                        b.supportsOneClick ??
+                        (symUpper === 'NEAR' || symUpper === 'WNEAR' || !b.isPlainOnly);
+                      if (!is1Click || symUpper === 'USDC' || symUpper === 'USDT') return false;
+                      const amt = parseFloat(b.amountFormatted || '0') || 0;
+                      if (amt <= 0) return false;
+                      if ((symUpper === 'NEAR' || symUpper === 'WNEAR') && amt < 0.05) return false;
+                      const usd = balanceUsd(b, tokens);
+                      if (usd !== null && usd < 1) return false;
+                      return true;
+                    });
+                    const stabilizeDisabled = !isFirstLoad && balances.length > 0 && !hasEligibleStabilize;
+                    return (
+                      <button
+                        type="button"
+                        disabled={stabilizeDisabled}
+                        onClick={() => {
+                          if (stabilizeDisabled) return;
+                          setStabilizeInitialToken(null);
+                          setIsStabilizeModalOpen(true);
+                        }}
+                        title={
+                          stabilizeDisabled
+                            ? 'Hold at least $1.00 USD in a non-stable token to stabilize'
+                            : 'Convert held crypto to USDC or USDT'
+                        }
+                        className={`relative overflow-hidden inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl border text-xs font-display font-extrabold uppercase tracking-wider shadow-xs transition-all group ${
+                          stabilizeDisabled
+                            ? 'bg-stone-200 border-stone-300 text-stone-500 cursor-not-allowed opacity-70'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700/80 hover:shadow-sm cursor-pointer'
+                        }`}
+                      >
+                        {!stabilizeDisabled && (
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[6.5px] leading-[7.5px] tracking-[0.12em] text-white/20 group-hover:text-white/25 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
+                          >
+                            <span>░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░</span>
+                            <span>▒░╬─┼─USDC/USDT─┼─╬░▒▓█╬░</span>
+                            <span>▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓</span>
+                            <span>░▒▓█╬─┼─1CLICK─┼─╬█▓▒░▒▓█</span>
+                          </span>
+                        )}
+                        <ArrowLeftRight
+                          className={`relative z-10 w-3.5 h-3.5 transition-colors drop-shadow-xs ${
+                            stabilizeDisabled ? 'text-stone-400' : 'text-emerald-100 group-hover:text-white'
+                          }`}
+                        />
+                        <span className="relative z-10 drop-shadow-xs">Stabilize</span>
+                      </button>
+                    );
+                  })()}
 
                   <button
                     type="button"
@@ -492,19 +526,27 @@ export const AppHome: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-100">
               {balances.length > 0 ? (
                 balances.map((b) => {
-                  const usd = hideBalance ? null : balanceUsd(b, tokens);
+                  const rawUsd = balanceUsd(b, tokens);
+                  const usd = hideBalance ? null : rawUsd;
                   const symUpper = (b.symbol || '').toUpperCase();
                   const is1Click =
                     b.supportsOneClick ?? (symUpper === 'NEAR' || symUpper === 'WNEAR' || !b.isPlainOnly);
+                  const numAmt = parseFloat(b.amountFormatted || '0') || 0;
+                  const isNearAsset = symUpper === 'NEAR' || symUpper === 'WNEAR';
+                  const meetsMinAmount =
+                    numAmt > 0 &&
+                    (!isNearAsset || numAmt >= 0.05) &&
+                    (rawUsd === null || rawUsd >= 1);
                   const canStabilize =
                     is1Click &&
                     symUpper !== 'USDC' &&
                     symUpper !== 'USDT' &&
-                    (parseFloat(b.amountFormatted || '0') || 0) > 0;
+                    meetsMinAmount;
                   return (
                     <button
                       key={b.defuse_asset_id}
                       type="button"
+                      disabled={!canStabilize}
                       onClick={() => {
                         if (!canStabilize) return;
                         const matched = paymentTokens.find(
@@ -532,6 +574,8 @@ export const AppHome: React.FC = () => {
                       title={
                         canStabilize
                           ? `Tap to stabilize ${b.symbol} to USDC or USDT`
+                          : is1Click && symUpper !== 'USDC' && symUpper !== 'USDT' && numAmt > 0
+                          ? `Minimum $1.00 USD required to stabilize ${b.symbol}`
                           : b.defuse_asset_id
                       }
                     >
@@ -838,19 +882,20 @@ export const AppHome: React.FC = () => {
                               </div>
                             );
                           })()}
-                          <span className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
-                            tx.status === 'success' || tx.status === 'claimed'
-                              ? 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/50 dark:border-emerald-800 dark:text-emerald-300'
-                              : tx.status === 'failed'
-                              ? 'text-red-700 bg-red-50 border-red-200 dark:bg-red-950/50 dark:border-red-800 dark:text-red-300'
-                              : tx.status === 'cancelled'
-                              ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-300'
-                              : 'text-stone-600 bg-stone-100 border-stone-200 dark:bg-stone-800 dark:border-stone-700 dark:text-stone-300'
-                          }`}>
-                            {tx.isSent
-                              ? (tx.status === 'claimed' || tx.status === 'success' ? 'DELIVERED' : tx.status === 'cancelled' ? 'CANCELLED' : 'WAITING FOR CLAIM')
-                              : (tx.status === 'claimed' || tx.status === 'success' ? 'RECEIVED' : historyStatusLabel(tx.status))}
-                          </span>
+                          {(() => {
+                            const statusMeta = activityStatusMeta({
+                              type: tx.type,
+                              isSent: tx.isSent,
+                              status: tx.status,
+                            });
+                            return (
+                              <span
+                                className={`text-[9px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${statusMeta.className}`}
+                              >
+                                {statusMeta.label}
+                              </span>
+                            );
+                          })()}
                         </div>
                         {tx.copyValue && (
                           <button

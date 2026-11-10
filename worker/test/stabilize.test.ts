@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   computeStabilizeSplit,
+  getStabilizeQuote,
   resolveOriginToken,
   resolveTargetStablecoin,
   StabilizeError,
@@ -69,4 +70,54 @@ test('resolveOriginToken canonicalizes native NEAR aliases to nep141:wrap.near',
     assert.equal(resolved.decimals, 24);
     assert.equal(resolved.priceUsd, 1.24);
   }
+});
+
+test('getStabilizeQuote rejects dust amounts below 0.05 NEAR or $1.00 USD before quoting', async () => {
+  const mockTokens = [
+    {
+      assetId: 'nep141:wrap.near',
+      decimals: 24,
+      blockchain: 'near',
+      symbol: 'wNEAR',
+      price: 3.59,
+      contractAddress: 'wrap.near',
+    },
+    {
+      assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+      decimals: 6,
+      blockchain: 'near',
+      symbol: 'USDC',
+      price: 1,
+    },
+  ];
+  const mockEnv: any = {
+    FEE_PERCENT: '0.01',
+    CACHE: {
+      async get() {
+        return mockTokens;
+      },
+      async put() {},
+    },
+  };
+  const mockSession: any = { x_id: 'x_1', x_handle: 'testuser' };
+
+  await assert.rejects(
+    () =>
+      getStabilizeQuote(mockEnv, mockSession, {
+        sourceAsset: 'nep141:wrap.near',
+        targetAsset: 'USDC',
+        amount: '0.03',
+      }),
+    (err: any) => err instanceof StabilizeError && err.code === 'AMOUNT_TOO_LOW'
+  );
+
+  await assert.rejects(
+    () =>
+      getStabilizeQuote(mockEnv, mockSession, {
+        sourceAsset: 'nep141:wrap.near',
+        targetAsset: 'USDC',
+        amount: '0.078998',
+      }),
+    (err: any) => err instanceof StabilizeError && err.code === 'AMOUNT_TOO_LOW'
+  );
 });
