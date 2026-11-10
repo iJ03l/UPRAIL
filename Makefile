@@ -3,9 +3,9 @@
 help:
 	@echo "UPRAIL Verification Suite (NEAR Hackathon)"
 	@echo "=========================================="
-	@echo "make verify           Run live on-chain mainnet checks + full 158 automated tests"
-	@echo "make check-mainnet    Verify escrow sponsor & sub-accounts on NEAR mainnet"
-	@echo "make test             Run 158 automated tests in worker (Miniflare sandbox)"
+	@echo "make verify           Run 10 live mainnet/feature checks + 166 automated tests"
+	@echo "make check-mainnet    Verify sponsor, sub-accounts, intents.near & live APIs (10 checks)"
+	@echo "make test             Run 166 automated tests across 39 suites (Miniflare + unit)"
 	@echo "make check-endpoints  Quick curl inspection of live production endpoints"
 
 verify: check-mainnet test
