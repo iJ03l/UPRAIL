@@ -50,7 +50,7 @@ make check-mainnet
 🎉 ALL ON-CHAIN SPONSOR & MAINNET CHECKS PASSED SUCCESSFULLY!
 ```
 
-### 2. Run Full Automated Test Suite (158 Tests, 0 Failures)
+### 2. Run Full Automated Test Suite (163 Tests, 0 Failures)
 Run the complete unit, Miniflare integration, and security test harness:
 ```bash
 make test
@@ -58,9 +58,9 @@ make test
 ```
 **Expected Output:**
 ```text
-ℹ tests 158
+ℹ tests 163
 ℹ suites 39
-ℹ pass 158
+ℹ pass 163
 ℹ fail 0
 ```
 
@@ -79,6 +79,9 @@ curl -sS https://api.uprail.world/.well-known/oauth-protected-resource/api/mcp |
 
 # 4. Inspect OpenAPI 3.1.0 Agent Payment specification
 curl -sS https://api.uprail.world/api/agent/openapi.json | jq .info
+
+# 5. Inspect live Buy Me a Coffee supported tokens & cross-chain routes
+curl -sS https://api.uprail.world/api/coffee/options | jq '.tokens | map({symbol, chains: (.chains | length)})'
 ```
 
 ---
@@ -89,11 +92,11 @@ Where each hackathon criterion is implemented and tested in the codebase:
 
 | Track | Requirement | UPRAIL Implementation | Verified Source Code & Tests |
 | :--- | :--- | :--- | :--- |
-| **`social`**<br/>(Social Money) | Send value via social identity, shared budgets, reputation rails | Maps any `@handle` to deterministic NEAR vaults (`u_<hex>.escrow.uprail.near`); `/request/:id` social payment cards; "People You Pay" persistent contact memory | • [`worker/src/routes/resolve.ts`](file:///home/x-5194/UP/worker/src/routes/resolve.ts)<br/>• [`worker/src/routes/requests.ts`](file:///home/x-5194/UP/worker/src/routes/requests.ts)<br/>• [`worker/test/account-exists.test.mjs`](file:///home/x-5194/UP/worker/test/account-exists.test.mjs) |
+| **`social`**<br/>(Social Money) | Send value via social identity, shared budgets, reputation rails | Maps any `@handle` to deterministic NEAR vaults (`u_<hex>.escrow.uprail.near`); **Buy Me a Coffee** (`uprail.world/<handle>`) walletless cross-chain tip pages; `/request/:id` social payment cards; "People You Pay" contact memory | • [`worker/src/routes/coffee.ts`](file:///home/x-5194/UP/worker/src/routes/coffee.ts)<br/>• [`worker/src/services/coffee.ts`](file:///home/x-5194/UP/worker/src/services/coffee.ts)<br/>• [`worker/test/coffee.test.ts`](file:///home/x-5194/UP/worker/test/coffee.test.ts)<br/>• [`worker/src/routes/requests.ts`](file:///home/x-5194/UP/worker/src/routes/requests.ts) |
 | **`privacy`**<br/>(Privacy & Private AI) | Confidential computation, breaking on-chain transaction graph | NEAR Confidential Intents (`intents.near` + 1Click); unlinked escrow claims break on-chain sender-recipient linkability; confidential balance reconciliation | • [`worker/src/services/confidentialRail.ts`](file:///home/x-5194/UP/worker/src/services/confidentialRail.ts)<br/>• [`worker/test/confidential-rail.test.ts`](file:///home/x-5194/UP/worker/test/confidential-rail.test.ts)<br/>• [`worker/src/services/refunds.ts`](file:///home/x-5194/UP/worker/src/services/refunds.ts) |
-| **`defi`**<br/>(Unstoppable DeFi) | Multi-chain cross-chain settlement via NEAR Intents | Cross-chain ingress & egress across 35+ chains (Base, Arbitrum, Solana, Bitcoin) via 1Click and `intents.near` | • [`worker/src/services/oneclickWithdraw.ts`](file:///home/x-5194/UP/worker/src/services/oneclickWithdraw.ts)<br/>• [`worker/test/oneclick-client.test.ts`](file:///home/x-5194/UP/worker/test/oneclick-client.test.ts)<br/>• [`worker/test/intents-support.test.mjs`](file:///home/x-5194/UP/worker/test/intents-support.test.mjs) |
+| **`defi`**<br/>(Unstoppable DeFi) | Multi-chain cross-chain settlement via NEAR Intents | Cross-chain ingress & egress across 35+ chains (Base, Arbitrum, Solana, Bitcoin) via 1Click and `intents.near`; 1-click ephemeral deposit address generation | • [`worker/src/services/oneclickWithdraw.ts`](file:///home/x-5194/UP/worker/src/services/oneclickWithdraw.ts)<br/>• [`worker/test/oneclick-client.test.ts`](file:///home/x-5194/UP/worker/test/oneclick-client.test.ts)<br/>• [`worker/test/intents-support.test.mjs`](file:///home/x-5194/UP/worker/test/intents-support.test.mjs) |
 | **`agents`** / **`business`**<br/>(Agent Economy) | Policy-bounded agent spending, autonomous payments | Remote MCP Server (`api.uprail.world/api/mcp`) + OpenAPI 3.1.0 with per-transaction & daily USD spend caps enforced atomically | • [`worker/src/routes/mcp.ts`](file:///home/x-5194/UP/worker/src/routes/mcp.ts)<br/>• [`worker/src/routes/agent.ts`](file:///home/x-5194/UP/worker/src/routes/agent.ts)<br/>• [`worker/test/miniflare.test.mjs`](file:///home/x-5194/UP/worker/test/miniflare.test.mjs) |
-| **`realworld`**<br/>(Real-World Money) | Stablecoin rails for real people and businesses | Zero seed phrases: hardware WebAuthn P-256 passkeys (Touch ID / Face ID) + 100% sponsored gas on NEAR via `escrow.uprail.near` | • [`worker/src/services/nearRpc.ts`](file:///home/x-5194/UP/worker/src/services/nearRpc.ts)<br/>• [`worker/test/recovery-codes.test.ts`](file:///home/x-5194/UP/worker/test/recovery-codes.test.ts)<br/>• [`worker/test/stabilize.test.ts`](file:///home/x-5194/UP/worker/test/stabilize.test.ts) |
+| **`realworld`**<br/>(Real-World Money) | Stablecoin rails for real people and businesses | Zero seed phrases & zero contributor login: hardware WebAuthn P-256 passkeys (Touch ID / Face ID), 100% sponsored gas, and public `uprail.world/<handle>` USDC/USDT tip pages | • [`frontend/src/views/PublicCoffeeView.tsx`](file:///home/x-5194/UP/frontend/src/views/PublicCoffeeView.tsx)<br/>• [`worker/src/services/nearRpc.ts`](file:///home/x-5194/UP/worker/src/services/nearRpc.ts)<br/>• [`worker/test/recovery-codes.test.ts`](file:///home/x-5194/UP/worker/test/recovery-codes.test.ts) |
 
 ---
 
@@ -111,6 +114,7 @@ Where each hackathon criterion is implemented and tested in the codebase:
 UPRAIL bridges this gap by mapping any X handle (`@handle`) to a deterministic, passkey-gated NEAR vault and routing transfers through **NEAR Intents** and **NEAR Confidential Intents** (`intents.near` + 1Click confidential execution):
 
 - **Universal Ingress to near.com via Public Identity:** Solves the near.com rotating address barrier. Anyone in the world can deposit or send funds to your persistent public identity (`@handle`) from 35+ chains without requiring a live session quote from you. Funds settle into your passkey-secured vault on NEAR Intents (`intents.near`), ready to be routed into any personal wallet or spent across the NEAR ecosystem.
+- **Buy Me a Coffee (`uprail.world/<handle>`):** Creators flip a single dashboard toggle to activate a sleek public tip page (`uprail.world/<handle>`). Supporters need **no UPRAIL account and no wallet connection**—they pick an amount (`$2`, `$5`, `$10`, `$25`, or custom), pick `USDC`/`USDT` (or major tokens), pick any origin chain, and receive a one-time ephemeral deposit address that routes through escrow (1% protocol fee) straight to the creator's vault.
 - **Send to any `@handle` without a recipient wallet:** Senders pay `@handle` in `USDC`, `USDT`, `NEAR`, `ETH`, `SOL`, `BTC`, or NEP-141 tokens. Registered recipients receive funds directly into their confidential/intents vault; unregistered handles receive funds into a pooled escrow and claim whenever they sign in.
 - **"People You Pay" (Persistent Identity Contacts & Quick-Actions):** P2P transfers are social and recurring. UPRAIL maintains a user-controlled, persistent contact memory merging pinned favorites, custom nicknames, and historical transfer recency—enabling single-tap sends and requests without re-typing handles or token parameters.
 - **UPRAIL Requests (Social Invoicing & Network-Effect Ingress):** Allow users to request money from any X handle with custom amounts, reasons, and expiry. Recipients receive a minimal, playful social card (`/request/:id`) and can accept or decline voluntarily in one tap. Unregistered recipients can view requests without an account upfront, and upon passkey onboarding, settle directly from their vault.
@@ -332,6 +336,7 @@ flowchart TD
 - **Confidential Intents Execution:** Integrates 1Click confidential quotes and execution with fail-closed downgrade protection.
 - **Hardware Passkey Biometrics + Recovery:** WebAuthn P-256 (`ES256`) per-transaction assertions on every fund-moving endpoint, backed by one-time recovery codes and self-custody private key export.
 - **Zero-Gas User Experience:** Protocol relayer sponsors sub-account creation, NEP-145 token storage registration, and `intents.near::execute_intents` gas.
+- **Buy Me a Coffee (`uprail.world/<handle>`):** One-toggle public creator tip links allowing anyone—with zero UPRAIL login or browser wallet—to pick a preset/custom USD amount, USDC/USDT or major asset, and any origin chain to reveal a standby one-time deposit address that settles 99% net directly to the creator's vault.
 - **Cross-Chain Withdrawals (35+ Chains):** Withdraw from UPRAIL directly to external wallets on NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and more.
 - **AI Chat Payments (OAuth 2.1 + Remote MCP):** Streamable HTTP MCP server (`/api/mcp`) and OpenAPI 3.1.0 spec (`/api/agent/openapi.json`) with Passkey-approved per-tx and daily USD caps, live oracle valuation, and idempotency keys.
 - **Launchpad Creator-Fee Routing:** Payout adapter (`POST /api/fees/adapter`) supporting Nearly, JustHoot v2, and Intear Launchpad (`launch.intear.near` / `dex.intear.near`). Launchpads keep their fee receiver and direct creator fees to an X handle onchain.
@@ -344,9 +349,9 @@ flowchart TD
 ```text
 /
 ├── frontend/                              # Next.js 16 + React 19 + Tailwind CSS (static export served by Worker)
-│   ├── src/app/                           # App Router pages: /, /app/send, /app/claim, /app/receive, /app/agents, /docs/*
-│   ├── src/components/                    # AppShell, PasskeyModal, ProtectedRoute, DomainGate, FlowPulseWidget
-│   ├── src/views/                         # LandingPage, AppHome, SendPage, ClaimPage, ReceivePage, AgentsPage
+│   ├── src/app/                           # App Router pages: /, /tip, /app/send, /app/claim, /app/receive, /app/agents, /docs/*
+│   ├── src/components/                    # AppShell, PasskeyModal, CoffeeModal, StabilizeModal, DomainGate, FlowPulseWidget
+│   ├── src/views/                         # LandingPage, AppHome, PublicCoffeeView, SendPage, ClaimPage, ReceivePage, AgentsPage
 │   ├── src/hooks/                         # useXAuth, usePasskey, usePayments, useOnchainData
 │   └── src/lib/                           # Typed API client (api.ts), client router, status formatters
 │
@@ -356,10 +361,10 @@ flowchart TD
 │   ├── src/db/                            # Canonical D1 schema.sql + sequential SQL migrations
 │   ├── src/middleware/                    # HMAC sessions, WebAuthn passkeyAuth, agentAuth, rateLimit, securityHeaders
 │   ├── src/oauth/                         # OAuth 2.1 Authorization Server (PKCE, DCR, /authorize UI) & Resource Server
-│   ├── src/routes/                        # auth, payments, claim, onchain, agent, mcp, fees, launchpads, invites, og
-│   ├── src/services/                      # nearRpc, confidentialRail, oneclickClient, oneclickAuth, oneclickWithdraw,
-│   │                                      # intentsNonce, launchpadFees, launchpadIntegrations, refunds, recoveryCodes
-│   └── test/                              # 14 automated test suites (Miniflare integration + unit tests)
+│   ├── src/routes/                        # auth, payments, claim, coffee, onchain, agent, mcp, fees, launchpads, invites, og
+│   ├── src/services/                      # nearRpc, confidentialRail, coffee, stabilize, oneclickClient, oneclickAuth,
+│   │                                      # oneclickWithdraw, intentsNonce, launchpadFees, launchpadIntegrations, refunds
+│   └── test/                              # 15+ automated test suites (163 tests: Miniflare integration + unit tests)
 │
 ├── go-near-service/                       # Go 1.25 Settlement Microservice
 │   ├── cmd/server/main.go                 # Chi HTTP server, graceful shutdown, route wiring
