@@ -5,7 +5,6 @@ import {
   Bot,
   Plus,
   KeyRound,
-  ShieldCheck,
   Trash2,
   Ban,
   Loader2,
@@ -22,18 +21,17 @@ import {
   Zap,
   Compass,
   BookOpen,
+  ExternalLink,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useSearchParams } from '../lib/router';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { SkeletonList } from '../components/Skeleton';
-import { Portal } from '../components/Portal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
-import type { AgentKey, CreatedAgentKey } from '../types';
+import type { AgentKey } from '../types';
 
 const MCP_ENDPOINT = 'https://api.uprail.world/api/mcp';
-const OPENAPI_SPEC_URL = 'https://api.uprail.world/api/agent/openapi.json';
 const DOCS_SETUP_URL = 'https://docs.uprail.world/docs/agents';
 const CLAUDE_CONNECTORS_URL = 'https://claude.ai/customize/connectors';
 const CHATGPT_CONNECTORS_URL = 'https://chatgpt.com/plugins';
@@ -100,19 +98,12 @@ const CHAT_PLATFORMS: ChatPlatform[] = [
   },
 ];
 
-function buildMcpJson(apiKey?: string): string {
+function buildMcpJson(): string {
   return JSON.stringify(
     {
       mcpServers: {
         uprail: {
           url: MCP_ENDPOINT,
-          ...(apiKey
-            ? {
-                headers: {
-                  Authorization: `Bearer ${apiKey}`,
-                },
-              }
-            : {}),
         },
       },
     },
@@ -155,6 +146,16 @@ function platformSettingsUrl(platform: PlatformId): string {
   }
 }
 
+function resolveSessionPlatform(k: AgentKey): ChatPlatform | null {
+  const hay = `${k.name || ''} ${k.oauthClientName || ''}`.toLowerCase();
+  if (hay.includes('claude') || hay.includes('anthropic')) return CHAT_PLATFORMS[0];
+  if (hay.includes('openai') || hay.includes('chatgpt') || hay.includes('dot')) return CHAT_PLATFORMS[1];
+  if (hay.includes('grok') || hay.includes('xai')) return CHAT_PLATFORMS[2];
+  if (hay.includes('muse') || hay.includes('meta')) return CHAT_PLATFORMS[3];
+  if (hay.includes('cursor') || hay.includes('windsurf')) return CHAT_PLATFORMS[4];
+  return null;
+}
+
 export const AgentsPage: React.FC = () => {
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   const { toast } = useToast();
@@ -164,24 +165,13 @@ export const AgentsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [created, setCreated] = useState<CreatedAgentKey | null>(null);
   const [showConnect, setShowConnect] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showCreateConfirm, setShowCreateConfirm] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<AgentKey | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AgentKey | null>(null);
-
-  // Create form state
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformId>('claude');
-  const [name, setName] = useState('Claude');
-  const [perTxLimit, setPerTxLimit] = useState('25');
-  const [dailyLimit, setDailyLimit] = useState('100');
-  const [expiresInDays, setExpiresInDays] = useState('90');
-  const [creating, setCreating] = useState(false);
 
   const selectPlatform = (p: ChatPlatform) => {
     setSelectedPlatform(p.id);
-    setName(p.defaultName);
   };
 
   useEffect(() => {
@@ -191,9 +181,7 @@ export const AgentsPage: React.FC = () => {
     if (!platform) return;
     appliedPlatformParam.current = requested;
     setSelectedPlatform(platform.id);
-    setName(platform.defaultName);
     setShowConnect(true);
-    setShowCreate(false);
     const timer = window.setTimeout(() => {
       document.getElementById('connect-ai-chat')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 80);
@@ -206,7 +194,7 @@ export const AgentsPage: React.FC = () => {
       setKeys(k);
       setError(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to load AI chat keys');
+      setError(err.message || 'Failed to load AI chat sessions');
     } finally {
       setLoading(false);
     }
@@ -217,53 +205,6 @@ export const AgentsPage: React.FC = () => {
     const t = setInterval(refresh, 20000);
     return () => clearInterval(t);
   }, [refresh]);
-
-  const handleCreate = async () => {
-    setError(null);
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setError('Give your AI chat connection a name (e.g. Grok Bot, OpenAI Dot, Meta Muse, Claude).');
-      return;
-    }
-    const perTxNum = parseFloat(perTxLimit);
-    const dailyNum = parseFloat(dailyLimit);
-    if (!Number.isFinite(perTxNum) || perTxNum <= 0 || !Number.isFinite(dailyNum) || dailyNum <= 0) {
-      setError('Enter positive USD limits for both per-transaction and daily spend.');
-      return;
-    }
-    if (perTxNum > dailyNum) {
-      setError('Max per payment cannot exceed your daily spend limit.');
-      return;
-    }
-
-    setShowCreateConfirm(true);
-  };
-
-  const performCreate = async () => {
-    setShowCreateConfirm(false);
-    const trimmedName = name.trim();
-    const perTxNum = parseFloat(perTxLimit);
-    const dailyNum = parseFloat(dailyLimit);
-    setCreating(true);
-    try {
-      const assertion = await authorizeWithPasskey(`Create manual Bearer key “${trimmedName}”`);
-      const res = await api.createAgentKey({
-        name: trimmedName,
-        perTxLimit: String(perTxNum),
-        dailyLimit: String(dailyNum),
-        expiresInDays: expiresInDays ? Number(expiresInDays) : null,
-        passkeyAssertion: assertion,
-      });
-      setCreated(res);
-      setShowCreate(false);
-      toast(`Key created for ${res.name}`);
-      await refresh();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create manual Bearer key');
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const handleRevoke = (k: AgentKey) => {
     setRevokeTarget(k);
@@ -339,10 +280,7 @@ export const AgentsPage: React.FC = () => {
             <span>Setup docs</span>
           </a>
           <button
-            onClick={() => {
-              setShowConnect((v) => !v);
-              setShowCreate(false);
-            }}
+            onClick={() => setShowConnect((v) => !v)}
             className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer flex-shrink-0"
           >
             {showConnect ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
@@ -412,33 +350,11 @@ export const AgentsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="rounded-2xl bg-stone-950 text-stone-100 p-4 space-y-4">
-            <div className="space-y-2">
-              <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
-                2. Remote MCP server URL
-              </div>
-              <CopyRow value={MCP_ENDPOINT} />
+          <div className="rounded-2xl bg-stone-950 text-stone-100 p-4 space-y-2">
+            <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
+              2. Remote MCP server URL
             </div>
-            <div className="grid gap-2 sm:grid-cols-3 text-[11px] leading-relaxed">
-              <div className="rounded-xl bg-stone-900 border border-stone-800 p-2.5">
-                <span className="block font-bold text-white">Add connector</span>
-                <span className="text-stone-400">
-                  In {activePlatformObj.label}, choose a custom or remote MCP connector.
-                </span>
-              </div>
-              <div className="rounded-xl bg-stone-900 border border-stone-800 p-2.5">
-                <span className="block font-bold text-white">Paste the URL</span>
-                <span className="text-stone-400">
-                  Leave authentication empty; OAuth discovery starts automatically.
-                </span>
-              </div>
-              <div className="rounded-xl bg-stone-900 border border-stone-800 p-2.5">
-                <span className="block font-bold text-white">Approve once</span>
-                <span className="text-stone-400">
-                  Set limits and a 1–365 day duration, then confirm with Face ID.
-                </span>
-              </div>
-            </div>
+            <CopyRow value={MCP_ENDPOINT} />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -450,6 +366,7 @@ export const AgentsPage: React.FC = () => {
             >
               <ActivePlatformIcon className="w-3.5 h-3.5" />
               <span>Open {activePlatformObj.label}</span>
+              <ExternalLink className="w-3 h-3 opacity-70" />
             </a>
             {activePlatformObj.id === 'claude' && (
               <a
@@ -497,163 +414,10 @@ export const AgentsPage: React.FC = () => {
               </button>
             )}
           </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-stone-200">
-            <p className="text-[11px] text-stone-500 max-w-lg">
-              Tokens stay scoped to this app and can be disconnected in one tap. Manual Bearer keys
-              are still available for OpenAPI Actions, bots, and older clients.
-            </p>
-            <button
-              onClick={() => {
-                setShowConnect(false);
-                setShowCreate(true);
-              }}
-              className="text-[11px] font-mono font-bold text-stone-600 hover:text-stone-950 transition-colors cursor-pointer flex-shrink-0"
-            >
-              Use a manual Bearer key instead →
-            </button>
-          </div>
         </div>
       )}
 
-      {/* Create form */}
-      {showCreate && (
-        <div
-          id="create-agent-key"
-          className="p-5 rounded-3xl bg-stone-50 border border-stone-200 space-y-5 scroll-mt-24"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2">
-            <div>
-              <div className="flex items-center space-x-2 text-stone-900">
-                <KeyRound className="w-4 h-4" />
-                <h2 className="text-sm font-display font-bold uppercase tracking-wider">
-                  Advanced: manual Bearer key
-                </h2>
-              </div>
-              <p className="mt-1 text-xs text-stone-500 max-w-xl">
-                Use this only for OpenAPI Actions, bots, or clients without OAuth support. OAuth is
-                safer because the secret never leaves UPRAIL.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreate(false);
-                setShowConnect(true);
-              }}
-              className="text-[11px] font-mono font-bold text-stone-600 hover:text-stone-950 transition-colors cursor-pointer self-start"
-            >
-              Use OAuth instead →
-            </button>
-          </div>
-
-          <div className="space-y-2.5">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-              1. Pick your AI chat app
-            </span>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {CHAT_PLATFORMS.map((p) => {
-                const active = selectedPlatform === p.id;
-                const Icon = p.icon;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => selectPlatform(p)}
-                    className={`text-left p-3 rounded-2xl border transition-colors cursor-pointer ${
-                      active
-                        ? 'border-stone-900 bg-white shadow-xs'
-                        : 'border-stone-200 bg-white hover:border-stone-400'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-1.5">
-                      <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${active ? 'text-stone-900' : 'text-stone-500'}`} />
-                      <span className="text-xs font-bold text-stone-900 truncate">{p.label}</span>
-                    </div>
-                    <p className="mt-1 text-[10px] leading-snug text-stone-500">{p.blurb}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-                Name
-              </span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Grok Bot, OpenAI Dot, Meta Muse, Claude"
-                className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm focus:outline-none focus:border-stone-900"
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-                Key expires in days (optional)
-              </span>
-              <input
-                value={expiresInDays}
-                onChange={(e) => setExpiresInDays(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="90 (blank = never)"
-                className="w-full px-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-                Max per payment ($ USD)
-              </span>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-mono text-stone-400">$</span>
-                <input
-                  value={perTxLimit}
-                  onChange={(e) => setPerTxLimit(e.target.value.replace(/[^0-9.]/g, ''))}
-                  placeholder="25"
-                  className="w-full pl-7 pr-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-                />
-              </div>
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-                Daily spend limit ($ USD)
-              </span>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-mono text-stone-400">$</span>
-                <input
-                  value={dailyLimit}
-                  onChange={(e) => setDailyLimit(e.target.value.replace(/[^0-9.]/g, ''))}
-                  placeholder="100"
-                  className="w-full pl-7 pr-3 py-2 rounded-xl bg-white border border-stone-200 text-sm font-mono focus:outline-none focus:border-stone-900"
-                />
-              </div>
-            </label>
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-            <p className="text-[11px] text-stone-500 max-w-md">
-              Payments inside your USD limits execute immediately from chat; any attempt above{' '}
-              <span className="font-mono font-bold text-stone-700">${perTxLimit || '25'}/tx</span> or{' '}
-              <span className="font-mono font-bold text-stone-700">${dailyLimit || '100'}/day</span> is
-              automatically blocked.
-            </p>
-            <button
-              onClick={handleCreate}
-              disabled={creating || isAuthorizing}
-              className="flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
-            >
-              {creating || isAuthorizing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <KeyRound className="w-4 h-4" />
-              )}
-              <span>Create Bearer key with passkey</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Keys list */}
+      {/* Sessions list */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 text-stone-900">
@@ -692,7 +456,6 @@ export const AgentsPage: React.FC = () => {
                     onClick={() => {
                       selectPlatform(p);
                       setShowConnect(true);
-                      setShowCreate(false);
                     }}
                     className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-xs font-bold text-stone-900 transition-colors cursor-pointer"
                   >
@@ -704,7 +467,7 @@ export const AgentsPage: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {keys.map((k) => {
               const isOAuth = k.authMethod === 'oauth';
               const revoked = Boolean(k.revokedAt);
@@ -718,79 +481,130 @@ export const AgentsPage: React.FC = () => {
               const spendPct = dailyLimitNum > 0 ? Math.min(1, spentToday / dailyLimitNum) : 0;
               const spendTone =
                 spendPct >= 1 ? 'bg-red-500' : spendPct >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500';
+              const matchedPlatform = resolveSessionPlatform(k);
+              const SessionIcon = matchedPlatform?.icon || Bot;
+
               return (
                 <div
                   key={k.id}
-                  className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 ${
-                    dead ? 'bg-stone-50 border-stone-200 opacity-60' : 'bg-white border-stone-200'
+                  className={`rounded-3xl border p-4 sm:p-5 flex flex-col justify-between gap-4 transition-all ${
+                    dead
+                      ? 'bg-stone-50/80 border-stone-200 opacity-70'
+                      : 'bg-white border-stone-200 shadow-xs hover:shadow-sm hover:border-stone-300'
                   }`}
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm font-bold text-stone-950 truncate">{k.name}</span>
+                  {/* Card Header */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${
+                          dead
+                            ? 'bg-stone-200 text-stone-500'
+                            : 'bg-stone-950 text-white shadow-2xs'
+                        }`}
+                      >
+                        <SessionIcon className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-display font-extrabold text-stone-950 truncate">
+                          {k.name}
+                        </h3>
+                        <p className="text-[11px] font-mono text-stone-500 truncate">
+                          {isOAuth
+                            ? k.oauthClientName || 'OAuth 2.1 Session'
+                            : `Key ${k.keyPrefix}…`}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex-shrink-0">
                       {!dead && (
-                        <span
-                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                            isOAuth
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-sky-50 text-sky-700 border-sky-200'
-                          }`}
-                        >
-                          {isOAuth ? 'OAUTH' : 'BEARER'}
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          <span>ACTIVE</span>
                         </span>
                       )}
                       {status === 'revoked' && (
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-200 text-stone-600">
+                        <span className="inline-flex text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-stone-200 text-stone-600">
                           REVOKED
                         </span>
                       )}
                       {status === 'expired' && (
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-200 text-stone-600">
+                        <span className="inline-flex text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-stone-200 text-stone-600">
                           EXPIRED
                         </span>
                       )}
                       {status === 'disconnected' && (
-                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                        <span className="inline-flex text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
                           REAUTHORIZE
                         </span>
                       )}
                     </div>
-                    <div className="mt-1 text-[11px] text-stone-500 font-mono truncate">
-                      {isOAuth
-                        ? `OAuth · ${k.oauthClientName || 'AI app'}`
-                        : `${k.keyPrefix}…`}{' '}
-                      · Max ${perTxLimitNum || 25}/transaction · Max ${dailyLimitNum || 100}/day
-                    </div>
-                    <div className="mt-0.5 text-[10px] text-stone-400 font-mono">
-                      {isOAuth
-                        ? `Connected ${formatDate(k.oauthConnectedAt || k.createdAt)}`
-                        : `Created ${formatDate(k.createdAt)}`}
-                      {k.lastUsedAt ? ` · Last used ${formatDate(k.lastUsedAt)}` : ' · Never used'}
-                      {k.expiresAt ? ` · Expires ${formatDate(k.expiresAt)}` : ''}
-                    </div>
-                    {dailyLimitNum > 0 && (
-                      <div className="mt-2 max-w-[16rem]">
-                        <div className="flex items-center justify-between text-[10px] font-mono text-stone-500">
-                          <span>Today&apos;s spend (USD)</span>
-                          <span className="tabular-nums">
-                            ${spentToday.toFixed(2)} / ${dailyLimitNum.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="mt-1 h-1.5 rounded-full bg-stone-100 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${spendTone} transition-[width] duration-300`}
-                            style={{ width: `${spendPct * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {!dead && (
+
+                  {/* Card Spend Caps Grid */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-2xl bg-stone-50 border border-stone-200/80 px-3 py-2.5">
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-stone-400">
+                        Per Payment
+                      </span>
+                      <span className="text-sm font-mono font-bold text-stone-950 tabular-nums">
+                        ${perTxLimitNum || 25}
+                      </span>
+                    </div>
+                    <div className="rounded-2xl bg-stone-50 border border-stone-200/80 px-3 py-2.5">
+                      <span className="block text-[10px] font-mono uppercase tracking-wider text-stone-400">
+                        Daily Cap
+                      </span>
+                      <span className="text-sm font-mono font-bold text-stone-950 tabular-nums">
+                        ${dailyLimitNum || 100}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Daily Spend Bar */}
+                  {dailyLimitNum > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-stone-500">
+                        <span>Today&apos;s spend</span>
+                        <span className="font-bold text-stone-800 tabular-nums">
+                          ${spentToday.toFixed(2)} / ${dailyLimitNum.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-stone-100 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${spendTone} transition-[width] duration-300`}
+                          style={{ width: `${spendPct * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Card Footer */}
+                  <div className="pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
+                    <div className="text-[10px] font-mono text-stone-400 leading-relaxed min-w-0 truncate">
+                      <span>
+                        {isOAuth
+                          ? `Connected ${formatDate(k.oauthConnectedAt || k.createdAt)}`
+                          : `Created ${formatDate(k.createdAt)}`}
+                      </span>
+                      <span className="mx-1">·</span>
+                      <span>
+                        {k.lastUsedAt ? `Used ${formatDate(k.lastUsedAt)}` : 'Unused'}
+                      </span>
+                      {k.expiresAt && (
+                        <>
+                          <span className="mx-1">·</span>
+                          <span>Exp {formatDate(k.expiresAt)}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {!dead ? (
                       <button
                         onClick={() => handleRevoke(k)}
                         disabled={busyId === k.id || isAuthorizing}
-                        className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-stone-200 text-stone-500 hover:text-red-600 hover:border-red-200 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-stone-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50/50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
                       >
                         {busyId === k.id ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -799,12 +613,11 @@ export const AgentsPage: React.FC = () => {
                         )}
                         <span>{isOAuth ? 'Disconnect' : 'Revoke'}</span>
                       </button>
-                    )}
-                    {dead && (
+                    ) : (
                       <button
                         onClick={() => handleDelete(k)}
                         disabled={busyId === k.id || isAuthorizing}
-                        className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
                       >
                         {busyId === k.id ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -892,24 +705,6 @@ export const AgentsPage: React.FC = () => {
       </div>
 
       <ConfirmDialog
-        isOpen={showCreateConfirm}
-        onCancel={() => setShowCreateConfirm(false)}
-        onConfirm={() => void performCreate()}
-        tone="financial"
-        title="Create manual Bearer key"
-        description="This key is for OpenAPI Actions, bots, or clients that cannot complete OAuth. It can move money within the limits below."
-        confirmLabel="Create Bearer key"
-        warning="Anyone with this key can spend up to these limits until you revoke it. The key is shown only once. For AI chats, use OAuth instead."
-        details={[
-          { label: 'Name', value: name.trim() || '—', mono: false, emphasis: true },
-          { label: 'App', value: activePlatformObj.label, mono: false },
-          { label: 'Max per payment', value: `$${perTxLimit || '0'}` },
-          { label: 'Daily limit', value: `$${dailyLimit || '0'}` },
-          { label: 'Expires', value: expiresInDays ? `${expiresInDays} days` : 'Never', mono: false },
-        ]}
-      />
-
-      <ConfirmDialog
         isOpen={Boolean(deleteTarget)}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void performDelete()}
@@ -965,10 +760,6 @@ export const AgentsPage: React.FC = () => {
         ]}
       />
 
-      {/* Created key modal */}
-      {created && (
-        <CreatedKeyModal created={created} onClose={() => setCreated(null)} />
-      )}
     </div>
   );
 };
@@ -992,139 +783,5 @@ const CopyRow: React.FC<{ value: string }> = ({ value }) => {
         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
     </div>
-  );
-};
-
-const CopyBlock: React.FC<{ value: string }> = ({ value }) => {
-  const { toast } = useToast();
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="relative rounded-xl bg-stone-900 border border-stone-800 p-3">
-      <pre className="text-[11px] font-mono text-stone-200 overflow-x-auto leading-relaxed pr-8">{value}</pre>
-      <button
-        onClick={() => {
-          navigator.clipboard.writeText(value);
-          setCopied(true);
-          toast('Copied config to clipboard');
-          setTimeout(() => setCopied(false), 1500);
-        }}
-        className="absolute top-2.5 right-2.5 p-1.5 rounded-lg text-stone-400 hover:text-white bg-stone-800/80 transition-colors cursor-pointer"
-        title="Copy JSON"
-      >
-        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-      </button>
-    </div>
-  );
-};
-
-const CreatedKeyModal: React.FC<{
-  created: CreatedAgentKey;
-  onClose: () => void;
-}> = ({ created, onClose }) => {
-  const { toast } = useToast();
-  const [copiedKey, setCopiedKey] = useState(false);
-  const [ack, setAck] = useState(false);
-
-  const mcpJson = buildMcpJson(created.key);
-
-  const copy = (value: string, message: string) => {
-    navigator.clipboard.writeText(value);
-    setAck(true);
-    toast(message);
-  };
-
-  return (
-    <Portal>
-      <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-        <div className="relative w-full max-w-lg rounded-3xl bg-white border border-stone-200 p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center space-x-2 text-stone-900">
-            <ShieldCheck className="w-5 h-5 text-emerald-600" />
-            <h3 className="text-lg font-display font-extrabold">{created.name} key is ready</h3>
-          </div>
-          <p className="text-xs text-stone-600 leading-relaxed">
-            This is a manual Bearer key for OpenAPI Actions, bots, or clients without OAuth support.
-            For Claude, ChatGPT, Grok, and other MCP apps, use{' '}
-            <strong>Connect AI Chat</strong> instead — it never exposes a secret.
-          </p>
-
-          <div className="space-y-1.5">
-            <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-              1. Your secret Bearer key
-            </span>
-            <div className="p-3 rounded-xl bg-stone-950 text-stone-100 font-mono text-xs break-all select-all">
-              {created.key}
-            </div>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(created.key);
-                setCopiedKey(true);
-                setAck(true);
-                toast('Secret key copied');
-                setTimeout(() => setCopiedKey(false), 1500);
-              }}
-              className="w-full flex items-center justify-center space-x-2 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
-            >
-              {copiedKey ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedKey ? 'Key copied' : 'Copy secret key'}</span>
-            </button>
-          </div>
-
-          <div className="space-y-2 pt-2 border-t border-stone-200">
-            <div className="flex items-center space-x-1.5">
-              <KeyRound className="w-3.5 h-3.5 text-stone-500" />
-              <span className="text-[10px] font-mono uppercase tracking-wider text-stone-500 font-bold">
-                2. Manual setup
-              </span>
-            </div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-              MCP config with Bearer key
-            </div>
-            <CopyBlock value={mcpJson} />
-            <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-              OAuth MCP URL (recommended, no key)
-            </div>
-            <CopyRow value={MCP_ENDPOINT} />
-            <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400 font-bold">
-              OpenAPI import URL
-            </div>
-            <CopyRow value={OPENAPI_SPEC_URL} />
-            <button
-              onClick={() => copy(mcpJson, 'MCP config copied')}
-              className="w-full flex items-center justify-center space-x-2 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy MCP config</span>
-            </button>
-          </div>
-
-          <div className="flex items-start space-x-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
-            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-            <span>
-              Capped at <strong>${created.perTxLimit}/transaction</strong> and{' '}
-              <strong>${created.dailyLimit}/day</strong>. This key is shown only once. Revoke it
-              anytime from this page.
-            </span>
-          </div>
-
-          <a
-            href={DOCS_SETUP_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-center space-x-1.5 text-[11px] font-mono font-bold text-stone-500 hover:text-stone-900 transition-colors"
-          >
-            <BookOpen className="w-3 h-3" />
-            <span>Setup guide &amp; troubleshooting →</span>
-          </a>
-
-          <button
-            onClick={onClose}
-            disabled={!ack}
-            className="w-full py-2.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-40"
-          >
-            {ack ? 'Done' : 'Copy your key above to continue'}
-          </button>
-        </div>
-      </div>
-    </Portal>
   );
 };
