@@ -484,16 +484,24 @@ export const LandingPage: React.FC = () => {
             </a>{' '}
             · for{' '}
             <a
-              href="https://x.com/uprailworld"
+              href="https://nearhackathon.com"
               target="_blank"
               rel="noopener noreferrer"
               className="font-bold text-stone-700 hover:text-black transition-colors"
             >
-              UP
+              Near Hackathon
             </a>
           </span>
           <span className="hidden sm:inline text-stone-300">—</span>
-          <span>crypto payments, not promises · handles stay off-chain</span>
+          <span>
+            crypto payments privately, not promises · handles stay off-chain ·{' '}
+            <a
+              href="mailto:privacy@uprail.world"
+              className="font-bold text-stone-700 hover:text-black transition-colors"
+            >
+              privacy@uprail.world
+            </a>
+          </span>
         </div>
       </footer>
     </div>
