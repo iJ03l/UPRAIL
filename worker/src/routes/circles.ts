@@ -26,6 +26,7 @@ import {
   createCircle,
   dissolveCircle,
   getCircleDetail,
+  joinCircle,
   listUserCircles,
   settleCircle,
 } from '../services/circles';
@@ -54,14 +55,16 @@ circlesRouter.post(
         .json<{
           vaultAsset?: string;
           sourceAsset?: string;
+          originAsset?: string;
           amount?: string;
         }>()
         .catch(() => null);
 
       const quote = await quoteGift(c.env, {
         vaultAsset: body?.vaultAsset || '',
-        sourceAsset: body?.sourceAsset || 'USDC',
+        sourceAsset: body?.sourceAsset || body?.originAsset || 'USDC',
         amount: String(body?.amount ?? ''),
+        zeroFee: true,
       });
       return c.json({ quote });
     } catch (err: any) {
@@ -126,6 +129,7 @@ circlesRouter.post(
       const circle = await createCircle(c.env, session, {
         name: String(body?.name || ''),
         purpose: String(body?.purpose || 'SHARED_GOAL'),
+        customPurpose: typeof body?.customPurpose === 'string' ? body.customPurpose : undefined,
         note: typeof body?.note === 'string' ? body.note : undefined,
         targetAmountUsd: Number(body?.targetAmountUsd || 0),
         vaultAsset: String(body?.vaultAsset || ''),
@@ -150,6 +154,33 @@ circlesRouter.post(
 );
 
 circlesRouter.post(
+  '/:id/join',
+  rateLimit({ limit: 20, prefix: 'circle_join', strict: true }),
+  requireAuth({ passkeyVerified: true }),
+  requirePasskeyAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const id = (c.req.param('id') || '').trim();
+    try {
+      const circle = await joinCircle(c.env, session, id);
+      return c.json({ circle });
+    } catch (err: any) {
+      if (err instanceof CircleError) {
+        return c.json<ErrorResponse>(
+          { error: err.message, code: err.code },
+          err.httpStatus as any
+        );
+      }
+      console.error('[circles/join] error:', err);
+      return c.json<ErrorResponse>(
+        { error: publicErrorMessage(err), code: 'CIRCLE_JOIN_FAILED' },
+        502
+      );
+    }
+  }
+);
+
+circlesRouter.post(
   '/:id/contribute',
   rateLimit({ limit: 20, prefix: 'circle_contribute', strict: true }),
   requireAuth({ passkeyVerified: true }),
@@ -162,7 +193,7 @@ circlesRouter.post(
         (await c.req.json().catch(() => null))) as Record<string, any> | null;
 
       const result = await contributeToCircle(c.env, session, id, {
-        sourceAsset: String(body?.sourceAsset || 'USDC'),
+        sourceAsset: String(body?.sourceAsset || body?.originAsset || 'USDC'),
         amount: String(body?.amount ?? ''),
         fundingMode: body?.fundingMode === 'EXTERNAL_DEPOSIT' ? 'EXTERNAL_DEPOSIT' : 'BALANCE',
       });
@@ -193,7 +224,12 @@ circlesRouter.post(
     const id = (c.req.param('id') || '').trim();
     try {
       const circle = await settleCircle(c.env, session, id);
-      return c.json({ circle });
+      return c.json({
+        circle,
+        txHash: circle.payoutTxHash || '',
+        payoutHandle: circle.payoutHandle,
+        sharesSettledFormatted: circle.totalSharesFormatted,
+      });
     } catch (err: any) {
       if (err instanceof CircleError) {
         return c.json<ErrorResponse>(
@@ -220,7 +256,10 @@ circlesRouter.post(
     const id = (c.req.param('id') || '').trim();
     try {
       const circle = await dissolveCircle(c.env, session, id);
-      return c.json({ circle });
+      return c.json({
+        circle,
+        refundedMembers: circle.members.filter((m) => Boolean(m.refundedAt)).length,
+      });
     } catch (err: any) {
       if (err instanceof CircleError) {
         return c.json<ErrorResponse>(

@@ -57,9 +57,14 @@ export const VALID_GIFT_OCCASIONS = [
   'BIRTHDAY',
   'CHRISTMAS',
   'HOLIDAY',
+  'NEW_YEAR',
   'ANNIVERSARY',
+  'GRADUATION',
+  'WEDDING',
+  'THANK_YOU',
   'CONGRATS',
   'JUST_BECAUSE',
+  'CUSTOM',
 ] as const;
 
 export type GiftOccasion = (typeof VALID_GIFT_OCCASIONS)[number];
@@ -68,9 +73,14 @@ export const OCCASION_LABELS: Record<GiftOccasion, string> = {
   BIRTHDAY: 'Birthday Gift',
   CHRISTMAS: 'Christmas Gift',
   HOLIDAY: 'Holiday Gift',
+  NEW_YEAR: 'New Year Gift',
   ANNIVERSARY: 'Anniversary Gift',
+  GRADUATION: 'Graduation Gift',
+  WEDDING: 'Wedding Gift',
+  THANK_YOU: 'Thank You Gift',
   CONGRATS: 'Congratulations',
   JUST_BECAUSE: 'Surprise Gift',
+  CUSTOM: 'Custom Gift',
 };
 
 export const MIN_TIMELOCK_LEAD_MS = 60 * 60 * 1000; // 1 hour minimum lock
@@ -81,10 +91,16 @@ export interface QuoteGiftInput {
   vaultAsset: string;
   sourceAsset: string;
   amount: string;
+  zeroFee?: boolean;
 }
 
 export interface QuoteGiftResult {
   vault: EarnVaultDescriptor;
+  vaultSymbol: string;
+  vaultName: string;
+  vaultAssetId: string;
+  vaultProtocol: string;
+  vaultDecimals: number;
   sourceAsset: string;
   sourceSymbol: string;
   sourceDecimals: number;
@@ -97,6 +113,7 @@ export interface QuoteGiftResult {
   netAmountInAtomic: string;
   estimatedSharesAtomic: string;
   estimatedSharesFormatted: string;
+  estimatedSharesOut: string;
   principalUsdCents: number;
   estimatedApyPct: number;
 }
@@ -104,6 +121,7 @@ export interface QuoteGiftResult {
 export interface CreateGiftInput {
   recipientHandle: string;
   occasion: string;
+  customOccasion?: string;
   message?: string;
   showAmount?: boolean;
   vaultAsset: string;
@@ -166,6 +184,25 @@ export function validateOccasion(raw: string): GiftOccasion {
     `Occasion must be one of: ${VALID_GIFT_OCCASIONS.join(', ')}.`,
     400
   );
+}
+
+export function resolveOccasionDisplay(rawOccasion: string): {
+  occasion: GiftOccasion;
+  occasionLabel: string;
+} {
+  const raw = String(rawOccasion || 'JUST_BECAUSE');
+  if (raw.startsWith('CUSTOM:')) {
+    const label = raw.slice(7).trim() || OCCASION_LABELS.CUSTOM;
+    return { occasion: 'CUSTOM', occasionLabel: label };
+  }
+  if ((VALID_GIFT_OCCASIONS as readonly string[]).includes(raw)) {
+    const occ = raw as GiftOccasion;
+    return { occasion: occ, occasionLabel: OCCASION_LABELS[occ] };
+  }
+  if (raw.trim()) {
+    return { occasion: 'CUSTOM', occasionLabel: raw.trim() };
+  }
+  return { occasion: 'JUST_BECAUSE', occasionLabel: OCCASION_LABELS.JUST_BECAUSE };
 }
 
 export function validateTimelockUntil(timelockUntil: number, now = Date.now()): number {
@@ -238,12 +275,25 @@ export async function quoteGift(
     );
   }
 
-  const split = computeStabilizeSplit(grossAtomic, origin.decimals, env.FEE_PERCENT);
+  const split = input.zeroFee
+    ? {
+        grossAtomic,
+        feeAtomic: 0n,
+        netInputAtomic: grossAtomic,
+        feePercent: 0,
+        grossAmountFormatted: formatAtomic(grossAtomic.toString(), origin.decimals),
+        feeAmountFormatted: '0',
+        netInputFormatted: formatAtomic(grossAtomic.toString(), origin.decimals),
+      }
+    : computeStabilizeSplit(grossAtomic, origin.decimals, env.FEE_PERCENT);
   const dummyCustody = '4ced75a94459bfd82b48a3d3116b2d2d76261f134f1efb5140f974e9443b0560';
   const deadline = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
   let quotedSharesAtomic = 0n;
-  let quotedUsdCents = Math.max(100, Math.round(estUsd * 0.99 * 100));
+  let quotedUsdCents = Math.max(
+    100,
+    Math.round(estUsd * (input.zeroFee ? 1 : 0.99) * 100)
+  );
 
   try {
     const q = await requestQuote(env, {
@@ -282,8 +332,14 @@ export async function quoteGift(
     throw new GiftError('QUOTE_FAILED', `1Click returned 0 ${vault.symbol} vault shares.`, 502);
   }
 
+  const formattedShares = formatAtomic(quotedSharesAtomic.toString(), vault.decimals);
   return {
     vault,
+    vaultSymbol: vault.symbol,
+    vaultName: vault.name,
+    vaultAssetId: vault.assetId,
+    vaultProtocol: vault.protocol,
+    vaultDecimals: vault.decimals,
     sourceAsset: origin.assetId,
     sourceSymbol: origin.symbol,
     sourceDecimals: origin.decimals,
@@ -295,7 +351,8 @@ export async function quoteGift(
     netAmountIn: split.netInputFormatted,
     netAmountInAtomic: split.netInputAtomic.toString(),
     estimatedSharesAtomic: quotedSharesAtomic.toString(),
-    estimatedSharesFormatted: formatAtomic(quotedSharesAtomic.toString(), vault.decimals),
+    estimatedSharesFormatted: formattedShares,
+    estimatedSharesOut: formattedShares,
     principalUsdCents: quotedUsdCents,
     estimatedApyPct: vault.estimatedApyPct,
   };
@@ -322,6 +379,14 @@ export async function createGift(
   }
 
   const occasion = validateOccasion(input.occasion);
+  let storedOccasion: string = occasion;
+  if (occasion === 'CUSTOM') {
+    const customLabel = sanitizeUserText(input.customOccasion, 48);
+    if (!customLabel || customLabel.length < 2) {
+      throw new GiftError('INVALID_OCCASION', 'Enter a custom occasion (2–48 characters).', 400);
+    }
+    storedOccasion = `CUSTOM:${customLabel}`;
+  }
   const now = Date.now();
   const timelockUntil = validateTimelockUntil(input.timelockUntil, now);
   const message = sanitizeUserText(input.message, 280) || null;
@@ -502,7 +567,7 @@ export async function createGift(
         senderHandle,
         recipientHandle,
         recipientXId,
-        occasion,
+        storedOccasion,
         message,
         showAmount,
         vault.assetId,
@@ -592,7 +657,7 @@ export async function createGift(
       senderHandle,
       recipientHandle,
       recipientXId,
-      occasion,
+      storedOccasion,
       message,
       showAmount,
       vault.assetId,
@@ -760,9 +825,7 @@ export async function getPublicGiftCardView(
   const now = Date.now();
   const timelockUntil = Number(row.timelock_until);
   const isUnlocked = now >= timelockUntil;
-  const occasion = (VALID_GIFT_OCCASIONS as readonly string[]).includes(row.occasion)
-    ? (row.occasion as GiftOccasion)
-    : 'JUST_BECAUSE';
+  const { occasion, occasionLabel } = resolveOccasionDisplay(row.occasion);
   const showAmount = Number(row.show_amount) === 1;
 
   const baseView: PublicGiftCardView = {
@@ -770,7 +833,7 @@ export async function getPublicGiftCardView(
     senderHandle: row.sender_handle,
     recipientHandle: row.recipient_handle,
     occasion,
-    occasionLabel: OCCASION_LABELS[occasion],
+    occasionLabel,
     vaultSymbol: row.vault_symbol,
     vaultName: vault?.name || row.vault_symbol,
     vaultProtocol: vault?.protocol || 'NEAR Intents Earn',
@@ -824,9 +887,7 @@ async function formatAuthenticatedGiftView(
   const now = Date.now();
   const timelockUntil = Number(row.timelock_until);
   const isUnlocked = now >= timelockUntil;
-  const occasion = (VALID_GIFT_OCCASIONS as readonly string[]).includes(row.occasion)
-    ? (row.occasion as GiftOccasion)
-    : 'JUST_BECAUSE';
+  const { occasion, occasionLabel } = resolveOccasionDisplay(row.occasion);
 
   return {
     id: row.id,
@@ -834,7 +895,7 @@ async function formatAuthenticatedGiftView(
     senderHandle: row.sender_handle,
     recipientHandle: row.recipient_handle,
     occasion,
-    occasionLabel: OCCASION_LABELS[occasion],
+    occasionLabel,
     message: row.message || null,
     vaultSymbol: row.vault_symbol,
     vaultName: vault?.name || row.vault_symbol,

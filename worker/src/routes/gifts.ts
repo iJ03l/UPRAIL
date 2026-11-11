@@ -94,13 +94,14 @@ giftsRouter.post(
         .json<{
           vaultAsset?: string;
           sourceAsset?: string;
+          originAsset?: string;
           amount?: string;
         }>()
         .catch(() => null);
 
       const quote = await quoteGift(c.env, {
         vaultAsset: body?.vaultAsset || '',
-        sourceAsset: body?.sourceAsset || 'USDC',
+        sourceAsset: body?.sourceAsset || body?.originAsset || 'USDC',
         amount: String(body?.amount ?? ''),
       });
       return c.json({ quote });
@@ -153,10 +154,11 @@ giftsRouter.post(
       const gift = await createGift(c.env, session, {
         recipientHandle: String(body?.recipientHandle || ''),
         occasion: String(body?.occasion || 'JUST_BECAUSE'),
+        customOccasion: typeof body?.customOccasion === 'string' ? body.customOccasion : undefined,
         message: typeof body?.message === 'string' ? body.message : undefined,
         showAmount: Boolean(body?.showAmount),
         vaultAsset: String(body?.vaultAsset || ''),
-        sourceAsset: String(body?.sourceAsset || 'USDC'),
+        sourceAsset: String(body?.sourceAsset || body?.originAsset || 'USDC'),
         amount: String(body?.amount ?? ''),
         timelockUntil: Number(body?.timelockUntil || 0),
         fundingMode: body?.fundingMode === 'EXTERNAL_DEPOSIT' ? 'EXTERNAL_DEPOSIT' : 'BALANCE',
@@ -188,7 +190,11 @@ giftsRouter.post(
     const id = (c.req.param('id') || '').trim();
     try {
       const gift = await claimGift(c.env, session, id);
-      return c.json({ gift });
+      return c.json({
+        gift,
+        txHash: gift.claimTxHash || '',
+        sharesClaimed: gift.sharesFormatted,
+      });
     } catch (err: any) {
       if (err instanceof GiftError) {
         return c.json<ErrorResponse>(

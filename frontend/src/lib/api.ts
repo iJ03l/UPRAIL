@@ -2108,6 +2108,7 @@ export const api = {
   async createGift(params: {
     recipientHandle: string;
     occasion: import('../types').GiftOccasion;
+    customOccasion?: string;
     message?: string;
     showAmount?: boolean;
     vaultAsset: string;
@@ -2186,6 +2187,7 @@ export const api = {
   async createCircle(params: {
     name: string;
     purpose: import('../types').CirclePurpose;
+    customPurpose?: string;
     note?: string;
     targetAmountUsd: number | string;
     vaultAsset: string;
@@ -2207,6 +2209,26 @@ export const api = {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(data.error || 'Failed to create Circle');
+    }
+    return data.circle;
+  },
+
+  async joinCircle(params: {
+    circleId: string;
+    passkeyAssertion: unknown;
+  }): Promise<import('../types').CircleView> {
+    const base = API_BASE
+      ? `${API_BASE}/api/circles/${encodeURIComponent(params.circleId)}/join`
+      : `/api/circles/${encodeURIComponent(params.circleId)}/join`;
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passkeyAssertion: params.passkeyAssertion }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to sign & join Circle');
     }
     return data.circle;
   },

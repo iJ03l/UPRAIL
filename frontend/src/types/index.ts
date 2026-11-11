@@ -415,12 +415,15 @@ export interface EarnVaultDescriptor {
 export type GiftOccasion =
   | 'BIRTHDAY'
   | 'CHRISTMAS'
+  | 'HOLIDAY'
   | 'NEW_YEAR'
   | 'ANNIVERSARY'
   | 'GRADUATION'
   | 'WEDDING'
   | 'THANK_YOU'
-  | 'JUST_BECAUSE';
+  | 'CONGRATS'
+  | 'JUST_BECAUSE'
+  | 'CUSTOM';
 
 export type GiftStatus = 'PENDING_FUNDING' | 'LOCKED' | 'CLAIMING' | 'CLAIMED' | 'EXPIRED';
 
@@ -512,24 +515,36 @@ export type CirclePurpose =
   | 'RENT'
   | 'TRIP'
   | 'DAILY_TIP'
-  | 'SAVINGS_CLUB';
+  | 'SAVINGS_CLUB'
+  | 'CUSTOM';
 
-export type CircleStatus = 'ACTIVE' | 'SETTLING' | 'COMPLETED' | 'DISSOLVING' | 'DISSOLVED';
+export type CircleStatus =
+  | 'ACTIVE'
+  | 'GOAL_MET'
+  | 'SETTLING'
+  | 'SETTLED'
+  | 'COMPLETED'
+  | 'DISSOLVING'
+  | 'DISSOLVED';
 
 export interface CircleMemberView {
   id: string;
   handle: string;
   isRegistered: boolean;
+  hasSigned: boolean;
+  joinedAt: number | null;
   shareBps: number;
   percentageShare: number;
   quotaUsdCents: number;
   contributedUsdCents: number;
   progressPct: number;
+  fulfillmentPct?: number;
   hasMetQuota: boolean;
   sharesAtomic: string;
   sharesFormatted: string;
   currentValueUsdCents: number;
   yieldUsdCents: number;
+  isCurrentUser?: boolean;
   refundedAt: number | null;
   refundTxHash: string | null;
 }
@@ -554,6 +569,7 @@ export interface CircleView {
   creatorHandle: string;
   isCreator: boolean;
   isMember: boolean;
+  hasSigned: boolean;
   myMemberId: string | null;
   name: string;
   purpose: CirclePurpose;
@@ -561,10 +577,12 @@ export interface CircleView {
   note: string | null;
   targetUsdCents: number;
   contributedUsdCents: number;
+  totalContributedUsdCents?: number;
   currentValueUsdCents: number;
   yieldUsdCents: number;
   yieldPct: number;
   progressPct: number;
+  completionPct?: number;
   allQuotasMet: boolean;
   vaultSymbol: string;
   vaultName: string;

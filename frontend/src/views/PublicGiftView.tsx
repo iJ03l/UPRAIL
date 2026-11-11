@@ -53,6 +53,14 @@ export const PublicGiftView: React.FC = () => {
 
   useEffect(() => {
     setGiftId(extractGiftIdFromLocation());
+    try {
+      const savedTheme = localStorage.getItem('uprail_theme');
+      const prefersDark =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const isDark = savedTheme ? savedTheme === 'dark' : prefersDark;
+      document.documentElement.classList.toggle('dark', isDark);
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -215,7 +223,7 @@ export const PublicGiftView: React.FC = () => {
             {/* Valuation & Yield Breakdown */}
             <div className="p-6 sm:p-8 space-y-6">
               {(authGift || activeGift.showAmount) ? (
-                <div className="grid grid-cols-3 gap-3 p-4 rounded-2xl bg-stone-50 border border-stone-200/80 text-center">
+                <div className="grid grid-cols-3 gap-3 p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center">
                   <div>
                     <div className="text-[10px] font-mono uppercase text-stone-400">Principal</div>
                     <div className="text-base sm:text-lg font-display font-extrabold text-stone-900 tabular-nums mt-0.5">
@@ -240,7 +248,7 @@ export const PublicGiftView: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/80 text-center space-y-1">
+                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center space-y-1">
                   <div className="text-xs font-mono font-bold text-stone-800">
                     Sealed Earn Vault Position ({activeGift.vaultName})
                   </div>

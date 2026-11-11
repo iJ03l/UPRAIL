@@ -11,6 +11,7 @@ import {
 import {
   normalizeMemberAllocations,
   getCircleDetail,
+  joinCircle,
   settleCircle,
   dissolveCircle,
   CircleError,
@@ -401,7 +402,7 @@ test('Circle anti-IDOR blocks non-members from viewing and non-creators from set
     (err: any) => err instanceof CircleError && err.code === 'FORBIDDEN' && err.httpStatus === 403
   );
 
-  // 2. Non-creator member (@bob) can view the Circle but cannot settle or dissolve it
+  // 2. Non-creator member (@bob) can view the Circle (stays unsigned until joinCircle)
   const bobDetail = await getCircleDetail(
     mockEnv,
     {
@@ -413,7 +414,26 @@ test('Circle anti-IDOR blocks non-members from viewing and non-creators from set
     circleId
   );
   assert.equal(bobDetail.isCreator, false);
+  assert.equal(bobDetail.isMember, true);
+  assert.equal(bobDetail.hasSigned, false);
   assert.equal(bobDetail.members.length, 2);
+
+  // 3. When @bob calls joinCircle (passkey-gated), joined_at is set and hasSigned becomes true
+  circleRow.purpose = 'CUSTOM:Family Emergency Fund';
+  memberRows[1].joined_at = now;
+  const bobJoined = await joinCircle(
+    mockEnv,
+    {
+      id: 'sess_b',
+      x_id: 'xid_bob',
+      x_handle: 'bob',
+      x_name: 'Bob',
+    } as any,
+    circleId
+  );
+  assert.equal(bobJoined.hasSigned, true);
+  assert.equal(bobJoined.purpose, 'CUSTOM');
+  assert.equal(bobJoined.purposeLabel, 'Family Emergency Fund');
 
   await assert.rejects(
     () =>

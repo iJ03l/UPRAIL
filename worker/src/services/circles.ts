@@ -60,6 +60,8 @@ export const VALID_CIRCLE_PURPOSES = [
   'RENT',
   'TRIP',
   'DAILY_TIP',
+  'SAVINGS_CLUB',
+  'CUSTOM',
 ] as const;
 
 export type CirclePurpose = (typeof VALID_CIRCLE_PURPOSES)[number];
@@ -70,6 +72,8 @@ export const CIRCLE_PURPOSE_LABELS: Record<CirclePurpose, string> = {
   RENT: 'Rent & Housing',
   TRIP: 'Group Trip',
   DAILY_TIP: 'Daily Goal Tip',
+  SAVINGS_CLUB: 'Savings Circle',
+  CUSTOM: 'Custom Circle',
 };
 
 const PENDING_CONTRIB_TTL_MS = 2 * 60 * 60 * 1000;
@@ -84,6 +88,7 @@ export interface CircleMemberInput {
 export interface CreateCircleInput {
   name: string;
   purpose: string;
+  customPurpose?: string;
   note?: string;
   targetAmountUsd: number;
   vaultAsset: string;
@@ -101,14 +106,20 @@ export interface CircleMemberView {
   id: string;
   handle: string;
   xId: string | null;
+  isRegistered: boolean;
+  hasSigned: boolean;
+  joinedAt: number | null;
   shareBps: number;
   percentageShare: number;
   quotaUsdCents: number;
   contributedUsdCents: number;
   fulfillmentPct: number;
+  progressPct: number;
   hasMetQuota: boolean;
   sharesAtomic: string;
   sharesFormatted: string;
+  currentValueUsdCents: number;
+  yieldUsdCents: number;
   isCurrentUser: boolean;
   refundedAt?: number | null;
   refundTxHash?: string | null;
@@ -136,13 +147,19 @@ export interface CircleView {
   creatorXId: string;
   creatorHandle: string;
   isCreator: boolean;
+  isMember: boolean;
+  hasSigned: boolean;
+  myMemberId: string | null;
   name: string;
   purpose: CirclePurpose;
   purposeLabel: string;
   note: string | null;
   targetUsdCents: number;
   totalContributedUsdCents: number;
+  contributedUsdCents: number;
   completionPct: number;
+  progressPct: number;
+  allQuotasMet: boolean;
   vaultSymbol: string;
   vaultName: string;
   vaultProtocol: string;
@@ -271,6 +288,15 @@ export async function createCircle(
   }
 
   const purpose = validateCirclePurpose(input.purpose);
+  let storedPurpose: string = purpose;
+  if (purpose === 'CUSTOM') {
+    const customLabel = sanitizeUserText(input.customPurpose, 48);
+    if (!customLabel || customLabel.length < 2) {
+      throw new CircleError('INVALID_PURPOSE', 'Enter a custom reason (2–48 characters).', 400);
+    }
+    storedPurpose = `CUSTOM:${customLabel}`;
+  }
+
   const note = sanitizeUserText(input.note, 280) || null;
 
   const targetUsd = Number(input.targetAmountUsd);
@@ -317,7 +343,7 @@ export async function createCircle(
       session.x_id,
       creatorHandle,
       name,
-      purpose,
+      storedPurpose,
       note,
       targetUsdCents,
       vault.assetId,
@@ -333,7 +359,8 @@ export async function createCircle(
   for (const alloc of allocations) {
     const memberId = generateSecureId('cmem');
     let memberXId: string | null = null;
-    if (alloc.handle === creatorHandle) {
+    const isCreatorMember = alloc.handle === creatorHandle;
+    if (isCreatorMember) {
       memberXId = session.x_id;
     } else {
       const existing = await env.DB.prepare(
@@ -344,6 +371,7 @@ export async function createCircle(
       if (existing) memberXId = existing.x_id;
     }
 
+    // Only the creator has signed at creation time; invited participants sign with their passkey
     await env.DB.prepare(
       `INSERT INTO circle_members (
         id, circle_id, x_handle, x_id, share_bps, quota_usd_cents,
@@ -357,7 +385,7 @@ export async function createCircle(
         memberXId,
         alloc.shareBps,
         alloc.quotaUsdCents,
-        memberXId ? now : null,
+        isCreatorMember ? now : null,
         now
       )
       .run();
@@ -398,24 +426,38 @@ async function buildCircleView(
     const contributed = Number(m.contributed_usd_cents || 0);
     totalContributedUsdCents += contributed;
     const quota = Math.max(1, Number(m.quota_usd_cents || 1));
-    const fulfillmentPct = Math.min(100, Number(((contributed / quota) * 100).toFixed(1)));
+    const rawPct = Number(((contributed / quota) * 100).toFixed(1));
+    const fulfillmentPct = Math.min(100, rawPct);
     const hasMetQuota = contributed >= quota;
     const isCurrentUser =
       (m.x_id && m.x_id === session.x_id) ||
       Boolean(callerHandle && String(m.x_handle || '').toLowerCase() === callerHandle);
 
+    const memberVal = computeVaultPositionValuation({
+      sharesAtomic: shares,
+      vaultDecimals,
+      sharePriceUsd: vault?.priceUsd || 0,
+      principalUsdCents: contributed,
+    });
+
     return {
       id: m.id,
       handle: m.x_handle,
       xId: m.x_id || null,
+      isRegistered: Boolean(m.x_id),
+      hasSigned: Boolean(m.joined_at),
+      joinedAt: m.joined_at ? Number(m.joined_at) : null,
       shareBps: Number(m.share_bps),
       percentageShare: Number((Number(m.share_bps) / 100).toFixed(2)),
       quotaUsdCents: quota,
       contributedUsdCents: contributed,
       fulfillmentPct,
+      progressPct: rawPct,
       hasMetQuota,
       sharesAtomic: shares.toString(),
       sharesFormatted: formatAtomic(shares.toString(), vaultDecimals),
+      currentValueUsdCents: memberVal.currentValueUsdCents,
+      yieldUsdCents: memberVal.yieldUsdCents,
       isCurrentUser,
       refundedAt: m.refunded_at ? Number(m.refunded_at) : null,
       refundTxHash: m.refund_tx_hash || null,
@@ -430,14 +472,24 @@ async function buildCircleView(
   });
 
   const targetUsdCents = Math.max(1, Number(circleRow.target_usd_cents || 1));
-  const completionPct = Math.min(
-    100,
-    Number(((totalContributedUsdCents / targetUsdCents) * 100).toFixed(1))
-  );
+  const rawCompletionPct = Number(((totalContributedUsdCents / targetUsdCents) * 100).toFixed(1));
+  const completionPct = Math.min(100, rawCompletionPct);
+  const allQuotasMet = members.length > 0 && members.every((m) => m.hasMetQuota);
+  const myMember = members.find((m) => m.isCurrentUser) || null;
 
-  const purpose = (VALID_CIRCLE_PURPOSES as readonly string[]).includes(circleRow.purpose)
-    ? (circleRow.purpose as CirclePurpose)
-    : 'SHARED_GOAL';
+  const rawPurposeStr = String(circleRow.purpose || 'SHARED_GOAL');
+  let purpose: CirclePurpose = 'SHARED_GOAL';
+  let purposeLabel: string = CIRCLE_PURPOSE_LABELS.SHARED_GOAL;
+  if (rawPurposeStr.startsWith('CUSTOM:')) {
+    purpose = 'CUSTOM';
+    purposeLabel = rawPurposeStr.slice(7).trim() || CIRCLE_PURPOSE_LABELS.CUSTOM;
+  } else if ((VALID_CIRCLE_PURPOSES as readonly string[]).includes(rawPurposeStr)) {
+    purpose = rawPurposeStr as CirclePurpose;
+    purposeLabel = CIRCLE_PURPOSE_LABELS[purpose];
+  } else if (rawPurposeStr.trim()) {
+    purpose = 'CUSTOM';
+    purposeLabel = rawPurposeStr.trim();
+  }
 
   const recentContributions: CircleContributionView[] = (contribRows.results || []).map((c) => {
     const cShares = String(c.shares_atomic || c.quoted_shares_atomic || '0');
@@ -459,18 +511,26 @@ async function buildCircleView(
     };
   });
 
+  const isCreator = circleRow.creator_x_id === session.x_id;
+
   return {
     id: circleRow.id,
     creatorXId: circleRow.creator_x_id,
     creatorHandle: circleRow.creator_handle,
-    isCreator: circleRow.creator_x_id === session.x_id,
+    isCreator,
+    isMember: Boolean(myMember),
+    hasSigned: myMember ? myMember.hasSigned : isCreator,
+    myMemberId: myMember ? myMember.id : null,
     name: circleRow.name,
     purpose,
-    purposeLabel: CIRCLE_PURPOSE_LABELS[purpose],
+    purposeLabel,
     note: circleRow.note || null,
     targetUsdCents,
     totalContributedUsdCents,
+    contributedUsdCents: totalContributedUsdCents,
     completionPct,
+    progressPct: rawCompletionPct,
+    allQuotasMet,
     vaultSymbol: circleRow.vault_symbol,
     vaultName: vault?.name || circleRow.vault_symbol,
     vaultProtocol: vault?.protocol || 'NEAR Intents Earn',
@@ -535,14 +595,73 @@ export async function getCircleDetail(
 
   if (memberMatch && !memberMatch.x_id) {
     await env.DB.prepare(
-      'UPDATE circle_members SET x_id = ?, joined_at = COALESCE(joined_at, ?) WHERE id = ? AND x_id IS NULL'
+      'UPDATE circle_members SET x_id = ? WHERE id = ? AND x_id IS NULL'
     )
-      .bind(session.x_id, Date.now(), memberMatch.id)
+      .bind(session.x_id, memberMatch.id)
       .run()
       .catch(() => {});
   }
 
   return buildCircleView(env, session, circleRow);
+}
+
+/**
+ * Passkey-gated participant signature to join a Circle (`POST /api/circles/:id/join`).
+ * Records the participant's passkey-signed commitment (`joined_at`) so all participants
+ * explicitly sign into the Circle and can add funds repeatedly at any point.
+ */
+export async function joinCircle(
+  env: Env,
+  session: Session,
+  circleId: string
+): Promise<CircleView> {
+  const cleanId = (circleId || '').trim();
+  if (!/^circ_[a-f0-9]{16,64}$/.test(cleanId)) {
+    throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
+  }
+
+  const circleRow = await env.DB.prepare('SELECT * FROM circles WHERE id = ? LIMIT 1')
+    .bind(cleanId)
+    .first<any>();
+  if (!circleRow) {
+    throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
+  }
+
+  if (circleRow.status !== 'ACTIVE' && circleRow.status !== 'GOAL_MET') {
+    throw new CircleError(
+      'CIRCLE_CLOSED',
+      `Cannot sign into a Circle in status ${circleRow.status}.`,
+      400
+    );
+  }
+
+  const callerHandle = (session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+  const memberRow = await env.DB.prepare(
+    'SELECT * FROM circle_members WHERE circle_id = ? AND (x_id = ? OR LOWER(x_handle) = ?) LIMIT 1'
+  )
+    .bind(cleanId, session.x_id, callerHandle)
+    .first<any>();
+
+  if (!memberRow) {
+    throw new CircleError(
+      'NOT_A_MEMBER',
+      'Only invited participants of this Circle can sign & join.',
+      403
+    );
+  }
+
+  const now = Date.now();
+  await env.DB.prepare(
+    'UPDATE circle_members SET x_id = ?, joined_at = COALESCE(joined_at, ?) WHERE id = ?'
+  )
+    .bind(session.x_id, now, memberRow.id)
+    .run();
+
+  await env.DB.prepare('UPDATE circles SET updated_at = ? WHERE id = ?')
+    .bind(now, cleanId)
+    .run();
+
+  return getCircleDetail(env, session, cleanId);
 }
 
 /**
@@ -556,9 +675,9 @@ export async function listUserCircles(
 
   if (callerHandle) {
     await env.DB.prepare(
-      'UPDATE circle_members SET x_id = ?, joined_at = COALESCE(joined_at, ?) WHERE LOWER(x_handle) = ? AND x_id IS NULL'
+      'UPDATE circle_members SET x_id = ? WHERE LOWER(x_handle) = ? AND x_id IS NULL'
     )
-      .bind(session.x_id, Date.now(), callerHandle)
+      .bind(session.x_id, callerHandle)
       .run()
       .catch(() => {});
   }
@@ -599,7 +718,15 @@ export async function contributeToCircle(
   session: Session,
   circleId: string,
   input: ContributeCircleInput
-): Promise<{ circle: CircleView; contribution: CircleContributionView }> {
+): Promise<{
+  circle: CircleView;
+  contribution: CircleContributionView;
+  contributionId: string;
+  status: string;
+  depositAddress: string | null;
+  depositMemo: string | null;
+  sharesAddedFormatted: string;
+}> {
   const cleanId = (circleId || '').trim();
   if (!/^circ_[a-f0-9]{16,64}$/.test(cleanId)) {
     throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
@@ -667,7 +794,7 @@ export async function contributeToCircle(
     );
   }
 
-  const split = computeStabilizeSplit(grossAtomic, origin.decimals, env.FEE_PERCENT);
+  const grossAmountFormatted = formatAtomic(grossAtomic.toString(), origin.decimals);
   const contribId = generateSecureId('ccon');
   const now = Date.now();
   const expiresAt = now + PENDING_CONTRIB_TTL_MS;
@@ -681,21 +808,22 @@ export async function contributeToCircle(
         env,
         session.x_id,
         origin.assetId,
-        split.grossAmountFormatted,
+        grossAmountFormatted,
         senderNearAccount
       );
     } catch {}
 
     const avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
-    const reqNum = Number(split.grossAmountFormatted);
+    const reqNum = Number(grossAmountFormatted);
     if (avail + 1e-6 < reqNum) {
       throw new CircleError(
         'INSUFFICIENT_BALANCE',
-        `Insufficient ${origin.symbol} balance (${avail.toFixed(4)} available, ${split.grossAmountFormatted} required).`,
+        `Insufficient ${origin.symbol} balance (${avail.toFixed(4)} available, ${grossAmountFormatted} required).`,
         400
       );
     }
 
+    // 100% of member contribution enters the Earn Vault; the 1% fee is charged on Circle payout
     let liveQuote;
     try {
       liveQuote = await requestQuote(env, {
@@ -703,7 +831,7 @@ export async function contributeToCircle(
         swapType: 'EXACT_INPUT',
         originAsset: origin.assetId,
         destinationAsset: vault.assetId,
-        amount: split.netInputAtomic.toString(),
+        amount: grossAtomic.toString(),
         recipient: circleRow.custody_account,
         recipientType: 'INTENTS',
         refundTo: senderNearAccount,
@@ -728,7 +856,7 @@ export async function contributeToCircle(
     }
 
     const rawQ = ((liveQuote.raw as any)?.quote || {}) as Record<string, unknown>;
-    const inUsd = Number(rawQ.amountInUsd || estUsd * 0.99);
+    const inUsd = Number(rawQ.amountInUsd || estUsd);
     const usdCents = Math.max(100, Math.round((Number.isFinite(inUsd) && inUsd > 0 ? inUsd : estUsd) * 100));
 
     const swapRes = await nearRpc.executeCrossChainSwapTransfer(
@@ -742,25 +870,6 @@ export async function contributeToCircle(
         `Failed to fund Circle contribution: ${swapRes.error || 'Swap transfer rejected'}`,
         502
       );
-    }
-
-    let feeTxHash: string | null = null;
-    let feeStatus = 'NONE';
-    if (split.feeAtomic > 0n && split.feeAmountFormatted !== '0') {
-      const feeRecipient = env.FEE_ACCOUNT_ID || env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
-      const feeRes = await nearRpc
-        .executeTransferIntent(
-          env,
-          session.x_id,
-          feeRecipient,
-          origin.assetId,
-          split.feeAmountFormatted
-        )
-        .catch(() => ({ success: false, txHash: undefined }));
-      if (feeRes.success) {
-        feeStatus = 'PAID';
-        feeTxHash = feeRes.txHash || null;
-      }
     }
 
     const prevMemberShares = BigInt(String(memberRow.shares_atomic || '0'));
@@ -777,7 +886,7 @@ export async function contributeToCircle(
         fee_shares_atomic, fee_status, fee_tx_hash,
         status, intent_hash,
         expires_at, created_at, updated_at, confirmed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '0', ?, '0', ?, ?, 'CONFIRMED', ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '0', ?, '0', 'NONE', NULL, 'CONFIRMED', ?, ?, ?, ?, ?)`
     )
       .bind(
         contribId,
@@ -787,14 +896,12 @@ export async function contributeToCircle(
         origin.assetId,
         origin.symbol,
         origin.decimals,
-        split.grossAtomic.toString(),
+        grossAtomic.toString(),
         usdCents,
         liveQuote.quote.depositAddress,
         liveQuote.quote.depositMemo || null,
         quotedSharesAtomic.toString(),
         quotedSharesAtomic.toString(),
-        feeStatus,
-        feeTxHash,
         swapRes.txHash || null,
         expiresAt,
         now,
@@ -848,7 +955,7 @@ export async function contributeToCircle(
       memberId: memberRow.id,
       contributorXId: session.x_id,
       sourceSymbol: origin.symbol,
-      grossAmount: split.grossAmountFormatted,
+      grossAmount: grossAmountFormatted,
       usdCents,
       sharesAtomic: quotedSharesAtomic.toString(),
       sharesFormatted: formatAtomic(quotedSharesAtomic.toString(), vault.decimals),
@@ -860,10 +967,18 @@ export async function contributeToCircle(
       confirmedAt: now,
     };
 
-    return { circle: updatedCircle, contribution: contribView };
+    return {
+      circle: updatedCircle,
+      contribution: contribView,
+      contributionId: contribView.id,
+      status: contribView.status,
+      depositAddress: contribView.depositAddress || null,
+      depositMemo: contribView.depositMemo || null,
+      sharesAddedFormatted: contribView.sharesFormatted,
+    };
   }
 
-  // EXTERNAL_DEPOSIT mode
+  // EXTERNAL_DEPOSIT mode — 100% enters the Earn Vault; 1% fee is charged on Circle payout
   let extQuote;
   try {
     extQuote = await requestQuote(env, {
@@ -871,7 +986,7 @@ export async function contributeToCircle(
       swapType: 'FLEX_INPUT',
       originAsset: origin.assetId,
       destinationAsset: vault.assetId,
-      amount: split.grossAtomic.toString(),
+      amount: grossAtomic.toString(),
       recipient: circleRow.custody_account,
       recipientType: 'INTENTS',
       refundTo: senderNearAccount,
@@ -889,13 +1004,18 @@ export async function contributeToCircle(
   }
 
   const grossShares = BigInt(extQuote.quote.amountOut || extQuote.quote.minAmountOut || '0');
-  const shareSplit = computeStabilizeSplit(grossShares, vault.decimals, env.FEE_PERCENT);
   const rawQ = ((extQuote.raw as any)?.quote || {}) as Record<string, unknown>;
   const inUsd = Number(rawQ.amountInUsd || estUsd);
   const usdCents = Math.max(
     100,
-    Math.round((Number.isFinite(inUsd) && inUsd > 0 ? inUsd * 0.99 : estUsd * 0.99) * 100)
+    Math.round((Number.isFinite(inUsd) && inUsd > 0 ? inUsd : estUsd) * 100)
   );
+
+  await env.DB.prepare(
+    'UPDATE circle_members SET x_id = COALESCE(x_id, ?), joined_at = COALESCE(joined_at, ?) WHERE id = ?'
+  )
+    .bind(session.x_id, now, memberRow.id)
+    .run();
 
   await env.DB.prepare(
     `INSERT INTO circle_contributions (
@@ -906,7 +1026,7 @@ export async function contributeToCircle(
       quoted_shares_atomic, balance_before_atomic, shares_atomic,
       fee_shares_atomic, fee_status,
       status, expires_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '0', NULL, ?, 'PENDING', 'PENDING_FUNDING', ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '0', NULL, '0', 'NONE', 'PENDING_FUNDING', ?, ?, ?)`
   )
     .bind(
       contribId,
@@ -916,12 +1036,11 @@ export async function contributeToCircle(
       origin.assetId,
       origin.symbol,
       origin.decimals,
-      split.grossAtomic.toString(),
+      grossAtomic.toString(),
       usdCents,
       extQuote.quote.depositAddress,
       extQuote.quote.depositMemo || null,
-      shareSplit.netInputAtomic.toString(),
-      shareSplit.feeAtomic.toString(),
+      grossShares.toString(),
       expiresAt,
       now,
       now
@@ -934,10 +1053,10 @@ export async function contributeToCircle(
     memberId: memberRow.id,
     contributorXId: session.x_id,
     sourceSymbol: origin.symbol,
-    grossAmount: split.grossAmountFormatted,
+    grossAmount: grossAmountFormatted,
     usdCents,
-    sharesAtomic: shareSplit.netInputAtomic.toString(),
-    sharesFormatted: formatAtomic(shareSplit.netInputAtomic.toString(), vault.decimals),
+    sharesAtomic: grossShares.toString(),
+    sharesFormatted: formatAtomic(grossShares.toString(), vault.decimals),
     status: 'PENDING_FUNDING',
     depositAddress: extQuote.quote.depositAddress,
     depositMemo: extQuote.quote.depositMemo || null,
@@ -946,13 +1065,21 @@ export async function contributeToCircle(
     confirmedAt: null,
   };
 
-  return { circle: updatedCircle, contribution: contribView };
+  return {
+    circle: updatedCircle,
+    contribution: contribView,
+    contributionId: contribView.id,
+    status: contribView.status,
+    depositAddress: contribView.depositAddress || null,
+    depositMemo: contribView.depositMemo || null,
+    sharesAddedFormatted: contribView.sharesFormatted,
+  };
 }
 
 /**
  * Creator-only, passkey-gated Circle payout (`POST /api/circles/:id/settle`).
- * Transfers 100% of the Circle's Earn Vault shares (principal + yield) to the
- * Circle's designated `payout_handle`.
+ * Carves out the 1% protocol fee on payout and disburses 99% of the Circle's
+ * Earn Vault shares (principal + compounded yield) to `payout_handle`.
  */
 export async function settleCircle(
   env: Env,
@@ -1039,13 +1166,32 @@ export async function settleCircle(
       payoutNearAccount = await nearRpc.resolveUserNearAccount(env, session);
     }
 
-    const transferRes = await transferFromEarnCustody(
-      env,
-      cleanId,
-      payoutNearAccount,
-      circleRow.vault_asset_id,
-      sharesToDisburse
+    // Carve out the 1% protocol fee on Circle payout (principal + yield)
+    const payoutSplit = computeStabilizeSplit(
+      sharesToDisburse,
+      Number(circleRow.vault_decimals || 18),
+      env.FEE_PERCENT
     );
+    const feeRecipient = env.FEE_ACCOUNT_ID || env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+    const payoutTransfers: Array<{ recipientAccount: string; assetId: string; amountAtomic: bigint }> = [
+      {
+        recipientAccount: payoutNearAccount,
+        assetId: circleRow.vault_asset_id,
+        amountAtomic: payoutSplit.netInputAtomic,
+      },
+    ];
+    if (
+      payoutSplit.feeAtomic > 0n &&
+      feeRecipient.toLowerCase() !== payoutNearAccount.toLowerCase()
+    ) {
+      payoutTransfers.push({
+        recipientAccount: feeRecipient,
+        assetId: circleRow.vault_asset_id,
+        amountAtomic: payoutSplit.feeAtomic,
+      });
+    }
+
+    const transferRes = await transferBatchFromEarnCustody(env, cleanId, payoutTransfers);
 
     if (!transferRes.success) {
       if (!transferRes.ambiguous) {
@@ -1297,46 +1443,20 @@ export async function reconcilePendingCircleContributions(
         (execStatus.raw as any)?.quoteResponse?.quote?.amountOut ||
         row.quoted_shares_atomic;
       const totalSettled = BigInt(String(rawOut || row.quoted_shares_atomic));
-      const shareSplit = computeStabilizeSplit(
-        totalSettled,
-        Number(circleRow.vault_decimals || 18),
-        env.FEE_PERCENT
-      );
-
-      let feeTxHash: string | null = null;
-      let feeStatus = 'NONE';
-      if (shareSplit.feeAtomic > 0n) {
-        const feeRecipient = env.FEE_ACCOUNT_ID || env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
-        const feeRes = await transferFromEarnCustody(
-          env,
-          circleRow.id,
-          feeRecipient,
-          circleRow.vault_asset_id,
-          shareSplit.feeAtomic
-        ).catch(() => ({ success: false, txHash: undefined }));
-        if (feeRes.success) {
-          feeStatus = 'PAID';
-          feeTxHash = feeRes.txHash || null;
-        }
-      }
 
       const lockRes = await env.DB.prepare(
         `UPDATE circle_contributions
          SET status = 'CONFIRMED',
              shares_atomic = ?,
-             fee_shares_atomic = ?,
-             fee_status = ?,
-             fee_tx_hash = ?,
+             fee_shares_atomic = '0',
+             fee_status = 'NONE',
              intent_hash = COALESCE(intent_hash, ?),
              confirmed_at = ?,
              updated_at = ?
          WHERE id = ? AND status = 'PENDING_FUNDING'`
       )
         .bind(
-          shareSplit.netInputAtomic.toString(),
-          shareSplit.feeAtomic.toString(),
-          feeStatus,
-          feeTxHash,
+          totalSettled.toString(),
           execStatus.intentHash || null,
           now,
           now,
@@ -1350,7 +1470,7 @@ export async function reconcilePendingCircleContributions(
           .first<any>();
         if (mRow) {
           const nextShares =
-            BigInt(String(mRow.shares_atomic || '0')) + shareSplit.netInputAtomic;
+            BigInt(String(mRow.shares_atomic || '0')) + totalSettled;
           const nextUsd = Number(mRow.contributed_usd_cents || 0) + Number(row.usd_cents || 0);
           await env.DB.prepare(
             'UPDATE circle_members SET contributed_usd_cents = ?, shares_atomic = ? WHERE id = ?'

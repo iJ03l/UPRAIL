@@ -225,12 +225,17 @@
   .dark .bg-white\/70 { background-color: color-mix(in srgb, var(--bg) 70%, transparent); }
   .dark .bg-stone-50 { background-color: var(--bg-subtle); }
   .dark .bg-stone-50\/50 { background-color: color-mix(in srgb, var(--bg-subtle) 50%, transparent); }
+  .dark .bg-stone-50\/60 { background-color: color-mix(in srgb, var(--bg-subtle) 60%, transparent); }
+  .dark .bg-stone-50\/70 { background-color: color-mix(in srgb, var(--bg-subtle) 70%, transparent); }
   .dark .bg-stone-50\/80 { background-color: color-mix(in srgb, var(--bg-subtle) 80%, transparent); }
+  .dark .bg-stone-50\/90 { background-color: color-mix(in srgb, var(--bg-subtle) 90%, transparent); }
   .dark .bg-stone-100 { background-color: var(--bg-muted); }
+  .dark .bg-stone-100\/60 { background-color: color-mix(in srgb, var(--bg-muted) 60%, transparent); }
+  .dark .bg-stone-100\/70 { background-color: color-mix(in srgb, var(--bg-muted) 70%, transparent); }
   .dark .bg-stone-100\/80 { background-color: color-mix(in srgb, var(--bg-muted) 80%, transparent); }
+  .dark .bg-stone-100\/90 { background-color: color-mix(in srgb, var(--bg-muted) 90%, transparent); }
   .dark .bg-stone-200 { background-color: var(--bg-inset); }
   .dark .bg-stone-300 { background-color: var(--bg-inset); }
-  .dark .bg-stone-50\/60 { background-color: color-mix(in srgb, var(--bg-subtle) 60%, transparent); }
   .dark .bg-stone-200\/70 { background-color: color-mix(in srgb, var(--bg-inset) 70%, transparent); }
   .dark .bg-stone-200\/80 { background-color: color-mix(in srgb, var(--bg-inset) 80%, transparent); }
 
@@ -249,6 +254,8 @@
   .dark .border-stone-100,
   .dark .border-stone-200 { border-color: var(--line); }
   .dark .border-stone-300 { border-color: var(--line-strong); }
+  .dark .border-stone-900,
+  .dark .border-stone-950 { border-color: var(--fg); }
   .dark .border-stone-200\/60 { border-color: color-mix(in srgb, var(--line) 60%, transparent); }
   .dark .border-stone-200\/70 { border-color: color-mix(in srgb, var(--line) 70%, transparent); }
   .dark .border-stone-200\/80 { border-color: color-mix(in srgb, var(--line) 80%, transparent); }
@@ -259,6 +266,7 @@
   /* success (emerald) — light-mode tinted chips invert to translucent green
      on the dark surface so success states stay green but stop glowing white. */
   .dark .bg-emerald-50 { background-color: var(--ok-bg); }
+  .dark .bg-emerald-50\/70 { background-color: color-mix(in srgb, var(--ok-bg) 70%, transparent); }
   .dark .bg-emerald-50\/80 { background-color: color-mix(in srgb, var(--ok-bg) 80%, transparent); }
   .dark .bg-emerald-100 { background-color: var(--ok-bg-strong); }
   .dark .text-emerald-400,
@@ -269,6 +277,27 @@
   .dark .text-emerald-950 { color: var(--ok-fg); }
   .dark .border-emerald-100,
   .dark .border-emerald-200 { border-color: var(--ok-line); }
+
+  /* amber / gold chips in dark mode */
+  .dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.14); }
+  .dark .text-amber-600,
+  .dark .text-amber-700,
+  .dark .text-amber-800 { color: #fbbf24; }
+  .dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.32); }
+
+  /* form controls in dark mode */
+  .dark input:not([type="checkbox"]):not([type="radio"]),
+  .dark select,
+  .dark textarea {
+    background-color: var(--bg-subtle);
+    color: var(--fg);
+    border-color: var(--line-strong);
+    color-scheme: dark;
+  }
+  .dark select option {
+    background-color: var(--bg-subtle);
+    color: var(--fg);
+  }
 
   /* hovers */
   .dark .hover\:bg-white:hover { background-color: var(--bg); }
