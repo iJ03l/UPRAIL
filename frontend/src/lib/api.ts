@@ -2025,6 +2025,274 @@ export const api = {
     }
     return data.donation;
   },
+
+  // ==========================================
+  // Earn Vaults, 1-to-1 Gifting & Circles
+  // ==========================================
+
+  async getEarnVaults(): Promise<import('../types').EarnVaultDescriptor[]> {
+    const base = API_BASE ? `${API_BASE}/api/gifts/vaults` : '/api/gifts/vaults';
+    const res = await fetch(base, { method: 'GET' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load Earn Vaults');
+    }
+    return data.vaults || [];
+  },
+
+  async quoteGift(params: {
+    originAsset: string;
+    amount: string;
+    vaultAsset: string;
+  }): Promise<import('../types').GiftQuoteResult> {
+    const base = API_BASE ? `${API_BASE}/api/gifts/quote` : '/api/gifts/quote';
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to quote Earn Vault deposit');
+    }
+    return data.quote;
+  },
+
+  async listGifts(): Promise<{
+    sent: import('../types').AuthenticatedGiftView[];
+    received: import('../types').AuthenticatedGiftView[];
+  }> {
+    const base = API_BASE ? `${API_BASE}/api/gifts` : '/api/gifts';
+    const res = await fetch(base, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load gifts');
+    }
+    return {
+      sent: data.sent || [],
+      received: data.received || [],
+    };
+  },
+
+  async getGift(giftId: string): Promise<import('../types').AuthenticatedGiftView> {
+    const base = API_BASE
+      ? `${API_BASE}/api/gifts/${encodeURIComponent(giftId)}`
+      : `/api/gifts/${encodeURIComponent(giftId)}`;
+    const res = await fetch(base, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load gift');
+    }
+    return data.gift;
+  },
+
+  async getPublicGift(giftId: string): Promise<import('../types').PublicGiftCardView> {
+    const base = API_BASE
+      ? `${API_BASE}/api/gifts/public/${encodeURIComponent(giftId)}`
+      : `/api/gifts/public/${encodeURIComponent(giftId)}`;
+    const res = await fetch(base, { method: 'GET' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Gift not found');
+    }
+    return data.gift;
+  },
+
+  async createGift(params: {
+    recipientHandle: string;
+    occasion: import('../types').GiftOccasion;
+    message?: string;
+    showAmount?: boolean;
+    vaultAsset: string;
+    originAsset: string;
+    amount: string;
+    timelockUntil: number | string;
+    fundingMode?: 'BALANCE' | 'EXTERNAL_DEPOSIT';
+    passkeyAssertion: unknown;
+  }): Promise<import('../types').AuthenticatedGiftView> {
+    const base = API_BASE ? `${API_BASE}/api/gifts` : '/api/gifts';
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to create Earn Vault gift');
+    }
+    return data.gift;
+  },
+
+  async claimGift(params: {
+    giftId: string;
+    passkeyAssertion: unknown;
+  }): Promise<{
+    gift: import('../types').AuthenticatedGiftView;
+    txHash: string;
+    sharesClaimed: string;
+  }> {
+    const base = API_BASE
+      ? `${API_BASE}/api/gifts/${encodeURIComponent(params.giftId)}/claim`
+      : `/api/gifts/${encodeURIComponent(params.giftId)}/claim`;
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passkeyAssertion: params.passkeyAssertion }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to unwrap and claim gift');
+    }
+    return data;
+  },
+
+  async listCircles(): Promise<import('../types').CircleView[]> {
+    const base = API_BASE ? `${API_BASE}/api/circles` : '/api/circles';
+    const res = await fetch(base, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load Circles');
+    }
+    return data.circles || [];
+  },
+
+  async getCircle(circleId: string): Promise<import('../types').CircleView> {
+    const base = API_BASE
+      ? `${API_BASE}/api/circles/${encodeURIComponent(circleId)}`
+      : `/api/circles/${encodeURIComponent(circleId)}`;
+    const res = await fetch(base, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to load Circle');
+    }
+    return data.circle;
+  },
+
+  async createCircle(params: {
+    name: string;
+    purpose: import('../types').CirclePurpose;
+    note?: string;
+    targetAmountUsd: number | string;
+    vaultAsset: string;
+    payoutHandle?: string;
+    members: Array<{
+      handle: string;
+      shareBps?: number;
+      percentageShare?: number;
+    }>;
+    passkeyAssertion: unknown;
+  }): Promise<import('../types').CircleView> {
+    const base = API_BASE ? `${API_BASE}/api/circles` : '/api/circles';
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to create Circle');
+    }
+    return data.circle;
+  },
+
+  async contributeToCircle(params: {
+    circleId: string;
+    originAsset: string;
+    amount: string;
+    fundingMode?: 'BALANCE' | 'EXTERNAL_DEPOSIT';
+    passkeyAssertion: unknown;
+  }): Promise<{
+    circle: import('../types').CircleView;
+    contributionId: string;
+    status: 'CONFIRMED' | 'PENDING_FUNDING';
+    depositAddress: string | null;
+    depositMemo: string | null;
+    sharesAddedFormatted: string;
+  }> {
+    const base = API_BASE
+      ? `${API_BASE}/api/circles/${encodeURIComponent(params.circleId)}/contribute`
+      : `/api/circles/${encodeURIComponent(params.circleId)}/contribute`;
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        originAsset: params.originAsset,
+        amount: params.amount,
+        fundingMode: params.fundingMode || 'BALANCE',
+        passkeyAssertion: params.passkeyAssertion,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to contribute to Circle');
+    }
+    return data;
+  },
+
+  async settleCircle(params: {
+    circleId: string;
+    passkeyAssertion: unknown;
+  }): Promise<{
+    circle: import('../types').CircleView;
+    txHash: string;
+    payoutHandle: string;
+    sharesSettledFormatted: string;
+  }> {
+    const base = API_BASE
+      ? `${API_BASE}/api/circles/${encodeURIComponent(params.circleId)}/settle`
+      : `/api/circles/${encodeURIComponent(params.circleId)}/settle`;
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passkeyAssertion: params.passkeyAssertion }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to settle Circle');
+    }
+    return data;
+  },
+
+  async dissolveCircle(params: {
+    circleId: string;
+    passkeyAssertion: unknown;
+  }): Promise<{
+    circle: import('../types').CircleView;
+    refundedMembers: number;
+  }> {
+    const base = API_BASE
+      ? `${API_BASE}/api/circles/${encodeURIComponent(params.circleId)}/dissolve`
+      : `/api/circles/${encodeURIComponent(params.circleId)}/dissolve`;
+    const res = await fetch(base, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passkeyAssertion: params.passkeyAssertion }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to dissolve Circle');
+    }
+    return data;
+  },
 };
 
 /**

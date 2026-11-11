@@ -348,3 +348,65 @@ ogRouter.get('/coffee/:file', (c) => {
   });
 });
 
+ogRouter.get('/gift/:file', (c) => {
+  const id = pngId(c.req.param('file'));
+  if (!id || !/^gft_[a-f0-9]{16,64}$/.test(id)) return c.text('Not found', 404);
+
+  return cached(c, async () => {
+    const row = await c.env.DB.prepare(
+      `SELECT sender_handle, recipient_handle, occasion, show_amount,
+              vault_symbol, principal_usd_cents, timelock_until, status
+       FROM gifts WHERE id = ? LIMIT 1`
+    )
+      .bind(id)
+      .first<{
+        sender_handle: string;
+        recipient_handle: string;
+        occasion: string;
+        show_amount: number;
+        vault_symbol: string;
+        principal_usd_cents: number;
+        timelock_until: number;
+        status: string;
+      }>();
+
+    if (!row) {
+      return renderOgCard({
+        eyebrow: 'UPRAIL · EARN VAULT GIFT',
+        headline: 'An Earn Vault gift awaits you',
+        subline: 'Sign in with your 𝕏 handle & passkey to unwrap',
+        cacheControl: 'no-store',
+      });
+    }
+
+    const occasionLabels: Record<string, string> = {
+      BIRTHDAY: 'BIRTHDAY GIFT',
+      CHRISTMAS: 'CHRISTMAS GIFT',
+      HOLIDAY: 'HOLIDAY GIFT',
+      ANNIVERSARY: 'ANNIVERSARY GIFT',
+      CONGRATS: 'CONGRATULATIONS GIFT',
+      JUST_BECAUSE: 'SURPRISE EARN GIFT',
+    };
+    const occLabel = occasionLabels[String(row.occasion || '').toUpperCase()] || 'EARN VAULT GIFT';
+    const unlockDate = new Date(Number(row.timelock_until || 0)).toISOString().slice(0, 10);
+    const isUnlocked = Date.now() >= Number(row.timelock_until || 0);
+    const showAmt = Number(row.show_amount) === 1;
+    const usdStr = showAmt
+      ? `$${(Number(row.principal_usd_cents || 0) / 100).toFixed(2)} in ${row.vault_symbol}`
+      : `${row.vault_symbol} Earn Vault`;
+
+    return renderOgCard({
+      eyebrow: `UPRAIL · ${occLabel}`,
+      headline: `@${row.sender_handle} → @${row.recipient_handle}`,
+      subline: `${usdStr} · Compounding Yield on NEAR Intents`,
+      detail:
+        row.status === 'CLAIMED'
+          ? 'Unwrapped & claimed on UPRAIL'
+          : isUnlocked
+          ? 'Unlocked & ready to unwrap with Passkey'
+          : `Timelocked until ${unlockDate}`,
+      cacheControl: 'public, max-age=120, s-maxage=120',
+    });
+  });
+});
+

@@ -98,6 +98,9 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0012_confidential_rail.sql',
       '0013_contacts_and_requests.sql',
       '0014_add_avatar_url.sql',
+      '0015_rescued_deposits.sql',
+      '0016_buy_me_a_coffee.sql',
+      '0017_circles_and_gifts.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');
@@ -1167,6 +1170,86 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
 
     const missingAsset = await mf.dispatchFetch('http://localhost/og/fees/fee_preview.png');
     assert.equal(missingAsset.status, 404);
+  });
+
+  it('serves all 3 curated Earn Vaults and renders Gift OG card + crawler SEO meta tags', async () => {
+    const vaultsRes = await mf.dispatchFetch('http://localhost/api/gifts/vaults');
+    assert.equal(vaultsRes.status, 200);
+    const vaultsBody = await vaultsRes.json();
+    assert.equal(vaultsBody.vaults.length, 3);
+    assert.deepEqual(
+      vaultsBody.vaults.map((v) => v.symbol),
+      ['TLO', 'gtUSDCp', 'kV-gtSOLb']
+    );
+
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    const giftId = 'gft_0123456789abcdef01234567';
+    const timelockUntil = now + 7 * 86400 * 1000;
+
+    await db
+      .prepare(
+        `INSERT INTO gifts
+           (id, sender_x_id, sender_handle, recipient_handle,
+            occasion, message, show_amount, vault_asset_id, vault_symbol,
+            vault_decimals, source_asset, source_symbol, source_decimals,
+            gross_atomic, principal_usd_cents, custody_account,
+            quoted_shares_atomic, shares_atomic, timelock_until, status,
+            expires_at, created_at, updated_at, funded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'LOCKED', ?, ?, ?, ?)`
+      )
+      .bind(
+        giftId,
+        'xid_test_alice',
+        'alice',
+        'illia',
+        'BIRTHDAY',
+        'Compounding in Taler USDC until your birthday!',
+        0,
+        'nep141:eth-0x0f38f1ce62776d4a0038bc6cac66877a5687383b.omft.near',
+        'TLO',
+        8,
+        'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+        'USDC',
+        6,
+        '50000000',
+        4950,
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        '4950000000',
+        '4950000000',
+        timelockUntil,
+        now + 3600000,
+        now,
+        now,
+        now
+      )
+      .run();
+
+    // 1. Public card view hides amount when show_amount = 0
+    const pubRes = await mf.dispatchFetch(`http://localhost/api/gifts/public/${giftId}`);
+    assert.equal(pubRes.status, 200);
+    const pubBody = await pubRes.json();
+    assert.equal(pubBody.gift.recipientHandle, 'illia');
+    assert.equal(pubBody.gift.vaultSymbol, 'TLO');
+    assert.equal(pubBody.gift.principalUsdCents, undefined);
+
+    // 2. Dynamic OG PNG renders valid PNG bytes
+    const ogRes = await mf.dispatchFetch(`http://localhost/og/gift/${giftId}.png`);
+    assert.equal(ogRes.status, 200);
+    assert.equal(ogRes.headers.get('content-type'), 'image/png');
+    const ogBytes = new Uint8Array(await ogRes.arrayBuffer());
+    assert.deepEqual([...ogBytes.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    assert.ok(ogBytes.length > 1000);
+
+    // 3. Crawler request to /gift/:id returns customized OG tags
+    const botRes = await mf.dispatchFetch(`http://localhost/gift/${giftId}`, {
+      headers: { 'User-Agent': 'Twitterbot/1.0' },
+    });
+    assert.equal(botRes.status, 200);
+    const botHtml = await botRes.text();
+    assert.ok(botHtml.includes(`/og/gift/${giftId}.png`));
+    assert.ok(botHtml.includes('@illia'));
+    assert.ok(botHtml.includes('TLO'));
   });
 });
 

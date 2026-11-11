@@ -18,6 +18,7 @@ import {
   AlertCircle,
   ExternalLink,
   Clock,
+  CircleDot,
 } from 'lucide-react';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
@@ -419,6 +420,24 @@ export const AppHome: React.FC = () => {
                 )}
 
                 <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                  <Link
+                    to="/app/circles"
+                    title="Circles & Timelocked Earn Vault Gifting"
+                    className="relative overflow-hidden inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl border border-stone-900 bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider shadow-xs hover:shadow-sm transition-all group cursor-pointer"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none select-none absolute inset-0 overflow-hidden font-mono text-[6.5px] leading-[7.5px] tracking-[0.12em] text-emerald-400/20 group-hover:text-emerald-300/30 whitespace-pre flex flex-col justify-between py-0.5 transition-colors"
+                    >
+                      <span>░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░</span>
+                      <span>▒░╬─┼─EARN•APY─┼─╬░▒▓█╬░▒</span>
+                      <span>▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓</span>
+                      <span>░▒▓█╬─┼─VAULTS─┼─╬█▓▒░▒▓█</span>
+                    </span>
+                    <CircleDot className="relative z-10 w-3.5 h-3.5 text-emerald-400 group-hover:text-emerald-300 transition-colors drop-shadow-xs" />
+                    <span className="relative z-10 drop-shadow-xs">Circles</span>
+                  </Link>
+
                   {(() => {
                     const hasEligibleStabilize = balances.some((b) => {
                       const symUpper = (b.symbol || '').toUpperCase();

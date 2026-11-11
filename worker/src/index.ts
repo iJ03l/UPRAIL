@@ -30,6 +30,8 @@ import { ogRouter } from './routes/og';
 import { contactsRouter } from './routes/contacts';
 import { requestsRouter } from './routes/requests';
 import { coffeeRouter } from './routes/coffee';
+import { circlesRouter } from './routes/circles';
+import { giftsRouter } from './routes/gifts';
 import { oauthRouter } from './routes/oauth';
 import { approvalRouter } from './routes/approval';
 import { getAuthorizationServer } from './oauth/authorization';
@@ -52,6 +54,8 @@ import {
   getCoffeeOptions,
   reconcilePendingCoffeeDonations,
 } from './services/coffee';
+import { reconcilePendingGifts } from './services/gifts';
+import { reconcilePendingCircleContributions } from './services/circles';
 import {
   creatorFeeCardKeyValid,
   emptyCreatorFeeCardSummary,
@@ -243,6 +247,10 @@ apiRouter.route('/requests', requestsRouter);
 // Buy Me a Coffee public tip links & ephemeral cross-chain deposits
 apiRouter.route('/coffee', coffeeRouter);
 
+// Multi-member quota Circles & 1-to-1 Timelocked Earn Vault Gifting
+apiRouter.route('/circles', circlesRouter);
+apiRouter.route('/gifts', giftsRouter);
+
 app.route('/api', apiRouter);
 
 // Dynamic social cards for share links (claim / invite / receipt / request / coffee).
@@ -354,13 +362,16 @@ const CLAIM_DEEP_LINK = /^\/(?:app\/)?claim\/([A-Za-z0-9_-]{1,64})\/?$/;
 // Payment request deep links: /request/<requestId> and /app/request/<requestId>
 const REQUEST_DEEP_LINK = /^\/(?:app\/)?request\/([A-Za-z0-9_-]{1,64})\/?$/;
 
+// Earn Vault Gift deep links: /gift/<giftId> and /app/gift/<giftId>
+const GIFT_DEEP_LINK = /^\/(?:app\/)?gift\/([A-Za-z0-9_-]{1,64})\/?$/;
+
 // Buy Me a Coffee handle deep links: uprail.world/<handle> or /tip/<handle>
 const COFFEE_HANDLE_RE = /^\/(?:tip\/)?@?([A-Za-z0-9_]{1,15})\/?$/;
 const RESERVED_ROOT_PATHS = new Set([
   'app', 'api', 'auth', 'og', 'docs', 'login', 'parking', 'send', 'request',
   'contacts', 'receive', 'claim', 'fees', 'agents', 'receipt', 'history',
   'privacy', 'terms', 'invite', 'refer', 'tip', 'health', 'oauth',
-  'robots', 'sitemap', 'favicon', 'llms',
+  'robots', 'sitemap', 'favicon', 'llms', 'gift', 'gifts', 'circle', 'circles', 'earn',
 ]);
 
 /**
@@ -500,10 +511,10 @@ const STATIC_ASSET_RE =
 
 // 404 / Asset Fallback Handler
 app.notFound(async (c) => {
-  if (c.env.ASSETS) {
-    const url = new URL(c.req.url);
-    const userAgent = c.req.header('user-agent');
-    const isBot = isBotRequest(userAgent, url.searchParams.get('card') === '1');
+  const url = new URL(c.req.url);
+  const userAgent = c.req.header('user-agent');
+  const isBot = isBotRequest(userAgent, url.searchParams.get('card') === '1');
+  if (c.env.ASSETS || isBot) {
     const claimMatch = url.pathname.match(CLAIM_DEEP_LINK);
 
     const isFeesView = url.searchParams.get('view') === 'fees';
@@ -700,6 +711,70 @@ app.notFound(async (c) => {
       }
     }
 
+    const giftMatch = url.pathname.match(GIFT_DEEP_LINK);
+    if (giftMatch) {
+      const giftId = giftMatch[1];
+      if (isBot && !STATIC_ASSET_RE.test(url.pathname)) {
+        let sender = '';
+        let recipient = '';
+        let vaultSymbol = 'Earn Vault';
+        let timelockUntil = 0;
+        let showAmount = false;
+        let principalCents = 0;
+        if (c.env.DB) {
+          try {
+            const g = await c.env.DB.prepare(
+              'SELECT sender_handle, recipient_handle, vault_symbol, timelock_until, show_amount, principal_usd_cents FROM gifts WHERE id = ? LIMIT 1'
+            )
+              .bind(giftId)
+              .first<{
+                sender_handle: string;
+                recipient_handle: string;
+                vault_symbol: string;
+                timelock_until: number;
+                show_amount: number;
+                principal_usd_cents: number;
+              }>();
+            if (g) {
+              sender = g.sender_handle || '';
+              recipient = g.recipient_handle || '';
+              vaultSymbol = g.vault_symbol || 'Earn Vault';
+              timelockUntil = Number(g.timelock_until || 0);
+              showAmount = Number(g.show_amount) === 1;
+              principalCents = Number(g.principal_usd_cents || 0);
+            }
+          } catch {}
+        }
+        const unlockDate = timelockUntil > 0 ? new Date(timelockUntil).toISOString().slice(0, 10) : '';
+        const amtLabel = showAmount && principalCents > 0 ? `$${(principalCents / 100).toFixed(2)} ` : '';
+        const title =
+          sender && recipient
+            ? `@${sender} gifted an ${amtLabel}${vaultSymbol} Earn Vault to @${recipient}`
+            : 'An Earn Vault gift is waiting on UPRAIL';
+        const description = unlockDate
+          ? `Compounding yield on NEAR Intents until ${unlockDate}. Sign in with X & passkey to unwrap.`
+          : 'Compounding yield on NEAR Intents. Sign in with X & passkey to unwrap.';
+        return renderShareCardHtml({
+          title,
+          description,
+          imageUrl: `${url.origin}/og/gift/${encodeURIComponent(giftId)}.png?v=${OG_CARD_VERSION}`,
+          url: url.href,
+        });
+      }
+
+      const target = new URL('/gift', url);
+      target.search = url.search;
+      const assetResponse = await c.env.ASSETS.fetch(
+        new Request(target, {
+          method: 'GET',
+          headers: c.req.raw.headers,
+        })
+      );
+      if (assetResponse.ok) {
+        return assetResponse;
+      }
+    }
+
     // Buy Me a Coffee deep links: uprail.world/<handle> or /tip/<handle>
     const coffeeMatch = !STATIC_ASSET_RE.test(url.pathname) ? url.pathname.match(COFFEE_HANDLE_RE) : null;
     if (coffeeMatch && !RESERVED_ROOT_PATHS.has(coffeeMatch[1].toLowerCase())) {
@@ -830,7 +905,9 @@ app.notFound(async (c) => {
       });
     }
 
-    return await c.env.ASSETS.fetch(c.req.raw);
+    if (c.env.ASSETS) {
+      return await c.env.ASSETS.fetch(c.req.raw);
+    }
   }
   return c.json<ErrorResponse>(
     {
@@ -1011,5 +1088,22 @@ export default {
     } catch (e) {
       console.warn('[cron] coffee donation reconciliation failed:', e);
     }
+
+    // 10. Reconcile any pending Earn Vault Gift and Circle external deposits.
+    try {
+      const [gifts, circleContribs] = await Promise.all([
+        reconcilePendingGifts(env, { limit: 20 }),
+        reconcilePendingCircleContributions(env, { limit: 20 }),
+      ]);
+      if (gifts.settled > 0) {
+        console.log(`[cron] settled ${gifts.settled}/${gifts.checked} pending gift(s)`);
+      }
+      if (circleContribs.confirmed > 0) {
+        console.log(`[cron] settled ${circleContribs.confirmed}/${circleContribs.checked} pending circle contribution(s)`);
+      }
+    } catch (e) {
+      console.warn('[cron] earn vault gift/circle reconciliation failed:', e);
+    }
   },
 };
+

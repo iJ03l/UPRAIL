@@ -393,4 +393,196 @@ export interface CoffeeSettingsResponse {
   }>;
 }
 
+export type EarnVaultSymbol = 'TLO' | 'gtUSDCp' | 'kV-gtSOLb';
+
+export interface EarnVaultDescriptor {
+  symbol: EarnVaultSymbol;
+  name: string;
+  protocol: string;
+  underlyingSymbol: string;
+  chain: string;
+  chainName: string;
+  assetId: string;
+  decimals: number;
+  estimatedApyPct: number;
+  minDepositUsd: number;
+  riskTier: 'LOW' | 'MODERATE';
+  description: string;
+  priceUsd: number;
+  liveAvailable: boolean;
+}
+
+export type GiftOccasion =
+  | 'BIRTHDAY'
+  | 'CHRISTMAS'
+  | 'NEW_YEAR'
+  | 'ANNIVERSARY'
+  | 'GRADUATION'
+  | 'WEDDING'
+  | 'THANK_YOU'
+  | 'JUST_BECAUSE';
+
+export type GiftStatus = 'PENDING_FUNDING' | 'LOCKED' | 'CLAIMING' | 'CLAIMED' | 'EXPIRED';
+
+export interface GiftQuoteResult {
+  originAssetId: string;
+  originSymbol: string;
+  originChain: string;
+  originDecimals: number;
+  vaultSymbol: EarnVaultSymbol;
+  vaultName: string;
+  vaultAssetId: string;
+  vaultProtocol: string;
+  vaultDecimals: number;
+  estimatedApyPct: number;
+  grossAmount: string;
+  netAmount: string;
+  protocolFee: string;
+  feePercent: number;
+  principalUsdCents: number;
+  estimatedSharesOut: string;
+  minSharesOut: string;
+  timeEstimateSeconds: number;
+}
+
+export interface PublicGiftCardView {
+  id: string;
+  senderHandle: string;
+  recipientHandle: string;
+  occasion: GiftOccasion;
+  occasionLabel: string;
+  vaultSymbol: string;
+  vaultName: string;
+  vaultProtocol: string;
+  vaultChainName: string;
+  estimatedApyPct: number;
+  timelockUntil: number;
+  isUnlocked: boolean;
+  status: GiftStatus;
+  showAmount: boolean;
+  principalUsdCents?: number;
+  currentValueUsdCents?: number;
+  yieldUsdCents?: number;
+  sharesFormatted?: string;
+  shareUrl: string;
+  ogImageUrl: string;
+  createdAt: number;
+  claimedAt: number | null;
+}
+
+export interface AuthenticatedGiftView {
+  id: string;
+  role: 'SENDER' | 'RECIPIENT';
+  senderHandle: string;
+  recipientHandle: string;
+  occasion: GiftOccasion;
+  occasionLabel: string;
+  message: string | null;
+  vaultSymbol: string;
+  vaultName: string;
+  vaultProtocol: string;
+  vaultChainName: string;
+  estimatedApyPct: number;
+  sourceSymbol: string;
+  grossAmount: string;
+  principalUsdCents: number;
+  currentValueUsdCents: number;
+  yieldUsdCents: number;
+  yieldPct: number;
+  sharesAtomic: string;
+  sharesFormatted: string;
+  custodyAccount: string;
+  depositAddress: string | null;
+  depositMemo: string | null;
+  timelockUntil: number;
+  isUnlocked: boolean;
+  status: GiftStatus;
+  showAmount: boolean;
+  claimTxHash: string | null;
+  canClaim: boolean;
+  shareUrl: string;
+  ogImageUrl: string;
+  createdAt: number;
+  claimedAt: number | null;
+}
+
+export type CirclePurpose =
+  | 'CONTRIBUTIONS'
+  | 'SHARED_GOAL'
+  | 'RENT'
+  | 'TRIP'
+  | 'DAILY_TIP'
+  | 'SAVINGS_CLUB';
+
+export type CircleStatus = 'ACTIVE' | 'SETTLING' | 'COMPLETED' | 'DISSOLVING' | 'DISSOLVED';
+
+export interface CircleMemberView {
+  id: string;
+  handle: string;
+  isRegistered: boolean;
+  shareBps: number;
+  percentageShare: number;
+  quotaUsdCents: number;
+  contributedUsdCents: number;
+  progressPct: number;
+  hasMetQuota: boolean;
+  sharesAtomic: string;
+  sharesFormatted: string;
+  currentValueUsdCents: number;
+  yieldUsdCents: number;
+  refundedAt: number | null;
+  refundTxHash: string | null;
+}
+
+export interface CircleContributionView {
+  id: string;
+  memberId: string;
+  contributorXId: string;
+  sourceSymbol: string;
+  grossAmount: string;
+  usdCents: number;
+  sharesFormatted: string;
+  status: string;
+  depositAddress: string | null;
+  depositMemo: string | null;
+  createdAt: number;
+  confirmedAt: number | null;
+}
+
+export interface CircleView {
+  id: string;
+  creatorHandle: string;
+  isCreator: boolean;
+  isMember: boolean;
+  myMemberId: string | null;
+  name: string;
+  purpose: CirclePurpose;
+  purposeLabel: string;
+  note: string | null;
+  targetUsdCents: number;
+  contributedUsdCents: number;
+  currentValueUsdCents: number;
+  yieldUsdCents: number;
+  yieldPct: number;
+  progressPct: number;
+  allQuotasMet: boolean;
+  vaultSymbol: string;
+  vaultName: string;
+  vaultProtocol: string;
+  vaultChainName: string;
+  vaultAssetId: string;
+  vaultDecimals: number;
+  estimatedApyPct: number;
+  totalSharesAtomic: string;
+  totalSharesFormatted: string;
+  payoutHandle: string;
+  custodyAccount: string;
+  status: CircleStatus;
+  payoutTxHash: string | null;
+  members: CircleMemberView[];
+  recentContributions: CircleContributionView[];
+  createdAt: number;
+  closedAt: number | null;
+}
+
 

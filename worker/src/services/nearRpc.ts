@@ -986,6 +986,9 @@ async function loadSupportedTokens(env: Env): Promise<OnchainToken[]> {
           'nep141:prl.omft.near': { symbol: 'PRL', name: 'Pearl', priority: 13, chain: 'prl' },
           'nep141:hood-0x5fc5360d0400a0fd4f2af552add042d716f1d168.omft.near': { symbol: 'USDG', name: 'Global Dollar (Robinhood)', priority: 14, chain: 'hood' },
           'nep141:hood.omft.near': { symbol: 'ETH', name: 'Ethereum (Robinhood)', priority: 15, chain: 'hood' },
+          'nep141:eth-0x0f38f1ce62776d4a0038bc6cac66877a5687383b.omft.near': { symbol: 'TLO', name: 'Taler USDC (Earn)', priority: 16, chain: 'eth' },
+          'nep141:base-0x0bb69b79bc829e1cfcc34a740110886d98d2bd14.omft.near': { symbol: 'gtUSDCp', name: 'Gauntlet USDC Prime (Morpho)', priority: 17, chain: 'base' },
+          'nep141:sol-0xa69aa1bcb03a369e338156a8718ad60271145803.omdep.near': { symbol: 'kV-gtSOLb', name: 'Kamino SOL (Earn)', priority: 18, chain: 'sol' },
         };
 
         const tokens: OnchainToken[] = [];
