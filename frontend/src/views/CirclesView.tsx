@@ -303,6 +303,147 @@ export const CirclesView: React.FC = () => {
     return circleMembers.reduce((acc, m) => acc + (parseFloat(m.percentage) || 0), 0);
   }, [circleMembers]);
 
+  const selectedCircleVault = useMemo(
+    () => vaults.find((v) => v.symbol === circleVaultSymbol) || vaults[0],
+    [vaults, circleVaultSymbol]
+  );
+
+  const selectedGiftVault = useMemo(
+    () => vaults.find((v) => v.symbol === giftVaultSymbol) || vaults[0],
+    [vaults, giftVaultSymbol]
+  );
+
+  const circleValidation = useMemo(() => {
+    const trimmedName = circleName.trim();
+    if (trimmedName.length < 2) {
+      return { isValid: false, hint: 'Enter a Circle name (at least 2 characters).' };
+    }
+    if (circlePurpose === 'CUSTOM' && circleCustomPurpose.trim().length < 2) {
+      return { isValid: false, hint: 'Enter a custom reason (at least 2 characters).' };
+    }
+    const targetNum = parseFloat(circleTargetUsd);
+    const minTarget = selectedCircleVault?.minDepositUsd || 10;
+    if (!Number.isFinite(targetNum) || targetNum < minTarget || targetNum > 1_000_000) {
+      return {
+        isValid: false,
+        hint: `Target goal must be at least $${minTarget} USD for ${selectedCircleVault?.symbol || 'this vault'}.`,
+      };
+    }
+    if (!circleVaultSymbol) {
+      return { isValid: false, hint: 'Select an Intents Earn Vault.' };
+    }
+    const effective =
+      circleMembers.length === 1
+        ? [{ ...circleMembers[0], percentage: '100' }]
+        : circleMembers;
+    if (effective.length < 1 || effective.length > 25) {
+      return { isValid: false, hint: 'Circle must have between 1 and 25 participants.' };
+    }
+    const seen = new Set<string>();
+    for (const m of effective) {
+      const cleanH = m.handle.trim().replace(/^@+/, '').toLowerCase();
+      if (!cleanH || !/^[a-z0-9_]{1,15}$/.test(cleanH)) {
+        return {
+          isValid: false,
+          hint: 'Every participant must have a valid @handle (1–15 letters, numbers, or _).',
+        };
+      }
+      if (seen.has(cleanH)) {
+        return { isValid: false, hint: `Duplicate participant @${cleanH}.` };
+      }
+      seen.add(cleanH);
+      const pct = parseFloat(m.percentage);
+      if (!Number.isFinite(pct) || pct < 1 || pct > 100) {
+        return { isValid: false, hint: `Each participant share must be between 1% and 100%.` };
+      }
+    }
+    const sum = effective.reduce((acc, m) => acc + (parseFloat(m.percentage) || 0), 0);
+    if (Math.abs(sum - 100) > 0.01) {
+      return {
+        isValid: false,
+        hint: `Participant shares must sum to exactly 100% (currently ${sum.toFixed(2)}%).`,
+      };
+    }
+    return { isValid: true, hint: null };
+  }, [
+    circleName,
+    circlePurpose,
+    circleCustomPurpose,
+    circleTargetUsd,
+    selectedCircleVault,
+    circleVaultSymbol,
+    circleMembers,
+  ]);
+
+  const contribValidation = useMemo(() => {
+    if (!contributeCircle) return { isValid: false, hint: null };
+    if (!contribOriginAsset) {
+      return { isValid: false, hint: 'Select a payment token.' };
+    }
+    const amt = parseFloat(contribAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return { isValid: false, hint: 'Enter a valid amount to add.' };
+    }
+    const originObj = availableOriginAssets.find((a) => a.assetId === contribOriginAsset);
+    const availBal = originObj ? parseFloat(originObj.balanceFormatted || '0') : 0;
+    if (originObj && amt > availBal + 1e-6) {
+      return {
+        isValid: false,
+        hint: `Insufficient ${originObj.symbol} balance (${originObj.balanceFormatted} available).`,
+      };
+    }
+    return { isValid: true, hint: null };
+  }, [contributeCircle, contribOriginAsset, contribAmount, availableOriginAssets]);
+
+  const giftValidation = useMemo(() => {
+    const cleanRecip = giftRecipient.trim().replace(/^@+/, '');
+    if (!cleanRecip) {
+      return { isValid: false, hint: 'Enter a recipient @handle.' };
+    }
+    if (cleanRecip.includes('.') || !/^[A-Za-z0-9_]{1,15}$/.test(cleanRecip)) {
+      return {
+        isValid: false,
+        hint: 'Enter a valid X @handle (1–15 letters, numbers, or _), not a wallet address.',
+      };
+    }
+    if (user?.handle && cleanRecip.toLowerCase() === user.handle.toLowerCase()) {
+      return { isValid: false, hint: 'Choose another @handle (cannot gift to yourself).' };
+    }
+    if (giftOccasion === 'CUSTOM' && giftCustomOccasion.trim().length < 2) {
+      return { isValid: false, hint: 'Enter a custom occasion (at least 2 characters).' };
+    }
+    if (!giftVaultSymbol || !giftOriginAsset) {
+      return { isValid: false, hint: 'Select a vault and payment token.' };
+    }
+    const amt = parseFloat(giftAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return { isValid: false, hint: 'Enter a valid gift amount.' };
+    }
+    const originObj = availableOriginAssets.find((a) => a.assetId === giftOriginAsset);
+    const availBal = originObj ? parseFloat(originObj.balanceFormatted || '0') : 0;
+    if (originObj && amt > availBal + 1e-6) {
+      return {
+        isValid: false,
+        hint: `Insufficient ${originObj.symbol} balance (${originObj.balanceFormatted} available).`,
+      };
+    }
+    const unlockMs = new Date(giftTimelockLocal).getTime();
+    if (!Number.isFinite(unlockMs) || unlockMs <= Date.now() + 60_000) {
+      return { isValid: false, hint: 'Select an unlock date & time in the future.' };
+    }
+    return { isValid: true, hint: null };
+  }, [
+    giftRecipient,
+    user?.handle,
+    giftOccasion,
+    giftCustomOccasion,
+    giftVaultSymbol,
+    giftOriginAsset,
+    giftAmount,
+    availableOriginAssets,
+    giftTimelockLocal,
+  ]);
+
   const splitMembersEvenly = () => {
     setCircleMembers((prev) => distributeEvenPercentages(prev));
   };
@@ -330,6 +471,10 @@ export const CirclesView: React.FC = () => {
 
   const handleCreateCircle = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!circleValidation.isValid) {
+      if (circleValidation.hint) toast(circleValidation.hint, 'error');
+      return;
+    }
     const effectiveMembers =
       circleMembers.length === 1
         ? [{ ...circleMembers[0], percentage: '100' }]
@@ -1477,10 +1622,16 @@ export const CirclesView: React.FC = () => {
                   </div>
                 </div>
 
+                {circleValidation.hint && (
+                  <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
+                    {circleValidation.hint}
+                  </div>
+                )}
+
                 <button
                   type="submit"
-                  disabled={isSubmittingCircle || isAuthorizing}
-                  className="w-full py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  disabled={!circleValidation.isValid || isSubmittingCircle || isAuthorizing}
+                  className="w-full py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Fingerprint className="w-4 h-4" />
                   <span>
@@ -1585,10 +1736,16 @@ export const CirclesView: React.FC = () => {
                   />
                 </div>
 
+                {contribValidation.hint && (
+                  <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
+                    {contribValidation.hint}
+                  </div>
+                )}
+
                 <button
                   type="submit"
-                  disabled={isSubmittingContrib || isAuthorizing}
-                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  disabled={!contribValidation.isValid || isSubmittingContrib || isAuthorizing}
+                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Fingerprint className="w-4 h-4" />
                   <span>
@@ -1615,7 +1772,7 @@ export const CirclesView: React.FC = () => {
                   </div>
                   <div>
                     <h2 className="text-lg font-display font-extrabold text-stone-950">
-                      Gift an Earn Vault
+                      Gift an Intents Earn Vault
                     </h2>
                     <p className="text-xs text-stone-500">
                       1-to-1 to any @handle. Compounds yield until the unlock date.
@@ -1783,10 +1940,16 @@ export const CirclesView: React.FC = () => {
                   />
                 </div>
 
+                {giftValidation.hint && (
+                  <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
+                    {giftValidation.hint}
+                  </div>
+                )}
+
                 <button
                   type="submit"
-                  disabled={isSubmittingGift || isAuthorizing}
-                  className="w-full py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  disabled={!giftValidation.isValid || isSubmittingGift || isAuthorizing}
+                  className="w-full py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Fingerprint className="w-4 h-4" />
                   <span>
