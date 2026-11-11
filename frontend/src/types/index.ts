@@ -393,7 +393,14 @@ export interface CoffeeSettingsResponse {
   }>;
 }
 
-export type EarnVaultSymbol = 'TLO' | 'gtUSDCp' | 'kV-gtSOLb';
+export type EarnVaultSymbol =
+  | 'TLO'
+  | 'gtUSDCp'
+  | 'kV-gtSOLb'
+  | 'stNEAR'
+  | 'cNEAR'
+  | 'wstETH'
+  | string;
 
 export interface EarnVaultDescriptor {
   symbol: EarnVaultSymbol;
@@ -532,6 +539,7 @@ export interface CircleMemberView {
   handle: string;
   isRegistered: boolean;
   hasSigned: boolean;
+  hasApprovedDissolve?: boolean;
   joinedAt: number | null;
   shareBps: number;
   percentageShare: number;
@@ -570,6 +578,9 @@ export interface CircleView {
   isCreator: boolean;
   isMember: boolean;
   hasSigned: boolean;
+  hasApprovedDissolve?: boolean;
+  dissolveApprovalsCount?: number;
+  dissolveRequiredCount?: number;
   myMemberId: string | null;
   name: string;
   purpose: CirclePurpose;

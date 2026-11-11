@@ -108,6 +108,7 @@ export interface CircleMemberView {
   xId: string | null;
   isRegistered: boolean;
   hasSigned: boolean;
+  hasApprovedDissolve: boolean;
   joinedAt: number | null;
   shareBps: number;
   percentageShare: number;
@@ -149,6 +150,9 @@ export interface CircleView {
   isCreator: boolean;
   isMember: boolean;
   hasSigned: boolean;
+  hasApprovedDissolve: boolean;
+  dissolveApprovalsCount: number;
+  dissolveRequiredCount: number;
   myMemberId: string | null;
   name: string;
   purpose: CirclePurpose;
@@ -440,12 +444,17 @@ async function buildCircleView(
       principalUsdCents: contributed,
     });
 
+    const rawRefundMarker = String(m.refund_tx_hash || '');
+    const hasApprovedDissolve =
+      Boolean(m.refunded_at) || rawRefundMarker.startsWith('DISSOLVE_APPROVED');
+
     return {
       id: m.id,
       handle: m.x_handle,
       xId: m.x_id || null,
       isRegistered: Boolean(m.x_id),
       hasSigned: Boolean(m.joined_at),
+      hasApprovedDissolve,
       joinedAt: m.joined_at ? Number(m.joined_at) : null,
       shareBps: Number(m.share_bps),
       percentageShare: Number((Number(m.share_bps) / 100).toFixed(2)),
@@ -460,7 +469,9 @@ async function buildCircleView(
       yieldUsdCents: memberVal.yieldUsdCents,
       isCurrentUser,
       refundedAt: m.refunded_at ? Number(m.refunded_at) : null,
-      refundTxHash: m.refund_tx_hash || null,
+      refundTxHash: rawRefundMarker.startsWith('DISSOLVE_APPROVED')
+        ? null
+        : m.refund_tx_hash || null,
     };
   });
 
@@ -476,6 +487,9 @@ async function buildCircleView(
   const completionPct = Math.min(100, rawCompletionPct);
   const allQuotasMet = members.length > 0 && members.every((m) => m.hasMetQuota);
   const myMember = members.find((m) => m.isCurrentUser) || null;
+  const contributingMembers = members.filter((m) => BigInt(m.sharesAtomic || '0') > 0n);
+  const dissolveRequiredCount = contributingMembers.length;
+  const dissolveApprovalsCount = contributingMembers.filter((m) => m.hasApprovedDissolve).length;
 
   const rawPurposeStr = String(circleRow.purpose || 'SHARED_GOAL');
   let purpose: CirclePurpose = 'SHARED_GOAL';
@@ -520,6 +534,9 @@ async function buildCircleView(
     isCreator,
     isMember: Boolean(myMember),
     hasSigned: myMember ? myMember.hasSigned : isCreator,
+    hasApprovedDissolve: myMember ? myMember.hasApprovedDissolve : false,
+    dissolveApprovalsCount,
+    dissolveRequiredCount,
     myMemberId: myMember ? myMember.id : null,
     name: circleRow.name,
     purpose,
@@ -1229,9 +1246,11 @@ export async function settleCircle(
 }
 
 /**
- * Creator-only, passkey-gated Circle dissolution (`POST /api/circles/:id/dissolve`).
- * Refunds all contributed Earn Vault shares (plus pro-rata accrued yield) back to
- * each contributing member's UPRAIL account.
+ * Unanimous contributor passkey-gated Circle dissolution (`POST /api/circles/:id/dissolve`).
+ * Every contributor who has funded the Circle must sign with their passkey to activate
+ * dissolution. Once all contributors have activated dissolve, the Circle refunds 100%
+ * of contributed Earn Vault shares (plus pro-rata accrued yield) back to each
+ * contributing member's UPRAIL account.
  */
 export async function dissolveCircle(
   env: Env,
@@ -1248,14 +1267,6 @@ export async function dissolveCircle(
     .first<any>();
   if (!circleRow) {
     throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
-  }
-
-  if (circleRow.creator_x_id !== session.x_id) {
-    throw new CircleError(
-      'FORBIDDEN',
-      'Only the Circle creator can dissolve this Circle.',
-      403
-    );
   }
 
   if (circleRow.status === 'DISSOLVED' || circleRow.status === 'SETTLED') {
@@ -1279,17 +1290,70 @@ export async function dissolveCircle(
     .bind(cleanId)
     .all<any>();
 
-  const contributors = (memberRows.results || []).filter(
+  const allMembers = memberRows.results || [];
+  const contributors = allMembers.filter(
     (m) => BigInt(String(m.shares_atomic || '0')) > 0n
   );
+
+  const callerHandle = (session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
+  const callerMember =
+    allMembers.find(
+      (m) =>
+        (m.x_id && m.x_id === session.x_id) ||
+        (callerHandle && String(m.x_handle || '').toLowerCase() === callerHandle)
+    ) || null;
 
   const now = Date.now();
 
   if (contributors.length === 0) {
+    if (circleRow.creator_x_id !== session.x_id) {
+      throw new CircleError(
+        'FORBIDDEN',
+        'Only the Circle creator can dissolve an unfunded Circle.',
+        403
+      );
+    }
     await env.DB.prepare(
       "UPDATE circles SET status = 'DISSOLVED', closed_at = ?, updated_at = ? WHERE id = ?"
     )
       .bind(now, now, cleanId)
+      .run();
+    return getCircleDetail(env, session, cleanId);
+  }
+
+  // Funded Circle: caller must be an active contributor (shares_atomic > 0)
+  const callerContributor = contributors.find(
+    (m) => callerMember && m.id === callerMember.id
+  );
+  if (!callerContributor) {
+    throw new CircleError(
+      'FORBIDDEN',
+      'Only contributors who have added funds to this Circle can activate a dissolve.',
+      403
+    );
+  }
+
+  // Record this contributor's passkey-authenticated dissolve approval
+  const approvalMarker = `DISSOLVE_APPROVED:${now}`;
+  callerContributor.refund_tx_hash = approvalMarker;
+  await env.DB.prepare(
+    `UPDATE circle_members
+     SET x_id = COALESCE(x_id, ?),
+         joined_at = COALESCE(joined_at, ?),
+         refund_tx_hash = ?
+     WHERE id = ?`
+  )
+    .bind(session.x_id, now, approvalMarker, callerContributor.id)
+    .run();
+
+  const allContributorsApproved = contributors.every((m) =>
+    String(m.refund_tx_hash || '').startsWith('DISSOLVE_APPROVED')
+  );
+
+  // If other contributors still need to sign to dissolve, persist approval and return updated view
+  if (!allContributorsApproved) {
+    await env.DB.prepare('UPDATE circles SET updated_at = ? WHERE id = ?')
+      .bind(now, cleanId)
       .run();
     return getCircleDetail(env, session, cleanId);
   }

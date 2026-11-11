@@ -53,11 +53,32 @@ const PRELOADED_TOKENS: any[] = [
     blockchain: 'sol',
     price: 185.0,
   },
+  {
+    assetId: 'nep141:meta-pool.near',
+    symbol: 'stNEAR',
+    decimals: 24,
+    blockchain: 'near',
+    price: 5.71,
+  },
+  {
+    assetId: 'nep141:cnear.assetize.near',
+    symbol: 'cNEAR',
+    decimals: 24,
+    blockchain: 'near',
+    price: 3.75,
+  },
+  {
+    assetId: 'nep141:eth-0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0.omft.near',
+    symbol: 'wstETH',
+    decimals: 18,
+    blockchain: 'eth',
+    price: 2590.0,
+  },
 ];
 
-test('resolveEarnVault allows all 3 curated 1Click Earn vaults and rejects unknown symbols', async () => {
-  assert.equal(CURATED_EARN_VAULTS.length, 3);
-  for (const sym of ['TLO', 'gtUSDCp', 'kV-gtSOLb']) {
+test('resolveEarnVault allows all 6 curated Intents Earn vaults and rejects unknown symbols', async () => {
+  assert.equal(CURATED_EARN_VAULTS.length, 6);
+  for (const sym of ['TLO', 'gtUSDCp', 'kV-gtSOLb', 'stNEAR', 'cNEAR', 'wstETH']) {
     const v = await resolveEarnVault(TEST_ENV, sym, PRELOADED_TOKENS);
     assert.ok(v, `expected ${sym} to resolve`);
     const byId = await resolveEarnVault(TEST_ENV, v.assetId, PRELOADED_TOKENS);
@@ -450,6 +471,7 @@ test('Circle anti-IDOR blocks non-members from viewing and non-creators from set
     (err: any) => err instanceof CircleError && err.code === 'FORBIDDEN' && err.httpStatus === 403
   );
 
+  // 4. Non-contributor (@bob with 0 shares) cannot activate dissolve
   await assert.rejects(
     () =>
       dissolveCircle(
@@ -464,4 +486,22 @@ test('Circle anti-IDOR blocks non-members from viewing and non-creators from set
       ),
     (err: any) => err instanceof CircleError && err.code === 'FORBIDDEN' && err.httpStatus === 403
   );
+
+  // 5. When both @alice and @bob are contributors, one contributor signing dissolve records 1/2 approval without dissolving yet
+  memberRows[1].shares_atomic = '5000000000';
+  memberRows[1].contributed_usd_cents = 50000;
+  const afterAliceDissolveSign = await dissolveCircle(
+    mockEnv,
+    {
+      id: 'sess_a',
+      x_id: 'xid_alice',
+      x_handle: 'alice',
+      x_name: 'Alice',
+    } as any,
+    circleId
+  );
+  assert.equal(afterAliceDissolveSign.status, 'ACTIVE');
+  assert.equal(afterAliceDissolveSign.hasApprovedDissolve, true);
+  assert.equal(afterAliceDissolveSign.dissolveApprovalsCount, 1);
+  assert.equal(afterAliceDissolveSign.dissolveRequiredCount, 2);
 });

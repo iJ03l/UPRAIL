@@ -376,7 +376,7 @@ export const PublicGiftView: React.FC = () => {
       </main>
 
       <footer className="text-center text-[11px] font-mono text-stone-400">
-        Powered by UPRAIL & NEAR Intents 1Click Earn • Passkey-Secured Custody
+        Powered by UPRAIL & Intents Earn • Passkey-Secured Custody
       </footer>
     </div>
   );

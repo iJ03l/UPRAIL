@@ -460,7 +460,7 @@ export const CirclesView: React.FC = () => {
     setIsActionBusyId(circle.id);
     try {
       const assertion = await authorizeWithPasskey(
-        `Dissolve Circle "${circle.name}" and refund members`
+        `Activate dissolve for Circle "${circle.name}" (requires all contributors)`
       );
       const res = await api.dissolveCircle({
         circleId: circle.id,
@@ -468,12 +468,21 @@ export const CirclesView: React.FC = () => {
       });
       setCircles((prev) => prev.map((c) => (c.id === res.circle.id ? res.circle : c)));
       refreshOnchain();
-      toast(
-        `Circle dissolved — refunded vault shares + yield to ${res.refundedMembers} member(s).`,
-        'info'
-      );
+      if (res.circle.status === 'DISSOLVED') {
+        toast(
+          `All contributors signed! Circle dissolved — refunded vault shares + yield to ${res.refundedMembers} contributor(s).`,
+          'info'
+        );
+      } else {
+        const signed = res.circle.dissolveApprovalsCount ?? 1;
+        const required = res.circle.dissolveRequiredCount ?? 1;
+        toast(
+          `Dissolve activated (${signed}/${required} contributors signed). All contributors must sign to dissolve.`,
+          'info'
+        );
+      }
     } catch (err: any) {
-      toast(err?.message || 'Could not dissolve Circle.', 'error');
+      toast(err?.message || 'Could not activate Circle dissolve.', 'error');
     } finally {
       setIsActionBusyId(null);
     }
@@ -605,11 +614,11 @@ export const CirclesView: React.FC = () => {
                 Circles & Earn Gifting
               </h1>
               <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-mono font-bold uppercase tracking-wider">
-                1Click Earn
+                Intents Earn
               </span>
             </div>
             <p className="text-xs text-stone-500">
-              Pool shared goals by percentage or send timelocked Earn Vault gifts to any @handle.
+              Pool shared goals by percentage or send timelocked Intents Earn Vault gifts to any @handle.
             </p>
           </div>
         </div>
@@ -631,65 +640,6 @@ export const CirclesView: React.FC = () => {
             <Plus className="w-3.5 h-3.5" />
             <span>New Circle</span>
           </button>
-        </div>
-      </div>
-
-      {/* Live 1Click Earn Vaults Selector Bar */}
-      <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-emerald-600" />
-            <span className="text-xs font-mono font-bold uppercase tracking-wider text-stone-700">
-              1Click Earn Vaults
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={loadAll}
-            className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
-          >
-            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>Sync</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {vaults.map((v) => {
-            const isSelected =
-              (activeTab === 'circles' ? circleVaultSymbol : giftVaultSymbol) === v.symbol;
-            return (
-              <div
-                key={v.assetId}
-                onClick={() => {
-                  setCircleVaultSymbol(v.symbol);
-                  setGiftVaultSymbol(v.symbol);
-                }}
-                className={`rounded-xl p-3.5 border transition-all cursor-pointer ${
-                  isSelected
-                    ? 'bg-white border-stone-900 shadow-xs'
-                    : 'bg-white border-stone-200 hover:border-stone-300'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-display font-extrabold text-sm text-stone-950">
-                      {v.symbol}
-                    </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 uppercase">
-                      {v.chainName}
-                    </span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-xs font-bold">
-                    {v.estimatedApyPct.toFixed(1)}% APY
-                  </span>
-                </div>
-                <div className="text-xs font-medium text-stone-800">{v.name}</div>
-                <div className="text-[11px] text-stone-500 mt-0.5 line-clamp-1">
-                  {v.protocol} • Min ${v.minDepositUsd} USD
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
 
@@ -770,6 +720,20 @@ export const CirclesView: React.FC = () => {
                 const circleProgress = circle.progressPct ?? circle.completionPct ?? 0;
                 const isCircleOpen = circle.status === 'ACTIVE' || circle.status === 'GOAL_MET';
                 const canParticipate = circle.isMember || circle.isCreator;
+                const myHandle = (user?.handle || '').toLowerCase();
+                const myMemberRow =
+                  circle.members.find(
+                    (m) => m.isCurrentUser || (myHandle && m.handle.toLowerCase() === myHandle)
+                  ) || null;
+                const isCallerContributor =
+                  Boolean(myMemberRow && BigInt(myMemberRow.sharesAtomic || '0') > 0n);
+                const hasPoolShares = BigInt(circle.totalSharesAtomic || '0') > 0n;
+                const canCallerDissolve = hasPoolShares
+                  ? isCallerContributor
+                  : circle.isCreator;
+                const dissolveSigned = circle.dissolveApprovalsCount ?? 0;
+                const dissolveRequired = circle.dissolveRequiredCount ?? 1;
+
                 return (
                   <div
                     key={circle.id}
@@ -847,27 +811,39 @@ export const CirclesView: React.FC = () => {
                                 <span>Add Funds</span>
                               </button>
                             )}
-                            {circle.isCreator && BigInt(circle.totalSharesAtomic || '0') > 0n && (
-                              <>
-                                <button
-                                  type="button"
-                                  disabled={isActionBusyId === circle.id || isAuthorizing}
-                                  onClick={() => handleSettleCircle(circle)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
-                                >
-                                  <Fingerprint className="w-3.5 h-3.5" />
-                                  <span>Settle</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={isActionBusyId === circle.id || isAuthorizing}
-                                  onClick={() => handleDissolveCircle(circle)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-600 text-xs font-mono transition-all cursor-pointer disabled:opacity-50"
-                                  title="Refund pro-rata shares + yield to members"
-                                >
-                                  <span>Dissolve</span>
-                                </button>
-                              </>
+                            {circle.isCreator && hasPoolShares && (
+                              <button
+                                type="button"
+                                disabled={isActionBusyId === circle.id || isAuthorizing}
+                                onClick={() => handleSettleCircle(circle)}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
+                                title="Disburse pooled vault shares + yield to payout handle (1% protocol fee on payout)"
+                              >
+                                <Fingerprint className="w-3.5 h-3.5" />
+                                <span>Settle</span>
+                              </button>
+                            )}
+                            {canCallerDissolve && (
+                              <button
+                                type="button"
+                                disabled={
+                                  isActionBusyId === circle.id ||
+                                  isAuthorizing ||
+                                  Boolean(circle.hasApprovedDissolve)
+                                }
+                                onClick={() => handleDissolveCircle(circle)}
+                                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-600 text-xs font-mono transition-all cursor-pointer disabled:opacity-60"
+                                title="All contributors who funded the Circle must sign with their passkey to dissolve and refund pro-rata shares + yield"
+                              >
+                                <Fingerprint className="w-3 h-3" />
+                                <span>
+                                  {hasPoolShares
+                                    ? circle.hasApprovedDissolve
+                                      ? `Dissolve Signed (${dissolveSigned}/${dissolveRequired})`
+                                      : `Activate Dissolve (${dissolveSigned}/${dissolveRequired})`
+                                    : 'Dissolve'}
+                                </span>
+                              </button>
                             )}
                           </div>
                         )}
@@ -935,6 +911,14 @@ export const CirclesView: React.FC = () => {
                                   </span>
                                 </div>
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {m.hasApprovedDissolve && isCircleOpen && (
+                                    <span
+                                      className="inline-flex items-center gap-1 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200"
+                                      title="Contributor signed to dissolve Circle"
+                                    >
+                                      <span>Dissolve ✓</span>
+                                    </span>
+                                  )}
                                   <span
                                     className={`inline-flex items-center gap-1 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
                                       m.hasSigned
@@ -1212,6 +1196,75 @@ export const CirclesView: React.FC = () => {
         </div>
       )}
 
+      {/* Intents Earn Vaults List (Placed under Create Your Circle / Active Circles card) */}
+      <div className="bg-stone-50 border border-stone-200 rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-stone-200">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-mono font-bold uppercase tracking-wider text-stone-700">
+              Intents Earn Vaults ({vaults.length})
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={loadAll}
+            className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
+          >
+            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Sync</span>
+          </button>
+        </div>
+
+        <div className="divide-y divide-stone-200 bg-white">
+          {vaults.map((v) => {
+            const isSelected =
+              (activeTab === 'circles' ? circleVaultSymbol : giftVaultSymbol) === v.symbol;
+            return (
+              <div
+                key={v.assetId}
+                onClick={() => {
+                  setCircleVaultSymbol(v.symbol);
+                  setGiftVaultSymbol(v.symbol);
+                }}
+                className={`flex items-center justify-between gap-3 px-4 py-3 transition-colors cursor-pointer ${
+                  isSelected ? 'bg-emerald-50/70' : 'hover:bg-stone-50'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      isSelected ? 'bg-emerald-600' : 'bg-stone-300'
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-display font-extrabold text-sm text-stone-950">
+                        {v.symbol}
+                      </span>
+                      <span className="text-xs font-medium text-stone-700 truncate">
+                        {v.name}
+                      </span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 uppercase flex-shrink-0">
+                        {v.chainName}
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-stone-500 truncate">
+                      {v.protocol} • Min ${v.minDepositUsd} USD
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-xs font-bold">
+                    {v.estimatedApyPct.toFixed(1)}% APY
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* MODAL 1: CREATE CIRCLE (Sanitized, Dropdown Reason + Custom, Auto-100% Solo) */}
       {isCreateCircleOpen && (
         <Portal>
@@ -1307,36 +1360,38 @@ export const CirclesView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Earn Vault Picker */}
+                {/* Intents Earn Vault List Picker */}
                 <div>
                   <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1.5">
-                    Earn Vault Asset (Yield Accrual)
+                    Intents Earn Vault (Yield Accrual)
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {vaults.map((v) => (
-                      <button
-                        key={v.symbol}
-                        type="button"
-                        onClick={() => setCircleVaultSymbol(v.symbol)}
-                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                          circleVaultSymbol === v.symbol
-                            ? 'border-emerald-600 bg-emerald-50'
-                            : 'border-stone-200 bg-stone-50 hover:border-stone-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-display font-extrabold text-xs text-stone-950">
-                            {v.symbol}
+                  <div className="rounded-xl border border-stone-200 divide-y divide-stone-200 overflow-hidden max-h-48 overflow-y-auto">
+                    {vaults.map((v) => {
+                      const active = circleVaultSymbol === v.symbol;
+                      return (
+                        <button
+                          key={v.symbol}
+                          type="button"
+                          onClick={() => setCircleVaultSymbol(v.symbol)}
+                          className={`w-full flex items-center justify-between px-3.5 py-2.5 text-left transition-colors cursor-pointer ${
+                            active ? 'bg-emerald-50' : 'bg-white hover:bg-stone-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-display font-extrabold text-xs text-stone-950">
+                              {v.symbol}
+                            </span>
+                            <span className="text-xs text-stone-600 truncate">{v.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 uppercase">
+                              {v.chainName}
+                            </span>
+                          </div>
+                          <span className="font-mono text-xs font-bold text-emerald-700 flex-shrink-0">
+                            {v.estimatedApyPct}% APY
                           </span>
-                          <span className="font-mono text-[10px] font-bold text-emerald-700">
-                            {v.estimatedApyPct}%
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-stone-500 truncate mt-0.5">
-                          {v.protocol}
-                        </div>
-                      </button>
-                    ))}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1648,36 +1703,38 @@ export const CirclesView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Earn Vault Picker */}
+                {/* Intents Earn Vault List Picker */}
                 <div>
                   <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1.5">
-                    Earn Vault Asset
+                    Intents Earn Vault Asset
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {vaults.map((v) => (
-                      <button
-                        key={v.symbol}
-                        type="button"
-                        onClick={() => setGiftVaultSymbol(v.symbol)}
-                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                          giftVaultSymbol === v.symbol
-                            ? 'border-emerald-600 bg-emerald-50'
-                            : 'border-stone-200 bg-stone-50 hover:border-stone-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-display font-extrabold text-xs text-stone-950">
-                            {v.symbol}
+                  <div className="rounded-xl border border-stone-200 divide-y divide-stone-200 overflow-hidden max-h-48 overflow-y-auto">
+                    {vaults.map((v) => {
+                      const active = giftVaultSymbol === v.symbol;
+                      return (
+                        <button
+                          key={v.symbol}
+                          type="button"
+                          onClick={() => setGiftVaultSymbol(v.symbol)}
+                          className={`w-full flex items-center justify-between px-3.5 py-2.5 text-left transition-colors cursor-pointer ${
+                            active ? 'bg-emerald-50' : 'bg-white hover:bg-stone-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-display font-extrabold text-xs text-stone-950">
+                              {v.symbol}
+                            </span>
+                            <span className="text-xs text-stone-600 truncate">{v.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 uppercase">
+                              {v.chainName}
+                            </span>
+                          </div>
+                          <span className="font-mono text-xs font-bold text-emerald-700 flex-shrink-0">
+                            {v.estimatedApyPct}% APY • Min ${v.minDepositUsd}
                           </span>
-                          <span className="font-mono text-[10px] font-bold text-emerald-700">
-                            {v.estimatedApyPct}%
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-stone-500 truncate mt-0.5">
-                          Min ${v.minDepositUsd}
-                        </div>
-                      </button>
-                    ))}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1715,10 +1772,10 @@ export const CirclesView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Live 1Click Earn Quote Preview */}
+                {/* Live Intents Earn Quote Preview */}
                 {isQuotingGift ? (
                   <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-500">
-                    Fetching live 1Click Earn Vault quote...
+                    Fetching live Intents Earn Vault quote...
                   </div>
                 ) : (
                   giftQuote && (
