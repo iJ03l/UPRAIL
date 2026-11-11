@@ -298,6 +298,84 @@ export const CirclesView: React.FC = () => {
     };
   }, [isCreateGiftOpen, giftOriginAsset, giftAmount, giftVaultSymbol]);
 
+  const [resolvedProfiles, setResolvedProfiles] = useState<
+    Record<string, { loading: boolean; exists: boolean; avatarUrl?: string; name?: string }>
+  >({});
+
+  // Resolve user avatars for @handle inputs across Circle and Gift modals
+  useEffect(() => {
+    if (!isCreateCircleOpen && !isCreateGiftOpen) return;
+    const handlesToResolve = new Set<string>();
+
+    if (isCreateCircleOpen) {
+      for (const m of circleMembers) {
+        const clean = m.handle.trim().replace(/^@+/, '').toLowerCase();
+        if (/^[a-z0-9_]{1,15}$/.test(clean)) {
+          handlesToResolve.add(clean);
+        }
+      }
+    }
+    if (isCreateGiftOpen) {
+      const cleanGift = giftRecipient.trim().replace(/^@+/, '').toLowerCase();
+      if (/^[a-z0-9_]{1,15}$/.test(cleanGift)) {
+        handlesToResolve.add(cleanGift);
+      }
+    }
+
+    const pending: string[] = [];
+    for (const h of handlesToResolve) {
+      if (user?.handle && h === user.handle.toLowerCase() && user.avatarUrl) {
+        if (!resolvedProfiles[h] || resolvedProfiles[h].loading) {
+          setResolvedProfiles((prev) => ({
+            ...prev,
+            [h]: {
+              loading: false,
+              exists: true,
+              avatarUrl: user.avatarUrl,
+              name: user.name,
+            },
+          }));
+        }
+        continue;
+      }
+      if (!resolvedProfiles[h]) {
+        pending.push(h);
+      }
+    }
+
+    if (pending.length === 0) return;
+
+    const timer = setTimeout(() => {
+      for (const h of pending) {
+        setResolvedProfiles((prev) => ({
+          ...prev,
+          [h]: { loading: true, exists: true },
+        }));
+        api
+          .resolveHandle(h)
+          .then((res) => {
+            setResolvedProfiles((prev) => ({
+              ...prev,
+              [h]: {
+                loading: false,
+                exists: res.exists !== false,
+                avatarUrl: res.avatarUrl || `https://unavatar.io/x/${h}`,
+                name: res.name,
+              },
+            }));
+          })
+          .catch(() => {
+            setResolvedProfiles((prev) => ({
+              ...prev,
+              [h]: { loading: false, exists: false },
+            }));
+          });
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [isCreateCircleOpen, isCreateGiftOpen, circleMembers, giftRecipient, user, resolvedProfiles]);
+
   const totalMemberPercentage = useMemo(() => {
     if (circleMembers.length === 1) return 100;
     return circleMembers.reduce((acc, m) => acc + (parseFloat(m.percentage) || 0), 0);
@@ -326,7 +404,7 @@ export const CirclesView: React.FC = () => {
     if (!Number.isFinite(targetNum) || targetNum < minTarget || targetNum > 1_000_000) {
       return {
         isValid: false,
-        hint: `Target goal must be at least $${minTarget} USD for ${selectedCircleVault?.symbol || 'this vault'}.`,
+        hint: `Target goal must be at least $${minTarget} USD for ${selectedCircleVault?.name || 'this vault'}.`,
       };
     }
     if (!circleVaultSymbol) {
@@ -352,6 +430,10 @@ export const CirclesView: React.FC = () => {
         return { isValid: false, hint: `Duplicate participant @${cleanH}.` };
       }
       seen.add(cleanH);
+      const prof = resolvedProfiles[cleanH];
+      if (prof && !prof.loading && !prof.exists) {
+        return { isValid: false, hint: `Account @${cleanH} was not found on X.` };
+      }
       const pct = parseFloat(m.percentage);
       if (!Number.isFinite(pct) || pct < 1 || pct > 100) {
         return { isValid: false, hint: `Each participant share must be between 1% and 100%.` };
@@ -373,6 +455,7 @@ export const CirclesView: React.FC = () => {
     selectedCircleVault,
     circleVaultSymbol,
     circleMembers,
+    resolvedProfiles,
   ]);
 
   const contribValidation = useMemo(() => {
@@ -406,8 +489,13 @@ export const CirclesView: React.FC = () => {
         hint: 'Enter a valid X @handle (1–15 letters, numbers, or _), not a wallet address.',
       };
     }
-    if (user?.handle && cleanRecip.toLowerCase() === user.handle.toLowerCase()) {
+    const cleanLower = cleanRecip.toLowerCase();
+    if (user?.handle && cleanLower === user.handle.toLowerCase()) {
       return { isValid: false, hint: 'Choose another @handle (cannot gift to yourself).' };
+    }
+    const prof = resolvedProfiles[cleanLower];
+    if (prof && !prof.loading && !prof.exists) {
+      return { isValid: false, hint: `Account @${cleanLower} was not found on X.` };
     }
     if (giftOccasion === 'CUSTOM' && giftCustomOccasion.trim().length < 2) {
       return { isValid: false, hint: 'Enter a custom occasion (at least 2 characters).' };
@@ -435,6 +523,7 @@ export const CirclesView: React.FC = () => {
   }, [
     giftRecipient,
     user?.handle,
+    resolvedProfiles,
     giftOccasion,
     giftCustomOccasion,
     giftVaultSymbol,
@@ -1420,14 +1509,9 @@ export const CirclesView: React.FC = () => {
                   <div className="w-9 h-9 rounded-xl bg-stone-100 border border-stone-200 text-emerald-600 flex items-center justify-center">
                     <CircleDot className="w-5 h-5" />
                   </div>
-                  <div>
-                    <h2 className="text-lg font-display font-extrabold text-stone-950">
-                      New Earn Circle
-                    </h2>
-                    <p className="text-xs text-stone-500">
-                      Solo defaults to 100%, or invite @handles to sign & add funds over time.
-                    </p>
-                  </div>
+                  <h2 className="text-lg font-display font-extrabold text-stone-950">
+                    New Earn Circle
+                  </h2>
                 </div>
                 <button
                   type="button"
@@ -1508,7 +1592,7 @@ export const CirclesView: React.FC = () => {
                 {/* Intents Earn Vault Dropdown */}
                 <div>
                   <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
-                    Intents Earn Vault (Yield Accrual)
+                    Intents Earn Vault
                   </label>
                   <select
                     value={circleVaultSymbol}
@@ -1517,7 +1601,7 @@ export const CirclesView: React.FC = () => {
                   >
                     {vaults.map((v) => (
                       <option key={v.symbol} value={v.symbol}>
-                        {v.symbol} — {v.name} ({v.chainName}) • {v.estimatedApyPct}% APY
+                        {v.name} — {v.estimatedApyPct}% APY
                       </option>
                     ))}
                   </select>
@@ -1554,20 +1638,38 @@ export const CirclesView: React.FC = () => {
                       const isSolo = circleMembers.length === 1;
                       const pct = isSolo ? 100 : parseFloat(m.percentage) || 0;
                       const usdShare = ((parseFloat(circleTargetUsd) || 0) * pct) / 100;
+                      const cleanH = m.handle.trim().replace(/^@+/, '').toLowerCase();
+                      const prof = cleanH ? resolvedProfiles[cleanH] : undefined;
                       return (
                         <div key={idx} className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            required
-                            placeholder="@handle"
-                            value={m.handle}
-                            onChange={(e) => {
-                              const next = [...circleMembers];
-                              next[idx] = { ...next[idx], handle: e.target.value };
-                              setCircleMembers(next);
-                            }}
-                            className="flex-1 px-3 py-2 rounded-xl border border-stone-300 text-xs font-mono"
-                          />
+                          <div className="relative flex-1">
+                            <input
+                              type="text"
+                              required
+                              placeholder="@handle"
+                              value={m.handle}
+                              onChange={(e) => {
+                                const next = [...circleMembers];
+                                next[idx] = { ...next[idx], handle: e.target.value };
+                                setCircleMembers(next);
+                              }}
+                              className="w-full px-3 py-2 pr-9 rounded-xl border border-stone-300 text-xs font-mono"
+                            />
+                            {prof?.loading ? (
+                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                                <RefreshCw className="w-3.5 h-3.5 text-stone-400 animate-spin" />
+                              </span>
+                            ) : prof?.exists && prof?.avatarUrl ? (
+                              <img
+                                src={prof.avatarUrl}
+                                alt={`@${cleanH}`}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full object-cover border border-stone-200 bg-stone-100 pointer-events-none"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            ) : null}
+                          </div>
                           <div className="relative w-24">
                             <input
                               type="number"
@@ -1770,14 +1872,9 @@ export const CirclesView: React.FC = () => {
                   <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
                     <Gift className="w-5 h-5" />
                   </div>
-                  <div>
-                    <h2 className="text-lg font-display font-extrabold text-stone-950">
-                      Gift an Intents Earn Vault
-                    </h2>
-                    <p className="text-xs text-stone-500">
-                      1-to-1 to any @handle. Compounds yield until the unlock date.
-                    </p>
-                  </div>
+                  <h2 className="text-lg font-display font-extrabold text-stone-950">
+                    Gift an Intents Earn Vault
+                  </h2>
                 </div>
                 <button
                   type="button"
@@ -1794,14 +1891,36 @@ export const CirclesView: React.FC = () => {
                     <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                       Recipient @handle
                     </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="@alice"
-                      value={giftRecipient}
-                      onChange={(e) => setGiftRecipient(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-900"
-                    />
+                    {(() => {
+                      const cleanG = giftRecipient.trim().replace(/^@+/, '').toLowerCase();
+                      const profG = cleanG ? resolvedProfiles[cleanG] : undefined;
+                      return (
+                        <div className="relative">
+                          <input
+                            type="text"
+                            required
+                            placeholder="@alice"
+                            value={giftRecipient}
+                            onChange={(e) => setGiftRecipient(e.target.value)}
+                            className="w-full px-3.5 py-2.5 pr-9 rounded-xl border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-900"
+                          />
+                          {profG?.loading ? (
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                              <RefreshCw className="w-3.5 h-3.5 text-stone-400 animate-spin" />
+                            </span>
+                          ) : profG?.exists && profG?.avatarUrl ? (
+                            <img
+                              src={profG.avatarUrl}
+                              alt={`@${cleanG}`}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full object-cover border border-stone-200 bg-stone-100 pointer-events-none"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div>
@@ -1846,7 +1965,7 @@ export const CirclesView: React.FC = () => {
                 {/* Intents Earn Vault Dropdown */}
                 <div>
                   <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
-                    Intents Earn Vault Asset
+                    Intents Earn Vault
                   </label>
                   <select
                     value={giftVaultSymbol}
@@ -1855,7 +1974,7 @@ export const CirclesView: React.FC = () => {
                   >
                     {vaults.map((v) => (
                       <option key={v.symbol} value={v.symbol}>
-                        {v.symbol} — {v.name} ({v.chainName}) • {v.estimatedApyPct}% APY (Min ${v.minDepositUsd})
+                        {v.name} — {v.estimatedApyPct}% APY
                       </option>
                     ))}
                   </select>
