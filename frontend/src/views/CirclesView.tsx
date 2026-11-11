@@ -1360,39 +1360,22 @@ export const CirclesView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Intents Earn Vault List Picker */}
+                {/* Intents Earn Vault Dropdown */}
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1.5">
+                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                     Intents Earn Vault (Yield Accrual)
                   </label>
-                  <div className="rounded-xl border border-stone-200 divide-y divide-stone-200 overflow-hidden max-h-48 overflow-y-auto">
-                    {vaults.map((v) => {
-                      const active = circleVaultSymbol === v.symbol;
-                      return (
-                        <button
-                          key={v.symbol}
-                          type="button"
-                          onClick={() => setCircleVaultSymbol(v.symbol)}
-                          className={`w-full flex items-center justify-between px-3.5 py-2.5 text-left transition-colors cursor-pointer ${
-                            active ? 'bg-emerald-50' : 'bg-white hover:bg-stone-50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-display font-extrabold text-xs text-stone-950">
-                              {v.symbol}
-                            </span>
-                            <span className="text-xs text-stone-600 truncate">{v.name}</span>
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 uppercase">
-                              {v.chainName}
-                            </span>
-                          </div>
-                          <span className="font-mono text-xs font-bold text-emerald-700 flex-shrink-0">
-                            {v.estimatedApyPct}% APY
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <select
+                    value={circleVaultSymbol}
+                    onChange={(e) => setCircleVaultSymbol(e.target.value as EarnVaultSymbol)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-medium bg-white focus:outline-none focus:border-stone-900"
+                  >
+                    {vaults.map((v) => (
+                      <option key={v.symbol} value={v.symbol}>
+                        {v.symbol} — {v.name} ({v.chainName}) • {v.estimatedApyPct}% APY
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Member Percentage Quotas */}
@@ -1703,39 +1686,22 @@ export const CirclesView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Intents Earn Vault List Picker */}
+                {/* Intents Earn Vault Dropdown */}
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1.5">
+                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                     Intents Earn Vault Asset
                   </label>
-                  <div className="rounded-xl border border-stone-200 divide-y divide-stone-200 overflow-hidden max-h-48 overflow-y-auto">
-                    {vaults.map((v) => {
-                      const active = giftVaultSymbol === v.symbol;
-                      return (
-                        <button
-                          key={v.symbol}
-                          type="button"
-                          onClick={() => setGiftVaultSymbol(v.symbol)}
-                          className={`w-full flex items-center justify-between px-3.5 py-2.5 text-left transition-colors cursor-pointer ${
-                            active ? 'bg-emerald-50' : 'bg-white hover:bg-stone-50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-display font-extrabold text-xs text-stone-950">
-                              {v.symbol}
-                            </span>
-                            <span className="text-xs text-stone-600 truncate">{v.name}</span>
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-500 uppercase">
-                              {v.chainName}
-                            </span>
-                          </div>
-                          <span className="font-mono text-xs font-bold text-emerald-700 flex-shrink-0">
-                            {v.estimatedApyPct}% APY • Min ${v.minDepositUsd}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <select
+                    value={giftVaultSymbol}
+                    onChange={(e) => setGiftVaultSymbol(e.target.value as EarnVaultSymbol)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-medium bg-white focus:outline-none focus:border-stone-900"
+                  >
+                    {vaults.map((v) => (
+                      <option key={v.symbol} value={v.symbol}>
+                        {v.symbol} — {v.name} ({v.chainName}) • {v.estimatedApyPct}% APY (Min ${v.minDepositUsd})
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Payment Token & Amount */}
