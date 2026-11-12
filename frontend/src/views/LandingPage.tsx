@@ -81,14 +81,90 @@ export const LandingPage: React.FC = () => {
           1. Hero Section: Full width end to end, bold mobile typography
         */}
         <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-6 sm:space-y-8 text-left py-8 sm:py-16 md:py-20 lg:py-24 min-h-[38vh] sm:min-h-[50vh] flex flex-col justify-center">
-          <h1 className="w-full text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.14] sm:leading-[1.08] text-stone-950">
-            Your{' '}
-            <span className="underline decoration-black decoration-2 sm:decoration-4 underline-offset-4 sm:underline-offset-6 inline-block">
-              𝕏
-            </span>{' '}
-            handle
-            <br />
-            is now your private money hub<span className="text-black">.</span>
+          <h1
+            aria-label="Your X handle is now your private money hub."
+            className="w-full text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.16] sm:leading-[1.1] text-stone-950"
+          >
+            <span aria-hidden="true">
+              Your{' '}
+              <span className="underline decoration-black decoration-2 sm:decoration-4 underline-offset-4 sm:underline-offset-6 inline-block">
+                𝕏
+              </span>{' '}
+              handle
+              <br />
+              is now your pr
+              <span className="relative inline-block">
+                &#x0131;
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="pointer-events-none absolute left-1/2 -top-[0.04em] -translate-x-1/2 w-[0.34em] h-[0.34em] text-[#E05326]"
+                >
+                  <path
+                    d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"
+                    stroke="currentColor"
+                    strokeWidth="2.8"
+                    strokeLinecap="round"
+                    className="hero-lock-shackle"
+                  />
+                  <rect x="4" y="10.5" width="16" height="11" rx="3" fill="currentColor" />
+                  <circle cx="12" cy="16" r="1.4" fill="white" />
+                </svg>
+              </span>
+              vate m
+              <span className="relative inline-flex items-center justify-center align-baseline mx-[0.02em] top-[0.07em] w-[0.58em] h-[0.58em]">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="w-full h-full hero-coin-glyph"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="9.2"
+                    stroke="currentColor"
+                    strokeWidth="3.5"
+                  />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="4.2"
+                    fill="#E05326"
+                    fillOpacity="0.18"
+                    stroke="#E05326"
+                    strokeWidth="2.2"
+                  />
+                </svg>
+              </span>
+              ney h
+              <span className="relative inline-block">
+                u
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="pointer-events-none absolute left-1/2 top-[0.14em] -translate-x-1/2 w-[0.36em] h-[0.36em] text-emerald-600"
+                >
+                  <g className="hero-leaf-glyph">
+                    <path
+                      d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"
+                      fill="currentColor"
+                      fillOpacity="0.24"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                    />
+                  </g>
+                </svg>
+              </span>
+              b<span className="text-black">.</span>
+            </span>
           </h1>
 
           <p className="text-base sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
@@ -126,13 +202,13 @@ export const LandingPage: React.FC = () => {
         {/* 
           2. The Manifesto: Full width end-to-end bold presentation
         */}
-        <section id="manifesto" className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-4 sm:space-y-6 scroll-mt-24">
+        <section id="manifesto" className="w-full px-3 sm:px-5 lg:px-8 space-y-4 sm:space-y-6 scroll-mt-24">
           <span className="text-xs sm:text-[11px] font-mono uppercase tracking-widest text-[#E05326] font-bold block">
             // Manifesto
           </span>
           <div className="w-full">
             <TextReveal
-              className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-extrabold tracking-tight leading-[1.15] sm:leading-[1.06]"
+              className="text-3xl sm:text-5xl md:text-6xl lg:text-[4.25rem] xl:text-[5.5rem] 2xl:text-[6.5rem] font-display font-extrabold tracking-tight leading-[1.15] sm:leading-[1.08]"
               accentWords={['leak', 'rekt', 'near', 'intents', 'confidential', 'uprail']}
             >
               Public blockchains leak your wealth and rekt. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to 𝕏 handles.

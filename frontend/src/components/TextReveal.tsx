@@ -46,7 +46,7 @@ export const TextReveal: React.FC<TextRevealProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`w-full flex flex-wrap gap-x-3 sm:gap-x-6 md:gap-x-8 gap-y-2 sm:gap-y-4 lg:gap-y-6 ${className}`}
+      className={`w-full block text-justify [text-align-last:left] ${className}`}
     >
       {words.map((word, index) => {
         // Individual word threshold
@@ -57,18 +57,20 @@ export const TextReveal: React.FC<TextRevealProps> = ({
         );
 
         return (
-          <span
-            key={index}
-            className={`transition-all duration-300 inline-block tracking-tighter ${
-              isRevealed
-                ? isAccent
-                  ? 'text-[#E05326] font-black underline decoration-[#E05326]/40 decoration-4 sm:decoration-8 underline-offset-8 drop-shadow-[0_2px_12px_rgba(224,83,38,0.25)] scale-[1.02]'
-                  : 'text-stone-950 dark:text-white font-black'
-                : 'text-stone-300 dark:text-stone-700 font-bold opacity-35 select-none'
-            }`}
-          >
-            {word}
-          </span>
+          <React.Fragment key={index}>
+            <span
+              className={`inline transition-colors duration-300 tracking-tighter ${
+                isRevealed
+                  ? isAccent
+                    ? 'text-[#E05326] font-extrabold underline decoration-[#E05326]/40 decoration-4 sm:decoration-8 underline-offset-8'
+                    : 'text-stone-950 dark:text-white font-extrabold'
+                  : 'text-stone-300 dark:text-stone-700 font-extrabold opacity-35 select-none'
+              }`}
+            >
+              {word}
+            </span>
+            {index < totalWords - 1 ? ' ' : null}
+          </React.Fragment>
         );
       })}
     </div>
