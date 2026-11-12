@@ -88,14 +88,14 @@ export const LandingPage: React.FC = () => {
             </span>{' '}
             handle
             <br />
-            is now a payment account<span className="text-black">.</span>
+            is now your private money hub<span className="text-black">.</span>
           </h1>
 
           <p className="text-base sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
-            Send, request, and stream confidential value to any 𝕏 handle, near.com vault, or autonomous AI agent.
+            Pay friends, earn together in Circles, gift timelocked vaults, and route near.com or AI agents without a wallet.
           </p>
 
-          <div className="pt-2 sm:pt-4 flex items-center gap-3">
+          <div className="pt-2 sm:pt-4 flex flex-col items-start gap-3">
             <a
               href={appSubdomainUrl}
               target="_blank"
@@ -104,6 +104,21 @@ export const LandingPage: React.FC = () => {
             >
               <span>Launch App</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </a>
+
+            <a
+              href="https://docs.near-intents.org"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors pl-0.5"
+            >
+              <span>Powered by</span>
+              <img
+                src="/brand/near-logo.svg"
+                alt="NEAR Intents"
+                className="w-4 h-4 rounded-full ring-1 ring-black/10 dark:ring-white/20"
+              />
+              <span className="font-bold text-stone-800">NEAR Intents</span>
             </a>
           </div>
         </section>

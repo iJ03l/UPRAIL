@@ -9,7 +9,7 @@ import {
   useScroll,
   useTransform,
 } from 'framer-motion';
-import { ArrowDownLeft, ArrowLeft, ArrowRight, ExternalLink } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeft, ArrowRight, ExternalLink, Gift, Leaf } from 'lucide-react';
 import { SolidCoffeeIcon } from './CoffeeModal';
 
 interface CapabilitiesCarouselProps {
@@ -28,6 +28,7 @@ interface CapabilityCardData {
   variant: 'dark' | 'light' | 'coffee';
   isRequestArrow?: boolean;
   isCoffee?: boolean;
+  icon?: 'leaf' | 'gift';
 }
 
 const CARDS: CapabilityCardData[] = [
@@ -77,7 +78,33 @@ const CARDS: CapabilityCardData[] = [
     variant: 'coffee',
     isCoffee: true,
   },
+  {
+    id: 'circles',
+    num: '05',
+    eyebrow: '05 / Circles',
+    title: 'Pool Earn vaults together.',
+    summary: 'Split a shared goal with friends in 1Click Earn vaults. Compound yield together until payout or dissolve.',
+    ctaLabel: 'Open Circles',
+    ctaHref: (appUrl) => `${appUrl}/circles`,
+    docsHref: 'https://docs.uprail.world',
+    variant: 'light',
+    icon: 'leaf',
+  },
+  {
+    id: 'gifts',
+    num: '06',
+    eyebrow: '06 / Vault Gifts',
+    title: 'Gift compounding yield.',
+    summary: 'Lock TLO, stNEAR, or gtUSDCp behind a date and @handle. Only their passkey unwraps it.',
+    ctaLabel: 'Send a Vault Gift',
+    ctaHref: (appUrl) => `${appUrl}/circles?tab=gifts`,
+    docsHref: 'https://docs.uprail.world',
+    variant: 'dark',
+    icon: 'gift',
+  },
 ];
+
+const MAX_INDEX = CARDS.length - 1;
 
 interface ArcCardProps {
   card: CapabilityCardData;
@@ -179,9 +206,21 @@ const ArcCard: React.FC<ArcCardProps> = ({
             className={`text-[11px] font-mono uppercase tracking-widest font-bold inline-flex items-center gap-1.5 ${eyebrowClass}`}
           >
             {card.isCoffee && <SolidCoffeeIcon className="w-3.5 h-3.5 text-[#E05326]" />}
+            {card.icon === 'leaf' && (
+              <Leaf className="w-3.5 h-3.5 text-emerald-600 fill-emerald-500/20" />
+            )}
+            {card.icon === 'gift' && <Gift className="w-3.5 h-3.5 text-amber-400" />}
             <span>{card.eyebrow}</span>
           </span>
-          <span className="w-2 h-2 rounded-full bg-[#E05326]" />
+          <span
+            className={`w-2 h-2 rounded-full ${
+              card.icon === 'leaf'
+                ? 'bg-emerald-500'
+                : card.icon === 'gift'
+                  ? 'bg-amber-400'
+                  : 'bg-[#E05326]'
+            }`}
+          />
         </div>
 
         <h3 className="text-3xl sm:text-4xl font-display font-extrabold tracking-tight leading-[1.05]">
@@ -221,6 +260,8 @@ const ArcCard: React.FC<ArcCardProps> = ({
           className={`px-5 py-2.5 rounded-xl font-display font-extrabold text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all ${ctaClass}`}
         >
           {card.isCoffee && <SolidCoffeeIcon className="w-3.5 h-3.5 text-[#E05326]" />}
+          {card.icon === 'leaf' && <Leaf className="w-3.5 h-3.5 text-emerald-500" />}
+          {card.icon === 'gift' && <Gift className="w-3.5 h-3.5 text-amber-500" />}
           <span>{card.ctaLabel}</span>
           {card.isRequestArrow ? (
             <ArrowDownLeft className="w-3.5 h-3.5 text-[#E05326]" />
@@ -245,16 +286,20 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
     offset: ['start start', 'end end'],
   });
 
-  // Smooth continuous index [0..3] with brief dwell plateau at start & end
-  const progress = useTransform(scrollYProgress, [0, 0.06, 0.94, 1], [0, 0, 3, 3]);
+  // Smooth continuous index [0..MAX_INDEX] with brief dwell plateau at start & end
+  const progress = useTransform(
+    scrollYProgress,
+    [0, 0.06, 0.94, 1],
+    [0, 0, MAX_INDEX, MAX_INDEX]
+  );
 
   useMotionValueEvent(progress, 'change', (latest) => {
-    const rounded = Math.min(3, Math.max(0, Math.round(latest)));
+    const rounded = Math.min(MAX_INDEX, Math.max(0, Math.round(latest)));
     setActiveIndex((prev) => (prev === rounded ? prev : rounded));
   });
 
   const scrollToStep = (index: number) => {
-    const clamped = Math.min(3, Math.max(0, index));
+    const clamped = Math.min(MAX_INDEX, Math.max(0, index));
     if (!trackRef.current) {
       setActiveIndex(clamped);
       return;
@@ -262,11 +307,11 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
     const rect = trackRef.current.getBoundingClientRect();
     const trackTop = window.scrollY + rect.top;
     const scrollable = Math.max(1, trackRef.current.offsetHeight - window.innerHeight);
-    const frac = 0.06 + (clamped / 3) * 0.88;
+    const frac = 0.06 + (clamped / MAX_INDEX) * 0.88;
     const targetY =
       clamped === 0
         ? trackTop
-        : clamped === 3
+        : clamped === MAX_INDEX
           ? trackTop + scrollable
           : trackTop + frac * scrollable;
 
@@ -278,7 +323,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
     <section
       id="capabilities"
       ref={trackRef}
-      className="relative w-full max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-20 min-h-[260vh] sm:min-h-[290vh]"
+      className="relative w-full max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-20 min-h-[340vh] sm:min-h-[380vh]"
     >
       <div className="sticky top-20 sm:top-24 py-4 sm:py-6 flex flex-col justify-center space-y-6">
         {/* Clean Header + Prev/Next Arrows */}
@@ -288,7 +333,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
               // Capabilities
             </span>
             <h2 className="text-2xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950 dark:text-white leading-[1.06]">
-              Four ways value moves.
+              Six ways value moves.
             </h2>
           </div>
 
@@ -305,7 +350,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
             <button
               type="button"
               aria-label="Next capability"
-              disabled={activeIndex === 3}
+              disabled={activeIndex === MAX_INDEX}
               onClick={() => scrollToStep(activeIndex + 1)}
               className="w-9 h-9 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-950 text-stone-700 dark:text-stone-200 disabled:opacity-35 flex items-center justify-center hover:border-stone-400 transition-colors cursor-pointer"
             >

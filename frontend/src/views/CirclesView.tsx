@@ -132,6 +132,12 @@ export const CirclesView: React.FC = () => {
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<'circles' | 'gifts'>('circles');
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab') === 'gifts') setActiveTab('gifts');
+    }
+  }, []);
   const [vaults, setVaults] = useState<EarnVaultDescriptor[]>([]);
   const [circles, setCircles] = useState<CircleView[]>([]);
   const [sentGifts, setSentGifts] = useState<AuthenticatedGiftView[]>([]);
