@@ -17,6 +17,7 @@ import { Portal } from './Portal';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TokenIcon } from './TokenIcon';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from './Toast';
 import {
   api,
@@ -54,6 +55,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   onSuccess,
 }) => {
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
+  useBodyScrollLock(isOpen);
   const { toast } = useToast();
 
   // Strictly show only the non-stablecoin crypto that the user actually holds
@@ -395,7 +397,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
           role="dialog"
           aria-modal="true"
           aria-labelledby="stabilize-modal-title"
-          className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl overflow-hidden animate-scale-in"
+          className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl max-h-[92vh] overflow-y-auto overscroll-contain animate-scale-in"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Close Button */}

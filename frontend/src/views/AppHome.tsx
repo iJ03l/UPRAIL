@@ -626,7 +626,7 @@ export const AppHome: React.FC = () => {
                           : b.defuse_asset_id
                       }
                     >
-                      {formatCompactAmount(b.amountFormatted)} {b.symbol}
+                      {hideBalance ? `•••• ${b.symbol}` : `${formatCompactAmount(b.amountFormatted)} ${b.symbol}`}
                       {usd !== null && usd > 0 ? (
                         <span className="text-stone-400"> · {formatUsdCompact(usd)}</span>
                       ) : null}

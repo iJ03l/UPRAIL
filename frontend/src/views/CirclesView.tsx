@@ -28,6 +28,7 @@ import { api, formatUsd } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from '../components/Toast';
 import { Portal } from '../components/Portal';
 import type {
@@ -262,6 +263,7 @@ export const CirclesView: React.FC = () => {
   const [isCreateCircleOpen, setIsCreateCircleOpen] = useState(false);
   const [isCreateGiftOpen, setIsCreateGiftOpen] = useState(false);
   const [contributeCircle, setContributeCircle] = useState<CircleView | null>(null);
+  useBodyScrollLock(Boolean(isCreateCircleOpen || isCreateGiftOpen || contributeCircle));
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Create Circle form state — defaults to solo creator at 100%
@@ -1729,8 +1731,8 @@ export const CirclesView: React.FC = () => {
       {/* MODAL 1: CREATE CIRCLE (Sanitized, Dropdown Reason + Custom, Auto-100% Solo) */}
       {isCreateCircleOpen && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
-            <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md">
+            <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto overscroll-contain">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-stone-100 border border-stone-200 text-emerald-600 flex items-center justify-center">
@@ -1751,7 +1753,7 @@ export const CirclesView: React.FC = () => {
 
               <form onSubmit={handleCreateCircle} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                     Circle Name
                   </label>
                   <input
@@ -1760,14 +1762,14 @@ export const CirclesView: React.FC = () => {
                     placeholder="e.g. Tokyo Summer Trip, House Rent, Core Savings"
                     value={circleName}
                     onChange={(e) => setCircleName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:border-stone-900"
+                    className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
                   />
                 </div>
 
                 {/* Dropdown Reason + Custom input */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Reason
                     </label>
                     <StyledSelect
@@ -1781,7 +1783,7 @@ export const CirclesView: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Target Goal (USD)
                     </label>
                     <input
@@ -1791,14 +1793,14 @@ export const CirclesView: React.FC = () => {
                       required
                       value={circleTargetUsd}
                       onChange={(e) => setCircleTargetUsd(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-900"
+                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal focus:outline-none focus:border-stone-900"
                     />
                   </div>
                 </div>
 
                 {circlePurpose === 'CUSTOM' && (
                   <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Custom Reason
                     </label>
                     <input
@@ -1808,14 +1810,14 @@ export const CirclesView: React.FC = () => {
                       placeholder="Enter custom reason (e.g. Studio Equipment, Retreat)"
                       value={circleCustomPurpose}
                       onChange={(e) => setCircleCustomPurpose(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:border-stone-900"
+                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
                     />
                   </div>
                 )}
 
                 {/* Intents Earn Vault Dropdown */}
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                     Intents Earn Vault
                   </label>
                   <StyledSelect
@@ -1831,8 +1833,8 @@ export const CirclesView: React.FC = () => {
 
                 {/* Member Percentage Quotas */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-mono font-bold uppercase text-stone-600">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-mono font-semibold uppercase text-stone-600">
                       Participants ({circleMembers.length === 1 ? 'Solo • Auto 100%' : `${circleMembers.length} Members`})
                     </label>
                     <div className="flex items-center gap-3">
@@ -1848,7 +1850,7 @@ export const CirclesView: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleAddMemberRow}
-                        className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-stone-900 hover:underline cursor-pointer"
+                        className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-stone-900 hover:underline cursor-pointer"
                       >
                         <Plus className="w-3 h-3" /> Add @handle
                       </button>
@@ -1863,8 +1865,8 @@ export const CirclesView: React.FC = () => {
                       const cleanH = m.handle.trim().replace(/^@+/, '').toLowerCase();
                       const prof = cleanH ? resolvedProfiles[cleanH] : undefined;
                       return (
-                        <div key={idx} className="flex items-center gap-2">
-                          <div className="relative flex-1">
+                        <div key={idx} className="flex items-center gap-2 min-w-0">
+                          <div className="relative flex-1 min-w-0">
                             <input
                               type="text"
                               required
@@ -1875,7 +1877,7 @@ export const CirclesView: React.FC = () => {
                                 next[idx] = { ...next[idx], handle: e.target.value };
                                 setCircleMembers(next);
                               }}
-                              className="w-full px-3 py-2 pr-9 rounded-xl border border-stone-300 text-xs font-mono"
+                              className="w-full min-w-0 px-3 py-2 pr-8 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal"
                             />
                             {prof?.loading ? (
                               <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -1892,7 +1894,7 @@ export const CirclesView: React.FC = () => {
                               />
                             ) : null}
                           </div>
-                          <div className="relative w-24">
+                          <div className="relative w-20 sm:w-24 flex-shrink-0">
                             <input
                               type="number"
                               min="1"
@@ -1907,22 +1909,22 @@ export const CirclesView: React.FC = () => {
                                 next[idx] = { ...next[idx], percentage: e.target.value };
                                 setCircleMembers(next);
                               }}
-                              className={`w-full px-2.5 py-2 pr-6 rounded-xl border border-stone-300 text-xs font-mono text-right ${
+                              className={`w-full px-2 py-2 pr-6 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal text-right ${
                                 isSolo ? 'opacity-75 cursor-not-allowed' : ''
                               }`}
                             />
-                            <span className="absolute right-2 top-2 text-xs font-mono text-stone-400">
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-stone-400">
                               %
                             </span>
                           </div>
-                          <span className="w-20 text-right text-[11px] font-mono text-stone-500 tabular-nums">
+                          <span className="hidden sm:inline-block w-20 text-right text-[11px] font-mono text-stone-500 tabular-nums flex-shrink-0">
                             {formatUsd(usdShare)}
                           </span>
                           {circleMembers.length > 1 && (
                             <button
                               type="button"
                               onClick={() => handleRemoveMemberRow(idx)}
-                              className="p-1.5 text-stone-400 hover:text-red-600 cursor-pointer"
+                              className="p-1.5 text-stone-400 hover:text-red-600 cursor-pointer flex-shrink-0"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1973,8 +1975,8 @@ export const CirclesView: React.FC = () => {
       {/* MODAL 2: ADD FUNDS TO CIRCLE (Supports repeated partial or full additions at any point) */}
       {contributeCircle && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-            <div className="bg-white border border-stone-200 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md">
+            <div className="bg-white border border-stone-200 rounded-3xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto overscroll-contain">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-display font-extrabold text-stone-950">
@@ -2028,7 +2030,7 @@ export const CirclesView: React.FC = () => {
 
               <form onSubmit={handleContribute} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                     Pay With
                   </label>
                   <StyledSelect
@@ -2044,7 +2046,7 @@ export const CirclesView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                     Amount to Add
                   </label>
                   <input
@@ -2055,7 +2057,7 @@ export const CirclesView: React.FC = () => {
                     placeholder="e.g. 25"
                     value={contribAmount}
                     onChange={(e) => setContribAmount(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono"
+                    className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal"
                   />
                 </div>
 
@@ -2086,8 +2088,8 @@ export const CirclesView: React.FC = () => {
       {/* MODAL 3: SEND TIMELOCKED EARN VAULT GIFT (Sanitized, Dropdown Occasion + Custom) */}
       {isCreateGiftOpen && (
         <Portal>
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
-            <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md">
+            <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto overscroll-contain">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
@@ -2108,8 +2110,8 @@ export const CirclesView: React.FC = () => {
 
               <form onSubmit={handleCreateGift} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <div className="min-w-0">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Recipient @handle
                     </label>
                     {(() => {
@@ -2123,7 +2125,7 @@ export const CirclesView: React.FC = () => {
                             placeholder="@alice"
                             value={giftRecipient}
                             onChange={(e) => setGiftRecipient(e.target.value)}
-                            className="w-full px-3.5 py-2.5 pr-9 rounded-xl border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-900"
+                            className="w-full min-w-0 px-3.5 py-2.5 pr-9 rounded-xl border border-stone-300 text-sm font-mono font-normal focus:outline-none focus:border-stone-900"
                           />
                           {profG?.loading ? (
                             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -2144,8 +2146,8 @@ export const CirclesView: React.FC = () => {
                     })()}
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <div className="min-w-0">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Occasion
                     </label>
                     <StyledSelect
@@ -2165,7 +2167,7 @@ export const CirclesView: React.FC = () => {
 
                 {giftOccasion === 'CUSTOM' && (
                   <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Custom Occasion
                     </label>
                     <input
@@ -2175,14 +2177,14 @@ export const CirclesView: React.FC = () => {
                       placeholder="Enter occasion (e.g. Eid, Promotion, Baby Shower)"
                       value={giftCustomOccasion}
                       onChange={(e) => setGiftCustomOccasion(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm focus:outline-none focus:border-stone-900"
+                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
                     />
                   </div>
                 )}
 
                 {/* Intents Earn Vault Dropdown */}
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                     Intents Earn Vault
                   </label>
                   <StyledSelect
@@ -2198,8 +2200,8 @@ export const CirclesView: React.FC = () => {
 
                 {/* Payment Token & Amount */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <div className="min-w-0">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Pay With
                     </label>
                     <StyledSelect
@@ -2213,8 +2215,8 @@ export const CirclesView: React.FC = () => {
                       }))}
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <div className="min-w-0">
+                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                       Amount
                     </label>
                     <input
@@ -2224,7 +2226,7 @@ export const CirclesView: React.FC = () => {
                       required
                       value={giftAmount}
                       onChange={(e) => setGiftAmount(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono"
+                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal"
                     />
                   </div>
                 </div>
@@ -2236,9 +2238,9 @@ export const CirclesView: React.FC = () => {
                   </div>
                 ) : (
                   giftQuote && (
-                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs font-mono">
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2 text-xs font-mono">
                       <span className="text-stone-700">Estimated Vault Shares:</span>
-                      <span className="font-bold text-emerald-800">
+                      <span className="font-semibold text-emerald-800 text-right">
                         ~{giftQuote.estimatedSharesOut} {giftQuote.vaultSymbol} (
                         {giftQuote.estimatedApyPct}% APY)
                       </span>
@@ -2247,8 +2249,8 @@ export const CirclesView: React.FC = () => {
                 )}
 
                 {/* Unlock Date & Time */}
-                <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                <div className="min-w-0">
+                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                     Unlock Date & Time
                   </label>
                   <input
@@ -2256,12 +2258,12 @@ export const CirclesView: React.FC = () => {
                     required
                     value={giftTimelockLocal}
                     onChange={(e) => setGiftTimelockLocal(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs font-mono"
+                    className="w-full min-w-0 max-w-full appearance-none px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal bg-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
+                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
                     Note (Optional)
                   </label>
                   <input
@@ -2270,7 +2272,7 @@ export const CirclesView: React.FC = () => {
                     placeholder="Enjoy the compounded yield!"
                     value={giftMessage}
                     onChange={(e) => setGiftMessage(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs"
+                    className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm sm:text-xs font-normal"
                   />
                 </div>
 

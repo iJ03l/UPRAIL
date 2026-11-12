@@ -13,6 +13,7 @@ import {
 import { api } from '../lib/api';
 import { Portal } from './Portal';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from './Toast';
 import type { CoffeeSettingsResponse } from '../types';
 
@@ -113,6 +114,7 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
 }) => {
   const { toast } = useToast();
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
+  useBodyScrollLock(isOpen);
   const [settings, setSettings] = useState<CoffeeSettingsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
@@ -204,7 +206,7 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
         onClick={onClose}
       >
         <div
-          className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl border border-stone-200 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
+          className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl border border-stone-200 shadow-2xl max-h-[92vh] overflow-y-auto overscroll-contain animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
