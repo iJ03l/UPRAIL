@@ -526,6 +526,7 @@ export type CirclePurpose =
   | 'CUSTOM';
 
 export type CircleStatus =
+  | 'PENDING_SIGNATURES'
   | 'ACTIVE'
   | 'GOAL_MET'
   | 'SETTLING'

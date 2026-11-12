@@ -188,7 +188,7 @@ export const LandingPage: React.FC = () => {
           </h1>
 
           <p className="text-base sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
-            Pay anyone, earn together in Circles, gift timelocked vaults, and route near.com or AI agents without a wallet.
+            Pay anyone, earn together in Circles, gift timelocked vaults, and route $ directly to near.com or AI agents without a wallet acts for you.
           </p>
 
           <div className="pt-2 sm:pt-4 flex flex-col items-start gap-3">

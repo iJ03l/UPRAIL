@@ -330,9 +330,13 @@ export async function createCircle(
 
   const allocations = normalizeMemberAllocations(input.members, targetUsdCents);
 
-  // Ensure creator is either a member or the creator is recorded so they can manage
+  // Only derive the Intents custody account & activate immediately if all members are already signed (e.g. Solo Circle)
+  const allSignedAtCreate = allocations.every((a) => a.handle === creatorHandle);
   const circleId = generateSecureId('circ');
-  const custody = await deriveEarnCustodyKey(env, circleId);
+  const custodyAccount = allSignedAtCreate
+    ? (await deriveEarnCustodyKey(env, circleId)).accountId
+    : '';
+  const initialStatus = allSignedAtCreate ? 'ACTIVE' : 'PENDING_SIGNATURES';
   const now = Date.now();
 
   await env.DB.prepare(
@@ -340,7 +344,7 @@ export async function createCircle(
       id, creator_x_id, creator_handle, name, purpose, note,
       target_usd_cents, vault_asset_id, vault_symbol, vault_decimals,
       payout_handle, custody_account, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       circleId,
@@ -354,7 +358,8 @@ export async function createCircle(
       vault.symbol,
       vault.decimals,
       payoutHandle,
-      custody.accountId,
+      custodyAccount,
+      initialStatus,
       now,
       now
     )
@@ -644,7 +649,11 @@ export async function joinCircle(
     throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
   }
 
-  if (circleRow.status !== 'ACTIVE' && circleRow.status !== 'GOAL_MET') {
+  if (
+    circleRow.status !== 'PENDING_SIGNATURES' &&
+    circleRow.status !== 'ACTIVE' &&
+    circleRow.status !== 'GOAL_MET'
+  ) {
     throw new CircleError(
       'CIRCLE_CLOSED',
       `Cannot sign into a Circle in status ${circleRow.status}.`,
@@ -674,9 +683,25 @@ export async function joinCircle(
     .bind(session.x_id, now, memberRow.id)
     .run();
 
-  await env.DB.prepare('UPDATE circles SET updated_at = ? WHERE id = ?')
-    .bind(now, cleanId)
-    .run();
+  const unsignedRow = await env.DB.prepare(
+    'SELECT COUNT(*) AS cnt FROM circle_members WHERE circle_id = ? AND joined_at IS NULL'
+  )
+    .bind(cleanId)
+    .first<{ cnt: number }>();
+  const allSigned = Number(unsignedRow?.cnt || 0) === 0;
+
+  if (allSigned && (circleRow.status === 'PENDING_SIGNATURES' || !circleRow.custody_account)) {
+    const custody = await deriveEarnCustodyKey(env, cleanId);
+    await env.DB.prepare(
+      "UPDATE circles SET custody_account = ?, status = 'ACTIVE', updated_at = ? WHERE id = ? AND (status = 'PENDING_SIGNATURES' OR custody_account = '')"
+    )
+      .bind(custody.accountId, now, cleanId)
+      .run();
+  } else {
+    await env.DB.prepare('UPDATE circles SET updated_at = ? WHERE id = ?')
+      .bind(now, cleanId)
+      .run();
+  }
 
   return getCircleDetail(env, session, cleanId);
 }
@@ -756,10 +781,31 @@ export async function contributeToCircle(
     throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
   }
 
+  if (circleRow.status === 'PENDING_SIGNATURES' || !circleRow.custody_account) {
+    throw new CircleError(
+      'CIRCLE_PENDING_SIGNATURES',
+      'All invited participants must sign with their passkey before the Circle Intents account is created and funding can start.',
+      400
+    );
+  }
+
   if (circleRow.status !== 'ACTIVE' && circleRow.status !== 'GOAL_MET') {
     throw new CircleError(
       'CIRCLE_CLOSED',
       `Cannot contribute to a Circle in status ${circleRow.status}.`,
+      400
+    );
+  }
+
+  const unsignedRow = await env.DB.prepare(
+    'SELECT COUNT(*) AS cnt FROM circle_members WHERE circle_id = ? AND joined_at IS NULL'
+  )
+    .bind(cleanId)
+    .first<{ cnt: number }>();
+  if (Number(unsignedRow?.cnt || 0) > 0) {
+    throw new CircleError(
+      'CIRCLE_PENDING_SIGNATURES',
+      'All invited participants must sign with their passkey before funding can start.',
       400
     );
   }
@@ -1342,7 +1388,11 @@ export async function dissolveCircle(
       409
     );
   }
-  if (circleRow.status !== 'ACTIVE' && circleRow.status !== 'GOAL_MET') {
+  if (
+    circleRow.status !== 'PENDING_SIGNATURES' &&
+    circleRow.status !== 'ACTIVE' &&
+    circleRow.status !== 'GOAL_MET'
+  ) {
     throw new CircleError(
       'INVALID_CIRCLE_STATE',
       `Circle cannot be dissolved while in status ${circleRow.status}.`,

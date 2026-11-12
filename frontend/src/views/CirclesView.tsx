@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Link } from '../lib/router';
 import {
   ArrowLeft,
@@ -10,6 +10,7 @@ import {
   Lock,
   Unlock,
   Check,
+  ChevronDown,
   Copy,
   ExternalLink,
   RefreshCw,
@@ -123,6 +124,118 @@ function distributeEvenPercentages(
       .toFixed(2)
       .replace(/\.00$/, ''),
   }));
+}
+
+interface StyledSelectOption<T extends string> {
+  value: T;
+  label: string;
+  badge?: string;
+}
+
+function StyledSelect<T extends string>({
+  value,
+  options,
+  onChange,
+  placeholder = 'Select...',
+  mono = false,
+}: {
+  value: T;
+  options: Array<StyledSelectOption<T>>;
+  onChange: (value: T) => void;
+  placeholder?: string;
+  mono?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((o) => o.value === value) || options[0] || null;
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`w-full px-3.5 py-2.5 rounded-xl border bg-white text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+          open
+            ? 'border-stone-900 ring-2 ring-stone-900/10'
+            : 'border-stone-300 hover:border-stone-400'
+        } ${mono ? 'font-mono text-xs' : 'text-sm font-medium'}`}
+      >
+        <span className="truncate text-stone-950">
+          {selected ? selected.label : placeholder}
+        </span>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {selected?.badge && (
+            <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
+              {selected.badge}
+            </span>
+          )}
+          <ChevronDown
+            className={`w-4 h-4 text-stone-400 transition-transform duration-150 ${
+              open ? 'rotate-180 text-stone-800' : ''
+            }`}
+          />
+        </span>
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          className="absolute left-0 right-0 mt-1.5 rounded-xl border border-stone-200 bg-white shadow-xl py-1 max-h-60 overflow-y-auto z-50"
+        >
+          {options.map((opt) => {
+            const isSelected = opt.value === value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                className={`w-full px-3.5 py-2 text-left flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                  isSelected
+                    ? 'bg-stone-100 text-stone-950 font-semibold'
+                    : 'text-stone-700 hover:bg-stone-50'
+                } ${mono ? 'font-mono text-xs' : 'text-sm'}`}
+              >
+                <span className="truncate">{opt.label}</span>
+                <span className="flex items-center gap-1.5 shrink-0">
+                  {opt.badge && (
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
+                      {opt.badge}
+                    </span>
+                  )}
+                  {isSelected && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export const CirclesView: React.FC = () => {
@@ -987,8 +1100,16 @@ export const CirclesView: React.FC = () => {
             <div className="grid grid-cols-1 gap-4">
               {circles.map((circle) => {
                 const circleProgress = circle.progressPct ?? circle.completionPct ?? 0;
-                const isCircleOpen = circle.status === 'ACTIVE' || circle.status === 'GOAL_MET';
+                const allMembersSigned =
+                  circle.members.length > 0 && circle.members.every((m) => m.hasSigned);
+                const unsignedCount = circle.members.filter((m) => !m.hasSigned).length;
+                const isCircleOpen =
+                  circle.status === 'PENDING_SIGNATURES' ||
+                  circle.status === 'ACTIVE' ||
+                  circle.status === 'GOAL_MET';
                 const canParticipate = circle.isMember || circle.isCreator;
+                const canAddFunds =
+                  canParticipate && allMembersSigned && circle.status !== 'PENDING_SIGNATURES';
                 const myHandle = (user?.handle || '').toLowerCase();
                 const myMemberRow =
                   circle.members.find(
@@ -1029,7 +1150,7 @@ export const CirclesView: React.FC = () => {
                         </span>
                         <span
                           className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold uppercase ${
-                            circle.status === 'ACTIVE'
+                            circle.status === 'PENDING_SIGNATURES' || circle.status === 'ACTIVE'
                               ? 'bg-amber-50 text-amber-700 border border-amber-200'
                               : circle.status === 'GOAL_MET' ||
                                 circle.status === 'SETTLED' ||
@@ -1038,7 +1159,11 @@ export const CirclesView: React.FC = () => {
                               : 'bg-stone-100 text-stone-600'
                           }`}
                         >
-                          {circle.status === 'GOAL_MET' ? 'GOAL MET' : circle.status}
+                          {circle.status === 'PENDING_SIGNATURES'
+                            ? 'WAITING SIGNATURES'
+                            : circle.status === 'GOAL_MET'
+                            ? 'GOAL MET'
+                            : circle.status}
                         </span>
                       </div>
                     </div>
@@ -1238,7 +1363,7 @@ export const CirclesView: React.FC = () => {
                                 <span>Sign & Join</span>
                               </button>
                             )}
-                            {canParticipate && (
+                            {canAddFunds ? (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1250,6 +1375,17 @@ export const CirclesView: React.FC = () => {
                                 <ArrowUpRight className="w-3.5 h-3.5" />
                                 <span>Add Funds</span>
                               </button>
+                            ) : (
+                              canParticipate &&
+                              !allMembersSigned && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono">
+                                  <Clock className="w-3.5 h-3.5" />
+                                  <span>
+                                    Waiting for {unsignedCount} signature
+                                    {unsignedCount === 1 ? '' : 's'} to activate vault
+                                  </span>
+                                </span>
+                              )
                             )}
                             {circle.isCreator && hasPoolShares && (
                               <button
@@ -1634,17 +1770,14 @@ export const CirclesView: React.FC = () => {
                     <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                       Reason
                     </label>
-                    <select
+                    <StyledSelect
                       value={circlePurpose}
-                      onChange={(e) => setCirclePurpose(e.target.value as CirclePurpose)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-medium bg-white focus:outline-none focus:border-stone-900"
-                    >
-                      {PURPOSE_OPTIONS.map((p) => (
-                        <option key={p.value} value={p.value}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setCirclePurpose(val as CirclePurpose)}
+                      options={PURPOSE_OPTIONS.map((p) => ({
+                        value: p.value,
+                        label: p.label,
+                      }))}
+                    />
                   </div>
 
                   <div>
@@ -1685,17 +1818,15 @@ export const CirclesView: React.FC = () => {
                   <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                     Intents Earn Vault
                   </label>
-                  <select
+                  <StyledSelect
                     value={circleVaultSymbol}
-                    onChange={(e) => setCircleVaultSymbol(e.target.value as EarnVaultSymbol)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-medium bg-white focus:outline-none focus:border-stone-900"
-                  >
-                    {vaults.map((v) => (
-                      <option key={v.symbol} value={v.symbol}>
-                        {v.name} — {v.estimatedApyPct}% APY
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setCircleVaultSymbol(val as EarnVaultSymbol)}
+                    options={vaults.map((v) => ({
+                      value: v.symbol as EarnVaultSymbol,
+                      label: v.name,
+                      badge: `${v.estimatedApyPct}% APY`,
+                    }))}
+                  />
                 </div>
 
                 {/* Member Percentage Quotas */}
@@ -1900,17 +2031,16 @@ export const CirclesView: React.FC = () => {
                   <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                     Pay With
                   </label>
-                  <select
+                  <StyledSelect
+                    mono
                     value={contribOriginAsset}
-                    onChange={(e) => setContribOriginAsset(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-xs font-mono bg-white"
-                  >
-                    {availableOriginAssets.map((a) => (
-                      <option key={a.assetId} value={a.assetId}>
-                        {a.symbol} ({a.balanceFormatted} available)
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setContribOriginAsset}
+                    options={availableOriginAssets.map((a) => ({
+                      value: a.assetId,
+                      label: a.symbol,
+                      badge: `${a.balanceFormatted} avail`,
+                    }))}
+                  />
                 </div>
 
                 <div>
@@ -2018,21 +2148,18 @@ export const CirclesView: React.FC = () => {
                     <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                       Occasion
                     </label>
-                    <select
+                    <StyledSelect
                       value={giftOccasion}
-                      onChange={(e) => {
-                        const val = e.target.value as GiftOccasion;
-                        setGiftOccasion(val);
-                        setGiftTimelockLocal(defaultTimelockForOccasion(val));
+                      onChange={(val) => {
+                        const occ = val as GiftOccasion;
+                        setGiftOccasion(occ);
+                        setGiftTimelockLocal(defaultTimelockForOccasion(occ));
                       }}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-medium bg-white focus:outline-none focus:border-stone-900"
-                    >
-                      {OCCASION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                      options={OCCASION_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: o.label,
+                      }))}
+                    />
                   </div>
                 </div>
 
@@ -2058,17 +2185,15 @@ export const CirclesView: React.FC = () => {
                   <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                     Intents Earn Vault
                   </label>
-                  <select
+                  <StyledSelect
                     value={giftVaultSymbol}
-                    onChange={(e) => setGiftVaultSymbol(e.target.value as EarnVaultSymbol)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-medium bg-white focus:outline-none focus:border-stone-900"
-                  >
-                    {vaults.map((v) => (
-                      <option key={v.symbol} value={v.symbol}>
-                        {v.name} — {v.estimatedApyPct}% APY
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setGiftVaultSymbol(val as EarnVaultSymbol)}
+                    options={vaults.map((v) => ({
+                      value: v.symbol as EarnVaultSymbol,
+                      label: v.name,
+                      badge: `${v.estimatedApyPct}% APY`,
+                    }))}
+                  />
                 </div>
 
                 {/* Payment Token & Amount */}
@@ -2077,17 +2202,16 @@ export const CirclesView: React.FC = () => {
                     <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
                       Pay With
                     </label>
-                    <select
+                    <StyledSelect
+                      mono
                       value={giftOriginAsset}
-                      onChange={(e) => setGiftOriginAsset(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-xl border border-stone-300 text-xs font-mono bg-white"
-                    >
-                      {availableOriginAssets.map((a) => (
-                        <option key={a.assetId} value={a.assetId}>
-                          {a.symbol} ({a.balanceFormatted})
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setGiftOriginAsset}
+                      options={availableOriginAssets.map((a) => ({
+                        value: a.assetId,
+                        label: a.symbol,
+                        badge: a.balanceFormatted,
+                      }))}
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-mono font-bold uppercase text-stone-600 mb-1">
