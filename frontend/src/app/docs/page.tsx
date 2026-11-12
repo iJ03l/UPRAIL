@@ -412,13 +412,22 @@ export default function DocsOverviewPage() {
         </div>
 
         <Callout>
-          <strong className="text-stone-900">Explore Further:</strong> Connect your AI assistant via{' '}
+          <strong className="text-stone-900">Explore Further:</strong> Learn how to pool yield and
+          send timelocked presents in{' '}
+          <a className="text-stone-900 underline font-bold" href="/docs/circles">
+            Circles &amp; Vault Gifts
+          </a>
+          , launch token or community drops with the{' '}
+          <a className="text-stone-900 underline font-bold" href="/docs/campaigns">
+            Project Campaigns Playbook
+          </a>
+          , connect your AI assistant via{' '}
           <a className="text-stone-900 underline font-bold" href="/docs/agents">
             AI Agents &amp; MCP
           </a>
-          , link your sovereign vault in the{' '}
+          , link your sovereign vault in{' '}
           <a className="text-stone-900 underline font-bold" href="/docs/near">
-            near.com Integration Guide
+            near.com Integration
           </a>
           , route meme royalties via{' '}
           <a className="text-stone-900 underline font-bold" href="/docs/fees">
