@@ -127,36 +127,37 @@ export const LandingPage: React.FC = () => {
                   </g>
                 </svg>
               </span>
-              s now your pri
-              <span className="relative inline-flex items-center justify-center align-baseline mx-[0.01em] top-[0.06em] w-[0.58em] h-[0.58em]">
+              s now your pr
+              <span className="relative inline-block leading-none">
+                i
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
-                  className="w-full h-full hero-shield-glyph"
+                  className="pointer-events-none absolute left-1/2 top-[56%] -translate-x-1/2 -translate-y-1/2 w-[0.62em] h-[0.62em] text-emerald-500"
                 >
-                  <path
-                    d="M4.2 5.4L12 3.4L19.8 5.4L12 19.6Z"
-                    fill="#E05326"
-                    fillOpacity="0.16"
-                  />
-                  <path
-                    d="M4 5.2L12 3.2L20 5.2"
-                    stroke="#E05326"
-                    strokeWidth="2.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M3.8 5.4L12 20.4L20.2 5.4"
-                    stroke="currentColor"
-                    strokeWidth="3.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="12" cy="10.2" r="1.8" fill="#E05326" />
+                  <g className="hero-privacy-slash">
+                    <line
+                      x1="4.5"
+                      y1="19.5"
+                      x2="19.5"
+                      y2="4.5"
+                      stroke="var(--bg)"
+                      strokeWidth="6.4"
+                      strokeLinecap="round"
+                    />
+                    <line
+                      x1="4.5"
+                      y1="19.5"
+                      x2="19.5"
+                      y2="4.5"
+                      stroke="currentColor"
+                      strokeWidth="3.4"
+                      strokeLinecap="round"
+                    />
+                  </g>
                 </svg>
               </span>
-              ate m
+              vate m
               <span className="relative inline-flex items-center justify-center align-baseline mx-[0.02em] top-[0.06em] w-[0.6em] h-[0.6em]">
                 <svg
                   viewBox="0 0 24 24"
