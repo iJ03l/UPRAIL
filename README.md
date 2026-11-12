@@ -1,9 +1,10 @@
 # UPRAIL (v1.1)
 
-**The public identity & universal deposit ingress layer for near.com: Private value transfers to any X (Twitter) handle, policy-bounded AI agent payment rails, and 35+ chain wallet routing built on NEAR Intents + confidential execution.**
+**Your X handle is now your private money hub.**  
+UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`intents.near` + Confidential Intents): pay friends privately by `@handle`, earn together in yield-bearing **Circles**, send timelocked Earn vault **Gifts**, accept no-login **Buy Me a Coffee** tips across 35+ chains, and route `near.com` or autonomous **AI agents** — all without a seed phrase or gas.
 
 - **Version:** v1.1.0
-- **Hackathon Tracks:** Privacy & Private AI · Social Money · Agent Economy · Real World Money · Open Innovation
+- **Hackathon Tracks:** Privacy & Private AI (`privacy`) · Social Money (`social`) · Unstoppable DeFi (`defi`) · Agent Economy (`agents`) · Autonomous Business (`business`) · Real-World Money (`realworld`) · Open Innovation (`open`)
 - **Mainnet Traction (Real People, Real Money):** **76 and counting** real users · **134+ and counting** mainnet payment & withdrawal transactions · **$159.31+ USDC and counting** settled volume ($183.54+ initiated) on NEAR Mainnet
 - **Live Application:** [https://app.uprail.world](https://app.uprail.world)
 - **Marketing & Interactive Preview:** [https://uprail.world](https://uprail.world)
@@ -57,10 +58,10 @@ make check-mainnet
 ```
 
 ### 2. Run Full Automated Test Suite (174 Tests, 0 Failures)
-Run the complete unit, Miniflare integration, confidential rail, stabilization, coffee, Circles & Earn Vault Gifting, launchpad, and security test harness:
+Run the complete unit, Miniflare integration, confidential rail, stabilization, coffee, Circles & Earn Vault Gifting, launchpad, and security test harness *(requires Node 22+; `make test` automatically switches via `nvm` when present)*:
 ```bash
 make test
-# Or: cd worker && npm test
+# Or (on Node 22+): cd worker && npm test
 ```
 **Expected Output:**
 ```text
@@ -93,9 +94,9 @@ curl -sS https://api.uprail.world/api/agent/openapi.json | jq '{openapi, paths: 
 # 6. Inspect self-serve Launchpad Creator-Fee Routing proof config
 curl -sS https://api.uprail.world/api/launchpads/config | jq '{network, escrowAccount, verificationKinds}'
 
-# 7. Inspect Public Payment Link / Buy Me a Coffee routes & machine-readable JSON
+# 7. Inspect Public Payment Link / Buy Me a Coffee routes & live creator JSON (@xy63ry0rx)
 curl -sS https://api.uprail.world/api/coffee/options | jq '.tokens | map({symbol, chains: (.chains | length)})'
-curl -sS "https://uprail.world/uprailworld?format=json" | jq .
+curl -sS "https://uprail.world/xy63ry0rx?format=json" | jq .
 
 # 8. Inspect Circles & Timelocked Earn Vault Gifting catalog (6 curated 1Click Earn vaults) & fail-closed guards
 curl -sS https://api.uprail.world/api/circles/vaults | jq '.vaults | map({symbol, estimatedApyPct, minDepositUsd, priceUsd})'
@@ -107,7 +108,7 @@ curl -sS https://api.uprail.world/api/gifts/vaults | jq '.vaults | length'
 | Feature | Do This (Action) | See This (Verified Result) |
 | :--- | :--- | :--- |
 | **1. Private `@handle` Send & Unlinked Claim** | Send USDC/NEAR on `/app/send` to any `@handle` (registered or new) + confirm with Passkey | Instant confidential settlement or shareable `/claim/<id>` link with edge OG card; claimed via X + Passkey |
-| **2. Public Payment Link (`uprail.world/<handle>`)** | Toggle ON via dashboard coin-pouch icon; visit `uprail.world/<handle>` without logging in | Pick `USDC`/`USDT`/`NEAR`/`SOL`/`ETH`/`BTC`, exact token amount (`amountToken`) & chain → one-time `FLEX_INPUT` `CONFIDENTIAL_INTENTS` address + 99% net payout |
+| **2. Public Payment Link (`uprail.world/<handle>`)** | Toggle ON via dashboard coin-pouch icon; visit `uprail.world/xy63ry0rx` without logging in | Pick `USDC`/`USDT`/`NEAR`/`SOL`/`ETH`/`BTC`, exact token amount (`amountToken`) & chain → one-time `FLEX_INPUT` `CONFIDENTIAL_INTENTS` address + 99% net payout |
 | **3. 1-Tap `near.com` Internal Withdrawal** | Dashboard → **Withdraw** (`near.com`) → bind `nearcom:0x...` address with Passkey → withdraw | 0% bridge fee internal settlement straight into `near.com` balance (`nearcomWithdraw.ts`) |
 | **4. 35+ Chain "Send to Wallet"** | Send/Withdraw to any external EVM, Solana, Bitcoin, TON, Tron, Sui, XRP, or NEAR address | 1Click cross-chain swap & delivery across 35+ networks (`oneclickWithdraw.ts`) |
 | **5. Stabilize (Crypto → USDC/USDT)** | Click **Stabilize** on Dashboard or any held token ≥ 0.05 NEAR / $1 | Gas-sponsored 1Click Confidential or Rhea Finance swap into USDC/USDT (1% fee) |
@@ -122,41 +123,29 @@ curl -sS https://api.uprail.world/api/gifts/vaults | jq '.vaults | length'
 
 ## 🗺️ Judging Map (Track-by-Track Verification)
 
-Where each hackathon criterion is implemented and tested in the codebase:
+Where each hackathon track criterion is implemented and tested in the codebase:
 
-| Track | Requirement | UPRAIL Implementation | Verified Source Code & Tests |
+| Track | Focus & Hints | UPRAIL Implementation | Verified Source Code & Tests |
 | :--- | :--- | :--- | :--- |
-| **`social`**<br/>(Social Money) | Send value via social identity, shared budgets, reputation rails | Maps any `@handle` to deterministic NEAR vaults (`u_<hex>.escrow.uprail.near`); **Circles** multi-member percentage-sized Earn pools (`/app/circles`); **1-to-1 Timelocked Earn Vault Gifting** (`uprail.world/gift/:id` + `/og/gift/:id.png`); public **Buy Me a Coffee** links (`uprail.world/<handle>`); `/request/:id` 1-to-1 payment request cards | • [`worker/src/services/circles.ts`](worker/src/services/circles.ts)<br/>• [`worker/src/services/gifts.ts`](worker/src/services/gifts.ts)<br/>• [`worker/src/routes/coffee.ts`](worker/src/routes/coffee.ts)<br/>• [`worker/src/routes/requests.ts`](worker/src/routes/requests.ts)<br/>• [`worker/test/circles-and-gifts.test.ts`](worker/test/circles-and-gifts.test.ts) |
-| **`privacy`**<br/>(Privacy & Private AI) | Confidential computation, breaking on-chain transaction graph | NEAR Confidential Intents (`intents.near` + 1Click); unlinked escrow claims break on-chain sender-recipient linkability; confidential balance reconciliation & link scrubbing | • [`worker/src/services/confidentialRail.ts`](worker/src/services/confidentialRail.ts)<br/>• [`worker/test/confidential-rail.test.ts`](worker/test/confidential-rail.test.ts)<br/>• [`worker/src/services/refunds.ts`](worker/src/services/refunds.ts) |
-| **`defi`**<br/>(Unstoppable DeFi) | Multi-chain cross-chain settlement via NEAR Intents | Cross-chain ingress & egress across 35+ chains via 1Click and `intents.near`; **1Click Earn Vaults** (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`) for Circles & Gifting; 1-tap `near.com` internal withdrawals (0% fee); **Stabilize** swaps via 1Click + Rhea Finance; Launchpad creator-fee routing | • [`worker/src/services/earnVaults.ts`](worker/src/services/earnVaults.ts)<br/>• [`worker/src/services/oneclickWithdraw.ts`](worker/src/services/oneclickWithdraw.ts)<br/>• [`worker/src/services/stabilize.ts`](worker/src/services/stabilize.ts)<br/>• [`worker/src/services/nearcomWithdraw.ts`](worker/src/services/nearcomWithdraw.ts)<br/>• [`worker/test/stabilize.test.ts`](worker/test/stabilize.test.ts) |
-| **`agents`** / **`business`**<br/>(Agent Economy) | Policy-bounded agent spending, autonomous payments | Remote 13-tool MCP Server (`api.uprail.world/api/mcp`) + OpenAPI 3.1.0 + OAuth 2.1 PKCE with atomic per-transaction & daily USD spend caps + instant `/approval` UI | • [`worker/src/routes/mcp.ts`](worker/src/routes/mcp.ts)<br/>• [`worker/src/routes/agent.ts`](worker/src/routes/agent.ts)<br/>• [`worker/src/routes/approval.ts`](worker/src/routes/approval.ts)<br/>• [`worker/test/miniflare.test.mjs`](worker/test/miniflare.test.mjs) |
-| **`realworld`**<br/>(Real-World Money) | Stablecoin rails for real people and businesses | Zero seed phrases & zero payer login: WebAuthn P-256 passkeys (Touch ID / Face ID), 100% sponsored gas, encrypted recovery codes, and `uprail.world/<handle>` USDC/USDT payment pages | • [`frontend/src/views/CirclesView.tsx`](frontend/src/views/CirclesView.tsx)<br/>• [`frontend/src/views/PublicGiftView.tsx`](frontend/src/views/PublicGiftView.tsx)<br/>• [`frontend/src/views/PublicCoffeeView.tsx`](frontend/src/views/PublicCoffeeView.tsx)<br/>• [`worker/test/recovery-codes.test.ts`](worker/test/recovery-codes.test.ts) |
+| **`social`**<br/>(Social Money) | Social identity value transfer, shared budgets, collective rewards (for walletless users without DAO UIs) | Maps any `@handle` to deterministic NEAR vaults (`u_<hex>.escrow.uprail.near`); **Circles** multi-member percentage-sized Earn pools (`/app/circles`) with per-item implicit `intents.near` custody & unanimous WebAuthn passkey dissolve; **1-to-1 Timelocked Earn Vault Gifting** (`uprail.world/gift/:id`); public **Buy Me a Coffee** links (`uprail.world/<handle>`); `/request/:id` invoicing | • [`worker/src/services/circles.ts`](worker/src/services/circles.ts)<br/>• [`worker/src/services/gifts.ts`](worker/src/services/gifts.ts)<br/>• [`worker/src/routes/coffee.ts`](worker/src/routes/coffee.ts)<br/>• [`worker/src/routes/requests.ts`](worker/src/routes/requests.ts)<br/>• [`worker/test/circles-and-gifts.test.ts`](worker/test/circles-and-gifts.test.ts) |
+| **`privacy`**<br/>(Privacy & Private AI) | Private finance, breaking on-chain transaction graphs | NEAR Confidential Intents (`intents.near` + 1Click `CONFIDENTIAL_INTENTS`) with fail-closed anti-downgrade validation; unlinked pooled escrow claims break sender-recipient linkability; D1 leg-identifier scrubbing (`scrubSettledPaymentLinks`) & anti-IDOR gates *(financial privacy layer; does not run TEE AI inference)* | • [`worker/src/services/confidentialRail.ts`](worker/src/services/confidentialRail.ts)<br/>• [`worker/test/confidential-rail.test.ts`](worker/test/confidential-rail.test.ts)<br/>• [`worker/src/services/refunds.ts`](worker/src/services/refunds.ts) |
+| **`defi`**<br/>(Unstoppable DeFi) | Multi-chain settlement & vaults via NEAR Intents | Cross-chain ingress & egress across 35+ chains via 1Click & `intents.near`; **6 live 1Click Earn Vaults** (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`); 0% bridge-fee `near.com` internal withdrawals (`nearcom:0x...`); **Stabilize** swaps (1Click + Rhea DEX); Launchpad fee routing | • [`worker/src/services/earnVaults.ts`](worker/src/services/earnVaults.ts)<br/>• [`worker/src/services/oneclickWithdraw.ts`](worker/src/services/oneclickWithdraw.ts)<br/>• [`worker/src/services/stabilize.ts`](worker/src/services/stabilize.ts)<br/>• [`worker/src/services/nearcomWithdraw.ts`](worker/src/services/nearcomWithdraw.ts)<br/>• [`worker/test/stabilize.test.ts`](worker/test/stabilize.test.ts) |
+| **`agents`** / **`business`**<br/>(Agent Economy & Autonomous Business) | Policy-bounded agent commerce, treasury/invoicing without raw keys | Production OAuth 2.1 AS + 13-tool Streamable HTTP MCP Server (`api.uprail.world/api/mcp`) + OpenAPI 3.1.0 with atomic per-tx/daily USD spend caps, idempotency locks, live oracle pricing, and mobile/desktop `/approve` WebAuthn escalation | • [`worker/src/routes/mcp.ts`](worker/src/routes/mcp.ts)<br/>• [`worker/src/routes/agent.ts`](worker/src/routes/agent.ts)<br/>• [`worker/src/routes/approval.ts`](worker/src/routes/approval.ts)<br/>• [`worker/test/miniflare.test.mjs`](worker/test/miniflare.test.mjs) |
+| **`realworld`**<br/>(Real-World Money) | Stablecoins, invoicing, remittances, meta-tx for real users | Zero seed phrases, zero payer login, and 100% sponsored gas (`escrow.uprail.near`); Touch ID / Face ID WebAuthn P-256 passkeys + HMAC recovery codes; `uprail.world/<handle>` USDC/USDT checkouts & live mainnet volume (`$159.31+ USDC`) | • [`frontend/src/views/CirclesView.tsx`](frontend/src/views/CirclesView.tsx)<br/>• [`frontend/src/views/PublicGiftView.tsx`](frontend/src/views/PublicGiftView.tsx)<br/>• [`frontend/src/views/PublicCoffeeView.tsx`](frontend/src/views/PublicCoffeeView.tsx)<br/>• [`worker/test/recovery-codes.test.ts`](worker/test/recovery-codes.test.ts) |
+| **`open`**<br/>(Open Innovation) | Chain abstraction + composable identity/intelligence rails | Unifies public social handles (`@handle`), confidential `intents.near` settlement, universal `near.com` ingress, Earn vault social pools/gifts, and autonomous MCP commerce under one passkey-secured identity layer | • [`scripts/verify-mainnet.py`](scripts/verify-mainnet.py)<br/>• [`worker/src/index.ts`](worker/src/index.ts) |
 
 ---
 
-## Problem
+## Why UPRAIL: A Social Ecosystem Around NEAR Intents
 
-1. **Public blockchains expose every financial relationship.** Standard transfers leak the sender address, recipient address, token, and exact amount on public explorers, turning a single peer transfer or creator payout into permanent wallet-graph surveillance.
-2. **Sending crypto requires the recipient to already have a wallet.** Senders must ask for a chain-specific address (`0x...`, `.near`, Solana base58) and worry about bridging and gas before a transfer can happen.
-3. **The post-frontend reality lacks safe, autonomous payment rails.** In the near future, users will not interact with traditional web frontends: AI agents (Claude, ChatGPT, Grok, Cursor, autonomous bots) will orchestrate commerce, negotiate deals, and move value on our behalf. Yet today, giving an AI assistant raw private keys risks catastrophic wallet drain, while token launchpads require creators to hardcode public wallets upfront instead of routing fees directly to an X identity.
-4. **near.com and cross-chain intent protocols require interactive, rotating deposit sessions.** On `near.com` (and Defuse / 1Click), cross-chain deposit addresses are ephemeral, session-bound, and rotating. Only the authenticated account owner sitting at the terminal can generate a quote and fund their own account. You cannot publish a permanent address on your social profile, invoice, or AI agent configuration for third parties, friends, or clients to deposit funds to you asynchronously.
+> *"Public blockchains leak your wealth and rekt. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to X handles."*
 
----
+Instead of building a single-purpose bridge or spend-cap script, UPRAIL wraps **NEAR Intents**, **Confidential Intents**, and **1Click Earn Vaults** around social identity so crypto behaves like everyday internet money — private, gasless, and social by default:
 
-## Solution
-
-UPRAIL bridges this gap by mapping any X handle (`@handle`) to a deterministic, passkey-gated NEAR vault and routing transfers through **NEAR Intents** and **NEAR Confidential Intents** (`intents.near` + 1Click confidential execution):
-
-- **Universal Ingress to near.com via Public Identity:** Solves the near.com rotating address barrier. Anyone in the world can deposit or send funds to your persistent public identity (`@handle`) from 35+ chains without requiring a live session quote from you. Funds settle into your passkey-secured vault on NEAR Intents (`intents.near`), ready to be routed into any personal wallet or spent across the NEAR ecosystem.
-- **Public Payment Pages (`uprail.world/<handle>` — Get Paid & Buy Me a Coffee):** Built for **people, creators, and builders** to request payment and get paid from anywhere using a single permanent link (`uprail.world/<handle>`), toggled behind a hardware WebAuthn passkey gate on the dashboard. Clients, sponsors, supporters, friends, and autonomous AI agents need **no UPRAIL account and no wallet connection**—they choose `USDC`/`USDT` (or `NEAR`, `SOL`, `ETH`, `BTC`, etc.), enter exact token amounts (`amountToken`, e.g., `1 NEAR`, `5 USDC`, `0.02 SOL`) directly, pick any origin chain, and receive a one-time `FLEX_INPUT` deposit address generated with `CONFIDENTIAL_INTENTS` (`confidentiality: "advanced"`) that tolerates native L1 sweep deductions and settles 99% net via `payEscrowPrivate` straight into the recipient's confidential vault, complete with minimal privacy-preserving receipts, JSON-LD `PayAction` / `POST` agent support, `/docs/coffee` documentation, and dynamic X-avatar `PAY ME HERE` OpenGraph preview cards.
-- **Send to any `@handle` without a recipient wallet:** Senders pay `@handle` in `USDC`, `USDT`, `NEAR`, `ETH`, `SOL`, `BTC`, or NEP-141 tokens. Registered recipients receive funds directly into their confidential/intents vault; unregistered handles receive funds into a pooled escrow and claim whenever they sign in.
-- **"People You Pay" (Persistent Identity Contacts & Quick-Actions):** P2P transfers are social and recurring. UPRAIL maintains a user-controlled, persistent contact memory merging pinned favorites, custom nicknames, and historical transfer recency—enabling single-tap sends and requests without re-typing handles or token parameters.
-- **UPRAIL Requests (`/request/:id` — Direct Payment Requests):** Lets people, creators, and builders request payment directly from any `@handle` with custom amounts, reasons, and expiry. Recipients receive a minimal social request card (`/request/:id`) and can pay or decline in one tap—even if they weren't registered beforehand, onboarding with X + passkey and settling straight from their vault.
-- **Passkey + X OAuth 2.0 onboarding (zero seed phrases):** Recipients sign in with X OAuth 2.0 PKCE and confirm with a hardware WebAuthn P-256 passkey (Touch ID / Face ID / YubiKey). UPRAIL sponsors 100% of NEAR account creation, storage deposits, and execution gas.
-- **Confidential execution & unlinked escrow claims:** When routed through NEAR Confidential Intents, balances and swap legs settle inside the confidential layer. Escrowed claims settle from pooled escrow's confidential balance to the recipient's vault, breaking onchain linkability between sender and recipient.
-- **Cross-chain "Send to Wallet" across 35+ blockchains:** Users can withdraw their balance to any external wallet on NEAR, Ethereum, Base, Arbitrum, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and 25+ other chains via 1Click.
-- **Built for the Post-Frontend Era (OAuth 2.1 + MCP):** Because users won't interact with frontends in the future, UPRAIL integrated the agent value rail from day one. Users connect Claude, ChatGPT, Grok, Meta Muse, or Cursor via OAuth 2.1 + PKCE or scoped Bearer keys with passkey-bounded per-transaction and daily USD spend caps enforced atomically—enabling AI agents to transact autonomously without seed phrases or raw key custody.
-- **Launchpad Creator-Fee Routing:** Token launchpads route creator fees directly to an X identity by sending transfers to escrow with the target handle memo, crediting the creator onchain automatically.
+1. **Social Transfers, Invoicing & Public Pay Links (No Wallet Required):** Public explorers expose every financial relationship, and asking someone for a chain-specific address breaks peer payments. UPRAIL maps any `@handle` to a deterministic NEAR vault (`u_<hex>.escrow.uprail.near`) with 100% sponsored gas, `CONFIDENTIAL_INTENTS` routing, pooled escrow for unregistered recipients, *People You Pay* contact memory, `/request/:id` invoicing, and public `uprail.world/<handle>` pages.
+2. **Social Earning & Timelocked Gifting (`Circles` + `Gifts`):** Real social money isn't just 1-to-1 transfers — people save together and gift across milestones. **Circles** let groups pool into 6 curated 1Click Earn vaults with percentage splits and unanimous WebAuthn passkey dissolve, while **Timelocked Gifts** (`uprail.world/gift/:id`) compound yield until an unlock timestamp behind anti-IDOR and biometric claim gates.
+3. **Universal Ingress for `near.com` & 35+ Chains:** `near.com` and 1Click deposit addresses rotate per live user session, so friends, clients, or agents can't fund you asynchronously. UPRAIL turns `@handle` and `uprail.world/<handle>` into permanent cross-chain ingress across 35+ chains, paired with **Stabilize** swaps into USDC/USDT and a **0%-bridge-fee `near.com` internal withdrawal rail (`nearcom:0x...`)**.
+4. **Autonomous Agents & Creator Fee Routing (Post-Frontend Era):** Software is shifting from web dashboards to AI assistants, and launchpads shouldn't force creators to expose static wallets. UPRAIL embeds an **OAuth 2.1 + 13-tool MCP server** (`api.uprail.world/api/mcp`) with atomic biometric spend caps and `/approve` escalation, alongside on-chain receipt verification for launchpad creator fees (`Fees to @handle via UPRAIL`).
 
 ---
 
@@ -239,6 +228,12 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
 - **Social Requests Lifecycle & Anti-Harassment:** Payment requests follow a strict state machine (`PENDING` → `COMPLETED` / `DECLINED` / `CANCELLED` / `EXPIRED`). Requests include rate-limiting (max 10 requests/hour/user) and request-blocking primitives to prevent spam, while allowing unregistered recipients to inspect invoices without signing up upfront.
 - **Full Autonomous Agent Parity:** AI agents can audit, generate, accept, and decline payment requests within their owner's biometric spend guardrails.
 
+### 9. 1Click Earn Circles & Timelocked Vault Gifting
+- **6 Curated 1Click Earn Vaults:** `TLO` (Taler USDC, Ethereum), `gtUSDCp` (Gauntlet USDC Prime, Base), `kV-gtSOLb` (Kamino Gauntlet SOL, Solana), `stNEAR` (Meta Pool, NEAR), `cNEAR` (Assetize/Linear, NEAR), and `wstETH` (Lido, Ethereum), enforced against an allowlist in [`earnVaults.ts`](worker/src/services/earnVaults.ts) with live 1Click registry pricing.
+- **Deterministic Per-Item Implicit Custody:** Every Circle or Gift derives its own 64-hex implicit `intents.near` custody account (`deriveEarnCustodyKey` via `HMAC-SHA256`), isolating vault shares per item without sub-account creation lag.
+- **Circles (Shared Budgets & Collective Ownership):** Creators set target USD goals, member handles, and exact percentage splits (`10,000` bps sum) with continuous contributions, 1% payout fee split, creator-triggered settlement, or **unanimous WebAuthn passkey dissolve** (`circles.ts`).
+- **Timelocked Vault Gifting (`uprail.world/gift/:id`):** Sends compounding Earn vault positions to any `@handle` with server-enforced `timelock_until`, optional private amount masking (`show_amount = 0`), anti-IDOR visibility gates, atomic `LOCKED -> CLAIMING` transitions (`gifts.ts`), and custom `/og/gift/:id.png` social cards.
+
 ---
 
 ## Key NEAR Primitives Used
@@ -246,9 +241,9 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
 | NEAR Primitive | Contract / Endpoint | How UPRAIL Uses It | Primary Code Path |
 | :--- | :--- | :--- | :--- |
 | **NEAR Intents (NEP-413)** | `intents.near` | Off-chain Ed25519 signed `nep413` payloads (`transfer`, `ft_withdraw`, `swap_transfer`) with versioned salt and deadline nonces. | [`nearRpc.ts`](worker/src/services/nearRpc.ts), [`intentsNonce.ts`](worker/src/services/intentsNonce.ts) |
-| **Confidential Intents & 1Click** | `https://1click.chaindefuser.com` | Confidential balances, NEP-413 session authentication, confidential quotes, intent generation, and submission. | [`confidentialRail.ts`](worker/src/services/confidentialRail.ts), [`oneclickClient.ts`](worker/src/services/oneclickClient.ts) |
+| **Confidential Intents & 1Click** | `https://1click.chaindefuser.com` | Confidential balances, NEP-413 session authentication, confidential quotes, intent generation, and 1Click Earn vaults. | [`confidentialRail.ts`](worker/src/services/confidentialRail.ts), [`earnVaults.ts`](worker/src/services/earnVaults.ts) |
 | **Defuse Solver Relay** | `https://solver-relay-v2.chaindefuser.com/rpc` | JSON-RPC 2.0 `publish_intent` relay for signed NEP-413 escrow settlements and refunds. | [`relay.go`](go-near-service/internal/intents/relay.go), [`nearRpc.ts`](worker/src/services/nearRpc.ts) |
-| **Deterministic Sub-Accounts** | `u_<hex>.escrow.uprail.near` | Per-user NEAR accounts created via atomic transactions and registered on `intents.near::add_public_key`. | [`nearRpc.ts`](worker/src/services/nearRpc.ts), [`service.go`](go-near-service/internal/account/service.go) |
+| **Deterministic Sub-Accounts & Implicit Custody** | `u_<hex>.escrow.uprail.near` & `intents.near` | Per-user sub-accounts registered on `intents.near::add_public_key`, plus deterministic 64-hex implicit custody accounts per Circle and Gift. | [`nearRpc.ts`](worker/src/services/nearRpc.ts), [`earnVaults.ts`](worker/src/services/earnVaults.ts) |
 | **Gasless Relayer & Storage Sponsor** | `escrow.uprail.near` | Sponsors NEP-145 `storage_deposit` and relays `intents.near::execute_intents` so end users never hold NEAR for gas. | [`nearRpc.ts`](worker/src/services/nearRpc.ts) |
 | **Onchain Receipt Verification** | NEAR JSON-RPC | Verifies onchain receipt logs to credit creator fees directly to X identities. | [`nearRpc.ts`](worker/src/services/nearRpc.ts), [`launchpadFees.ts`](worker/src/services/launchpadFees.ts) |
 
@@ -265,7 +260,7 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
 4. **Claim with X + Passkey:** Open the claim link as the recipient `@handle`, sign in with X, and confirm with your Passkey (or click **Send to Wallet** on `/app/claim` to withdraw directly to an external wallet across 35+ chains).
    - **Expected result:** The payment is atomically claimed and settled into the recipient's vault (or bridged cross-chain via 1Click).
 
-#### Flow 2: 1-Tap Internal Withdrawal to near.com (0% Bridge Fee)
+### Flow 2: 1-Tap Internal Withdrawal to near.com (0% Bridge Fee)
 1. **Open Withdraw:** On the Dashboard ([https://app.uprail.world/app](https://app.uprail.world/app)), click the **Withdraw** button (`near.com`).
 2. **First-Time Setup (Passkey Gated):**
    - In `near.com`, tap your account menu → click **My address** → copy your internal address (e.g. `nearcom:0xb137a2f1054b5de422a8df801613d6722701163c`).
@@ -277,24 +272,30 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
    - Confirm with your Passkey: the transfer settles directly into your `near.com` internal balance with zero bridge fees.
    - You can edit your saved destination at any time by clicking **Edit** (also passkey-gated).
 
-#### Flow 3: Connect an AI Agent (Claude, ChatGPT, Cursor) via OAuth 2.1 + MCP
+### Flow 3: Connect an AI Agent (Claude, ChatGPT, Cursor) via OAuth 2.1 + MCP
 1. Go to [https://app.uprail.world/app/agents](https://app.uprail.world/app/agents) and copy the MCP server URL `https://api.uprail.world/api/mcp`.
 2. Add it as a remote connector in Claude, ChatGPT, or Cursor—this launches UPRAIL's **OAuth 2.1 PKCE + Passkey** consent screen where you set per-transaction and daily USD spend caps.
 3. Once connected, manage or revoke active agent session cards directly on `/app/agents`. Your agent gets access to all **13 MCP tools** (`pay_handle`, `check_approval`, `withdraw_to_wallet`, `receive_payment`, `get_balance`, `list_payments`, `resolve_handle`, `list_contacts`, `save_contact`, `request_payment`, `list_requests`, `accept_request`, `decline_request`) bounded by your passkey-approved caps.
 
-#### Flow 4: Public Payment Link (`uprail.world/<handle>` — Request Payment & Get Paid)
-1. **Enable Your Payment Link (Passkey-Gated):** Built for people, creators, and builders who want one persistent link to share on social bios, invoices, PRs, or DMs. On your dashboard ([https://app.uprail.world/app](https://app.uprail.world/app)), click the coin-pouch button under **Stabilize** and flip the toggle (verified by Face ID / Touch ID). Your link `https://uprail.world/<handle>` goes live immediately with a `PAY ME HERE` OpenGraph preview card showing your X profile picture.
-2. **Get Paid Without Payer Sign-Up (Human Flow):** Any client, sponsor, friend, or supporter visits `https://uprail.world/<handle>`, chooses `USDC` / `USDT` / `NEAR` / `SOL` / `ETH` / `BTC`, selects or enters an exact token amount (`amountToken`), picks an origin chain, and sends to a one-time `FLEX_INPUT` confidential deposit address + QR code. `checkAndSettleCoffeeDonation` settles 99% net privately via `payEscrowPrivate` and displays a minimal receipt.
+### Flow 4: Public Payment Link (`uprail.world/<handle>` — Live Example: `@xy63ry0rx`)
+1. **Enable Your Payment Link (Passkey-Gated):** On your dashboard ([https://app.uprail.world/app](https://app.uprail.world/app)), click the coin-pouch button under **Stabilize** and flip the toggle (verified by Face ID / Touch ID). Your link `https://uprail.world/<handle>` goes live immediately with a `PAY ME HERE` OpenGraph preview card showing your X profile picture.
+2. **Get Paid Without Payer Sign-Up (Human Flow):** Visit the live public page [https://uprail.world/xy63ry0rx](https://uprail.world/xy63ry0rx) without logging in, choose `USDC` / `USDT` / `NEAR` / `SOL` / `ETH` / `BTC`, enter an exact token amount (`amountToken`), pick an origin chain, and send to a one-time `FLEX_INPUT` confidential deposit address + QR code. `checkAndSettleCoffeeDonation` settles 99% net privately via `payEscrowPrivate` and displays a minimal receipt.
 3. **Get Paid by Any Visiting AI Agent:**
    ```bash
-   # Discover supported routes & machine-readable instructions
-   curl -s "https://uprail.world/uprailworld?format=json" | jq .
+   # Discover supported routes & machine-readable instructions on live creator @xy63ry0rx
+   curl -s "https://uprail.world/xy63ry0rx?format=json" | jq .
 
    # Create a one-time confidential FLEX_INPUT deposit quote directly
-   curl -s -X POST https://uprail.world/uprailworld \
+   curl -s -X POST https://uprail.world/xy63ry0rx \
      -H "Content-Type: application/json" \
      -d '{"amountToken":"1","originSymbol":"NEAR","originChain":"near"}' | jq .
    ```
+
+### Flow 5: Circles (Shared Earn Pools) & Timelocked Earn Vault Gifting
+1. **Create a Circle Pool:** On `/app/circles` (click **Circles** above **Stabilize** on the dashboard), pick one of 6 live Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`), assign member handles with percentage splits summing to `100%`, and sign with your Passkey.
+   - **Expected result:** Contributions convert into compounding vault shares held in the Circle's dedicated `intents.near` custody account until settled to the target payout handle or unanimously dissolved via member passkeys.
+2. **Send a Timelocked Earn Gift:** Open **Send Gift** on `/app/circles`, enter any recipient `@handle`, pick an occasion preset & unlock timestamp, optionally hide exact USD principal, and fund from any Intents asset with your Passkey.
+   - **Expected result:** UPRAIL swaps into the chosen Earn vault, renders a shareable `uprail.world/gift/<id>` page with `/og/gift/<id>.png` preview card, and blocks claims until `Date.now() >= timelock_until` and recipient X + Passkey verification.
 
 ---
 
@@ -312,8 +313,8 @@ flowchart TD
         Router["Hono API & Subdomain Router<br/>CSP/HSTS · Rate Limiting · HMAC Sessions"]
         Auth["Auth & Passkey Engine<br/>Single-Use Challenges · Recovery Codes"]
         AgentMCP["OAuth 2.1 AS + MCP Server (/api/mcp)<br/>Atomic USD Spend Caps · Idempotency Locks"]
-        Rail["Settlement Orchestrator<br/>Confidential Rail · Public Intents · Launchpad Fees"]
-        D1[("Cloudflare D1 (SQLite)<br/>Identities, Passkeys, Payments,<br/>Withdrawals, Agents, Fees")]
+        Rail["Settlement Orchestrator<br/>Confidential Rail · Earn Circles/Gifts · Launchpad Fees"]
+        D1[("Cloudflare D1 (SQLite)<br/>Identities, Passkeys, Payments,<br/>Withdrawals, Circles/Gifts, Agents")]
         KV[("Cloudflare KV<br/>Token Catalogue · Session Grants")]
     end
 
@@ -322,9 +323,9 @@ flowchart TD
     end
 
     subgraph NEAR["NEAR Protocol & Intents Layer"]
-        OneClick["1Click Confidential & Cross-Chain API<br/>(1click.chaindefuser.com)"]
+        OneClick["1Click Confidential, Earn & Cross-Chain API<br/>(1click.chaindefuser.com)"]
         Solver["Defuse Solver Relay<br/>(solver-relay-v2.chaindefuser.com/rpc)"]
-        IntentsContract["NEAR Intents Verifier (intents.near)<br/>+ Escrow & User Vaults (*.escrow.uprail.near)"]
+        IntentsContract["NEAR Intents Verifier (intents.near)<br/>+ Escrow, User Vaults & Earn Custody"]
         DestChains["35+ External Chains<br/>(ETH, Base, Arbitrum, SOL, BTC, Sui, TON, XRPL...)"]
     end
 
@@ -348,21 +349,6 @@ flowchart TD
     Solver --> IntentsContract
     OneClick --> DestChains
 ```
-
----
-
-## Key Features
-
-- **Universal Ingress for near.com:** Overcomes the rotating deposit address barrier on near.com. Anyone can deposit into a user's NEAR Intents vault from 35+ chains by simply sending to their `@handle`.
-- **Wallet-less Social Transfers:** Send crypto to any `@handle` on X. Unregistered recipients claim via X login + device passkey within 30 days, or funds auto-refund to the sender.
-- **Confidential Intents Execution:** Integrates 1Click confidential quotes and execution with fail-closed downgrade protection.
-- **Hardware Passkey Biometrics + Recovery:** WebAuthn P-256 (`ES256`) per-transaction assertions on every fund-moving endpoint, backed by one-time recovery codes and self-custody private key export.
-- **Zero-Gas User Experience:** Protocol relayer sponsors sub-account creation, NEP-145 token storage registration, and `intents.near::execute_intents` gas.
-- **Public Payment Pages & Direct Requests (`uprail.world/<handle>` & `/request/:id`):** Gives people, creators, and builders both direct handle-to-handle payment requests and a passkey-gated public link where anyone (human or AI agent, zero login required) can pay in `USDC`/`USDT`/`NEAR`/major tokens across any chain via one-time confidential 1Click deposit addresses, private `payEscrowPrivate` vault settlement, light/dark mode, and minimal receipts.
-- **Cross-Chain Withdrawals (35+ Chains):** Withdraw from UPRAIL directly to external wallets on NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Starknet, and more.
-- **AI Chat Payments (OAuth 2.1 + Remote MCP):** Streamable HTTP MCP server (`/api/mcp`) and OpenAPI 3.1.0 spec (`/api/agent/openapi.json`) with Passkey-approved per-tx and daily USD caps, live oracle valuation, and idempotency keys.
-- **Launchpad Creator-Fee Routing:** Payout adapter (`POST /api/fees/adapter`) supporting Nearly, JustHoot v2, and Intear Launchpad (`launch.intear.near` / `dex.intear.near`). Launchpads keep their fee receiver and direct creator fees to an X handle onchain.
-- **Dynamic Edge OpenGraph Cards:** Generates custom `1200x630` PNG social preview cards at the edge for Buy Me a Coffee links (`/og/coffee/<handle>.png` with X avatars), claim links, receipts, and creator fees.
 
 ---
 
