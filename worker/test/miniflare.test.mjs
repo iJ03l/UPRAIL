@@ -1172,14 +1172,14 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(missingAsset.status, 404);
   });
 
-  it('serves all 3 curated Earn Vaults and renders Gift OG card + crawler SEO meta tags', async () => {
+  it('serves all 6 curated Earn Vaults and renders Gift OG card + crawler SEO meta tags', async () => {
     const vaultsRes = await mf.dispatchFetch('http://localhost/api/gifts/vaults');
     assert.equal(vaultsRes.status, 200);
     const vaultsBody = await vaultsRes.json();
-    assert.equal(vaultsBody.vaults.length, 3);
+    assert.equal(vaultsBody.vaults.length, 6);
     assert.deepEqual(
       vaultsBody.vaults.map((v) => v.symbol),
-      ['TLO', 'gtUSDCp', 'kV-gtSOLb']
+      ['TLO', 'gtUSDCp', 'kV-gtSOLb', 'stNEAR', 'cNEAR', 'wstETH']
     );
 
     const db = await mf.getD1Database('DB');

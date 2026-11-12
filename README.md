@@ -29,43 +29,44 @@ UPRAIL is not a testnet prototype — it is live in production on **NEAR Mainnet
 
 Judges and automated evaluators (Claude Code, Codex) can verify the live project, on-chain contracts, every core feature, and the full test suite in seconds:
 
-### 1. One-Command Live Mainnet & Feature Verification (10 Checks)
-Verify the live gas sponsor (`escrow.uprail.near`), user sub-accounts, `intents.near` key registration, cross-chain token registry, AI agent OpenAPI/MCP discovery, launchpad routing, and fail-closed security:
+### 1. One-Command Live Mainnet & Feature Verification (11 Checks)
+Verify the live gas sponsor (`escrow.uprail.near`), user sub-accounts, `intents.near` key registration, cross-chain token registry, AI agent OpenAPI/MCP discovery, launchpad routing, Circles & Earn Vault Gifting, and fail-closed security:
 ```bash
 make check-mainnet
 # Or directly: python3 scripts/verify-mainnet.py
 ```
-**Expected Output (10/10 checks passing):**
+**Expected Output (11/11 checks passing):**
 ```text
 =================================================================
-⚡ UPRAIL: Live Mainnet & Full-Feature Verification (10 Checks)
+⚡ UPRAIL: Live Mainnet & Full-Feature Verification (11 Checks)
 =================================================================
 
-[1/10] NEAR Mainnet Sponsor (escrow.uprail.near)... ✔ OK! Block #223938263 (0.3903 NEAR)
-[2/10] User Sub-Account (u_fc982587d85af44f.escrow.uprail.near)... ✔ OK! Key ed25519:FBgiyiswzZ...
-[3/10] NEAR Intents Key Registration (intents.near)... ✔ OK! has_public_key == true
-[4/10] Production Worker Health (api.uprail.world/health)... ✔ OK! uprail-worker v1.0.0
-[5/10] Public Identity Resolver (@uprailworld)... ✔ OK! -> u_fc982587d85af44f.escrow.uprail.near
-[6/10] Cross-Chain Tokens & Live Price Oracle... ✔ OK! 492 Intents tokens · NEAR=$3.55
-[7/10] AI Agent OpenAPI 3.1.0 Spec (/api/agent/openapi.json)... ✔ OK! 9 agent paths
-[8/10] OAuth 2.1 & MCP Discovery (RFC 8414 / RFC 9728)... ✔ OK! MCP=https://api.uprail.world/api/mcp
-[9/10] Launchpad Creator-Fee Routing (/api/launchpads/config)... ✔ OK! Kinds: token_config, factory, jh_v2_dev
-[10/10] Fail-Closed Anti-BAC Guard (/api/payments)... ✔ OK! Unauthenticated access blocked (HTTP 401)
+[1/11] NEAR Mainnet Sponsor (escrow.uprail.near)... ✔ OK! Block #224158284 (0.3546 NEAR)
+[2/11] User Sub-Account (u_fc982587d85af44f.escrow.uprail.near)... ✔ OK! Key ed25519:FBgiyiswzZ...
+[3/11] NEAR Intents Key Registration (intents.near)... ✔ OK! has_public_key == true
+[4/11] Production Worker Health (api.uprail.world/health)... ✔ OK! uprail-worker v1.0.0
+[5/11] Public Identity Resolver (@uprailworld)... ✔ OK! -> u_fc982587d85af44f.escrow.uprail.near
+[6/11] Cross-Chain Tokens & Live Price Oracle... ✔ OK! 494 Intents tokens · NEAR=$3.55
+[7/11] AI Agent OpenAPI 3.1.0 Spec (/api/agent/openapi.json)... ✔ OK! 9 agent paths
+[8/11] OAuth 2.1 & MCP Discovery (RFC 8414 / RFC 9728)... ✔ OK! MCP=https://api.uprail.world/api/mcp
+[9/11] Launchpad Creator-Fee Routing (/api/launchpads/config)... ✔ OK! Kinds: token_config, factory, jh_v2_dev
+[10/11] Fail-Closed Anti-BAC Guard (/api/payments)... ✔ OK! Unauthenticated access blocked (HTTP 401)
+[11/11] Circles & Earn Vault Gifting (/api/circles/vaults)... ✔ OK! 6 Earn vaults (TLO, gtUSDCp, kV-gtSOLb, stNEAR, cNEAR, wstETH) · Auth 401 guarded
 =================================================================
 🎉 ALL ON-CHAIN SPONSOR, MAINNET & FEATURE CHECKS PASSED!
 ```
 
-### 2. Run Full Automated Test Suite (166 Tests, 0 Failures)
-Run the complete unit, Miniflare integration, confidential rail, stabilization, coffee, launchpad, and security test harness:
+### 2. Run Full Automated Test Suite (174 Tests, 0 Failures)
+Run the complete unit, Miniflare integration, confidential rail, stabilization, coffee, Circles & Earn Vault Gifting, launchpad, and security test harness:
 ```bash
 make test
 # Or: cd worker && npm test
 ```
 **Expected Output:**
 ```text
-ℹ tests 119 + 47 = 166
+ℹ tests 120 + 54 = 174
 ℹ suites 26 + 13 = 39
-ℹ pass 166
+ℹ pass 174
 ℹ fail 0
 ```
 
@@ -95,6 +96,10 @@ curl -sS https://api.uprail.world/api/launchpads/config | jq '{network, escrowAc
 # 7. Inspect Public Payment Link / Buy Me a Coffee routes & machine-readable JSON
 curl -sS https://api.uprail.world/api/coffee/options | jq '.tokens | map({symbol, chains: (.chains | length)})'
 curl -sS "https://uprail.world/uprailworld?format=json" | jq .
+
+# 8. Inspect Circles & Timelocked Earn Vault Gifting catalog (6 curated 1Click Earn vaults) & fail-closed guards
+curl -sS https://api.uprail.world/api/circles/vaults | jq '.vaults | map({symbol, estimatedApyPct, minDepositUsd, priceUsd})'
+curl -sS https://api.uprail.world/api/gifts/vaults | jq '.vaults | length'
 ```
 
 ### 4. All-Feature Quick Verification (`Do X → See Y`)
@@ -111,7 +116,7 @@ curl -sS "https://uprail.world/uprailworld?format=json" | jq .
 | **8. Launchpad Creator-Fee Routing** | Register token via `POST /api/launchpads/register` or send `Fees to @handle via UPRAIL` | Escrow verifies on-chain receipts/memos via NEAR RPC and credits the creator's vault automatically |
 | **9. Hardware Passkeys & Recovery Codes** | Register WebAuthn P-256 passkey on onboarding; view/rotate encrypted recovery codes | Every fund-moving endpoint rejects unverified sessions; lost passkeys rotate safely via HMAC recovery codes |
 | **10. 100% Sponsored Gas & Key Export** | Onboard a fresh X account with 0 NEAR; run `Export Private Key` with Passkey | `escrow.uprail.near` sponsors account creation, `intents.near` key reg & NEP-145 storage; full self-custody export |
-| **11. Circles & Timelocked Earn Vault Gifting** | Click **Circles** above **Stabilize** (`/app/circles`) to pool percentage-sized member goals or send a 1-to-1 timelocked Earn Vault gift (`uprail.world/gift/:id`) | Routes into 1Click Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`), compounds yield in per-item custody accounts, renders dynamic `/og/gift/:id.png` SEO cards, and enforces passkey + anti-IDOR gates |
+| **11. Circles & Timelocked Earn Vault Gifting** | Click **Circles** above **Stabilize** (`/app/circles`) to pool percentage-sized member goals or send a 1-to-1 timelocked Earn Vault gift (`uprail.world/gift/:id`) | Routes into 6 curated 1Click Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`), compounds yield in per-item custody accounts, renders dynamic `/og/gift/:id.png` SEO cards, and enforces passkey + anti-IDOR gates |
 
 ---
 
@@ -123,7 +128,7 @@ Where each hackathon criterion is implemented and tested in the codebase:
 | :--- | :--- | :--- | :--- |
 | **`social`**<br/>(Social Money) | Send value via social identity, shared budgets, reputation rails | Maps any `@handle` to deterministic NEAR vaults (`u_<hex>.escrow.uprail.near`); **Circles** multi-member percentage-sized Earn pools (`/app/circles`); **1-to-1 Timelocked Earn Vault Gifting** (`uprail.world/gift/:id` + `/og/gift/:id.png`); public **Buy Me a Coffee** links (`uprail.world/<handle>`); `/request/:id` 1-to-1 payment request cards | • [`worker/src/services/circles.ts`](worker/src/services/circles.ts)<br/>• [`worker/src/services/gifts.ts`](worker/src/services/gifts.ts)<br/>• [`worker/src/routes/coffee.ts`](worker/src/routes/coffee.ts)<br/>• [`worker/src/routes/requests.ts`](worker/src/routes/requests.ts)<br/>• [`worker/test/circles-and-gifts.test.ts`](worker/test/circles-and-gifts.test.ts) |
 | **`privacy`**<br/>(Privacy & Private AI) | Confidential computation, breaking on-chain transaction graph | NEAR Confidential Intents (`intents.near` + 1Click); unlinked escrow claims break on-chain sender-recipient linkability; confidential balance reconciliation & link scrubbing | • [`worker/src/services/confidentialRail.ts`](worker/src/services/confidentialRail.ts)<br/>• [`worker/test/confidential-rail.test.ts`](worker/test/confidential-rail.test.ts)<br/>• [`worker/src/services/refunds.ts`](worker/src/services/refunds.ts) |
-| **`defi`**<br/>(Unstoppable DeFi) | Multi-chain cross-chain settlement via NEAR Intents | Cross-chain ingress & egress across 35+ chains via 1Click and `intents.near`; **1Click Earn Vaults** (`TLO`, `gtUSDCp`, `kV-gtSOLb`) for Circles & Gifting; 1-tap `near.com` internal withdrawals (0% fee); **Stabilize** swaps via 1Click + Rhea Finance; Launchpad creator-fee routing | • [`worker/src/services/earnVaults.ts`](worker/src/services/earnVaults.ts)<br/>• [`worker/src/services/oneclickWithdraw.ts`](worker/src/services/oneclickWithdraw.ts)<br/>• [`worker/src/services/stabilize.ts`](worker/src/services/stabilize.ts)<br/>• [`worker/src/services/nearcomWithdraw.ts`](worker/src/services/nearcomWithdraw.ts)<br/>• [`worker/test/stabilize.test.ts`](worker/test/stabilize.test.ts) |
+| **`defi`**<br/>(Unstoppable DeFi) | Multi-chain cross-chain settlement via NEAR Intents | Cross-chain ingress & egress across 35+ chains via 1Click and `intents.near`; **1Click Earn Vaults** (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`) for Circles & Gifting; 1-tap `near.com` internal withdrawals (0% fee); **Stabilize** swaps via 1Click + Rhea Finance; Launchpad creator-fee routing | • [`worker/src/services/earnVaults.ts`](worker/src/services/earnVaults.ts)<br/>• [`worker/src/services/oneclickWithdraw.ts`](worker/src/services/oneclickWithdraw.ts)<br/>• [`worker/src/services/stabilize.ts`](worker/src/services/stabilize.ts)<br/>• [`worker/src/services/nearcomWithdraw.ts`](worker/src/services/nearcomWithdraw.ts)<br/>• [`worker/test/stabilize.test.ts`](worker/test/stabilize.test.ts) |
 | **`agents`** / **`business`**<br/>(Agent Economy) | Policy-bounded agent spending, autonomous payments | Remote 13-tool MCP Server (`api.uprail.world/api/mcp`) + OpenAPI 3.1.0 + OAuth 2.1 PKCE with atomic per-transaction & daily USD spend caps + instant `/approval` UI | • [`worker/src/routes/mcp.ts`](worker/src/routes/mcp.ts)<br/>• [`worker/src/routes/agent.ts`](worker/src/routes/agent.ts)<br/>• [`worker/src/routes/approval.ts`](worker/src/routes/approval.ts)<br/>• [`worker/test/miniflare.test.mjs`](worker/test/miniflare.test.mjs) |
 | **`realworld`**<br/>(Real-World Money) | Stablecoin rails for real people and businesses | Zero seed phrases & zero payer login: WebAuthn P-256 passkeys (Touch ID / Face ID), 100% sponsored gas, encrypted recovery codes, and `uprail.world/<handle>` USDC/USDT payment pages | • [`frontend/src/views/CirclesView.tsx`](frontend/src/views/CirclesView.tsx)<br/>• [`frontend/src/views/PublicGiftView.tsx`](frontend/src/views/PublicGiftView.tsx)<br/>• [`frontend/src/views/PublicCoffeeView.tsx`](frontend/src/views/PublicCoffeeView.tsx)<br/>• [`worker/test/recovery-codes.test.ts`](worker/test/recovery-codes.test.ts) |
 
@@ -366,9 +371,9 @@ flowchart TD
 ```text
 /
 ├── frontend/                              # Next.js 16 + React 19 + Tailwind CSS (static export served by Worker)
-│   ├── src/app/                           # App Router pages: /, /tip, /app/send, /app/claim, /app/receive, /app/agents, /docs/*
+│   ├── src/app/                           # App Router pages: /, /tip, /gift, /app/send, /app/claim, /app/receive, /app/circles, /app/agents, /docs/*
 │   ├── src/components/                    # AppShell, CapabilitiesCarousel, PasskeyModal, CoffeeModal, StabilizeModal, DomainGate
-│   ├── src/views/                         # LandingPage, AppHome, PublicCoffeeView, SendPage, ClaimPage, ReceivePage, AgentsPage
+│   ├── src/views/                         # LandingPage, AppHome, CirclesView, PublicGiftView, PublicCoffeeView, SendPage, ClaimPage, ReceivePage, AgentsPage
 │   ├── src/hooks/                         # useXAuth, usePasskey, usePayments, useOnchainData
 │   └── src/lib/                           # Typed API client (api.ts), client router, status formatters
 │
@@ -378,10 +383,10 @@ flowchart TD
 │   ├── src/db/                            # Canonical D1 schema.sql + sequential SQL migrations
 │   ├── src/middleware/                    # HMAC sessions, WebAuthn passkeyAuth, agentAuth, rateLimit, securityHeaders
 │   ├── src/oauth/                         # OAuth 2.1 Authorization Server (PKCE, DCR, /authorize UI) & Resource Server
-│   ├── src/routes/                        # auth, payments, claim, coffee, onchain, agent, mcp, fees, launchpads, invites, og
-│   ├── src/services/                      # nearRpc, confidentialRail, coffee, stabilize, oneclickClient, oneclickAuth,
-│   │                                      # oneclickWithdraw, intentsNonce, launchpadFees, launchpadIntegrations, refunds
-│   └── test/                              # 15+ automated test suites (166 tests: Miniflare integration + unit tests)
+│   ├── src/routes/                        # auth, payments, claim, coffee, circles, gifts, onchain, agent, mcp, fees, launchpads, invites, og
+│   ├── src/services/                      # nearRpc, confidentialRail, coffee, circles, gifts, earnVaults, stabilize, oneclickClient,
+│   │                                      # oneclickAuth, oneclickWithdraw, intentsNonce, launchpadFees, launchpadIntegrations, refunds
+│   └── test/                              # 18 automated test files (174 tests across 39 suites: Miniflare integration + unit tests)
 │
 ├── go-near-service/                       # Go 1.25 Settlement Microservice
 │   ├── cmd/server/main.go                 # Chi HTTP server, graceful shutdown, route wiring

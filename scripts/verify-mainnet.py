@@ -3,16 +3,17 @@
 UPRAIL: Live Mainnet & Feature Verification Suite
 
 Zero-dependency, read-only verification for NEAR Hackathon judges & automated evaluators:
-  [1/10] Mainnet Sponsor & Escrow Factory (escrow.uprail.near)
-  [2/10] Deterministic User Sub-Account (u_fc982587d85af44f.escrow.uprail.near)
-  [3/10] NEAR Intents Key Registration (intents.near::has_public_key)
-  [4/10] Production Worker Health (api.uprail.world/health)
-  [5/10] Public @handle -> Vault Resolution (/api/resolve)
-  [6/10] 35+ Chain Token Registry & Live Price Oracle (/api/onchain/tokens + /price)
-  [7/10] AI Agent OpenAPI 3.1.0 Spec (/api/agent/openapi.json)
-  [8/10] OAuth 2.1 & Remote MCP Discovery (RFC 8414 + RFC 9728)
-  [9/10] Launchpad Creator-Fee Routing Config (/api/launchpads/config)
- [10/10] Fail-Closed Anti-BAC Auth Guard (/api/payments -> 401)
+  [1/11] Mainnet Sponsor & Escrow Factory (escrow.uprail.near)
+  [2/11] Deterministic User Sub-Account (u_fc982587d85af44f.escrow.uprail.near)
+  [3/11] NEAR Intents Key Registration (intents.near::has_public_key)
+  [4/11] Production Worker Health (api.uprail.world/health)
+  [5/11] Public @handle -> Vault Resolution (/api/resolve)
+  [6/11] 35+ Chain Token Registry & Live Price Oracle (/api/onchain/tokens + /price)
+  [7/11] AI Agent OpenAPI 3.1.0 Spec (/api/agent/openapi.json)
+  [8/11] OAuth 2.1 & Remote MCP Discovery (RFC 8414 + RFC 9728)
+  [9/11] Launchpad Creator-Fee Routing Config (/api/launchpads/config)
+ [10/11] Fail-Closed Anti-BAC Auth Guard (/api/payments -> 401)
+ [11/11] Circles & Earn Vault Gifting (/api/circles/vaults + 401 guards)
 """
 
 import sys, json, base64, urllib.request, urllib.error
@@ -64,17 +65,17 @@ def http_status(url):
 
 def main():
     print('=================================================================')
-    print('⚡ UPRAIL: Live Mainnet & Full-Feature Verification (10 Checks)')
+    print('⚡ UPRAIL: Live Mainnet & Full-Feature Verification (11 Checks)')
     print('=================================================================\n')
 
     passed = 0
-    total = 10
+    total = 11
     demo_account = 'u_fc982587d85af44f.escrow.uprail.near'
     demo_pubkey = ''
 
     # 1. Escrow Sponsor Account (escrow.uprail.near)
     try:
-        sys.stdout.write('[1/10] NEAR Mainnet Sponsor (escrow.uprail.near)... ')
+        sys.stdout.write('[1/11] NEAR Mainnet Sponsor (escrow.uprail.near)... ')
         sys.stdout.flush()
         acc = call_rpc('query', {
             'request_type': 'view_account',
@@ -89,7 +90,7 @@ def main():
 
     # 2. Deterministic User Sub-Account
     try:
-        sys.stdout.write(f'[2/10] User Sub-Account ({demo_account})... ')
+        sys.stdout.write(f'[2/11] User Sub-Account ({demo_account})... ')
         sys.stdout.flush()
         call_rpc('query', {
             'request_type': 'view_account',
@@ -111,7 +112,7 @@ def main():
 
     # 3. NEAR Intents Contract & Key Registration (intents.near::has_public_key)
     try:
-        sys.stdout.write('[3/10] NEAR Intents Key Registration (intents.near)... ')
+        sys.stdout.write('[3/11] NEAR Intents Key Registration (intents.near)... ')
         sys.stdout.flush()
         key_to_check = demo_pubkey or 'ed25519:FBgiyiswzZMo6faKtD4tRsRZqniUon3k1XcpzokKoCAR'
         args_b64 = base64.b64encode(json.dumps({
@@ -136,7 +137,7 @@ def main():
 
     # 4. Production Worker Health
     try:
-        sys.stdout.write('[4/10] Production Worker Health (api.uprail.world/health)... ')
+        sys.stdout.write('[4/11] Production Worker Health (api.uprail.world/health)... ')
         sys.stdout.flush()
         data = http_get('https://api.uprail.world/health')
         if data.get('status') == 'ok':
@@ -149,7 +150,7 @@ def main():
 
     # 5. Public @handle -> Vault Resolution
     try:
-        sys.stdout.write('[5/10] Public Identity Resolver (@uprailworld)... ')
+        sys.stdout.write('[5/11] Public Identity Resolver (@uprailworld)... ')
         sys.stdout.flush()
         data = http_get('https://api.uprail.world/api/resolve?handle=uprailworld')
         if data.get('resolved') and data.get('nearAccount') == demo_account:
@@ -162,7 +163,7 @@ def main():
 
     # 6. Cross-Chain Token Registry & Live USD Price Oracle
     try:
-        sys.stdout.write('[6/10] Cross-Chain Tokens & Live Price Oracle... ')
+        sys.stdout.write('[6/11] Cross-Chain Tokens & Live Price Oracle... ')
         sys.stdout.flush()
         toks = http_get('https://api.uprail.world/api/onchain/tokens')
         price = http_get('https://api.uprail.world/api/onchain/price?asset=wrap.near')
@@ -177,7 +178,7 @@ def main():
 
     # 7. AI Agent OpenAPI 3.1.0 Spec
     try:
-        sys.stdout.write('[7/10] AI Agent OpenAPI 3.1.0 Spec (/api/agent/openapi.json)... ')
+        sys.stdout.write('[7/11] AI Agent OpenAPI 3.1.0 Spec (/api/agent/openapi.json)... ')
         sys.stdout.flush()
         spec = http_get('https://api.uprail.world/api/agent/openapi.json')
         paths = list((spec.get('paths') or {}).keys())
@@ -191,7 +192,7 @@ def main():
 
     # 8. OAuth 2.1 + Remote MCP Protected Resource Discovery (RFC 8414 + RFC 9728)
     try:
-        sys.stdout.write('[8/10] OAuth 2.1 & MCP Discovery (RFC 8414 / RFC 9728)... ')
+        sys.stdout.write('[8/11] OAuth 2.1 & MCP Discovery (RFC 8414 / RFC 9728)... ')
         sys.stdout.flush()
         oauth = http_get('https://app.uprail.world/.well-known/oauth-authorization-server')
         mcp = http_get('https://api.uprail.world/.well-known/oauth-protected-resource/api/mcp')
@@ -205,7 +206,7 @@ def main():
 
     # 9. Launchpad Creator-Fee Routing Config
     try:
-        sys.stdout.write('[9/10] Launchpad Creator-Fee Routing (/api/launchpads/config)... ')
+        sys.stdout.write('[9/11] Launchpad Creator-Fee Routing (/api/launchpads/config)... ')
         sys.stdout.flush()
         lp = http_get('https://api.uprail.world/api/launchpads/config')
         if lp.get('escrowAccount') == 'escrow.uprail.near' and lp.get('verificationKinds'):
@@ -218,7 +219,7 @@ def main():
 
     # 10. Fail-Closed Auth / Anti-BAC Verification
     try:
-        sys.stdout.write('[10/10] Fail-Closed Anti-BAC Guard (/api/payments)... ')
+        sys.stdout.write('[10/11] Fail-Closed Anti-BAC Guard (/api/payments)... ')
         sys.stdout.flush()
         code = http_status('https://api.uprail.world/api/payments')
         if code == 401:
@@ -226,6 +227,23 @@ def main():
             passed += 1
         else:
             print(f'✖ FAIL: Expected 401, got HTTP {code}')
+    except Exception as e:
+        print(f'✖ FAIL: {e}')
+
+    # 11. Circles & Timelocked Earn Vault Gifting
+    try:
+        sys.stdout.write('[11/11] Circles & Earn Vault Gifting (/api/circles/vaults)... ')
+        sys.stdout.flush()
+        vaults_res = http_get('https://api.uprail.world/api/circles/vaults')
+        vaults = vaults_res.get('vaults', [])
+        symbols = [v.get('symbol') for v in vaults]
+        circles_code = http_status('https://api.uprail.world/api/circles')
+        gifts_code = http_status('https://api.uprail.world/api/gifts')
+        if len(vaults) >= 6 and circles_code == 401 and gifts_code == 401:
+            print(f'✔ OK! {len(vaults)} Earn vaults ({", ".join(symbols)}) · Auth 401 guarded')
+            passed += 1
+        else:
+            print(f'✖ FAIL: vaults={len(vaults)}, circles={circles_code}, gifts={gifts_code}')
     except Exception as e:
         print(f'✖ FAIL: {e}')
 
