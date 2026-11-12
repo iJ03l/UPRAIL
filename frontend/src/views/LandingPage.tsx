@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { ArrowDownLeft, ArrowRight, ExternalLink, Moon, Sun } from 'lucide-react';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { TextReveal } from '../components/TextReveal';
-import { MoneyFlowSchematic } from '../components/MoneyFlowSchematic';
 import { InteractiveRailSimulator } from '../components/InteractiveRailSimulator';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { useTheme } from '../components/ThemeProvider';
@@ -92,27 +91,8 @@ export const LandingPage: React.FC = () => {
               </span>{' '}
               handle
               <br />
-              is now your pr
-              <span className="relative inline-block">
-                &#x0131;
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="pointer-events-none absolute left-1/2 -top-[0.04em] -translate-x-1/2 w-[0.34em] h-[0.34em] text-[#E05326]"
-                >
-                  <path
-                    d="M7.5 11V7.5a4.5 4.5 0 0 1 9 0V11"
-                    stroke="currentColor"
-                    strokeWidth="2.8"
-                    strokeLinecap="round"
-                    className="hero-lock-shackle"
-                  />
-                  <rect x="4" y="10.5" width="16" height="11" rx="3" fill="currentColor" />
-                  <circle cx="12" cy="16" r="1.4" fill="white" />
-                </svg>
-              </span>
-              vate m
-              <span className="relative inline-flex items-center justify-center align-baseline mx-[0.02em] top-[0.07em] w-[0.58em] h-[0.58em]">
+              is now your private m
+              <span className="relative inline-flex items-center justify-center align-baseline mx-[0.02em] top-[0.06em] w-[0.6em] h-[0.6em]">
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
@@ -122,48 +102,22 @@ export const LandingPage: React.FC = () => {
                     cx="12"
                     cy="12"
                     r="9.2"
-                    stroke="currentColor"
-                    strokeWidth="3.5"
-                  />
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="4.2"
                     fill="#E05326"
-                    fillOpacity="0.18"
-                    stroke="#E05326"
-                    strokeWidth="2.2"
+                    fillOpacity="0.1"
+                    stroke="currentColor"
+                    strokeWidth="3.6"
+                  />
+                  <rect
+                    x="10.2"
+                    y="6.8"
+                    width="3.6"
+                    height="10.4"
+                    rx="1.8"
+                    fill="#E05326"
                   />
                 </svg>
               </span>
-              ney h
-              <span className="relative inline-block">
-                u
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="pointer-events-none absolute left-1/2 top-[0.14em] -translate-x-1/2 w-[0.36em] h-[0.36em] text-emerald-600"
-                >
-                  <g className="hero-leaf-glyph">
-                    <path
-                      d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"
-                      fill="currentColor"
-                      fillOpacity="0.24"
-                      stroke="currentColor"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"
-                      stroke="currentColor"
-                      strokeWidth="2.4"
-                      strokeLinecap="round"
-                    />
-                  </g>
-                </svg>
-              </span>
-              b<span className="text-black">.</span>
+              ney hub<span className="text-black">.</span>
             </span>
           </h1>
 
@@ -182,12 +136,7 @@ export const LandingPage: React.FC = () => {
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </a>
 
-            <a
-              href="https://docs.near-intents.org"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-xs font-mono text-stone-500 hover:text-stone-900 transition-colors pl-0.5"
-            >
+            <div className="inline-flex items-center gap-2 text-xs font-mono text-stone-500 pl-0.5 select-none">
               <span>Powered by</span>
               <img
                 src="/brand/near-logo.svg"
@@ -195,7 +144,7 @@ export const LandingPage: React.FC = () => {
                 className="w-4 h-4 rounded-full ring-1 ring-black/10 dark:ring-white/20"
               />
               <span className="font-bold text-stone-800">NEAR Intents</span>
-            </a>
+            </div>
           </div>
         </section>
 
@@ -214,13 +163,6 @@ export const LandingPage: React.FC = () => {
               Public blockchains leak your wealth and rekt. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to 𝕏 handles.
             </TextReveal>
           </div>
-        </section>
-
-        {/* 
-          3. Schematic: Money Flow (Mobile 2x2 grid, Desktop conduits)
-        */}
-        <section id="schematic" className="w-full max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-24">
-          <MoneyFlowSchematic />
         </section>
 
         {/* 
