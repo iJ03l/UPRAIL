@@ -1,7 +1,7 @@
 # UPRAIL (v1.1)
 
 **Your X handle is now your private money hub.**  
-UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`intents.near` + Confidential Intents): pay anyone privately by `@handle`, earn together in yield-bearing **Circles**, send timelocked Earn vault **Gifts**, accept no-login **Buy Me a Coffee** tips across 35+ chains, and route `near.com` or autonomous **AI agents** — all without a seed phrase or gas.
+UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`intents.near` + Confidential Intents): earn together in yield-bearing **Circles**, gift timelocked Earn vaults, pay anyone privately by `@handle`, accept no-login **Buy Me a Coffee** tips across 35+ chains, and route `$` directly to `near.com` or AI agents without a wallet acts for you — all without a seed phrase or gas.
 
 - **Version:** v1.1.0
 - **Hackathon Tracks:** Privacy & Private AI (`privacy`) · Social Money (`social`) · Unstoppable DeFi (`defi`) · Agent Economy (`agents`) · Autonomous Business (`business`) · Real-World Money (`realworld`) · Open Innovation (`open`)
@@ -107,17 +107,17 @@ curl -sS https://api.uprail.world/api/gifts/vaults | jq '.vaults | length'
 
 | Feature | Do This (Action) | See This (Verified Result) |
 | :--- | :--- | :--- |
-| **1. Private `@handle` Send & Unlinked Claim** | Send USDC/NEAR on `/app/send` to any `@handle` (registered or new) + confirm with Passkey | Instant confidential settlement or shareable `/claim/<id>` link with edge OG card; claimed via X + Passkey |
-| **2. Public Payment Link (`uprail.world/<handle>`)** | Toggle ON via dashboard coin-pouch icon; visit `uprail.world/xy63ry0rx` without logging in | Pick `USDC`/`USDT`/`NEAR`/`SOL`/`ETH`/`BTC`, exact token amount (`amountToken`) & chain → one-time `FLEX_INPUT` `CONFIDENTIAL_INTENTS` address + 99% net payout |
-| **3. 1-Tap `near.com` Internal Withdrawal** | Dashboard → **Withdraw** (`near.com`) → bind `nearcom:0x...` address with Passkey → withdraw | 0% bridge fee internal settlement straight into `near.com` balance (`nearcomWithdraw.ts`) |
-| **4. 35+ Chain "Send to Wallet"** | Send/Withdraw to any external EVM, Solana, Bitcoin, TON, Tron, Sui, XRP, or NEAR address | 1Click cross-chain swap & delivery across 35+ networks (`oneclickWithdraw.ts`) |
-| **5. Stabilize (Crypto → USDC/USDT)** | Click **Stabilize** on Dashboard or any held token ≥ 0.05 NEAR / $1 | Gas-sponsored 1Click Confidential or Rhea Finance swap into USDC/USDT (1% fee) |
-| **6. Social Invoicing & "People You Pay"** | Create request on `/app/request`; share `/request/:id`; pin/nickname frequent contacts | Recipient views/pays/declines `/request/:id` in 1 tap; persistent contact memory with anti-spam blocks |
-| **7. AI Agent Rail (OAuth 2.1 + 13-Tool MCP)** | Connect `https://api.uprail.world/api/mcp` in Claude/ChatGPT/Cursor & approve caps with Passkey | Agent calls 13 MCP tools (`pay_handle`, `request_payment`, etc.) bounded by atomic per-tx/daily USD caps |
-| **8. Launchpad Creator-Fee Routing** | Register token via `POST /api/launchpads/register` or send `Fees to @handle via UPRAIL` | Escrow verifies on-chain receipts/memos via NEAR RPC and credits the creator's vault automatically |
-| **9. Hardware Passkeys & Recovery Codes** | Register WebAuthn P-256 passkey on onboarding; view/rotate encrypted recovery codes | Every fund-moving endpoint rejects unverified sessions; lost passkeys rotate safely via HMAC recovery codes |
-| **10. 100% Sponsored Gas & Key Export** | Onboard a fresh X account with invite code `INTENT` & 0 NEAR; run `Export Private Key` with Passkey | `escrow.uprail.near` sponsors account creation, `intents.near` key reg & NEP-145 storage; full self-custody export |
-| **11. Circles & Timelocked Earn Vault Gifting** | Click **Circles** above **Stabilize** (`/app/circles`) to pool percentage-sized member goals or send a 1-to-1 timelocked Earn Vault gift (`uprail.world/gift/:id`) | Routes into 6 curated 1Click Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`), compounds yield in per-item custody accounts, renders dynamic `/og/gift/:id.png` SEO cards, and enforces passkey + anti-IDOR gates |
+| **1. Circles (Like a DAO, With Friends) & Timelocked Earn Vault Gifting** | Click **Circles** above **Stabilize** (`/app/circles`) to pool percentage-sized member goals, have every member sign with Passkey before custody activates, or send a 1-to-1 timelocked Earn Vault gift (`uprail.world/gift/:id`) | Routes into 6 curated 1Click Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`), compounds yield in per-item `intents.near` custody accounts, enforces unanimous Passkey dissolve or creator settle (99%/1%), renders `/og/gift/:id.png` SEO cards, and enforces anti-IDOR gates |
+| **2. Private `@handle` Send & Unlinked Claim** | Send USDC/NEAR on `/app/send` to any `@handle` (registered or new) + confirm with Passkey | Instant confidential settlement or shareable `/claim/<id>` link with edge OG card; claimed via X + Passkey |
+| **3. Public Payment Link (`uprail.world/<handle>`)** | Toggle ON via dashboard coin-pouch icon; visit `uprail.world/xy63ry0rx` without logging in | Pick `USDC`/`USDT`/`NEAR`/`SOL`/`ETH`/`BTC`, exact token amount (`amountToken`) & chain → one-time `FLEX_INPUT` `CONFIDENTIAL_INTENTS` address + 99% net payout |
+| **4. 1-Tap `near.com` Internal Withdrawal** | Dashboard → **Withdraw** (`near.com`) → bind `nearcom:0x...` address with Passkey → withdraw | 0% bridge fee internal settlement straight into `near.com` balance (`nearcomWithdraw.ts`) |
+| **5. 35+ Chain "Send to Wallet"** | Send/Withdraw to any external EVM, Solana, Bitcoin, TON, Tron, Sui, XRP, or NEAR address | 1Click cross-chain swap & delivery across 35+ networks (`oneclickWithdraw.ts`) |
+| **6. Stabilize (Crypto → USDC/USDT)** | Click **Stabilize** on Dashboard or any held token ≥ 0.05 NEAR / $1 | Gas-sponsored 1Click Confidential or Rhea Finance swap into USDC/USDT (1% fee) |
+| **7. Social Invoicing & "People You Pay"** | Create request on `/app/request`; share `/request/:id`; pin/nickname frequent contacts | Recipient views/pays/declines `/request/:id` in 1 tap; persistent contact memory with anti-spam blocks |
+| **8. AI Agent Rail (OAuth 2.1 + 13-Tool MCP)** | Connect `https://api.uprail.world/api/mcp` in Claude/ChatGPT/Cursor & approve caps with Passkey | Agent calls 13 MCP tools (`pay_handle`, `request_payment`, etc.) bounded by atomic per-tx/daily USD caps |
+| **9. Launchpad Creator-Fee Routing** | Register token via `POST /api/launchpads/register` or send `Fees to @handle via UPRAIL` | Escrow verifies on-chain receipts/memos via NEAR RPC and credits the creator's vault automatically |
+| **10. Hardware Passkeys & Recovery Codes** | Register WebAuthn P-256 passkey on onboarding; view/rotate encrypted recovery codes | Every fund-moving endpoint rejects unverified sessions; lost passkeys rotate safely via HMAC recovery codes |
+| **11. 100% Sponsored Gas & Key Export** | Onboard a fresh X account with invite code `INTENT` & 0 NEAR; run `Export Private Key` with Passkey | `escrow.uprail.near` sponsors account creation, `intents.near` key reg & NEP-145 storage; full self-custody export |
 
 ---
 
@@ -162,12 +162,27 @@ Every X account is mapped to a dedicated NEAR sub-account (`u_<hex>.escrow.uprai
 2. **Self-Custody Key Export:**
    - With a fresh WebAuthn passkey assertion, any user can export their raw Ed25519 private key and sub-account ID at any time, maintaining complete non-custodial ownership and portability.
 
-### 2. Dual-Factor Identity: X OAuth 2.0 PKCE + WebAuthn P-256 Passkeys
+### 2. 1Click Earn Circles ("Like a DAO, But With Friends") & Timelocked Vault Gifting
+Instead of deploying a DAO contract, managing a multisig, or asking friends for wallet addresses and gas, **Circles** let any group pool money and earn yield together using only X `@handle`s and hardware Passkeys (`Touch ID` / `Face ID`):
+
+1. **Propose & Unanimous Member Sign-Off (`PENDING_SIGNATURES` → `ACTIVE`):**
+   - The creator picks one of **6 curated 1Click Earn vaults** (`TLO` Ethereum USDC, `gtUSDCp` Base USDC, `kV-gtSOLb` Solana SOL, `stNEAR` NEAR, `cNEAR` NEAR, `wstETH` Ethereum), sets a USD goal, a payout `@handle`, and exact member percentage splits summing to `10,000` bps (`100.00%`).
+   - Invited members review the Circle terms and sign with their WebAuthn Passkey. **Only after every member has signed** does UPRAIL derive the Circle's dedicated 64-hex implicit `intents.near` custody account (`deriveEarnCustodyKey` via `HMAC-SHA256`) and activate the pool (`ACTIVE`) — nobody can deposit funds until the whole group agrees.
+2. **Continuous Yield-Bearing Contributions (`ACTIVE` → `GOAL_MET`):**
+   - Members can fund their share in one or multiple installments from any Intents balance; `1Click` swaps into the Circle's Earn vault shares inside its isolated per-circle custody account so funds **compound yield automatically** while the group fills the goal (`GOAL_MET` once all member targets are met).
+3. **Payout Settlement (`SETTLED`):**
+   - The creator settles the Circle with a Passkey challenge (`ACTIVE` / `GOAL_MET` → `SETTLING` → `SETTLED`), sending **99%** of the accumulated vault shares directly to the designated payout `@handle`'s `intents.near` account and **1%** to `escrow.uprail.near`.
+4. **Unanimous Passkey Dissolve (`DISSOLVED`):**
+   - If the group changes its mind before settlement, **every contributor with shares must approve dissolution with their hardware Passkey**. Once unanimous, the Circle atomically transitions (`DISSOLVING` → `DISSOLVED`) and refunds each contributor pro-rata back to their `intents.near` vault (if zero contributions have been made yet, the creator can cancel immediately).
+5. **Timelocked Vault Gifting (`uprail.world/gift/:id`):**
+   - Sends compounding 1-to-1 Earn vault positions to any `@handle` with server-enforced `timelock_until`, optional private amount masking (`show_amount = 0`), anti-IDOR visibility gates, atomic `LOCKED -> CLAIMING` transitions (`gifts.ts`), and custom `/og/gift/:id.png` social cards.
+
+### 3. Dual-Factor Identity: X OAuth 2.0 PKCE + WebAuthn P-256 Passkeys
 - **X OAuth 2.0:** Uses S256 PKCE challenges to verify ownership of the X handle and issues an authenticated session.
 - **Per-Transaction WebAuthn Gate:** Restricts authorization to hardware P-256 / ES256 passkeys with resident keys. Every fund-moving or security-sensitive action requires a fresh biometric challenge and verifies signature counters to prevent replays.
 - **Encrypted Recovery Codes:** First-time passkey registration issues one-time recovery codes protected with authenticated encryption and domain-separated hashing, enabling users to safely rotate passkeys if a device is lost.
 
-### 3. Three-Rail Intent Execution & Confidential Settlement
+### 4. Three-Rail Intent Execution & Confidential Settlement
 When a sender initiates a transfer, the system generates a cryptographically signed quote binding recipient, asset, amount, and expiry, then settles across three rails:
 
 1. **NEAR Confidential Intents Rail:**
@@ -178,13 +193,13 @@ When a sender initiates a transfer, the system generates a cryptographically sig
 3. **Native NEP-141 Fallback Rail:**
    - For launchpad or custom NEP-141 tokens not yet listed on `intents.near`, handles direct sponsored transfers.
 
-### 4. Escrowed Social Claims, Atomic Locks & Refunds
+### 5. Escrowed Social Claims, Atomic Locks & Refunds
 - **Direct vs. Escrowed Routing:** Registered handles settle directly into their NEAR Intents vault. Unregistered handles receive funds into a 30-day pooled escrow.
 - **Handle Binding on Registration:** When a new user connects their X identity and registers a passkey, all pending escrowed transfers matching their handle are permanently bound to their verified identity, preventing handle rename attacks.
 - **Atomic Claim Reservation:** Claims execute using atomic conditional state updates to guarantee at-most-once payouts and eliminate race conditions.
 - **At-Most-Once Refunds:** Senders can cancel unclaimed transfers, and expired escrowed funds (>30 days) automatically refund the full gross amount to the original sender.
 
-### 5. Universal Ingress to near.com & Internal Withdrawal Rail
+### 6. Universal Ingress to near.com & Internal Withdrawal Rail
 - **Universal Ingress for near.com (Solving the Rotating Address Barrier):** On `near.com` (and Defuse / 1Click), cross-chain deposit addresses are ephemeral, session-bound, and rotating. Only the authenticated owner at their terminal can generate a quote to fund their account. UPRAIL solves this by giving every user a persistent public identity (`@handle`) mapped to a NEAR Intents vault: anyone in the world can deposit from 35+ chains directly to `@handle` without requiring a live session quote from the recipient.
 - **Passkey-Gated `near.com` Internal Withdrawal Rail:** Once funds settle into the user's UPRAIL vault, users can withdraw directly into their personal `near.com` wallet in one tap:
   - **Zero Bridge Fees & 1:1 Routing:** Bypasses external chain bridges and routing fees by transferring internally inside the Confidential Intents layer (`submitPrivateTransfer`) to the recipient's NEP-518 internal address (`nearcom:0x...`).
@@ -194,7 +209,7 @@ When a sender initiates a transfer, the system generates a cryptographically sig
   - **Edit Protection:** Updating or replacing the saved `near.com` withdrawal destination is strictly gated by a fresh passkey challenge to protect against unauthorized modification.
 - **Cross-Chain Withdrawals ("Send to Wallet"):** In addition to internal `near.com` routing, users can withdraw any asset from their vault to an external address across **35+ blockchains** (NEAR, Ethereum, Base, Arbitrum, Optimism, Polygon, BNB Chain, Avalanche, Solana, Bitcoin, Sui, Aptos, TON, Tron, XRP Ledger, Stellar, Dogecoin, Litecoin, Zcash, Starknet, Hyperliquid, Monad, Berachain, etc.) with chain-specific address validation and atomic state reservation.
 
-### 6. AI Agent Payment Rail & OAuth 2.1 Remote MCP Server (The Post-Frontend Thesis)
+### 7. AI Agent Payment Rail & OAuth 2.1 Remote MCP Server (The Post-Frontend Thesis)
 
 > **The Post-Frontend Thesis:** In the coming era, users will rarely interact with traditional web frontends. The future of software is conversational and autonomous — where AI agents negotiate, orchestrate workflows, tip creators, purchase compute, split bounties, and settle transactions on our behalf. But an agent that cannot move value is just an observer, while giving an LLM unconstrained access to a raw crypto wallet is a fatal security flaw. From day one, UPRAIL was built with this post-frontend reality in mind: we integrated the agentic value railway directly into the protocol's foundation, letting autonomous models transact with cryptographic safety, biometric spend limits, and zero seed phrases.
 
@@ -219,20 +234,14 @@ UPRAIL includes a full **OAuth 2.1 Authorization Server** and **Streamable HTTP 
 - **Human-in-the-Loop Instant Passkey Escalation (`/approve`):** When an agent needs to execute an anomalous high-value batch transfer or exceed its daily limit, it yields an authorization ticket link (`/approve?id=...`). The user reviews the breakdown on their device, confirms with Face ID or fingerprint via WebAuthn, and the agent's intent executes atomically on NEAR.
 - **Fail-Closed Spend Policy & Anti-Replay:** Live oracle token pricing, atomic database reservations before signing intents, and idempotency locks prevent retried prompts from causing double-spends or prompt-injection drains.
 
-### 7. Launchpad Creator-Fee Routing
+### 8. Launchpad Creator-Fee Routing
 Launchpads and DEX pools (Nearly, JustHoot v2, and Intear Launchpad on `launch.intear.near` / `dex.intear.near`) keep their own fee receiver. When a payout should reach an X handle, their adapter or keeper sends the transfer to escrow with the target handle memo (`Fees to @handle via UPRAIL`), and UPRAIL automatically verifies the onchain receipt and credits the creator's vault.
 
-### 8. Social Invoicing, Contact Memory & Anti-Spam Request Rails
+### 9. Social Invoicing, Contact Memory & Anti-Spam Request Rails
 Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduces zero-friction social payment memory:
 - **"People you pay" (Contact Engine):** A user-governed registry mapping contacts to X identities, tracking custom nicknames, preferred transfer assets and amounts, and pin priorities, automatically merged with transfer ledger history.
 - **Social Requests Lifecycle & Anti-Harassment:** Payment requests follow a strict state machine (`PENDING` → `COMPLETED` / `DECLINED` / `CANCELLED` / `EXPIRED`). Requests include rate-limiting (max 10 requests/hour/user) and request-blocking primitives to prevent spam, while allowing unregistered recipients to inspect invoices without signing up upfront.
 - **Full Autonomous Agent Parity:** AI agents can audit, generate, accept, and decline payment requests within their owner's biometric spend guardrails.
-
-### 9. 1Click Earn Circles & Timelocked Vault Gifting
-- **6 Curated 1Click Earn Vaults:** `TLO` (Taler USDC, Ethereum), `gtUSDCp` (Gauntlet USDC Prime, Base), `kV-gtSOLb` (Kamino Gauntlet SOL, Solana), `stNEAR` (Meta Pool, NEAR), `cNEAR` (Assetize/Linear, NEAR), and `wstETH` (Lido, Ethereum), enforced against an allowlist in [`earnVaults.ts`](worker/src/services/earnVaults.ts) with live 1Click registry pricing.
-- **Deterministic Per-Item Implicit Custody:** Every Circle or Gift derives its own 64-hex implicit `intents.near` custody account (`deriveEarnCustodyKey` via `HMAC-SHA256`), isolating vault shares per item without sub-account creation lag.
-- **Circles (Shared Budgets & Collective Ownership):** Creators set target USD goals, member handles, and exact percentage splits (`10,000` bps sum) with continuous contributions, 1% payout fee split, creator-triggered settlement, or **unanimous WebAuthn passkey dissolve** (`circles.ts`).
-- **Timelocked Vault Gifting (`uprail.world/gift/:id`):** Sends compounding Earn vault positions to any `@handle` with server-enforced `timelock_until`, optional private amount masking (`show_amount = 0`), anti-IDOR visibility gates, atomic `LOCKED -> CLAIMING` transitions (`gifts.ts`), and custom `/og/gift/:id.png` social cards.
 
 ---
 
@@ -251,7 +260,14 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
 
 ## Quick Demo (For Human & AI Judges)
 
-### Flow 1: Send & Claim Privately by `@handle`
+### Flow 1: Circles ("Like a DAO, With Friends") & Timelocked Earn Vault Gifting
+1. **Create a Circle Pool & Collect Unanimous Member Signatures:** On `/app/circles` (click **Circles** above **Stabilize** on the dashboard), pick one of 6 live Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`), set a USD goal and payout `@handle`, assign member handles with percentage splits summing to `100%`, and sign with your Passkey.
+   - **Expected result:** The Circle starts in `PENDING_SIGNATURES`. Once **every invited member** signs with their hardware Passkey, UPRAIL derives the Circle's dedicated `intents.near` custody account and flips the Circle to `ACTIVE`.
+2. **Contribute, Earn Yield & Settle (or Unanimously Dissolve):** Signed members contribute in one or multiple installments; contributions swap into compounding Earn vault shares until the creator settles (`99%` to payout `@handle`, `1%` fee to `escrow.uprail.near`) or every contributor approves dissolution via Passkey for pro-rata refunds.
+3. **Send a Timelocked Earn Gift:** Open **Send Gift** on `/app/circles`, enter any recipient `@handle`, pick an occasion preset & unlock timestamp, optionally hide exact USD principal, and fund from any Intents asset with your Passkey.
+   - **Expected result:** UPRAIL swaps into the chosen Earn vault, renders a shareable `uprail.world/gift/<id>` page with `/og/gift/<id>.png` preview card, and blocks claims until `Date.now() >= timelock_until` and recipient X + Passkey verification.
+
+### Flow 2: Send & Claim Privately by `@handle`
 1. **Sign In, Enter Invite Code `INTENT` & Provision Vault:** Go to [https://app.uprail.world](https://app.uprail.world), sign in with X, enter invite code **`INTENT`** *(gated during active testing so onboarding stays controlled and the team can talk directly with early users)*, and register a device Passkey (Touch ID / Face ID).
    - **Expected result:** UPRAIL deterministically provisions your vault, registers its key on `intents.near`, and displays your recovery codes.
 2. **Deposit or Check Balance:** Open **Receive** (`/app/receive`) to copy your `@handle` payment link or generate a cross-chain deposit address (e.g., USDC from Base, Arbitrum, Solana, or NEAR).
@@ -260,7 +276,7 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
 4. **Claim with X + Passkey:** Open the claim link as the recipient `@handle`, sign in with X, and confirm with your Passkey (or click **Send to Wallet** on `/app/claim` to withdraw directly to an external wallet across 35+ chains).
    - **Expected result:** The payment is atomically claimed and settled into the recipient's vault (or bridged cross-chain via 1Click).
 
-### Flow 2: 1-Tap Internal Withdrawal to near.com (0% Bridge Fee)
+### Flow 3: 1-Tap Internal Withdrawal to near.com (0% Bridge Fee)
 1. **Open Withdraw:** On the Dashboard ([https://app.uprail.world/app](https://app.uprail.world/app)), click the **Withdraw** button (`near.com`).
 2. **First-Time Setup (Passkey Gated):**
    - In `near.com`, tap your account menu → click **My address** → copy your internal address (e.g. `nearcom:0xb137a2f1054b5de422a8df801613d6722701163c`).
@@ -272,12 +288,12 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
    - Confirm with your Passkey: the transfer settles directly into your `near.com` internal balance with zero bridge fees.
    - You can edit your saved destination at any time by clicking **Edit** (also passkey-gated).
 
-### Flow 3: Connect an AI Agent (Claude, ChatGPT, Cursor) via OAuth 2.1 + MCP
+### Flow 4: Connect an AI Agent (Claude, ChatGPT, Cursor) via OAuth 2.1 + MCP
 1. Go to [https://app.uprail.world/app/agents](https://app.uprail.world/app/agents) and copy the MCP server URL `https://api.uprail.world/api/mcp`.
 2. Add it as a remote connector in Claude, ChatGPT, or Cursor—this launches UPRAIL's **OAuth 2.1 PKCE + Passkey** consent screen where you set per-transaction and daily USD spend caps.
 3. Once connected, manage or revoke active agent session cards directly on `/app/agents`. Your agent gets access to all **13 MCP tools** (`pay_handle`, `check_approval`, `withdraw_to_wallet`, `receive_payment`, `get_balance`, `list_payments`, `resolve_handle`, `list_contacts`, `save_contact`, `request_payment`, `list_requests`, `accept_request`, `decline_request`) bounded by your passkey-approved caps.
 
-### Flow 4: Public Payment Link (`uprail.world/<handle>` — Live Example: `@xy63ry0rx`)
+### Flow 5: Public Payment Link (`uprail.world/<handle>` — Live Example: `@xy63ry0rx`)
 1. **Enable Your Payment Link (Passkey-Gated):** On your dashboard ([https://app.uprail.world/app](https://app.uprail.world/app)), click the coin-pouch button under **Stabilize** and flip the toggle (verified by Face ID / Touch ID). Your link `https://uprail.world/<handle>` goes live immediately with a `PAY ME HERE` OpenGraph preview card showing your X profile picture.
 2. **Get Paid Without Payer Sign-Up (Human Flow):** Visit the live public page [https://uprail.world/xy63ry0rx](https://uprail.world/xy63ry0rx) without logging in, choose `USDC` / `USDT` / `NEAR` / `SOL` / `ETH` / `BTC`, enter an exact token amount (`amountToken`), pick an origin chain, and send to a one-time `FLEX_INPUT` confidential deposit address + QR code. `checkAndSettleCoffeeDonation` settles 99% net privately via `payEscrowPrivate` and displays a minimal receipt.
 3. **Get Paid by Any Visiting AI Agent:**
@@ -290,12 +306,6 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
      -H "Content-Type: application/json" \
      -d '{"amountToken":"1","originSymbol":"NEAR","originChain":"near"}' | jq .
    ```
-
-### Flow 5: Circles (Shared Earn Pools) & Timelocked Earn Vault Gifting
-1. **Create a Circle Pool:** On `/app/circles` (click **Circles** above **Stabilize** on the dashboard), pick one of 6 live Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`), assign member handles with percentage splits summing to `100%`, and sign with your Passkey.
-   - **Expected result:** Contributions convert into compounding vault shares held in the Circle's dedicated `intents.near` custody account until settled to the target payout handle or unanimously dissolved via member passkeys.
-2. **Send a Timelocked Earn Gift:** Open **Send Gift** on `/app/circles`, enter any recipient `@handle`, pick an occasion preset & unlock timestamp, optionally hide exact USD principal, and fund from any Intents asset with your Passkey.
-   - **Expected result:** UPRAIL swaps into the chosen Earn vault, renders a shareable `uprail.world/gift/<id>` page with `/og/gift/<id>.png` preview card, and blocks claims until `Date.now() >= timelock_until` and recipient X + Passkey verification.
 
 ---
 
