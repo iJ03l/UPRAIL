@@ -90,21 +90,24 @@ export const LandingPage: React.FC = () => {
                 𝕏
               </span>{' '}
               h
-              <span className="relative inline-block leading-none">
-                a
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="pointer-events-none absolute left-[45%] bottom-[0.16em] -translate-x-1/2 w-[0.23em] h-[0.23em] text-emerald-500"
-                >
+              <span className="relative inline-flex items-center justify-center align-baseline mx-[0.01em] top-[0.11em] w-[0.72em] h-[0.72em] text-emerald-600 dark:text-emerald-400">
+                <svg viewBox="0 0 28 28" fill="none" className="w-full h-full">
+                  <g className="hero-at-orbit">
+                    <path
+                      d="M17.2 10.6v4.1c0 1.8 1.1 2.9 2.7 2.9 2.2 0 3.7-2 3.7-5.1 0-5-3.8-8.7-9.4-8.7-5.7 0-9.8 4.1-9.8 9.8 0 5.8 4.2 9.8 10.1 9.8 2.4 0 4.5-.6 6.2-1.7"
+                      stroke="currentColor"
+                      strokeWidth="3.1"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </g>
                   <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    fill="currentColor"
-                    className="hero-beacon-ring"
+                    cx="13.7"
+                    cy="13.7"
+                    r="3.8"
+                    stroke="currentColor"
+                    strokeWidth="3"
                   />
-                  <circle cx="12" cy="12" r="6" fill="currentColor" />
                 </svg>
               </span>
               ndle
@@ -125,20 +128,32 @@ export const LandingPage: React.FC = () => {
                 </svg>
               </span>
               s now your pri
-              <span className="relative inline-block leading-none">
-                v
+              <span className="relative inline-flex items-center justify-center align-baseline mx-[0.01em] top-[0.06em] w-[0.58em] h-[0.58em]">
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
-                  className="pointer-events-none absolute left-1/2 top-[0.23em] -translate-x-1/2 w-[0.28em] h-[0.28em] text-[#E05326]"
+                  className="w-full h-full hero-shield-glyph"
                 >
-                  <g className="hero-shield-glyph">
-                    <path
-                      d="M12 2.5L4.5 5.8v5.1c0 4.9 3.2 9.2 7.5 10.6 4.3-1.4 7.5-5.7 7.5-10.6V5.8L12 2.5z"
-                      fill="currentColor"
-                    />
-                    <circle cx="12" cy="11" r="2.2" fill="white" />
-                  </g>
+                  <path
+                    d="M4.2 5.4L12 3.4L19.8 5.4L12 19.6Z"
+                    fill="#E05326"
+                    fillOpacity="0.16"
+                  />
+                  <path
+                    d="M4 5.2L12 3.2L20 5.2"
+                    stroke="#E05326"
+                    strokeWidth="2.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M3.8 5.4L12 20.4L20.2 5.4"
+                    stroke="currentColor"
+                    strokeWidth="3.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle cx="12" cy="10.2" r="1.8" fill="#E05326" />
                 </svg>
               </span>
               ate m
@@ -172,7 +187,7 @@ export const LandingPage: React.FC = () => {
           </h1>
 
           <p className="text-base sm:text-lg md:text-xl text-stone-600 max-w-2xl font-sans leading-relaxed">
-            Pay friends, earn together in Circles, gift timelocked vaults, and route near.com or AI agents without a wallet.
+            Pay anyone, earn together in Circles, gift timelocked vaults, and route near.com or AI agents without a wallet.
           </p>
 
           <div className="pt-2 sm:pt-4 flex flex-col items-start gap-3">

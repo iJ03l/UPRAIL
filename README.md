@@ -1,7 +1,7 @@
 # UPRAIL (v1.1)
 
 **Your X handle is now your private money hub.**  
-UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`intents.near` + Confidential Intents): pay friends privately by `@handle`, earn together in yield-bearing **Circles**, send timelocked Earn vault **Gifts**, accept no-login **Buy Me a Coffee** tips across 35+ chains, and route `near.com` or autonomous **AI agents** — all without a seed phrase or gas.
+UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`intents.near` + Confidential Intents): pay anyone privately by `@handle`, earn together in yield-bearing **Circles**, send timelocked Earn vault **Gifts**, accept no-login **Buy Me a Coffee** tips across 35+ chains, and route `near.com` or autonomous **AI agents** — all without a seed phrase or gas.
 
 - **Version:** v1.1.0
 - **Hackathon Tracks:** Privacy & Private AI (`privacy`) · Social Money (`social`) · Unstoppable DeFi (`defi`) · Agent Economy (`agents`) · Autonomous Business (`business`) · Real-World Money (`realworld`) · Open Innovation (`open`)
@@ -144,7 +144,7 @@ Instead of building a single-purpose bridge or spend-cap script, UPRAIL wraps **
 
 1. **Social Transfers, Invoicing & Public Pay Links (No Wallet Required):** Public explorers expose every financial relationship, and asking someone for a chain-specific address breaks peer payments. UPRAIL maps any `@handle` to a deterministic NEAR vault (`u_<hex>.escrow.uprail.near`) with 100% sponsored gas, `CONFIDENTIAL_INTENTS` routing, pooled escrow for unregistered recipients, *People You Pay* contact memory, `/request/:id` invoicing, and public `uprail.world/<handle>` pages.
 2. **Social Earning & Timelocked Gifting (`Circles` + `Gifts`):** Real social money isn't just 1-to-1 transfers — people save together and gift across milestones. **Circles** let groups pool into 6 curated 1Click Earn vaults with percentage splits and unanimous WebAuthn passkey dissolve, while **Timelocked Gifts** (`uprail.world/gift/:id`) compound yield until an unlock timestamp behind anti-IDOR and biometric claim gates.
-3. **Universal Ingress for `near.com` & 35+ Chains:** `near.com` and 1Click deposit addresses rotate per live user session, so friends, clients, or agents can't fund you asynchronously. UPRAIL turns `@handle` and `uprail.world/<handle>` into permanent cross-chain ingress across 35+ chains, paired with **Stabilize** swaps into USDC/USDT and a **0%-bridge-fee `near.com` internal withdrawal rail (`nearcom:0x...`)**.
+3. **Universal Ingress for `near.com` & 35+ Chains:** `near.com` and 1Click deposit addresses rotate per live user session, so peers, clients, or agents can't fund you asynchronously. UPRAIL turns `@handle` and `uprail.world/<handle>` into permanent cross-chain ingress across 35+ chains, paired with **Stabilize** swaps into USDC/USDT and a **0%-bridge-fee `near.com` internal withdrawal rail (`nearcom:0x...`)**.
 4. **Autonomous Agents & Creator Fee Routing (Post-Frontend Era):** Software is shifting from web dashboards to AI assistants, and launchpads shouldn't force creators to expose static wallets. UPRAIL embeds an **OAuth 2.1 + 13-tool MCP server** (`api.uprail.world/api/mcp`) with atomic biometric spend caps and `/approve` escalation, alongside on-chain receipt verification for launchpad creator fees (`Fees to @handle via UPRAIL`).
 
 ---

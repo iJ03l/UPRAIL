@@ -26,10 +26,13 @@ interface CapabilityCardData {
   ctaHref: (appUrl: string) => string;
   docsHref: string;
   variant: 'dark' | 'light' | 'coffee';
+  receiptLines: [ { label: string; value: string }, { label: string; value: string } ];
   isRequestArrow?: boolean;
   isCoffee?: boolean;
   icon?: 'leaf' | 'gift';
 }
+
+const BARCODE_BARS = [2, 1, 3, 1, 2, 1, 1, 3, 2, 1, 2, 3, 1, 2, 1, 1, 2, 1];
 
 const CARDS: CapabilityCardData[] = [
   {
@@ -42,6 +45,10 @@ const CARDS: CapabilityCardData[] = [
     ctaHref: (appUrl) => `${appUrl}/request`,
     docsHref: 'https://docs.uprail.world',
     variant: 'dark',
+    receiptLines: [
+      { label: 'PAYER', value: 'Any 𝕏 @handle' },
+      { label: 'SETTLEMENT', value: '1-Tap Passkey' },
+    ],
     isRequestArrow: true,
   },
   {
@@ -54,6 +61,10 @@ const CARDS: CapabilityCardData[] = [
     ctaHref: (appUrl) => `${appUrl}/agents`,
     docsHref: 'https://docs.uprail.world/docs/agents',
     variant: 'light',
+    receiptLines: [
+      { label: 'PROTOCOL', value: 'OAuth 2.1 + MCP' },
+      { label: 'POLICY', value: 'Atomic USD Caps' },
+    ],
   },
   {
     id: 'fees',
@@ -65,6 +76,10 @@ const CARDS: CapabilityCardData[] = [
     ctaHref: (appUrl) => `${appUrl}/claim?view=fees`,
     docsHref: 'https://docs.uprail.world/docs/fees',
     variant: 'dark',
+    receiptLines: [
+      { label: 'ROUTING', value: 'On-Chain Receipt' },
+      { label: 'GAS', value: '100% Sponsored' },
+    ],
   },
   {
     id: 'coffee',
@@ -76,6 +91,10 @@ const CARDS: CapabilityCardData[] = [
     ctaHref: (appUrl) => appUrl,
     docsHref: 'https://docs.uprail.world/docs/coffee',
     variant: 'coffee',
+    receiptLines: [
+      { label: 'CHECKOUT', value: 'Zero Login' },
+      { label: 'NETWORKS', value: '35+ Blockchains' },
+    ],
     isCoffee: true,
   },
   {
@@ -83,11 +102,15 @@ const CARDS: CapabilityCardData[] = [
     num: '05',
     eyebrow: '05 / Circles',
     title: 'Pool Earn vaults together.',
-    summary: 'Split a shared goal with friends in 1Click Earn vaults. Compound yield together until payout or dissolve.',
+    summary: 'Split a shared goal with anyone in 1Click Earn vaults. Compound yield together until payout or dissolve.',
     ctaLabel: 'Open Circles',
     ctaHref: (appUrl) => `${appUrl}/circles`,
     docsHref: 'https://docs.uprail.world/circles',
     variant: 'light',
+    receiptLines: [
+      { label: 'VAULTS', value: '6 Earn Pools (9.2%)' },
+      { label: 'CUSTODY', value: 'Isolated Escrow' },
+    ],
     icon: 'leaf',
   },
   {
@@ -100,6 +123,10 @@ const CARDS: CapabilityCardData[] = [
     ctaHref: (appUrl) => `${appUrl}/circles?tab=gifts`,
     docsHref: 'https://docs.uprail.world/circles#gift',
     variant: 'dark',
+    receiptLines: [
+      { label: 'TIMELOCK', value: 'Unlock Date + Passkey' },
+      { label: 'GIFT FEE', value: '0% Protocol Fee' },
+    ],
     icon: 'gift',
   },
 ];
@@ -169,12 +196,19 @@ const ArcCard: React.FC<ArcCardProps> = ({
         ? 'text-stone-600 dark:text-stone-300'
         : 'text-stone-400';
 
-  const footerBorderClass =
+  const dashedBorderClass =
     card.variant === 'coffee'
-      ? 'border-[#E2D2BA] dark:border-[#3E2D20]'
+      ? 'border-[#D9C4A9] dark:border-[#4B3626]'
       : card.variant === 'light'
-        ? 'border-stone-200 dark:border-stone-800'
-        : 'border-stone-800/90';
+        ? 'border-stone-300 dark:border-stone-700'
+        : 'border-stone-800';
+
+  const valueClass =
+    card.variant === 'coffee'
+      ? 'text-[#1E140E] dark:text-[#FAF3E8]'
+      : card.variant === 'light'
+        ? 'text-stone-900 dark:text-stone-100'
+        : 'text-stone-100';
 
   const docsLinkClass =
     card.variant === 'coffee'
@@ -196,24 +230,32 @@ const ArcCard: React.FC<ArcCardProps> = ({
       onClick={() => {
         if (!isCenter) onSelect(index);
       }}
-      className={`absolute top-4 w-[min(90vw,440px)] sm:w-[660px] md:w-[750px] min-h-[430px] sm:min-h-[540px] rounded-[2.25rem] border p-8 sm:p-12 shadow-xl flex flex-col justify-between select-none ${surfaceClass} ${
+      className={`absolute top-6 sm:top-4 w-[310px] sm:w-[660px] md:w-[750px] min-h-[320px] sm:min-h-[540px] rounded-2xl sm:rounded-3xl border shadow-xl flex flex-col justify-between select-none overflow-hidden ${surfaceClass} ${
         isCenter ? 'pointer-events-auto cursor-default' : 'cursor-pointer'
       }`}
     >
-      <div className="space-y-5">
-        <div className="flex items-center justify-between">
-          <span
-            className={`text-xs font-mono uppercase tracking-widest font-bold inline-flex items-center gap-1.5 ${eyebrowClass}`}
-          >
-            {card.isCoffee && <SolidCoffeeIcon className="w-4 h-4 text-[#E05326]" />}
-            {card.icon === 'leaf' && (
-              <Leaf className="w-4 h-4 text-emerald-600 fill-emerald-500/20" />
-            )}
-            {card.icon === 'gift' && <Gift className="w-4 h-4 text-amber-400" />}
-            <span>{card.eyebrow}</span>
+      {/* Top Receipt Strip */}
+      <div
+        className={`px-6 sm:px-11 pt-5 sm:pt-8 pb-3 border-b border-dashed flex items-center justify-between ${dashedBorderClass}`}
+      >
+        <span
+          className={`text-[10px] sm:text-xs font-mono uppercase tracking-widest font-bold inline-flex items-center gap-1.5 ${eyebrowClass}`}
+        >
+          {card.isCoffee && <SolidCoffeeIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#E05326]" />}
+          {card.icon === 'leaf' && (
+            <Leaf className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 fill-emerald-500/20" />
+          )}
+          {card.icon === 'gift' && (
+            <Gift className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+          )}
+          <span>RCPT // {card.eyebrow}</span>
+        </span>
+        <div className="flex items-center gap-2">
+          <span className={`hidden sm:inline text-[10px] font-mono uppercase tracking-wider ${eyebrowClass}`}>
+            UPRAIL RAIL
           </span>
           <span
-            className={`w-2.5 h-2.5 rounded-full ${
+            className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${
               card.icon === 'leaf'
                 ? 'bg-emerald-500'
                 : card.icon === 'gift'
@@ -222,32 +264,63 @@ const ArcCard: React.FC<ArcCardProps> = ({
             }`}
           />
         </div>
-
-        <h3 className="text-4xl sm:text-5xl md:text-[3.25rem] font-display font-extrabold tracking-tight leading-[1.04]">
-          {card.title}
-        </h3>
-
-        <p className={`text-base sm:text-lg md:text-xl leading-relaxed ${summaryClass}`}>
-          {card.summary}
-        </p>
       </div>
 
-      <div
-        className={`flex items-center justify-between pt-5 mt-6 border-t gap-3 ${footerBorderClass}`}
-      >
-        <a
-          href={card.docsHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          tabIndex={isCenter ? 0 : -1}
-          onClick={(e) => {
-            if (!isCenter) e.preventDefault();
-          }}
-          className={`text-xs font-mono transition-colors inline-flex items-center gap-1 ${docsLinkClass}`}
-        >
-          <span>Docs</span>
-          <ExternalLink className="w-3 h-3" />
-        </a>
+      {/* Main Receipt Body */}
+      <div className="px-6 sm:px-11 py-4 sm:py-7 flex-1 flex flex-col justify-between gap-4 sm:gap-6">
+        <div className="space-y-2 sm:space-y-4">
+          <h3 className="text-2xl sm:text-5xl md:text-[3.25rem] font-display font-extrabold tracking-tight leading-[1.05]">
+            {card.title}
+          </h3>
+
+          <p className={`text-xs sm:text-lg md:text-xl leading-relaxed ${summaryClass}`}>
+            {card.summary}
+          </p>
+        </div>
+
+        {/* Receipt Ledger Rows */}
+        <div className={`pt-3 sm:pt-4 border-t border-dashed space-y-1.5 sm:space-y-2.5 font-mono text-[10px] sm:text-xs ${dashedBorderClass}`}>
+          {card.receiptLines.map((row) => (
+            <div key={row.label} className="flex items-center justify-between gap-3">
+              <span className={`uppercase tracking-wider ${eyebrowClass}`}>{row.label}</span>
+              <span className={`flex-1 border-b border-dotted opacity-40 ${dashedBorderClass}`} />
+              <span className={`font-bold ${valueClass}`}>{row.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Perforated Tear Line + Side Cutouts + Barcode Footer */}
+      <div className={`relative px-6 sm:px-11 py-4 sm:py-6 border-t border-dashed flex items-center justify-between gap-3 ${dashedBorderClass}`}>
+        <span className="absolute -left-2.5 -top-2.5 w-5 h-5 rounded-full bg-surface border border-stone-200/60 dark:border-stone-800/60 pointer-events-none" />
+        <span className="absolute -right-2.5 -top-2.5 w-5 h-5 rounded-full bg-surface border border-stone-200/60 dark:border-stone-800/60 pointer-events-none" />
+
+        <div className="flex items-center gap-3 sm:gap-4">
+          {/* Receipt Barcode Stub */}
+          <div className="hidden sm:flex items-center gap-[2px] h-5 opacity-45" aria-hidden="true">
+            {BARCODE_BARS.map((w, i) => (
+              <span
+                key={i}
+                style={{ width: `${w}px` }}
+                className="h-full bg-current rounded-[0.5px]"
+              />
+            ))}
+          </div>
+
+          <a
+            href={card.docsHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={isCenter ? 0 : -1}
+            onClick={(e) => {
+              if (!isCenter) e.preventDefault();
+            }}
+            className={`text-xs font-mono transition-colors inline-flex items-center gap-1 ${docsLinkClass}`}
+          >
+            <span>Docs</span>
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
 
         <a
           href={card.ctaHref(appSubdomainUrl)}
@@ -257,7 +330,7 @@ const ArcCard: React.FC<ArcCardProps> = ({
           onClick={(e) => {
             if (!isCenter) e.preventDefault();
           }}
-          className={`px-5 py-2.5 rounded-xl font-display font-extrabold text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all ${ctaClass}`}
+          className={`px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl font-display font-extrabold text-[11px] sm:text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all ${ctaClass}`}
         >
           {card.isCoffee && <SolidCoffeeIcon className="w-3.5 h-3.5 text-[#E05326]" />}
           {card.icon === 'leaf' && <Leaf className="w-3.5 h-3.5 text-emerald-500" />}
@@ -361,7 +434,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
 
         {/* Continuous Scroll-Driven Right-to-Left Arc Stage */}
         <div
-          className="relative w-full h-[480px] sm:h-[585px] flex items-start justify-center overflow-x-clip overflow-y-visible"
+          className="relative w-full h-[420px] sm:h-[585px] flex items-start justify-center overflow-x-clip overflow-y-visible"
           style={{
             WebkitMaskImage:
               'linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)',

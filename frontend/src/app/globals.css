@@ -678,14 +678,18 @@
 }
 
 /* Hero typographic letter-embedded icon animations (GPU-only transforms & opacity) */
-@keyframes hero-beacon-pulse {
-  0%, 100% {
-    transform: scale(0.92);
-    opacity: 0.45;
+@keyframes hero-at-orbit {
+  0%, 58% {
+    transform: rotate(0deg) scale(1);
   }
-  50% {
-    transform: scale(1.45);
-    opacity: 0.12;
+  78% {
+    transform: rotate(-14deg) scale(1.06);
+  }
+  90% {
+    transform: rotate(4deg) scale(1);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
   }
 }
 
@@ -719,8 +723,8 @@
   }
 }
 
-.hero-beacon-ring {
-  animation: hero-beacon-pulse 2.6s ease-in-out infinite;
+.hero-at-orbit {
+  animation: hero-at-orbit 4.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   transform-box: fill-box;
   transform-origin: center;
 }
