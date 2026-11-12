@@ -452,3 +452,10 @@ Local configuration templates are available in `worker/.dev.vars.example` and `g
 - **Remote MCP Endpoint:** `https://api.uprail.world/api/mcp`
 - **Agent OpenAPI 3.1.0 Spec:** [https://api.uprail.world/api/agent/openapi.json](https://api.uprail.world/api/agent/openapi.json)
 - **X (Twitter):** [@uprailworld](https://x.com/uprailworld)
+
+---
+
+## License
+
+Released under the [MIT License](./LICENSE).
+
