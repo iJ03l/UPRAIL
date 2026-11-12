@@ -202,14 +202,39 @@ export const LandingPage: React.FC = () => {
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </a>
 
-            <div className="inline-flex items-center gap-2 text-xs font-mono text-stone-500 pl-0.5 select-none">
+            <div
+              aria-label="Powered by NEAR"
+              className="inline-flex items-center gap-2 text-xs font-mono text-stone-500 pl-0.5 select-none"
+            >
               <span>Powered by</span>
-              <img
-                src="/brand/near-logo.svg"
-                alt="NEAR Intents"
-                className="w-4 h-4 rounded-full ring-1 ring-black/10 dark:ring-white/20"
-              />
-              <span className="font-bold text-stone-800">NEAR Intents</span>
+              <span className="inline-flex items-center gap-1.5 text-stone-950 dark:text-white">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  color="#000"
+                  viewBox="0 0 512 512"
+                  aria-hidden="true"
+                  className="w-4 h-4 shrink-0"
+                >
+                  <rect width="512" height="512" fill="#00EC97" rx="110" />
+                  <path
+                    fill="currentColor"
+                    d="M373.89 106.199a31.95 31.95 0 0 0-27.213 15.207l-62.631 92.979a6.67 6.67 0 0 0-.989 5.001 6.66 6.66 0 0 0 2.837 4.235 6.67 6.67 0 0 0 8.032-.494l61.643-53.47c1.02-.924 2.599-.827 3.523.193.419.473.644 1.074.644 1.697v167.402a2.49 2.49 0 0 1-2.502 2.491 2.48 2.48 0 0 1-1.912-.891L168.976 117.497a31.93 31.93 0 0 0-24.356-11.298h-6.508c-17.623 0-31.917 14.294-31.917 31.917v235.767c0 17.623 14.294 31.917 31.917 31.917a31.94 31.94 0 0 0 27.213-15.206l62.631-92.98a6.66 6.66 0 0 0-1.847-9.236 6.67 6.67 0 0 0-8.033.494l-61.643 53.471c-1.02.923-2.599.826-3.522-.194a2.49 2.49 0 0 1-.634-1.697V173.008a2.49 2.49 0 0 1 2.502-2.492c.731 0 1.439.322 1.912.891l186.313 223.096a31.95 31.95 0 0 0 24.357 11.297h6.508c17.623 0 31.927-14.272 31.938-31.895V138.116c0-17.623-14.294-31.917-31.917-31.917"
+                  />
+                </svg>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 981 254"
+                  aria-hidden="true"
+                  className="h-3 w-auto shrink-0"
+                >
+                  <path
+                    fill="currentColor"
+                    d="M136.42.98c-26.61 0-45.96 6.29-62.4 20.8L44.99 46.93c-2.42 1.94-7.26 3.39-10.64.48-3.39-2.9-3.87-6.77-.97-10.64l15.48-23.22c2.42-3.39.49-7.74-3.87-7.74H7.74C3.39 5.81 0 9.2 0 13.55v226.4c0 4.35 3.39 7.74 7.74 7.74h38.7c4.35 0 7.74-3.39 7.74-7.74V112.24c0-58.53 48.86-67.72 67.24-67.72 39.18 0 53.21 28.06 53.21 49.34v146.09c0 4.35 3.39 7.74 7.74 7.74h38.7c4.35 0 7.74-3.39 7.74-7.74V89.02c0-54.18-35.32-88.04-92.4-88.04zM386.503.012c-74.98 0-122.87 45.96-122.87 108.36v34.35c0 65.79 47.89 110.78 122.87 110.78 66.27 0 112.71-34.35 117.55-80.79.49-4.84-2.9-8.22-7.74-8.22h-37.73c-3.39 0-6.29 1.94-7.26 5.32-4.84 15.48-27.57 38.7-64.82 38.7s-72.08-27.09-71.6-65.79l.49-43.05c.48-32.41 34.35-54.66 71.11-54.66 33.38 0 65.79 18.87 69.17 49.83a7.073 7.073 0 0 1-5.71 7.49l-108.46 21.05c-4.35.97-7.74 4.84-7.74 9.67v.48c0 4.35 4.35 8.22 10.64 8.22h155.77a7.74 7.74 0 0 0 7.74-7.74v-30.47c0-57.56-49.83-103.52-121.42-103.52zM656.423.01c-60.47 0-112.71 35.31-112.71 81.75 0 3.87 3.39 6.77 7.74 6.77h39.18c3.87 0 6.77-2.9 7.26-6.77 3.87-21.28 29.51-36.76 57.08-36.76 32.89 0 55.15 20.32 55.15 55.15v42.09c0 43.05-31.93 64.82-71.6 64.82-30.96 0-48.86-11.61-48.86-30.48 0-16.45 8.71-30.48 44.5-38.7l51.76-14.03c5.32-1.45 7.26-5.81 6.29-10.64-.48-3.87-4.83-5.81-8.71-5.81h-53.69c-45.47 0-91.43 29.02-91.43 71.59v6.77c0 43.54 41.12 66.27 88.04 66.27 29.99 0 55.63-11.61 71.59-25.15l23.71-20.32c3.87-3.39 7.74-3.39 11.12 0 2.9 2.9 1.93 7.26-.49 10.64l-14.51 22.74c-2.42 3.39-.49 7.74 3.87 7.74h34.83c4.35 0 7.74-3.39 7.74-7.74V93.36c0-56.11-40.15-93.36-107.88-93.36zm316.836 5.81h-54.18c-18.86 0-37.25 11.61-50.31 22.74l-21.28 18.38c-2.42 1.94-6.78 3.39-9.68.97-3.39-2.42-4.84-7.26-1.93-11.13l15.48-23.22c2.42-3.39.49-7.74-3.87-7.74h-36.28c-4.35 0-7.74 3.39-7.74 7.74v226.4c0 4.35 3.39 7.74 7.74 7.74h39.67c4.35 0 7.74-3.39 7.74-7.74v-116.1c0-49.83 20.32-72.08 64.34-72.08h50.31c4.35 0 7.74-3.39 7.74-7.74V13.56c0-4.35-3.39-7.74-7.74-7.74z"
+                  />
+                </svg>
+              </span>
             </div>
           </div>
         </section>
@@ -353,39 +378,12 @@ export const LandingPage: React.FC = () => {
               <span>{isDark ? 'Light' : 'Dark'}</span>
             </button>
             <a
-              href="https://docs.uprail.world/docs/near"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-black transition-colors flex items-center"
-            >
-              <span>near.com Rail</span>
-              <ExternalLink className="w-3 h-3 ml-1" />
-            </a>
-            <a
               href="https://docs.uprail.world"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-black transition-colors flex items-center"
             >
               <span>Docs</span>
-              <ExternalLink className="w-3 h-3 ml-1" />
-            </a>
-            <a
-              href={`${appSubdomainUrl}/request`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-black transition-colors flex items-center"
-            >
-              <span>Request Money</span>
-              <ExternalLink className="w-3 h-3 ml-1" />
-            </a>
-            <a
-              href="https://docs.near-intents.org"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-black transition-colors flex items-center"
-            >
-              <span>1Click Docs</span>
               <ExternalLink className="w-3 h-3 ml-1" />
             </a>
             <a
