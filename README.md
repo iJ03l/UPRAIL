@@ -6,7 +6,7 @@ UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`inte
 - **Version:** v1.1.0
 - **Hackathon Tracks:** Privacy & Private AI (`privacy`) · Social Money (`social`) · Unstoppable DeFi (`defi`) · Agent Economy (`agents`) · Autonomous Business (`business`) · Real-World Money (`realworld`) · Open Innovation (`open`)
 - **Mainnet Traction (Real People, Real Money):** **76 and counting** real users · **134+ and counting** mainnet payment & withdrawal transactions · **$159.31+ USDC and counting** settled volume ($183.54+ initiated) on NEAR Mainnet
-- **Live Application:** [https://app.uprail.world](https://app.uprail.world)
+- **Live Application:** [https://app.uprail.world](https://app.uprail.world) *(Judge Invite Code: `INTENT` — controlled onboarding while testing and talking directly with early users)*
 - **Marketing & Interactive Preview:** [https://uprail.world](https://uprail.world)
 - **Developer Documentation:** [https://docs.uprail.world](https://docs.uprail.world)
 - **Remote MCP Server:** `https://api.uprail.world/api/mcp`
@@ -116,7 +116,7 @@ curl -sS https://api.uprail.world/api/gifts/vaults | jq '.vaults | length'
 | **7. AI Agent Rail (OAuth 2.1 + 13-Tool MCP)** | Connect `https://api.uprail.world/api/mcp` in Claude/ChatGPT/Cursor & approve caps with Passkey | Agent calls 13 MCP tools (`pay_handle`, `request_payment`, etc.) bounded by atomic per-tx/daily USD caps |
 | **8. Launchpad Creator-Fee Routing** | Register token via `POST /api/launchpads/register` or send `Fees to @handle via UPRAIL` | Escrow verifies on-chain receipts/memos via NEAR RPC and credits the creator's vault automatically |
 | **9. Hardware Passkeys & Recovery Codes** | Register WebAuthn P-256 passkey on onboarding; view/rotate encrypted recovery codes | Every fund-moving endpoint rejects unverified sessions; lost passkeys rotate safely via HMAC recovery codes |
-| **10. 100% Sponsored Gas & Key Export** | Onboard a fresh X account with 0 NEAR; run `Export Private Key` with Passkey | `escrow.uprail.near` sponsors account creation, `intents.near` key reg & NEP-145 storage; full self-custody export |
+| **10. 100% Sponsored Gas & Key Export** | Onboard a fresh X account with invite code `INTENT` & 0 NEAR; run `Export Private Key` with Passkey | `escrow.uprail.near` sponsors account creation, `intents.near` key reg & NEP-145 storage; full self-custody export |
 | **11. Circles & Timelocked Earn Vault Gifting** | Click **Circles** above **Stabilize** (`/app/circles`) to pool percentage-sized member goals or send a 1-to-1 timelocked Earn Vault gift (`uprail.world/gift/:id`) | Routes into 6 curated 1Click Earn vaults (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`), compounds yield in per-item custody accounts, renders dynamic `/og/gift/:id.png` SEO cards, and enforces passkey + anti-IDOR gates |
 
 ---
@@ -252,7 +252,7 @@ Peer-to-peer finance is fundamentally relational and two-sided. UPRAIL introduce
 ## Quick Demo (For Human & AI Judges)
 
 ### Flow 1: Send & Claim Privately by `@handle`
-1. **Sign In & Provision Vault:** Go to [https://app.uprail.world](https://app.uprail.world), sign in with X, and register a device Passkey (Touch ID / Face ID).
+1. **Sign In, Enter Invite Code `INTENT` & Provision Vault:** Go to [https://app.uprail.world](https://app.uprail.world), sign in with X, enter invite code **`INTENT`** *(gated during active testing so onboarding stays controlled and the team can talk directly with early users)*, and register a device Passkey (Touch ID / Face ID).
    - **Expected result:** UPRAIL deterministically provisions your vault, registers its key on `intents.near`, and displays your recovery codes.
 2. **Deposit or Check Balance:** Open **Receive** (`/app/receive`) to copy your `@handle` payment link or generate a cross-chain deposit address (e.g., USDC from Base, Arbitrum, Solana, or NEAR).
 3. **Send to Any `@handle`:** Open **Send** (`/app/send`), enter any X handle (even one that has never used UPRAIL), choose an asset and amount, and confirm with your Passkey.
@@ -437,7 +437,7 @@ Local configuration templates are available in `worker/.dev.vars.example` and `g
 
 ## Links
 
-- **Live Web App:** [https://app.uprail.world](https://app.uprail.world)
+- **Live Web App:** [https://app.uprail.world](https://app.uprail.world) *(Judge Invite Code: `INTENT` — controlled onboarding during active testing & user feedback)*
 - **Marketing & Interactive Demo:** [https://uprail.world](https://uprail.world)
 - **Developer Docs:** [https://docs.uprail.world](https://docs.uprail.world) ([AI Agents](https://docs.uprail.world/agents) · [MCP Server](https://docs.uprail.world/mcp) · [Creator Fees](https://docs.uprail.world/fees) · [Buy Me a Coffee](https://docs.uprail.world/coffee))
 - **Remote MCP Endpoint:** `https://api.uprail.world/api/mcp`
