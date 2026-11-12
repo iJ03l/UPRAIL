@@ -127,7 +127,7 @@ const ArcCard: React.FC<ArcCardProps> = ({
 }) => {
   const offset = useTransform(progress, (p) => index - p);
 
-  const x = useTransform(offset, [-2, -1, 0, 1, 2], ['-225%', '-116%', '0%', '116%', '225%']);
+  const x = useTransform(offset, [-2, -1, 0, 1, 2], ['-205%', '-108%', '0%', '108%', '205%']);
   const y = useTransform(
     offset,
     [-2, -1, -0.45, 0, 0.45, 1, 2],
@@ -196,24 +196,24 @@ const ArcCard: React.FC<ArcCardProps> = ({
       onClick={() => {
         if (!isCenter) onSelect(index);
       }}
-      className={`absolute top-6 w-[310px] sm:w-[440px] md:w-[500px] min-h-[320px] sm:min-h-[360px] rounded-[2rem] border p-7 sm:p-10 shadow-xl flex flex-col justify-between select-none ${surfaceClass} ${
+      className={`absolute top-4 w-[min(90vw,440px)] sm:w-[660px] md:w-[750px] min-h-[430px] sm:min-h-[540px] rounded-[2.25rem] border p-8 sm:p-12 shadow-xl flex flex-col justify-between select-none ${surfaceClass} ${
         isCenter ? 'pointer-events-auto cursor-default' : 'cursor-pointer'
       }`}
     >
-      <div className="space-y-4">
+      <div className="space-y-5">
         <div className="flex items-center justify-between">
           <span
-            className={`text-[11px] font-mono uppercase tracking-widest font-bold inline-flex items-center gap-1.5 ${eyebrowClass}`}
+            className={`text-xs font-mono uppercase tracking-widest font-bold inline-flex items-center gap-1.5 ${eyebrowClass}`}
           >
-            {card.isCoffee && <SolidCoffeeIcon className="w-3.5 h-3.5 text-[#E05326]" />}
+            {card.isCoffee && <SolidCoffeeIcon className="w-4 h-4 text-[#E05326]" />}
             {card.icon === 'leaf' && (
-              <Leaf className="w-3.5 h-3.5 text-emerald-600 fill-emerald-500/20" />
+              <Leaf className="w-4 h-4 text-emerald-600 fill-emerald-500/20" />
             )}
-            {card.icon === 'gift' && <Gift className="w-3.5 h-3.5 text-amber-400" />}
+            {card.icon === 'gift' && <Gift className="w-4 h-4 text-amber-400" />}
             <span>{card.eyebrow}</span>
           </span>
           <span
-            className={`w-2 h-2 rounded-full ${
+            className={`w-2.5 h-2.5 rounded-full ${
               card.icon === 'leaf'
                 ? 'bg-emerald-500'
                 : card.icon === 'gift'
@@ -223,11 +223,11 @@ const ArcCard: React.FC<ArcCardProps> = ({
           />
         </div>
 
-        <h3 className="text-3xl sm:text-4xl font-display font-extrabold tracking-tight leading-[1.05]">
+        <h3 className="text-4xl sm:text-5xl md:text-[3.25rem] font-display font-extrabold tracking-tight leading-[1.04]">
           {card.title}
         </h3>
 
-        <p className={`text-sm sm:text-base leading-relaxed ${summaryClass}`}>
+        <p className={`text-base sm:text-lg md:text-xl leading-relaxed ${summaryClass}`}>
           {card.summary}
         </p>
       </div>
@@ -325,7 +325,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
       ref={trackRef}
       className="relative w-full max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 scroll-mt-20 min-h-[340vh] sm:min-h-[380vh]"
     >
-      <div className="sticky top-20 sm:top-24 py-4 sm:py-6 flex flex-col justify-center space-y-6">
+      <div className="sticky top-14 sm:top-16 py-2 sm:py-3 flex flex-col justify-center space-y-4">
         {/* Clean Header + Prev/Next Arrows */}
         <div className="flex items-end justify-between gap-4 max-w-6xl w-full mx-auto">
           <div className="space-y-1">
@@ -361,7 +361,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
 
         {/* Continuous Scroll-Driven Right-to-Left Arc Stage */}
         <div
-          className="relative w-full h-[420px] sm:h-[470px] flex items-start justify-center overflow-x-clip overflow-y-visible"
+          className="relative w-full h-[480px] sm:h-[585px] flex items-start justify-center overflow-x-clip overflow-y-visible"
           style={{
             WebkitMaskImage:
               'linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)',

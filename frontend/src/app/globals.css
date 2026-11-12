@@ -677,7 +677,39 @@
   pointer-events: none;
 }
 
-/* Hero typographic coin 'o' animation (GPU-only transform) */
+/* Hero typographic letter-embedded icon animations (GPU-only transforms & opacity) */
+@keyframes hero-beacon-pulse {
+  0%, 100% {
+    transform: scale(0.92);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.45);
+    opacity: 0.12;
+  }
+}
+
+@keyframes hero-spark-spin {
+  0%, 62% {
+    transform: rotate(0deg) scale(1);
+  }
+  80% {
+    transform: rotate(90deg) scale(1.14);
+  }
+  100% {
+    transform: rotate(90deg) scale(1);
+  }
+}
+
+@keyframes hero-shield-float {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-1.5px) scale(1.06);
+  }
+}
+
 @keyframes hero-coin-flip {
   0%, 55% {
     transform: perspective(260px) rotateY(0deg);
@@ -685,6 +717,24 @@
   85%, 100% {
     transform: perspective(260px) rotateY(360deg);
   }
+}
+
+.hero-beacon-ring {
+  animation: hero-beacon-pulse 2.6s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hero-spark-glyph {
+  animation: hero-spark-spin 4.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hero-shield-glyph {
+  animation: hero-shield-float 3.4s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 .hero-coin-glyph {

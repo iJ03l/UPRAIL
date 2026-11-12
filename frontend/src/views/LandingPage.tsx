@@ -89,9 +89,59 @@ export const LandingPage: React.FC = () => {
               <span className="underline decoration-black decoration-2 sm:decoration-4 underline-offset-4 sm:underline-offset-6 inline-block">
                 𝕏
               </span>{' '}
-              handle
+              h
+              <span className="relative inline-block leading-none">
+                a
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="pointer-events-none absolute left-[45%] bottom-[0.16em] -translate-x-1/2 w-[0.23em] h-[0.23em] text-emerald-500"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    fill="currentColor"
+                    className="hero-beacon-ring"
+                  />
+                  <circle cx="12" cy="12" r="6" fill="currentColor" />
+                </svg>
+              </span>
+              ndle
               <br />
-              is now your private m
+              <span className="relative inline-block leading-none">
+                &#x0131;
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="pointer-events-none absolute left-1/2 -top-[0.02em] -translate-x-1/2 w-[0.28em] h-[0.28em] text-[#E05326]"
+                >
+                  <g className="hero-spark-glyph">
+                    <path
+                      d="M12 1.5L14.8 9.2L22.5 12L14.8 14.8L12 22.5L9.2 14.8L1.5 12L9.2 9.2L12 1.5Z"
+                      fill="currentColor"
+                    />
+                  </g>
+                </svg>
+              </span>
+              s now your pri
+              <span className="relative inline-block leading-none">
+                v
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="pointer-events-none absolute left-1/2 top-[0.23em] -translate-x-1/2 w-[0.28em] h-[0.28em] text-[#E05326]"
+                >
+                  <g className="hero-shield-glyph">
+                    <path
+                      d="M12 2.5L4.5 5.8v5.1c0 4.9 3.2 9.2 7.5 10.6 4.3-1.4 7.5-5.7 7.5-10.6V5.8L12 2.5z"
+                      fill="currentColor"
+                    />
+                    <circle cx="12" cy="11" r="2.2" fill="white" />
+                  </g>
+                </svg>
+              </span>
+              ate m
               <span className="relative inline-flex items-center justify-center align-baseline mx-[0.02em] top-[0.06em] w-[0.6em] h-[0.6em]">
                 <svg
                   viewBox="0 0 24 24"
