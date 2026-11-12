@@ -602,13 +602,13 @@ app.notFound(async (c) => {
       const target = new URL(basePath, url);
       // Keep ?invite= / ?payment= — the page reads them from the address bar.
       target.search = url.search;
-      const assetResponse = await c.env.ASSETS.fetch(
+      const assetResponse = await c.env.ASSETS?.fetch(
         new Request(target, {
           method: 'GET',
           headers: c.req.raw.headers,
         })
       );
-      if (assetResponse.ok) {
+      if (assetResponse?.ok) {
         return assetResponse;
       }
     }
@@ -645,13 +645,13 @@ app.notFound(async (c) => {
 
       const target = new URL('/receipt', url);
       target.search = url.search;
-      const assetResponse = await c.env.ASSETS.fetch(
+      const assetResponse = await c.env.ASSETS?.fetch(
         new Request(target, {
           method: 'GET',
           headers: c.req.raw.headers,
         })
       );
-      if (assetResponse.ok) {
+      if (assetResponse?.ok) {
         return assetResponse;
       }
     }
@@ -700,13 +700,13 @@ app.notFound(async (c) => {
       // Always route request deep links to /request (PublicRequestView)
       const target = new URL('/request', url);
       target.search = url.search;
-      const assetResponse = await c.env.ASSETS.fetch(
+      const assetResponse = await c.env.ASSETS?.fetch(
         new Request(target, {
           method: 'GET',
           headers: c.req.raw.headers,
         })
       );
-      if (assetResponse.ok) {
+      if (assetResponse?.ok) {
         return assetResponse;
       }
     }
@@ -764,13 +764,13 @@ app.notFound(async (c) => {
 
       const target = new URL('/gift', url);
       target.search = url.search;
-      const assetResponse = await c.env.ASSETS.fetch(
+      const assetResponse = await c.env.ASSETS?.fetch(
         new Request(target, {
           method: 'GET',
           headers: c.req.raw.headers,
         })
       );
-      if (assetResponse.ok) {
+      if (assetResponse?.ok) {
         return assetResponse;
       }
     }
@@ -830,13 +830,13 @@ app.notFound(async (c) => {
 
       const target = new URL('/tip', url);
       target.search = url.search;
-      const assetResponse = await c.env.ASSETS.fetch(
+      const assetResponse = await c.env.ASSETS?.fetch(
         new Request(target, {
           method: 'GET',
           headers: c.req.raw.headers,
         })
       );
-      if (assetResponse.ok) {
+      if (assetResponse?.ok) {
         return assetResponse;
       }
     }
