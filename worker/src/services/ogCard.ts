@@ -8,7 +8,7 @@
  * using Satori + resvg inside the Worker (no browser, no external service).
  */
 import { ImageResponse } from 'workers-og';
-import { FONT_REGULAR, FONT_BOLD } from '../assets/fonts';
+import { FONT_REGULAR, FONT_BOLD, BRICOLAGE_REGULAR, BRICOLAGE_BOLD } from '../assets/fonts';
 import { BRAND_ICON, BRAND_WORDMARK } from '../assets/brand';
 
 export interface OgCardOptions {
@@ -50,7 +50,7 @@ export async function renderOgCard(opts: OgCardOptions): Promise<Response> {
     : '';
 
   const html = `
-  <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:60px 72px;background:#F7F6F3;border:2px solid #ECE9E4;font-family:'DejaVu';">
+  <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:60px 72px;background:#F7F6F3;border:2px solid #ECE9E4;font-family:'Bricolage Grotesque','DejaVu';">
     <div style="display:flex;align-items:center;">
       <img src="${BRAND_ICON}" width="48" height="46" />
       <img src="${BRAND_WORDMARK}" width="110" height="37" style="margin-left:14px;" />
@@ -83,6 +83,8 @@ export async function renderOgCard(opts: OgCardOptions): Promise<Response> {
     height: 630,
     format: 'png',
     fonts: [
+      { name: 'Bricolage Grotesque', data: BRICOLAGE_REGULAR, weight: 400, style: 'normal' },
+      { name: 'Bricolage Grotesque', data: BRICOLAGE_BOLD, weight: 700, style: 'normal' },
       { name: 'DejaVu', data: FONT_REGULAR, weight: 400, style: 'normal' },
       { name: 'DejaVu', data: FONT_BOLD, weight: 700, style: 'normal' },
     ],
@@ -113,7 +115,7 @@ export async function renderCoffeeOgCard(opts: CoffeeOgCardOptions): Promise<Res
     : `<div style="display:flex;align-items:center;justify-content:center;width:148px;height:148px;border-radius:74px;background:${INK};color:#FFFFFF;font-size:58px;font-weight:700;flex-shrink:0;">${esc(initial)}</div>`;
 
   const html = `
-  <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:60px 72px;background:#F7F6F3;border:2px solid #ECE9E4;font-family:'DejaVu';">
+  <div style="display:flex;flex-direction:column;width:1200px;height:630px;box-sizing:border-box;padding:60px 72px;background:#F7F6F3;border:2px solid #ECE9E4;font-family:'Bricolage Grotesque','DejaVu';">
     <div style="display:flex;align-items:center;width:100%;">
       <img src="${BRAND_ICON}" width="48" height="46" />
       <img src="${BRAND_WORDMARK}" width="110" height="37" style="margin-left:14px;" />
@@ -149,6 +151,8 @@ export async function renderCoffeeOgCard(opts: CoffeeOgCardOptions): Promise<Res
     height: 630,
     format: 'png',
     fonts: [
+      { name: 'Bricolage Grotesque', data: BRICOLAGE_REGULAR, weight: 400, style: 'normal' },
+      { name: 'Bricolage Grotesque', data: BRICOLAGE_BOLD, weight: 700, style: 'normal' },
       { name: 'DejaVu', data: FONT_REGULAR, weight: 400, style: 'normal' },
       { name: 'DejaVu', data: FONT_BOLD, weight: 700, style: 'normal' },
     ],
