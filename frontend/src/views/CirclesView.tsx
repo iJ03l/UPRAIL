@@ -1472,7 +1472,21 @@ export const CirclesView: React.FC = () => {
                         <span>Copy SEO Gift Link</span>
                       </button>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {(gift.canClaim ||
+                          (gift.status === 'LOCKED' &&
+                            nowMs >= gift.timelockUntil + 30 * 24 * 60 * 60 * 1000)) && (
+                          <button
+                            type="button"
+                            disabled={isActionBusyId === gift.id || isAuthorizing}
+                            onClick={() => handleClaimGift(gift)}
+                            title="30 days have passed since unlock and recipient has not claimed yet — reclaim vault shares + yield back to your account"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-display font-bold cursor-pointer"
+                          >
+                            <Fingerprint className="w-3 h-3" />
+                            <span>Reclaim Unclaimed</span>
+                          </button>
+                        )}
                         <a
                           href={`https://x.com/intent/tweet?text=${encodeURIComponent(
                             `I just gifted @${gift.recipientHandle} a compounding ${gift.vaultSymbol} Earn Vault (${gift.estimatedApyPct}% APY) on @uprailworld`

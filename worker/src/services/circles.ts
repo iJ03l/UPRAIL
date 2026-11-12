@@ -932,7 +932,8 @@ export async function contributeToCircle(
        SET x_id = COALESCE(x_id, ?),
            joined_at = COALESCE(joined_at, ?),
            contributed_usd_cents = ?,
-           shares_atomic = ?
+           shares_atomic = ?,
+           refund_tx_hash = NULL
        WHERE id = ?`
     )
       .bind(
@@ -943,6 +944,14 @@ export async function contributeToCircle(
         memberRow.id
       )
       .run();
+
+    // Clear any prior dissolve approvals on the Circle since new funds were added
+    await env.DB.prepare(
+      "UPDATE circle_members SET refund_tx_hash = NULL WHERE circle_id = ? AND refund_tx_hash LIKE 'DISSOLVE_APPROVED%'"
+    )
+      .bind(cleanId)
+      .run()
+      .catch(() => {});
 
     // Check if all members have now met their quota
     const allMembers = await env.DB.prepare(
@@ -1145,16 +1154,54 @@ export async function settleCircle(
     recordedShares += BigInt(String(m.shares_atomic || '0'));
   }
 
+  // Verify no recent contribution is still settling via 1Click solver
+  const recentContribs = await env.DB.prepare(
+    'SELECT id, deposit_address, deposit_memo, created_at FROM circle_contributions WHERE circle_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 5'
+  )
+    .bind(cleanId, Date.now() - 10 * 60_000)
+    .all<{ id: string; deposit_address: string | null; deposit_memo: string | null; created_at: number }>();
+
   const liveBalance = await getCustodyVaultBalance(
     env,
     circleRow.custody_account,
     circleRow.vault_asset_id
   );
-  const sharesToDisburse =
-    liveBalance !== null && liveBalance > 0n ? liveBalance : recordedShares;
+  if (liveBalance === null) {
+    throw new CircleError(
+      'RPC_UNAVAILABLE',
+      'Could not verify on-chain Circle vault balance right now. Please try again in a moment.',
+      503
+    );
+  }
+
+  // If on-chain custody balance is significantly below recorded shares, check if a recent swap is still in flight
+  if (liveBalance === 0n || (recordedShares > 0n && liveBalance < (recordedShares * 95n) / 100n)) {
+    for (const c of recentContribs.results || []) {
+      if (!c.deposit_address) continue;
+      try {
+        const execStatus = await getExecutionStatus(
+          env,
+          c.deposit_address,
+          c.deposit_memo || undefined
+        );
+        const st = String(execStatus.status || '').toUpperCase();
+        if (st === 'PENDING_DEPOSIT' || st === 'PROCESSING' || st === 'KNOWN_DEPOSIT_TX') {
+          throw new CircleError(
+            'SWAP_SETTLING_ONCHAIN',
+            'A recent contribution is still settling into the vault on NEAR Intents (usually 5–15 seconds). Please wait a moment and try again.',
+            409
+          );
+        }
+      } catch (e) {
+        if (e instanceof CircleError) throw e;
+      }
+    }
+  }
+
+  const sharesToDisburse = liveBalance;
 
   if (sharesToDisburse <= 0n) {
-    throw new CircleError('EMPTY_CIRCLE_VAULT', 'This Circle holds 0 vault shares to disburse.', 400);
+    throw new CircleError('EMPTY_CIRCLE_VAULT', 'This Circle holds 0 settled vault shares on-chain to disburse.', 400);
   }
 
   const now = Date.now();
@@ -1169,18 +1216,32 @@ export async function settleCircle(
   }
 
   try {
-    let payoutNearAccount: string;
+    const callerHandle = (session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
     const payoutHandle = String(circleRow.payout_handle || circleRow.creator_handle).toLowerCase();
-    const payoutUser = await env.DB.prepare(
-      'SELECT x_id, x_handle, near_account FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1'
-    )
-      .bind(payoutHandle)
-      .first<{ x_id: string; x_handle: string; near_account: string | null }>();
+    let payoutNearAccount: string;
 
-    if (payoutUser) {
-      payoutNearAccount = await nearRpc.resolveUserNearAccount(env, payoutUser);
-    } else {
+    if (payoutHandle === callerHandle) {
       payoutNearAccount = await nearRpc.resolveUserNearAccount(env, session);
+    } else {
+      const payoutUser = await env.DB.prepare(
+        'SELECT x_id, x_handle, near_account FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1'
+      )
+        .bind(payoutHandle)
+        .first<{ x_id: string; x_handle: string; near_account: string | null }>();
+
+      if (!payoutUser) {
+        await env.DB.prepare(
+          "UPDATE circles SET status = 'ACTIVE', updated_at = ? WHERE id = ? AND status = 'SETTLING'"
+        )
+          .bind(Date.now(), cleanId)
+          .run();
+        throw new CircleError(
+          'PAYOUT_RECIPIENT_UNREGISTERED',
+          `Payout recipient @${payoutHandle} has not signed in to UPRAIL yet. Ask @${payoutHandle} to sign in once before disbursing the Circle vault.`,
+          400
+        );
+      }
+      payoutNearAccount = await nearRpc.resolveUserNearAccount(env, payoutUser);
     }
 
     // Carve out the 1% protocol fee on Circle payout (principal + yield)
@@ -1208,7 +1269,12 @@ export async function settleCircle(
       });
     }
 
-    const transferRes = await transferBatchFromEarnCustody(env, cleanId, payoutTransfers);
+    const transferRes = await transferBatchFromEarnCustody(
+      env,
+      cleanId,
+      payoutTransfers,
+      circleRow.custody_account
+    );
 
     if (!transferRes.success) {
       if (!transferRes.ambiguous) {
@@ -1248,9 +1314,9 @@ export async function settleCircle(
 /**
  * Unanimous contributor passkey-gated Circle dissolution (`POST /api/circles/:id/dissolve`).
  * Every contributor who has funded the Circle must sign with their passkey to activate
- * dissolution. Once all contributors have activated dissolve, the Circle refunds 100%
- * of contributed Earn Vault shares (plus pro-rata accrued yield) back to each
- * contributing member's UPRAIL account.
+ * dissolution. Once all contributors have activated dissolve (or after a 7-day timeout
+ * if a co-contributor is unresponsive), the Circle refunds 100% of contributed Earn Vault
+ * shares (plus pro-rata accrued yield) back to each contributing member's UPRAIL account.
  */
 export async function dissolveCircle(
   env: Env,
@@ -1333,8 +1399,11 @@ export async function dissolveCircle(
     );
   }
 
-  // Record this contributor's passkey-authenticated dissolve approval
-  const approvalMarker = `DISSOLVE_APPROVED:${now}`;
+  // Preserve original approval timestamp if caller already signed earlier (enables 7-day deadlock escape hatch)
+  const existingMarker = String(callerContributor.refund_tx_hash || '');
+  const approvalMarker = existingMarker.startsWith('DISSOLVE_APPROVED:')
+    ? existingMarker
+    : `DISSOLVE_APPROVED:${now}`;
   callerContributor.refund_tx_hash = approvalMarker;
   await env.DB.prepare(
     `UPDATE circle_members
@@ -1350,12 +1419,83 @@ export async function dissolveCircle(
     String(m.refund_tx_hash || '').startsWith('DISSOLVE_APPROVED')
   );
 
-  // If other contributors still need to sign to dissolve, persist approval and return updated view
+  // Deadlock escape hatch: if a dissolve request has been pending for > 7 days and another contributor is unresponsive
+  let deadlockTimeoutExpired = false;
   if (!allContributorsApproved) {
+    const earliestTs = contributors.reduce((minTs, m) => {
+      const marker = String(m.refund_tx_hash || '');
+      if (marker.startsWith('DISSOLVE_APPROVED:')) {
+        const ts = Number(marker.split(':')[1] || 0);
+        if (ts > 0 && ts < minTs) return ts;
+      }
+      return minTs;
+    }, Infinity);
+    if (Number.isFinite(earliestTs) && now - earliestTs >= 7 * 86400_000) {
+      deadlockTimeoutExpired = true;
+    }
+  }
+
+  // If other contributors still need to sign to dissolve, persist approval and return updated view
+  if (!allContributorsApproved && !deadlockTimeoutExpired) {
     await env.DB.prepare('UPDATE circles SET updated_at = ? WHERE id = ?')
       .bind(now, cleanId)
       .run();
     return getCircleDetail(env, session, cleanId);
+  }
+
+  let totalRecordedShares = 0n;
+  for (const m of contributors) {
+    totalRecordedShares += BigInt(String(m.shares_atomic || '0'));
+  }
+
+  const recentContribs = await env.DB.prepare(
+    'SELECT id, deposit_address, deposit_memo, created_at FROM circle_contributions WHERE circle_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 5'
+  )
+    .bind(cleanId, Date.now() - 10 * 60_000)
+    .all<{ id: string; deposit_address: string | null; deposit_memo: string | null; created_at: number }>();
+
+  const liveBalance = await getCustodyVaultBalance(
+    env,
+    circleRow.custody_account,
+    circleRow.vault_asset_id
+  );
+  if (liveBalance === null) {
+    throw new CircleError(
+      'RPC_UNAVAILABLE',
+      'Could not verify on-chain Circle vault balance right now. Please try again in a moment.',
+      503
+    );
+  }
+
+  if (liveBalance === 0n || (totalRecordedShares > 0n && liveBalance < (totalRecordedShares * 95n) / 100n)) {
+    for (const c of recentContribs.results || []) {
+      if (!c.deposit_address) continue;
+      try {
+        const execStatus = await getExecutionStatus(
+          env,
+          c.deposit_address,
+          c.deposit_memo || undefined
+        );
+        const st = String(execStatus.status || '').toUpperCase();
+        if (st === 'PENDING_DEPOSIT' || st === 'PROCESSING' || st === 'KNOWN_DEPOSIT_TX') {
+          throw new CircleError(
+            'SWAP_SETTLING_ONCHAIN',
+            'A recent contribution is still settling into the vault on NEAR Intents (usually 5–15 seconds). Please wait a moment before dissolving.',
+            409
+          );
+        }
+      } catch (e) {
+        if (e instanceof CircleError) throw e;
+      }
+    }
+  }
+
+  if (liveBalance <= 0n) {
+    throw new CircleError(
+      'EMPTY_CIRCLE_VAULT',
+      'Circle custody account currently holds 0 settled vault shares on-chain.',
+      400
+    );
   }
 
   const lockRes = await env.DB.prepare(
@@ -1369,19 +1509,7 @@ export async function dissolveCircle(
   }
 
   try {
-    let totalRecordedShares = 0n;
-    for (const m of contributors) {
-      totalRecordedShares += BigInt(String(m.shares_atomic || '0'));
-    }
-
-    const liveBalance = await getCustodyVaultBalance(
-      env,
-      circleRow.custody_account,
-      circleRow.vault_asset_id
-    );
-    const distributable =
-      liveBalance !== null && liveBalance > 0n ? liveBalance : totalRecordedShares;
-
+    const distributable = liveBalance;
     const transfers: Array<{ recipientAccount: string; assetId: string; amountAtomic: bigint; memberId: string }> = [];
     let allocated = 0n;
 
@@ -1401,7 +1529,19 @@ export async function dissolveCircle(
           x_handle: m.x_handle,
         });
       } else {
-        recipientNearAccount = await nearRpc.resolveUserNearAccount(env, session);
+        const memberIdentity = await env.DB.prepare(
+          'SELECT x_id, x_handle, near_account FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1'
+        )
+          .bind(String(m.x_handle || '').toLowerCase())
+          .first<{ x_id: string; x_handle: string; near_account: string | null }>();
+        if (!memberIdentity) {
+          throw new CircleError(
+            'CONTRIBUTOR_UNREGISTERED',
+            `Contributor @${m.x_handle} has no registered UPRAIL account to refund.`,
+            400
+          );
+        }
+        recipientNearAccount = await nearRpc.resolveUserNearAccount(env, memberIdentity);
       }
 
       if (slice > 0n) {
@@ -1414,7 +1554,12 @@ export async function dissolveCircle(
       }
     }
 
-    const batchRes = await transferBatchFromEarnCustody(env, cleanId, transfers);
+    const batchRes = await transferBatchFromEarnCustody(
+      env,
+      cleanId,
+      transfers,
+      circleRow.custody_account
+    );
     if (!batchRes.success) {
       if (!batchRes.ambiguous) {
         await env.DB.prepare(
@@ -1459,7 +1604,10 @@ export async function dissolveCircle(
 }
 
 /**
- * Cron reconciliation for pending external Circle contributions.
+ * Cron reconciliation for Circle contributions and stuck Circle settlement/dissolution states:
+ *   1. Confirms `PENDING_FUNDING` external deposits once 1Click reports `SUCCESS`.
+ *   2. Reverses recently `CONFIRMED` balance contributions if 1Click refunded the swap (`REFUNDED` / `FAILED`).
+ *   3. Recovers Circles stuck in `SETTLING` or `DISSOLVING` after an ambiguous RPC timeout.
  */
 export async function reconcilePendingCircleContributions(
   env: Env,
@@ -1543,6 +1691,79 @@ export async function reconcilePendingCircleContributions(
             .run();
         }
         confirmed++;
+      }
+    } catch {}
+  }
+
+  // 2. Verify recently confirmed BALANCE contributions and reverse if 1Click refunded the swap
+  const recentConfirmed = await env.DB.prepare(
+    "SELECT * FROM circle_contributions WHERE status = 'CONFIRMED' AND created_at > ? ORDER BY created_at DESC LIMIT ?"
+  )
+    .bind(Date.now() - 45 * 60_000, limit)
+    .all<any>();
+
+  for (const row of recentConfirmed.results || []) {
+    if (!row.deposit_address) continue;
+    try {
+      const execStatus = await getExecutionStatus(
+        env,
+        row.deposit_address,
+        row.deposit_memo || undefined
+      );
+      const remote = String(execStatus.status || '').toUpperCase();
+      if (remote === 'REFUNDED' || remote === 'FAILED') {
+        const revRes = await env.DB.prepare(
+          "UPDATE circle_contributions SET status = 'REFUNDED', updated_at = ? WHERE id = ? AND status = 'CONFIRMED'"
+        )
+          .bind(Date.now(), row.id)
+          .run();
+        if (revRes.meta?.changes) {
+          const mRow = await env.DB.prepare('SELECT * FROM circle_members WHERE id = ? LIMIT 1')
+            .bind(row.member_id)
+            .first<any>();
+          if (mRow) {
+            const curShares = BigInt(String(mRow.shares_atomic || '0'));
+            const revShares = BigInt(String(row.shares_atomic || row.quoted_shares_atomic || '0'));
+            const nextShares = curShares > revShares ? curShares - revShares : 0n;
+            const nextUsd = Math.max(
+              0,
+              Number(mRow.contributed_usd_cents || 0) - Number(row.usd_cents || 0)
+            );
+            await env.DB.prepare(
+              'UPDATE circle_members SET contributed_usd_cents = ?, shares_atomic = ? WHERE id = ?'
+            )
+              .bind(nextUsd, nextShares.toString(), mRow.id)
+              .run();
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Recover any Circles stuck in SETTLING or DISSOLVING for > 60 seconds
+  const stuckCircles = await env.DB.prepare(
+    "SELECT * FROM circles WHERE status IN ('SETTLING', 'DISSOLVING') AND updated_at < ? LIMIT ?"
+  )
+    .bind(Date.now() - 60_000, limit)
+    .all<any>();
+
+  for (const c of stuckCircles.results || []) {
+    checked++;
+    try {
+      const liveBal = await getCustodyVaultBalance(env, c.custody_account, c.vault_asset_id);
+      if (liveBal === 0n) {
+        const finalStatus = c.status === 'SETTLING' ? 'SETTLED' : 'DISSOLVED';
+        await env.DB.prepare(
+          'UPDATE circles SET status = ?, closed_at = COALESCE(closed_at, ?), updated_at = ? WHERE id = ? AND status = ?'
+        )
+          .bind(finalStatus, Date.now(), Date.now(), c.id, c.status)
+          .run();
+      } else if (liveBal !== null && liveBal > 0n) {
+        await env.DB.prepare(
+          "UPDATE circles SET status = 'ACTIVE', updated_at = ? WHERE id = ? AND status = ?"
+        )
+          .bind(Date.now(), c.id, c.status)
+          .run();
       }
     } catch {}
   }

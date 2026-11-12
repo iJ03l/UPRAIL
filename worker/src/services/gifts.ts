@@ -918,7 +918,11 @@ async function formatAuthenticatedGiftView(
     status: row.status,
     showAmount: Number(row.show_amount) === 1,
     claimTxHash: row.claim_tx_hash || null,
-    canClaim: role === 'RECIPIENT' && row.status === 'LOCKED' && isUnlocked,
+    canClaim:
+      (role === 'RECIPIENT' && row.status === 'LOCKED' && isUnlocked) ||
+      (role === 'SENDER' &&
+        row.status === 'LOCKED' &&
+        Date.now() >= timelockUntil + 30 * 24 * 60 * 60 * 1000),
     shareUrl: `https://uprail.world/gift/${encodeURIComponent(row.id)}`,
     ogImageUrl: `https://app.uprail.world/og/gift/${encodeURIComponent(row.id)}.png`,
     createdAt: Number(row.created_at),
@@ -1042,7 +1046,8 @@ export async function listUserGifts(
 /**
  * Passkey-gated, IDOR-proof, timelock-enforced Gift Claim (`POST /api/gifts/:id/claim`).
  * Transfers 100% of the Earn vault shares (principal + accrued yield) from the
- * gift's custody account to the recipient's UPRAIL Intents account.
+ * gift's custody account to the recipient's UPRAIL Intents account (or allows the
+ * sender to reclaim an unclaimed gift 30 days after `timelock_until` has passed).
  */
 export async function claimGift(
   env: Env,
@@ -1061,29 +1066,28 @@ export async function claimGift(
     throw new GiftError('NOT_FOUND', 'Gift not found.', 404);
   }
 
+  const now = Date.now();
+  const timelockUntil = Number(row.timelock_until);
+  const senderReclaimAvailableAt = timelockUntil + 30 * 24 * 60 * 60 * 1000;
+
   const callerHandle = (session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
   const recipientHandle = String(row.recipient_handle || '').trim().toLowerCase();
+  const isRecipient = row.recipient_x_id
+    ? row.recipient_x_id === session.x_id
+    : Boolean(callerHandle && callerHandle === recipientHandle);
+  const isSenderReclaim =
+    !isRecipient && row.sender_x_id === session.x_id && now >= senderReclaimAvailableAt;
 
-  // Strict anti-IDOR ownership verification
-  if (row.recipient_x_id) {
-    if (row.recipient_x_id !== session.x_id) {
-      throw new GiftError(
-        'FORBIDDEN',
-        'Only the designated recipient of this gift can unwrap and claim it.',
-        403
-      );
-    }
-  } else {
-    if (!callerHandle || callerHandle !== recipientHandle) {
-      throw new GiftError(
-        'FORBIDDEN',
-        'Only the designated recipient of this gift can unwrap and claim it.',
-        403
-      );
-    }
+  // Strict anti-IDOR ownership verification: only recipient (or sender 30d after unlock if unclaimed) can claim
+  if (!isRecipient && !isSenderReclaim) {
+    throw new GiftError(
+      'FORBIDDEN',
+      'Only the designated recipient of this gift can unwrap and claim it.',
+      403
+    );
   }
 
-  if (row.status === 'CLAIMED') {
+  if (row.status === 'CLAIMED' || row.status === 'REFUNDED') {
     throw new GiftError('ALREADY_CLAIMED', 'This gift has already been unwrapped and claimed.', 409);
   }
   if (row.status === 'CLAIMING') {
@@ -1098,8 +1102,6 @@ export async function claimGift(
   }
 
   // Server-enforced timelock boundary check
-  const now = Date.now();
-  const timelockUntil = Number(row.timelock_until);
   if (now < timelockUntil) {
     throw new GiftError(
       'GIFT_LOCKED',
@@ -1108,41 +1110,93 @@ export async function claimGift(
     );
   }
 
+  // Verify live on-chain balance BEFORE locking or transferring; fail closed if RPC is unreachable
+  const liveBalance = await getCustodyVaultBalance(env, row.custody_account, row.vault_asset_id);
+  if (liveBalance === null) {
+    throw new GiftError(
+      'RPC_UNAVAILABLE',
+      'Unable to verify live custody vault balance on NEAR Intents right now. Please retry in a few seconds.',
+      503
+    );
+  }
+
+  if (liveBalance === 0n && row.deposit_address) {
+    try {
+      const exec = await getExecutionStatus(env, String(row.deposit_address));
+      const st = String(exec?.status || '').toUpperCase();
+      if (st === 'PENDING_DEPOSIT' || st === 'PROCESSING' || st === 'KNOWN_DEPOSIT_TX') {
+        throw new GiftError(
+          'SWAP_SETTLING_ONCHAIN',
+          'The 1Click swap into the gift custody vault is still settling on-chain. Please wait ~15 seconds and retry.',
+          409
+        );
+      }
+      if (st === 'REFUNDED' || st === 'FAILED') {
+        await env.DB.prepare(
+          "UPDATE gifts SET status = 'REFUNDED', shares_atomic = '0', updated_at = ? WHERE id = ? AND status = 'LOCKED'"
+        )
+          .bind(Date.now(), cleanId)
+          .run();
+        throw new GiftError(
+          'GIFT_SWAP_REFUNDED',
+          'The initial 1Click swap for this gift was refunded back to the sender on NEAR Intents.',
+          409
+        );
+      }
+    } catch (e) {
+      if (e instanceof GiftError) throw e;
+    }
+  }
+
+  if (liveBalance <= 0n) {
+    throw new GiftError(
+      'EMPTY_GIFT_CUSTODY',
+      'Custody account currently holds 0 vault shares on-chain.',
+      409
+    );
+  }
+
   // Atomic CAS transition: LOCKED -> CLAIMING (prevents concurrent double-claim races)
-  const lockRes = await env.DB.prepare(
-    `UPDATE gifts
-     SET status = 'CLAIMING',
-         recipient_x_id = COALESCE(recipient_x_id, ?),
-         updated_at = ?
-     WHERE id = ?
-       AND status = 'LOCKED'
-       AND timelock_until <= ?
-       AND (recipient_x_id IS NULL OR recipient_x_id = ?)`
-  )
-    .bind(session.x_id, now, cleanId, now, session.x_id)
-    .run();
+  const lockRes = isRecipient
+    ? await env.DB.prepare(
+        `UPDATE gifts
+         SET status = 'CLAIMING',
+             recipient_x_id = COALESCE(recipient_x_id, ?),
+             updated_at = ?
+         WHERE id = ?
+           AND status = 'LOCKED'
+           AND timelock_until <= ?
+           AND (recipient_x_id IS NULL OR recipient_x_id = ?)`
+      )
+        .bind(session.x_id, now, cleanId, now, session.x_id)
+        .run()
+    : await env.DB.prepare(
+        `UPDATE gifts
+         SET status = 'CLAIMING',
+             updated_at = ?
+         WHERE id = ?
+           AND status = 'LOCKED'
+           AND timelock_until <= ?
+           AND sender_x_id = ?`
+      )
+        .bind(now, cleanId, now, session.x_id)
+        .run();
 
   if (!lockRes.meta?.changes) {
     throw new GiftError('CLAIM_RACE_CONFLICT', 'Gift claim is already in progress or completed.', 409);
   }
 
   try {
-    const recipientNearAccount = await nearRpc.resolveUserNearAccount(env, session);
-    const liveBalance = await getCustodyVaultBalance(env, row.custody_account, row.vault_asset_id);
-    const fallbackShares = BigInt(String(row.shares_atomic || row.quoted_shares_atomic || '0'));
-    const sharesToTransfer =
-      liveBalance !== null && liveBalance > 0n ? liveBalance : fallbackShares;
-
-    if (sharesToTransfer <= 0n) {
-      throw new Error('Custody account holds 0 vault shares.');
-    }
+    const claimantNearAccount = await nearRpc.resolveUserNearAccount(env, session);
+    const sharesToTransfer = liveBalance;
 
     const transferRes = await transferFromEarnCustody(
       env,
       cleanId,
-      recipientNearAccount,
+      claimantNearAccount,
       row.vault_asset_id,
-      sharesToTransfer
+      sharesToTransfer,
+      row.custody_account
     );
 
     if (!transferRes.success) {
@@ -1154,7 +1208,7 @@ export async function claimGift(
           202
         );
       }
-      // Definite failure before inclusion — revert status to LOCKED so recipient can retry
+      // Definite failure before inclusion — revert status to LOCKED so claimant can retry
       await env.DB.prepare(
         "UPDATE gifts SET status = 'LOCKED', updated_at = ? WHERE id = ? AND status = 'CLAIMING'"
       )
@@ -1168,9 +1222,10 @@ export async function claimGift(
     }
 
     const claimedAt = Date.now();
+    const finalStatus = isSenderReclaim ? 'REFUNDED' : 'CLAIMED';
     await env.DB.prepare(
       `UPDATE gifts
-       SET status = 'CLAIMED',
+       SET status = ?,
            shares_atomic = ?,
            claim_tx_hash = ?,
            claimed_at = ?,
@@ -1178,6 +1233,7 @@ export async function claimGift(
        WHERE id = ?`
     )
       .bind(
+        finalStatus,
         sharesToTransfer.toString(),
         transferRes.txHash || null,
         claimedAt,
@@ -1189,7 +1245,11 @@ export async function claimGift(
     const updated = await env.DB.prepare('SELECT * FROM gifts WHERE id = ? LIMIT 1')
       .bind(cleanId)
       .first<any>();
-    return formatAuthenticatedGiftView(env, updated || row, 'RECIPIENT');
+    return formatAuthenticatedGiftView(
+      env,
+      updated || row,
+      isSenderReclaim ? 'SENDER' : 'RECIPIENT'
+    );
   } catch (err: any) {
     if (err instanceof GiftError) throw err;
     await env.DB.prepare(
@@ -1209,7 +1269,8 @@ export async function claimGift(
 /**
  * Cron reconciliation for gifts:
  *   1. Settles any `PENDING_FUNDING` external deposits or expires them after TTL.
- *   2. Retries any interrupted `CLAIMING` gifts idempotently.
+ *   2. Marks recently `LOCKED` balance-funded gifts as `REFUNDED` if their 1Click swap refunded.
+ *   3. Retries or recovers any interrupted `CLAIMING` gifts idempotently.
  */
 export async function reconcilePendingGifts(
   env: Env,
@@ -1234,6 +1295,42 @@ export async function reconcilePendingGifts(
     } catch {}
   }
 
+  // Reconcile recently funded LOCKED gifts whose 1Click swap may have refunded
+  const recentLocked = await env.DB.prepare(
+    "SELECT * FROM gifts WHERE status = 'LOCKED' AND deposit_address IS NOT NULL AND created_at > ? ORDER BY created_at DESC LIMIT ?"
+  )
+    .bind(Date.now() - 45 * 60 * 1000, limit)
+    .all<any>();
+
+  for (const row of recentLocked.results || []) {
+    checked++;
+    try {
+      const exec = await getExecutionStatus(env, String(row.deposit_address));
+      const st = String(exec?.status || '').toUpperCase();
+      if (st === 'REFUNDED' || st === 'FAILED') {
+        const liveBal = await getCustodyVaultBalance(env, row.custody_account, row.vault_asset_id);
+        if (liveBal === 0n) {
+          await env.DB.prepare(
+            "UPDATE gifts SET status = 'REFUNDED', shares_atomic = '0', updated_at = ? WHERE id = ? AND status = 'LOCKED'"
+          )
+            .bind(Date.now(), row.id)
+            .run();
+        }
+      } else if (st === 'SUCCESS') {
+        const actualAtomic = String(
+          exec?.swapDetails?.amountOut || (exec as any)?.amountOut || ''
+        ).trim();
+        if (/^\d+$/.test(actualAtomic) && BigInt(actualAtomic) > 0n && actualAtomic !== String(row.shares_atomic)) {
+          await env.DB.prepare(
+            "UPDATE gifts SET shares_atomic = ?, updated_at = ? WHERE id = ? AND status = 'LOCKED'"
+          )
+            .bind(actualAtomic, Date.now(), row.id)
+            .run();
+        }
+      }
+    } catch {}
+  }
+
   const stuckClaims = await env.DB.prepare(
     "SELECT * FROM gifts WHERE status = 'CLAIMING' AND updated_at < ? LIMIT ?"
   )
@@ -1252,25 +1349,41 @@ export async function reconcilePendingGifts(
           .bind(Date.now(), Date.now(), row.id)
           .run();
         claimed++;
-      } else if (liveBal !== null && liveBal > 0n && row.recipient_x_id) {
-        const recipientNear = await nearRpc.resolveUserNearAccount(env, {
-          x_id: row.recipient_x_id,
-          x_handle: row.recipient_handle,
-        });
-        const retry = await transferFromEarnCustody(
-          env,
-          row.id,
-          recipientNear,
-          row.vault_asset_id,
-          liveBal
-        );
-        if (retry.success) {
+      } else if (liveBal !== null && liveBal > 0n) {
+        if (row.recipient_x_id) {
+          const recipientNear = await nearRpc.resolveUserNearAccount(env, {
+            x_id: row.recipient_x_id,
+            x_handle: row.recipient_handle,
+          });
+          const retry = await transferFromEarnCustody(
+            env,
+            row.id,
+            recipientNear,
+            row.vault_asset_id,
+            liveBal,
+            row.custody_account
+          );
+          if (retry.success) {
+            await env.DB.prepare(
+              "UPDATE gifts SET status = 'CLAIMED', claim_tx_hash = ?, claimed_at = ?, updated_at = ? WHERE id = ?"
+            )
+              .bind(retry.txHash || null, Date.now(), Date.now(), row.id)
+              .run();
+            claimed++;
+          } else if (!retry.ambiguous) {
+            await env.DB.prepare(
+              "UPDATE gifts SET status = 'LOCKED', updated_at = ? WHERE id = ? AND status = 'CLAIMING'"
+            )
+              .bind(Date.now(), row.id)
+              .run();
+          }
+        } else {
+          // Revert to LOCKED so sender or recipient can retry manually
           await env.DB.prepare(
-            "UPDATE gifts SET status = 'CLAIMED', claim_tx_hash = ?, claimed_at = ?, updated_at = ? WHERE id = ?"
+            "UPDATE gifts SET status = 'LOCKED', updated_at = ? WHERE id = ? AND status = 'CLAIMING'"
           )
-            .bind(retry.txHash || null, Date.now(), Date.now(), row.id)
+            .bind(Date.now(), row.id)
             .run();
-          claimed++;
         }
       }
     } catch {}

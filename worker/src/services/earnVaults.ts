@@ -268,45 +268,64 @@ export async function resolveEarnVault(
  */
 export async function deriveEarnCustodyKey(
   env: Env,
-  itemId: string
+  itemId: string,
+  expectedAccountId?: string | null
 ): Promise<EarnCustodyKey> {
   const cleanId = (itemId || '').trim();
   if (!/^(gft|circ)_[a-f0-9]{16,64}$/.test(cleanId)) {
     throw new EarnVaultError('INVALID_CUSTODY_ID', 'Invalid gift or circle identifier.', 400);
   }
-  const privKeyStr = env.ESCROW_PRIVATE_KEY;
-  if (!privKeyStr) {
+  const envAny = env as unknown as Record<string, string | undefined>;
+  const candidates = [
+    envAny.EARN_CUSTODY_MASTER_KEY,
+    env.ESCROW_PRIVATE_KEY,
+    envAny.PREVIOUS_ESCROW_PRIVATE_KEY,
+  ].filter((k): k is string => Boolean(k && k.trim()));
+
+  if (candidates.length === 0) {
     throw new EarnVaultError(
       'CUSTODY_KEY_UNCONFIGURED',
       'Server custody key is not configured.',
       503
     );
   }
-  const escrowRaw = base58Decode(privKeyStr);
-  const masterSeed = escrowRaw.slice(0, 32);
-  if (masterSeed.length !== 32) {
-    throw new EarnVaultError('CUSTODY_KEY_INVALID', 'Invalid server master key.', 503);
+
+  const domainMsg = new TextEncoder().encode(`uprail_earn_custody_v1:${cleanId}`);
+  const cleanExpected = expectedAccountId ? expectedAccountId.trim().toLowerCase() : null;
+  let firstValid: EarnCustodyKey | null = null;
+
+  for (const keyStr of candidates) {
+    const escrowRaw = base58Decode(keyStr);
+    const masterSeed = escrowRaw.slice(0, 32);
+    if (masterSeed.length !== 32) continue;
+
+    const hmacKey = await crypto.subtle.importKey(
+      'raw',
+      masterSeed,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const derivedPriv = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, domainMsg));
+    const derivedPub = ed25519.getPublicKey(derivedPriv);
+    const accountId = bytesToHex(derivedPub);
+    const derived: EarnCustodyKey = {
+      itemId: cleanId,
+      accountId,
+      publicKey: derivedPub,
+      privateKey: derivedPriv,
+      publicKeyB58: `ed25519:${base58Encode(derivedPub)}`,
+    };
+    if (!firstValid) firstValid = derived;
+    if (!cleanExpected || accountId.toLowerCase() === cleanExpected) {
+      return derived;
+    }
   }
 
-  const hmacKey = await crypto.subtle.importKey(
-    'raw',
-    masterSeed,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const domainMsg = new TextEncoder().encode(`uprail_earn_custody_v1:${cleanId}`);
-  const derivedPriv = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, domainMsg));
-  const derivedPub = ed25519.getPublicKey(derivedPriv);
-  const accountId = bytesToHex(derivedPub);
-
-  return {
-    itemId: cleanId,
-    accountId,
-    publicKey: derivedPub,
-    privateKey: derivedPriv,
-    publicKeyB58: `ed25519:${base58Encode(derivedPub)}`,
-  };
+  if (!firstValid) {
+    throw new EarnVaultError('CUSTODY_KEY_INVALID', 'Invalid server master key.', 503);
+  }
+  return firstValid;
 }
 
 /**
@@ -374,7 +393,8 @@ export async function getCustodyVaultBalance(
 export async function transferBatchFromEarnCustody(
   env: Env,
   itemId: string,
-  transfers: ReadonlyArray<{ recipientAccount: string; assetId: string; amountAtomic: bigint }>
+  transfers: ReadonlyArray<{ recipientAccount: string; assetId: string; amountAtomic: bigint }>,
+  expectedAccountId?: string | null
 ): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   const nonZero = transfers.filter((t) => t.amountAtomic > 0n && t.recipientAccount);
   if (nonZero.length === 0) {
@@ -382,7 +402,7 @@ export async function transferBatchFromEarnCustody(
   }
 
   try {
-    const custody = await deriveEarnCustodyKey(env, itemId);
+    const custody = await deriveEarnCustodyKey(env, itemId, expectedAccountId);
     const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
     let nonceB64 = '';
     for (let i = 0; i < nonceBytes.length; i++) nonceB64 += String.fromCharCode(nonceBytes[i]);
@@ -433,11 +453,15 @@ export async function transferFromEarnCustody(
   itemId: string,
   recipientAccount: string,
   assetId: string,
-  amountAtomic: bigint
+  amountAtomic: bigint,
+  expectedAccountId?: string | null
 ): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
-  return transferBatchFromEarnCustody(env, itemId, [
-    { recipientAccount, assetId, amountAtomic },
-  ]);
+  return transferBatchFromEarnCustody(
+    env,
+    itemId,
+    [{ recipientAccount, assetId, amountAtomic }],
+    expectedAccountId
+  );
 }
 
 /**
