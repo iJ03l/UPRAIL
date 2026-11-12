@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Clock,
   CircleDot,
+  Leaf,
 } from 'lucide-react';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
@@ -425,7 +426,7 @@ export const AppHome: React.FC = () => {
                     title="Circles & Timelocked Earn Vault Gifting"
                     className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-2xl border border-stone-200 bg-white hover:bg-stone-50 hover:border-stone-300 text-stone-900 text-xs font-display font-bold tracking-wide shadow-2xs transition-all group cursor-pointer"
                   >
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 ring-4 ring-emerald-500/15 transition-transform group-hover:scale-110" />
+                    <Leaf className="w-3.5 h-3.5 text-emerald-600 fill-emerald-500/20 transition-transform group-hover:scale-110 group-hover:-rotate-6" />
                     <span>Circles</span>
                     <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-900 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
                   </Link>
