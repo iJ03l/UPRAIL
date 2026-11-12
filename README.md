@@ -14,6 +14,22 @@ UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`inte
 
 ---
 
+## 📑 Index
+
+- **[Live Mainnet Traction](#live-mainnet-traction-real-people-real-money)** — Live NEAR Mainnet user, transaction, and USDC volume metrics
+- **[Judging in 60 Seconds](#-judging-in-60-seconds-do-x--see-y)** — `make check-mainnet`, 174 automated tests, curl checks, and `Do X → See Y`
+- **[Judging Map (Track-by-Track)](#-judging-map-track-by-track-verification)** — Every hackathon track mapped to verified source files and tests
+- **[Why UPRAIL](#why-uprail-a-social-ecosystem-around-near-intents)** — Social money thesis built around NEAR Intents and `@handle` identity
+- **[How It Works (Technical)](#how-it-works-technical)** — Vaults, Circles ("like a DAO, with friends"), Passkeys, Confidential Intents, `near.com`, and MCP
+- **[Key NEAR Primitives Used](#key-near-primitives-used)** — `intents.near`, 1Click, Defuse Solver Relay, `escrow.uprail.near`, and NEAR RPC
+- **[Quick Demo (For Human & AI Judges)](#quick-demo-for-human--ai-judges)** — Step-by-step walkthroughs starting with Circles & Timelocked Gifts
+- **[Architecture](#architecture)** — System diagram across SPA, Cloudflare Worker/D1/KV, Go service, and NEAR Intents
+- **[Project Structure](#project-structure)** — Repository layout (`frontend/`, `worker/`, `go-near-service/`)
+- **[Tech Stack & Security Model](#tech-stack)** — Frameworks, defense-in-depth security, production status, and env config
+- **[Links](#links)** — Live app, docs, OpenAPI, MCP server, and X (`@uprailworld`)
+
+---
+
 ## Live Mainnet Traction (Real People, Real Money)
 
 UPRAIL is not a testnet prototype — it is live in production on **NEAR Mainnet** with real users onboarding via X + WebAuthn passkeys and moving real money across social handles, AI agents, and external wallets:
