@@ -215,6 +215,12 @@ export const CirclesView: React.FC = () => {
         assetId: b.defuse_asset_id || b.nearContractId || b.symbol,
         symbol: b.symbol,
         balanceFormatted: b.amountFormatted,
+        priceUsd:
+          typeof b.priceUsd === 'number' && b.priceUsd > 0
+            ? b.priceUsd
+            : ['USDC', 'USDT', 'DAI'].includes((b.symbol || '').toUpperCase())
+            ? 1
+            : undefined,
         chain: 'near',
       }));
     if (held.length > 0) return held;
@@ -223,18 +229,21 @@ export const CirclesView: React.FC = () => {
         assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
         symbol: 'USDC',
         balanceFormatted: '0.00',
+        priceUsd: 1,
         chain: 'near',
       },
       {
         assetId: 'nep141:usdt.tether-token.near',
         symbol: 'USDT',
         balanceFormatted: '0.00',
+        priceUsd: 1,
         chain: 'near',
       },
       {
         assetId: 'nep141:wrap.near',
         symbol: 'NEAR',
         balanceFormatted: '0.00',
+        priceUsd: undefined,
         chain: 'near',
       },
     ];
@@ -467,7 +476,17 @@ export const CirclesView: React.FC = () => {
     if (!Number.isFinite(amt) || amt <= 0) {
       return { isValid: false, hint: 'Enter a valid amount to add.' };
     }
+    const circleVault = vaults.find((v) => v.symbol === contributeCircle.vaultSymbol);
+    const minUsd = circleVault?.minDepositUsd || 5;
     const originObj = availableOriginAssets.find((a) => a.assetId === contribOriginAsset);
+    const unitPrice = originObj?.priceUsd ?? 1;
+    const estUsd = amt * unitPrice;
+    if (estUsd + 1e-6 < minUsd) {
+      return {
+        isValid: false,
+        hint: `Minimum deposit for ${contributeCircle.vaultSymbol} is $${minUsd} USD (currently ~$${estUsd.toFixed(2)}).`,
+      };
+    }
     const availBal = originObj ? parseFloat(originObj.balanceFormatted || '0') : 0;
     if (originObj && amt > availBal + 1e-6) {
       return {
@@ -476,7 +495,7 @@ export const CirclesView: React.FC = () => {
       };
     }
     return { isValid: true, hint: null };
-  }, [contributeCircle, contribOriginAsset, contribAmount, availableOriginAssets]);
+  }, [contributeCircle, contribOriginAsset, contribAmount, availableOriginAssets, vaults]);
 
   const giftValidation = useMemo(() => {
     const cleanRecip = giftRecipient.trim().replace(/^@+/, '');
@@ -507,7 +526,16 @@ export const CirclesView: React.FC = () => {
     if (!Number.isFinite(amt) || amt <= 0) {
       return { isValid: false, hint: 'Enter a valid gift amount.' };
     }
+    const minUsd = selectedGiftVault?.minDepositUsd || 5;
     const originObj = availableOriginAssets.find((a) => a.assetId === giftOriginAsset);
+    const unitPrice = originObj?.priceUsd ?? 1;
+    const estUsd = amt * unitPrice;
+    if (estUsd + 1e-6 < minUsd) {
+      return {
+        isValid: false,
+        hint: `Minimum deposit for ${selectedGiftVault?.name || giftVaultSymbol} is $${minUsd} USD (currently ~$${estUsd.toFixed(2)}).`,
+      };
+    }
     const availBal = originObj ? parseFloat(originObj.balanceFormatted || '0') : 0;
     if (originObj && amt > availBal + 1e-6) {
       return {
@@ -527,6 +555,7 @@ export const CirclesView: React.FC = () => {
     giftOccasion,
     giftCustomOccasion,
     giftVaultSymbol,
+    selectedGiftVault,
     giftOriginAsset,
     giftAmount,
     availableOriginAssets,
@@ -967,45 +996,73 @@ export const CirclesView: React.FC = () => {
                   : circle.isCreator;
                 const dissolveSigned = circle.dissolveApprovalsCount ?? 0;
                 const dissolveRequired = circle.dissolveRequiredCount ?? 1;
+                const isSolo = circle.members.length === 1;
+                const circleVaultMeta = vaults.find((v) => v.symbol === circle.vaultSymbol);
+                const vaultMinUsd = circleVaultMeta?.minDepositUsd || 5;
+                const ticketSerial = circle.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase();
 
                 return (
                   <div
                     key={circle.id}
-                    className="bg-white border border-stone-200 rounded-2xl p-5 shadow-2xs space-y-4"
+                    className="relative overflow-hidden bg-white border border-stone-200 rounded-2xl shadow-2xs"
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2.5 py-0.5 rounded-md bg-stone-100 text-stone-700 font-mono text-[10px] font-bold uppercase tracking-wider">
-                            {circle.purposeLabel}
-                          </span>
-                          <span className="px-2.5 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
-                            {circle.vaultSymbol} • {circle.estimatedApyPct}% APY
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold uppercase ${
-                              circle.status === 'ACTIVE'
-                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                : circle.status === 'GOAL_MET' ||
-                                  circle.status === 'SETTLED' ||
-                                  circle.status === 'COMPLETED'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-stone-100 text-stone-600'
-                            }`}
-                          >
-                            {circle.status === 'GOAL_MET' ? 'GOAL MET • OPEN' : circle.status}
-                          </span>
-                        </div>
-                        <h3 className="text-lg font-display font-extrabold text-stone-950">
-                          {circle.name}
-                        </h3>
-                        <div className="text-[11px] font-mono text-stone-500">
-                          Created by @{circle.creatorHandle} • Payout:{' '}
-                          <span className="text-stone-900 font-semibold">@{circle.payoutHandle}</span>
-                        </div>
+                    {/* TICKET TOP STRIP */}
+                    <div className="px-5 py-2.5 bg-stone-50 border-b border-stone-200 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2 py-0.5 rounded bg-stone-200/80 text-stone-800 font-mono text-[10px] font-bold uppercase tracking-wider">
+                          {circle.purposeLabel}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
+                          {circle.vaultSymbol} • {circle.estimatedApyPct}% APY
+                        </span>
                       </div>
 
-                      <div className="flex flex-col sm:items-end justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-[10px] text-stone-400 tracking-widest uppercase">
+                          #{ticketSerial}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold uppercase ${
+                            circle.status === 'ACTIVE'
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : circle.status === 'GOAL_MET' ||
+                                circle.status === 'SETTLED' ||
+                                circle.status === 'COMPLETED'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-stone-100 text-stone-600'
+                          }`}
+                        >
+                          {circle.status === 'GOAL_MET' ? 'GOAL MET' : circle.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* TICKET MAIN BODY */}
+                    <div className="px-5 py-4 space-y-3.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <h3 className="text-lg font-display font-extrabold text-stone-950 leading-tight">
+                            {circle.name}
+                          </h3>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-stone-500">
+                            <span className="inline-flex items-center gap-1.5 text-stone-800 font-semibold">
+                              <img
+                                src={`https://unavatar.io/x/${circle.payoutHandle}`}
+                                alt={`@${circle.payoutHandle}`}
+                                className="w-4 h-4 rounded-full object-cover border border-stone-200 bg-stone-100"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                              <span>Payout @{circle.payoutHandle}</span>
+                            </span>
+                            {circle.creatorHandle.toLowerCase() !==
+                              circle.payoutHandle.toLowerCase() && (
+                              <span>• By @{circle.creatorHandle}</span>
+                            )}
+                          </div>
+                        </div>
+
                         <div className="sm:text-right">
                           <div className="text-xl font-display font-extrabold text-stone-950 tabular-nums">
                             {formatCentsUsd(circle.currentValueUsdCents)}{' '}
@@ -1013,12 +1070,155 @@ export const CirclesView: React.FC = () => {
                               / {formatCentsUsd(circle.targetUsdCents)}
                             </span>
                           </div>
-                          <div className="text-[11px] font-mono text-emerald-600">
-                            +{formatCentsUsd(circle.yieldUsdCents)} live yield (
-                            {circle.totalSharesFormatted} {circle.vaultSymbol})
+                          {hasPoolShares ? (
+                            <div className="text-[11px] font-mono text-emerald-600">
+                              +{formatCentsUsd(circle.yieldUsdCents)} yield ({circle.totalSharesFormatted}{' '}
+                              {circle.vaultSymbol})
+                            </div>
+                          ) : (
+                            <div className="text-[11px] font-mono text-stone-400">
+                              Min deposit ${vaultMinUsd} USD
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Sleek Progress Track */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-mono uppercase tracking-wider text-stone-500">
+                          <span>Funded</span>
+                          <span className="font-bold text-stone-900">
+                            {circleProgress.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-600 rounded-full transition-all duration-500"
+                            style={{ width: `${Math.min(100, circleProgress)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* PERFORATED TICKET TEAR LINE WITH SIDE NOTCHES */}
+                    <div className="relative flex items-center">
+                      <div className="w-4 h-4 -ml-2 rounded-full bg-stone-100 border border-stone-200 shrink-0" />
+                      <div className="w-full border-t-2 border-dashed border-stone-200" />
+                      <div className="w-4 h-4 -mr-2 rounded-full bg-stone-100 border border-stone-200 shrink-0" />
+                    </div>
+
+                    {/* TICKET STUB (Participants for Group Circles + Action Bar) */}
+                    <div className="px-5 py-3.5 bg-stone-50/60 space-y-3">
+                      {!isSolo && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
+                              Participants ({circle.members.length})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCopyLink(
+                                  circle.id,
+                                  `${window.location.origin}/app/circles?circle=${encodeURIComponent(
+                                    circle.id
+                                  )}`
+                                )
+                              }
+                              className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
+                            >
+                              {copiedId === circle.id ? (
+                                <Check className="w-3 h-3 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                              <span>Invite Link</span>
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {circle.members.map((m) => {
+                              const memberPct = m.progressPct ?? m.fulfillmentPct ?? 0;
+                              return (
+                                <div
+                                  key={m.id}
+                                  className="px-3 py-2 rounded-xl bg-white border border-stone-200 flex items-center justify-between gap-2 text-xs"
+                                >
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <img
+                                      src={`https://unavatar.io/x/${m.handle}`}
+                                      alt={`@${m.handle}`}
+                                      className="w-4 h-4 rounded-full object-cover border border-stone-200 bg-stone-100 shrink-0"
+                                      onError={(e) => {
+                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                      }}
+                                    />
+                                    <span className="font-mono font-bold text-stone-900 truncate">
+                                      @{m.handle}
+                                    </span>
+                                    <span className="text-[10px] font-mono text-stone-400">
+                                      ({m.percentageShare.toFixed(2).replace(/\.00$/, '')}%)
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
+                                    <span className="text-stone-600 tabular-nums">
+                                      {formatCentsUsd(m.contributedUsdCents)}/
+                                      {formatCentsUsd(m.quotaUsdCents)}
+                                    </span>
+                                    {m.hasApprovedDissolve && isCircleOpen && (
+                                      <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold">
+                                        Dissolve ✓
+                                      </span>
+                                    )}
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded font-bold ${
+                                        m.hasMetQuota
+                                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                          : m.hasSigned
+                                          ? 'bg-stone-100 text-stone-700'
+                                          : 'bg-amber-50 text-amber-700'
+                                      }`}
+                                    >
+                                      {m.hasMetQuota
+                                        ? '100% ✓'
+                                        : m.hasSigned
+                                        ? `${memberPct.toFixed(0)}%`
+                                        : 'Unsigned'}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
+                      )}
 
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        {/* Left Ticket Barcode & Pass Info */}
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className="flex items-center gap-[2px] h-5 opacity-45 select-none"
+                            aria-hidden="true"
+                          >
+                            <span className="w-[2px] h-full bg-stone-900" />
+                            <span className="w-[1px] h-full bg-stone-900" />
+                            <span className="w-[3px] h-full bg-stone-900" />
+                            <span className="w-[1px] h-full bg-stone-900" />
+                            <span className="w-[2px] h-full bg-stone-900" />
+                            <span className="w-[1px] h-full bg-stone-900" />
+                            <span className="w-[3px] h-full bg-stone-900" />
+                            <span className="w-[2px] h-full bg-stone-900" />
+                          </div>
+                          <span className="text-[11px] font-mono text-stone-500">
+                            {isSolo
+                              ? 'Solo Vault Pass • 100% Share'
+                              : `${circle.members.filter((m) => m.hasSigned).length}/${
+                                  circle.members.length
+                                } Signed`}
+                          </span>
+                        </div>
+
+                        {/* Right Action Buttons */}
                         {isCircleOpen && (
                           <div className="flex flex-wrap items-center gap-2">
                             {circle.isMember && !circle.hasSigned && (
@@ -1026,10 +1226,10 @@ export const CirclesView: React.FC = () => {
                                 type="button"
                                 disabled={isActionBusyId === circle.id || isAuthorizing}
                                 onClick={() => handleJoinCircle(circle)}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-stone-300 bg-stone-50 hover:bg-stone-100 text-stone-900 text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-stone-900 text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
                               >
                                 <Fingerprint className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Sign & Join Circle</span>
+                                <span>Sign & Join</span>
                               </button>
                             )}
                             {canParticipate && (
@@ -1039,7 +1239,7 @@ export const CirclesView: React.FC = () => {
                                   setContributeCircle(circle);
                                   setContribAmount('');
                                 }}
-                                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-bold transition-all cursor-pointer"
+                                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-bold transition-all cursor-pointer"
                               >
                                 <ArrowUpRight className="w-3.5 h-3.5" />
                                 <span>Add Funds</span>
@@ -1050,7 +1250,7 @@ export const CirclesView: React.FC = () => {
                                 type="button"
                                 disabled={isActionBusyId === circle.id || isAuthorizing}
                                 onClick={() => handleSettleCircle(circle)}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
                                 title="Disburse pooled vault shares + yield to payout handle (1% protocol fee on payout)"
                               >
                                 <Fingerprint className="w-3.5 h-3.5" />
@@ -1066,150 +1266,21 @@ export const CirclesView: React.FC = () => {
                                   Boolean(circle.hasApprovedDissolve)
                                 }
                                 onClick={() => handleDissolveCircle(circle)}
-                                className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-600 text-xs font-mono transition-all cursor-pointer disabled:opacity-60"
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-600 text-xs font-mono transition-all cursor-pointer disabled:opacity-60"
                                 title="All contributors who funded the Circle must sign with their passkey to dissolve and refund pro-rata shares + yield"
                               >
                                 <Fingerprint className="w-3 h-3" />
                                 <span>
                                   {hasPoolShares
                                     ? circle.hasApprovedDissolve
-                                      ? `Dissolve Signed (${dissolveSigned}/${dissolveRequired})`
-                                      : `Activate Dissolve (${dissolveSigned}/${dissolveRequired})`
+                                      ? `Dissolve (${dissolveSigned}/${dissolveRequired})`
+                                      : `Dissolve (${dissolveSigned}/${dissolveRequired})`
                                     : 'Dissolve'}
                                 </span>
                               </button>
                             )}
                           </div>
                         )}
-                      </div>
-                    </div>
-
-                    {/* Overall Circle Progress Bar */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[11px] font-mono text-stone-500">
-                        <span>Pool Progress (Members can keep adding at any time)</span>
-                        <span className="font-bold text-stone-900">
-                          {circleProgress.toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-stone-100 overflow-hidden">
-                        <div
-                          className="h-full bg-emerald-600 rounded-full transition-all duration-500"
-                          style={{ width: `${Math.min(100, circleProgress)}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Member Percentage Allocations Table */}
-                    <div className="border-t border-stone-200 pt-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-500">
-                          Participants ({circle.members.length})
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCopyLink(
-                              circle.id,
-                              `${window.location.origin}/app/circles?circle=${encodeURIComponent(
-                                circle.id
-                              )}`
-                            )
-                          }
-                          className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
-                        >
-                          {copiedId === circle.id ? (
-                            <Check className="w-3 h-3 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3 h-3" />
-                          )}
-                          <span>Copy Invite Link</span>
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {circle.members.map((m) => {
-                          const memberPct = m.progressPct ?? m.fulfillmentPct ?? 0;
-                          return (
-                            <div
-                              key={m.id}
-                              className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-1.5"
-                            >
-                              <div className="flex items-center justify-between gap-2 text-xs">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="font-mono font-bold text-stone-900 truncate">
-                                    @{m.handle}
-                                  </span>
-                                  <span className="px-1.5 py-0.5 rounded bg-stone-200 text-stone-700 font-mono text-[10px] font-bold">
-                                    {m.percentageShare.toFixed(2).replace(/\.00$/, '')}%
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  {m.hasApprovedDissolve && isCircleOpen && (
-                                    <span
-                                      className="inline-flex items-center gap-1 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200"
-                                      title="Contributor signed to dissolve Circle"
-                                    >
-                                      <span>Dissolve ✓</span>
-                                    </span>
-                                  )}
-                                  <span
-                                    className={`inline-flex items-center gap-1 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                      m.hasSigned
-                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                        : 'bg-stone-100 text-stone-500 border border-stone-200'
-                                    }`}
-                                    title={
-                                      m.hasSigned
-                                        ? 'Signed with Passkey'
-                                        : 'Awaiting passkey signature from participant'
-                                    }
-                                  >
-                                    {m.hasSigned ? (
-                                      <>
-                                        <CheckCircle2 className="w-2.5 h-2.5" />
-                                        <span>Signed</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Clock className="w-2.5 h-2.5" />
-                                        <span>Unsigned</span>
-                                      </>
-                                    )}
-                                  </span>
-                                  <span
-                                    className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                      m.hasMetQuota
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                    }`}
-                                  >
-                                    {m.hasMetQuota ? '100%+ ✓' : `${memberPct.toFixed(0)}%`}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between text-[11px] font-mono text-stone-500">
-                                <span>
-                                  Added: {formatCentsUsd(m.contributedUsdCents)} /{' '}
-                                  {formatCentsUsd(m.quotaUsdCents)}
-                                </span>
-                                {m.yieldUsdCents > 0 && (
-                                  <span className="text-emerald-600">
-                                    +{formatCentsUsd(m.yieldUsdCents)} yield
-                                  </span>
-                                )}
-                              </div>
-                              <div className="h-1.5 w-full rounded-full bg-stone-200 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${
-                                    m.hasMetQuota ? 'bg-emerald-600' : 'bg-stone-900'
-                                  }`}
-                                  style={{ width: `${Math.min(100, memberPct)}%` }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
                       </div>
                     </div>
                   </div>
