@@ -81,7 +81,7 @@ export const LandingPage: React.FC = () => {
           1. Hero Section: Full width end to end, bold mobile typography
         */}
         <section className="w-full px-4 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 space-y-6 sm:space-y-8 text-left py-8 sm:py-16 md:py-20 lg:py-24 min-h-[38vh] sm:min-h-[50vh] flex flex-col justify-center">
-          <h1 className="w-full text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.08] sm:leading-[1.0] text-stone-950">
+          <h1 className="w-full text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5rem] 2xl:text-[5.75rem] font-display font-extrabold tracking-tight leading-[1.14] sm:leading-[1.08] text-stone-950">
             Your{' '}
             <span className="underline decoration-black decoration-2 sm:decoration-4 underline-offset-4 sm:underline-offset-6 inline-block">
               𝕏
@@ -132,7 +132,7 @@ export const LandingPage: React.FC = () => {
           </span>
           <div className="w-full">
             <TextReveal
-              className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-black tracking-tight leading-[1.12] sm:leading-[0.98]"
+              className="text-3xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl font-display font-extrabold tracking-tight leading-[1.15] sm:leading-[1.06]"
               accentWords={['leak', 'rekt', 'near', 'intents', 'confidential', 'uprail']}
             >
               Public blockchains leak your wealth and rekt. NEAR Intents made confidential transfers possible. UPRAIL streams that private value to 𝕏 handles.

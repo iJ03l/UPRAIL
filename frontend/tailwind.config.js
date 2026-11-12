@@ -77,10 +77,10 @@ export default {
         }
       },
       fontFamily: {
-        // Rare bespoke display font: Clash Display / Syne
+        // Tall, sharp editorial display font: Bricolage Grotesque
         display: [
-          '"Clash Display"',
-          'Syne',
+          '"Bricolage Grotesque"',
+          '"Space Grotesk"',
           '-apple-system',
           'BlinkMacSystemFont',
           'sans-serif',
