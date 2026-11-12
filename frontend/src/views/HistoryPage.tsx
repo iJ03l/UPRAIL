@@ -22,7 +22,7 @@ import { ShareModal } from '../components/ShareModal';
 import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
-import { PaymentIntent, PaymentRequest } from '../types';
+import { CoffeeSettingsResponse, PaymentIntent, PaymentRequest } from '../types';
 import { activityStatusMeta, cancellationReason } from '../lib/statusLabels';
 
 export const HistoryPage: React.FC = () => {
@@ -61,16 +61,26 @@ export const HistoryPage: React.FC = () => {
     } catch {}
   };
 
+  const [coffeeDonations, setCoffeeDonations] = useState<CoffeeSettingsResponse['recentDonations']>([]);
+  const loadCoffee = async () => {
+    try {
+      const s = await api.getCoffeeSettings();
+      setCoffeeDonations(s?.recentDonations || []);
+    } catch {}
+  };
+
   useEffect(() => {
     loadHistory();
     loadOnchainHistory();
     loadRequests();
+    loadCoffee();
   }, [loadHistory, loadOnchainHistory]);
 
   const handleRefresh = () => {
     loadHistory();
     loadOnchainHistory();
     loadRequests();
+    loadCoffee();
   };
 
   const handleCopy = (value: string, id: string) => {
@@ -245,9 +255,36 @@ export const HistoryPage: React.FC = () => {
       });
     }
 
-    list.sort((a, b) => b.timestamp - a.timestamp);
-    return list;
-  }, [history, requests, transactions, user?.handle, tokens, balances]);
+    // 4. Buy Me a Coffee tips received via the public pay link (settled in stables)
+    const coffeeTxHashes = new Set<string>();
+    const coffeeIds = new Set<string>();
+    for (const d of coffeeDonations) {
+      if (d.payoutTxHash) coffeeTxHashes.add(d.payoutTxHash);
+      coffeeIds.add(d.id);
+      list.push({
+        id: d.id,
+        type: 'deposit',
+        isSent: false,
+        title: 'Buy Me a Coffee tip',
+        subtitle: `Paid in ${d.originSymbol} • Settled as ${d.targetSymbol}`,
+        amount: d.netAmount || d.grossAmount,
+        amountUsd: parseFloat(d.netAmount || d.grossAmount) || null,
+        symbol: d.targetSymbol,
+        status: 'completed',
+        date: new Date(d.createdAt).toLocaleDateString(),
+        timestamp: d.createdAt,
+        balanceEffect: getTransactionBalanceEffect({ type: 'deposit', isSent: false, status: 'completed' }),
+        copyValue: d.payoutTxHash || undefined,
+      });
+    }
+
+    const deduped = coffeeTxHashes.size
+      ? list.filter((item) => coffeeIds.has(item.id) || !coffeeTxHashes.has(item.id))
+      : list;
+
+    deduped.sort((a, b) => b.timestamp - a.timestamp);
+    return deduped;
+  }, [history, requests, transactions, user?.handle, tokens, balances, coffeeDonations]);
 
   const filteredHistory = useMemo(() => {
     return unifiedHistory.filter((item) => {

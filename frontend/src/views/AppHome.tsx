@@ -35,7 +35,7 @@ import {
   formatUsdCompact,
   sumUsd,
 } from '../lib/api';
-import type { PaymentIntent, PaymentRequest, Token } from '../types';
+import type { CoffeeSettingsResponse, PaymentIntent, PaymentRequest, Token } from '../types';
 import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
 import { StabilizeModal } from '../components/StabilizeModal';
@@ -108,6 +108,16 @@ export const AppHome: React.FC = () => {
 
   useEffect(() => {
     api.getIncomingRequests().then((r) => setIncomingRequests(r || [])).catch(() => {});
+  }, []);
+
+  // Completed Buy Me a Coffee tips (public pay link) settle escrow → vault and
+  // are not rows in `payments`, so fetch them separately for the activity feed.
+  const [coffeeDonations, setCoffeeDonations] = useState<CoffeeSettingsResponse['recentDonations']>([]);
+  useEffect(() => {
+    api
+      .getCoffeeSettings()
+      .then((s) => setCoffeeDonations(s?.recentDonations || []))
+      .catch(() => {});
   }, []);
 
   // Received-payment notifications. Direct sends land straight in the vault
@@ -363,9 +373,34 @@ export const AppHome: React.FC = () => {
       });
     }
 
-    list.sort((a, b) => b.timestamp - a.timestamp);
-    return list;
-  }, [history, requests, transactions, user?.handle, tokens, balances]);
+    // Buy Me a Coffee tips received via the public pay link
+    const coffeeTxHashes = new Set<string>();
+    for (const d of coffeeDonations) {
+      if (d.payoutTxHash) coffeeTxHashes.add(d.payoutTxHash);
+      list.push({
+        id: d.id,
+        type: 'deposit',
+        isSent: false,
+        title: 'Buy Me a Coffee tip',
+        subtitle: `${new Date(d.createdAt).toLocaleDateString()} • Paid in ${d.originSymbol}`,
+        amount: formatTokenAmount(d.netAmount || d.grossAmount),
+        symbol: d.targetSymbol,
+        status: 'completed',
+        timestamp: d.createdAt,
+        balanceEffect: getTransactionBalanceEffect({ type: 'deposit', isSent: false, status: 'completed' }),
+        copyValue: d.payoutTxHash || undefined,
+        copyTitle: 'Copy tx hash',
+      });
+    }
+
+    const coffeeIds = new Set(coffeeDonations.map((d) => d.id));
+    const deduped = coffeeTxHashes.size
+      ? list.filter((item) => coffeeIds.has(item.id) || !coffeeTxHashes.has(item.id))
+      : list;
+
+    deduped.sort((a, b) => b.timestamp - a.timestamp);
+    return deduped;
+  }, [history, requests, transactions, user?.handle, tokens, balances, coffeeDonations]);
 
   return (
     <div className="w-full">
@@ -753,7 +788,7 @@ export const AppHome: React.FC = () => {
                 <ArrowDownLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
               <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors">
-                Receive
+                Deposit
               </span>
               <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
                 Any Chain

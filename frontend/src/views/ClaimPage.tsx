@@ -641,7 +641,7 @@ export const ClaimPage: React.FC = () => {
                 to="/app/receive"
                 className="py-2.5 px-4 rounded-xl border border-stone-200 hover:border-black text-stone-700 hover:text-black font-display font-bold text-xs uppercase tracking-wider bg-stone-50 transition-colors cursor-pointer"
               >
-                Receive money
+                Deposit funds
               </Link>
             </div>
           </div>

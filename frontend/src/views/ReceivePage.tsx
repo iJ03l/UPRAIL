@@ -385,28 +385,29 @@ export const ReceivePage: React.FC = () => {
 
   const handleSelectPreset = (presetVal: string) => {
     setDepositAmount(presetVal);
-    if (selectedToken && selectedChain) {
-      loadAddress(true, presetVal);
-    }
   };
 
-  // Debounced address derivation when user changes amount
+  const canShowAddress = Boolean(
+    hasIntentAccount &&
+      selectedToken &&
+      selectedChain &&
+      depositAmount.trim() &&
+      !isNaN(parseFloat(depositAmount)) &&
+      parseFloat(depositAmount) > 0
+  );
+
+  const handleShowAddress = () => {
+    if (!canShowAddress || isDeriving) return;
+    loadAddress(true);
+  };
+
+  // A one-time quote is only requested when the user clicks "Show Address".
+  // Changing the asset, network, or amount invalidates any address on screen.
   useEffect(() => {
-    const amt = depositAmount.trim();
-    const numAmt = parseFloat(amt);
-    if (!selectedToken || !selectedChain || !amt || isNaN(numAmt) || numAmt <= 0) {
-      setCurrentAddress(null);
-      setDepositStatus(null);
-      setSettledSuccess(false);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      loadAddress(false, amt);
-    }, 600);
-
-    return () => clearTimeout(timer);
-  }, [selectedToken, selectedChain, depositAmount, loadAddress]);
+    setCurrentAddress(null);
+    setDepositStatus(null);
+    setSettledSuccess(false);
+  }, [selectedToken, selectedChain, depositAmount]);
 
   const loadNearAddress = useCallback(
     async (refresh = false) => {
@@ -645,7 +646,7 @@ export const ReceivePage: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-1">
             <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-1.5">
               <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold flex-shrink-0">1</span>
-              <span>Select Asset to Receive</span>
+              <span>Select Asset to Deposit</span>
             </label>
             <span className="text-[11px] font-mono text-stone-400">
               {tokens.length} intent assets supported
@@ -686,7 +687,7 @@ export const ReceivePage: React.FC = () => {
                   </div>
                   <div>
                     <span className="font-mono text-sm font-bold text-stone-900 block">
-                      Select an Asset to Receive...
+                      Select an Asset to Deposit...
                     </span>
                     <span className="text-xs text-stone-400 font-sans">
                       {tokens.length} cross-chain intent assets supported
@@ -982,15 +983,36 @@ export const ReceivePage: React.FC = () => {
           )}
 
           {/* Critical Exact Input Notice */}
-          <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200/80 text-[11px] text-amber-900 leading-relaxed space-y-1">
+          <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-700/50 text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed space-y-1">
             <div className="flex items-center space-x-1.5 font-bold">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-700 flex-shrink-0" />
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 flex-shrink-0" />
               <span>Exact-Amount Intent Routing</span>
             </div>
-            <p className="text-amber-800">
+            <p className="text-amber-800 dark:text-amber-200/90">
               The deposit address is locked to this <strong>exact amount</strong> and goes directly into your UPRAIL account. Always transfer the exact amount specified from your external wallet.
             </p>
           </div>
+
+          {!currentAddress && (
+            <button
+              type="button"
+              onClick={handleShowAddress}
+              disabled={!canShowAddress || isDeriving}
+              className="w-full py-3.5 px-5 rounded-2xl bg-black hover:bg-stone-800 disabled:bg-stone-200 disabled:text-stone-400 text-white font-display font-extrabold text-xs uppercase tracking-wider transition-all shadow-sm flex items-center justify-center space-x-2 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {isDeriving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Generating Address...</span>
+                </>
+              ) : (
+                <>
+                  <QrCode className="w-4 h-4" />
+                  <span>Show Address</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Minimum Deposit / Finality Badge when selected */}
@@ -1101,7 +1123,7 @@ export const ReceivePage: React.FC = () => {
                         onClick={handleGenerateFresh}
                         className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
                       >
-                        Receive Another
+                        Deposit Another
                       </button>
                     </div>
                   </div>
@@ -1213,9 +1235,20 @@ export const ReceivePage: React.FC = () => {
                       ? `Select source blockchain network for ${selectedToken} in Step 2.`
                       : !depositAmount || parseFloat(depositAmount) <= 0
                       ? `Enter the exact ${selectedToken} deposit amount in Step 3.`
-                      : 'Generating your single-use deposit address & QR code...'}
+                      : 'Click "Show Address" to generate your single-use deposit address & QR code.'}
                   </p>
                 </div>
+                {canShowAddress && (
+                  <button
+                    type="button"
+                    onClick={handleShowAddress}
+                    disabled={isDeriving}
+                    className="px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>Show Address</span>
+                  </button>
+                )}
                 <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 text-[10px] font-mono text-stone-500">
                   <Zap className="w-3 h-3 text-stone-500" />
                   <span>Protected by your passkey</span>
@@ -1226,7 +1259,7 @@ export const ReceivePage: React.FC = () => {
         </div>
       </div>
       ) : (
-        /* ── DIRECT NEAR NATIVE & MEMES TAB — pick token, receive to pk account ── */
+        /* ── DIRECT NEAR NATIVE & MEMES TAB — pick token, deposit to pk account ── */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
           {/* ── LEFT COLUMN (7 Cols) ── */}
           <div className="lg:col-span-7 space-y-6">
@@ -1238,7 +1271,7 @@ export const ReceivePage: React.FC = () => {
                   <span>NEAR Protocol Direct Ingress</span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-stone-950">
-                  Receive any NEAR token
+                  Deposit any NEAR token
                 </h2>
               </div>
 
@@ -1247,7 +1280,7 @@ export const ReceivePage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold uppercase tracking-wider text-stone-700 font-mono flex items-center space-x-2">
                     <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">1</span>
-                    <span>Select Token to Receive</span>
+                    <span>Select Token to Deposit</span>
                   </label>
                   <span className="text-[11px] font-mono text-stone-400">All NEAR tokens</span>
                 </div>
@@ -1372,7 +1405,7 @@ export const ReceivePage: React.FC = () => {
                           onClick={handleGenerateFreshNear}
                           className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
                         >
-                          Receive Another
+                          Deposit Another
                         </button>
                       </div>
                     </div>
@@ -1485,7 +1518,7 @@ export const ReceivePage: React.FC = () => {
                   <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
                   <span>Setting up your UPRAIL account…</span>
                   <span className="text-stone-400 max-w-[240px] leading-relaxed">
-                    Receive addresses appear once setup finishes — usually a few seconds after your first sign-in.
+                    Deposit addresses appear once setup finishes — usually a few seconds after your first sign-in.
                   </span>
                   <button
                     type="button"
