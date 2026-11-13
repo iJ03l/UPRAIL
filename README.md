@@ -472,6 +472,12 @@ Local configuration templates are available in `worker/.dev.vars.example` and `g
 
 ---
 
+## Hackathon Disclosure (Multi-Project Rule Q-015)
+
+In accordance with NEAR HACKATHON rule **Q-015**, the author is also submitting a separate, independent hackathon project: **[fe2vi.space](https://fe2vi.space)** (a distinct product with its own repository and submission; maximum 2 projects per participant).
+
+---
+
 ## License
 
 Released under the [MIT License](./LICENSE).
