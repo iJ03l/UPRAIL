@@ -526,10 +526,10 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
               </div>
             </div>
 
-            {/* Help & Support */}
+            {/* Community & Support */}
             <div className="space-y-2">
               <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
-                Need Help?
+                Support &amp; Community
               </span>
               <a
                 href="https://t.me/uprailworld"
@@ -544,6 +544,29 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   <span className="text-left min-w-0">
                     <span className="block text-xs font-mono font-bold text-stone-900">
                       Get help on Telegram
+                    </span>
+                    <span className="block text-[10px] text-stone-500 font-mono truncate">
+                      @uprailworld
+                    </span>
+                  </span>
+                </span>
+                <ExternalLink className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-900 transition-colors flex-shrink-0" />
+              </a>
+              <a
+                href="https://x.com/uprailworld"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group w-full py-3 px-3 rounded-2xl bg-stone-50 hover:bg-stone-100 border border-stone-200 transition-colors flex items-center justify-between gap-2"
+              >
+                <span className="flex items-center space-x-2.5 min-w-0">
+                  <span className="w-8 h-8 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-900 flex-shrink-0">
+                    <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                    </svg>
+                  </span>
+                  <span className="text-left min-w-0">
+                    <span className="block text-xs font-mono font-bold text-stone-900">
+                      Follow on 𝕏
                     </span>
                     <span className="block text-[10px] text-stone-500 font-mono truncate">
                       @uprailworld

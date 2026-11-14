@@ -61,16 +61,33 @@ export const LandingPage: React.FC = () => {
           {/* Brand with Cinematic Glitch — icon-only on mobile, full wordmark on sm+ */}
           <GlitchLogo href="/" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
 
-          {/* Launch App Button - Strictly opens app.uprail.world in new tab */}
-          <a
-            href={appSubdomainUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-shrink-0 px-4 py-2 sm:px-6 sm:py-2.5 rounded-xl bg-black text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-800 transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95"
-          >
-            <span>Launch App</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </a>
+          {/* Nav Actions: X (@uprailworld) + Launch App */}
+          <nav aria-label="Primary navigation" className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <a
+              href="https://x.com/uprailworld"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Follow @uprailworld on X"
+              title="Follow @uprailworld on X"
+              className="inline-flex items-center justify-center gap-1.5 h-9 w-9 sm:w-auto sm:h-10 sm:px-3.5 rounded-xl bg-stone-100 hover:bg-stone-200 border border-stone-200 text-stone-900 text-xs font-mono font-bold transition-colors flex-shrink-0"
+            >
+              <svg className="w-3.5 h-3.5 fill-current flex-shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
+              <span className="hidden sm:inline">@uprailworld</span>
+            </a>
+
+            {/* Launch App Button - Strictly opens app.uprail.world in new tab */}
+            <a
+              href={appSubdomainUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-shrink-0 px-4 py-2 sm:px-6 sm:py-2.5 rounded-xl bg-black text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-800 transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95"
+            >
+              <span>Launch App</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </a>
+          </nav>
         </div>
       </header>
 

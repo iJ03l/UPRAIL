@@ -11,6 +11,7 @@ UPRAIL is a complete **social money ecosystem built around NEAR Intents** (`inte
 - **Developer Documentation:** [https://docs.uprail.world](https://docs.uprail.world)
 - **Remote MCP Server:** `https://api.uprail.world/api/mcp`
 - **OpenAPI 3.1.0 Spec (AI Agents):** [https://api.uprail.world/api/agent/openapi.json](https://api.uprail.world/api/agent/openapi.json)
+- **X (Twitter):** [@uprailworld](https://x.com/uprailworld)
 
 ---
 
