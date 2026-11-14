@@ -458,8 +458,8 @@ export const SendPage: React.FC = () => {
           {/* Optional Memo */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
-                Private Note (Optional)
+              <label className="text-xs font-semibold uppercase tracking-wider text-stone-600">
+                Note (Optional)
               </label>
               <span className="text-[11px] font-mono text-stone-700 font-semibold">Encrypted</span>
             </div>

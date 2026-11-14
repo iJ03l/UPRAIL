@@ -165,7 +165,7 @@ export const RequestMoneyPage: React.FC = () => {
             <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400">
               Amount & Asset
             </label>
-            <div className="flex items-center space-x-2 p-2 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800">
+            <div className="flex items-center space-x-2 p-2 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 focus-within:border-stone-900 dark:focus-within:border-stone-100 focus-within:bg-white dark:focus-within:bg-stone-950 transition-colors">
               <input
                 type="text"
                 value={amount}
@@ -178,7 +178,7 @@ export const RequestMoneyPage: React.FC = () => {
                 }}
                 placeholder="0.00"
                 disabled={isSubmitting}
-                className="w-full bg-transparent px-3 text-2xl font-mono font-bold text-stone-950 dark:text-white outline-hidden"
+                className="w-full bg-transparent px-3 text-2xl font-mono font-bold text-stone-950 dark:text-white focus:outline-none focus:ring-0 outline-none"
               />
               <div className="flex-shrink-0">
                 <AssetPicker
@@ -199,7 +199,7 @@ export const RequestMoneyPage: React.FC = () => {
           {/* Memo / Purpose */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400">
-              Reason / Memo (Optional)
+              Note (Optional)
             </label>
             <input
               type="text"

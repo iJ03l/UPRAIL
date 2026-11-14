@@ -142,7 +142,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
         onClick={() => inputRef.current?.focus()}
         className={`relative flex items-center rounded-2xl bg-stone-50 dark:bg-stone-900 border transition-all duration-200 cursor-text ${
           isFocused
-            ? 'border-stone-900 dark:border-stone-100 ring-1 ring-stone-900 dark:ring-stone-100 bg-white dark:bg-stone-950'
+            ? 'border-stone-900 dark:border-stone-100 bg-white dark:bg-stone-950'
             : resolutionError && !isFocused
             ? 'border-red-300 dark:border-red-800 bg-red-50/20'
             : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700'
@@ -167,7 +167,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
           autoCorrect="off"
           autoComplete="off"
           spellCheck={false}
-          className="w-full min-w-0 bg-transparent py-3.5 pr-10 text-stone-900 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 font-normal text-base focus:outline-none"
+          className="w-full min-w-0 bg-transparent py-3.5 pr-10 text-stone-900 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 font-normal text-base focus:outline-none focus:ring-0 outline-none"
         />
 
         {/* Clear or Status Indicator */}
