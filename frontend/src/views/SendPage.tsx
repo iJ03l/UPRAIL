@@ -357,6 +357,8 @@ export const SendPage: React.FC = () => {
                 onResolved={(_acc, isValid) => setIsHandleValid(isValid)}
                 disabled={isSubmitting}
                 placeholder="username"
+                label="Recipient (𝕏 Handle)"
+                mode="send"
               />
             </div>
           ) : (
@@ -364,10 +366,10 @@ export const SendPage: React.FC = () => {
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-stone-600">
                     Recipient Wallet Address
                   </label>
-                  <span className="text-xs text-stone-700 font-mono font-bold">
+                  <span className="text-xs text-stone-700 font-mono font-medium">
                     Cross-Chain Solver
                   </span>
                 </div>
@@ -377,6 +379,10 @@ export const SendPage: React.FC = () => {
                   onChange={(e) => setWalletAddress(e.target.value.trim())}
                   disabled={isSubmitting}
                   placeholder="0x... (EVM), Solana base58, or .near"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoComplete="off"
                   className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3.5 text-base sm:text-xs text-stone-900 font-mono placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
                 />
               </div>

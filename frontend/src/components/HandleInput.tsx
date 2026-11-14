@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { AtSign, CheckCircle2, User, X, AlertCircle, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, User, X, AlertCircle, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../lib/api';
 
@@ -20,10 +20,12 @@ export interface ResolvedAccountInfo {
 interface HandleInputProps {
   value: string;
   onChange: (val: string) => void;
-  onResolved?: (account: ResolvedAccountInfo | null, isValid: boolean) => void;
+  onResolved?: (account: ResolvedAccountInfo | null, isValid: boolean | null) => void;
   disabled?: boolean;
   placeholder?: string;
   label?: string;
+  mode?: 'send' | 'request';
+  helperText?: string;
 }
 
 export const HandleInput: React.FC<HandleInputProps> = ({
@@ -32,7 +34,9 @@ export const HandleInput: React.FC<HandleInputProps> = ({
   onResolved,
   disabled = false,
   placeholder = 'username',
-  label = 'Recipient',
+  label,
+  mode = 'send',
+  helperText,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
@@ -40,23 +44,28 @@ export const HandleInput: React.FC<HandleInputProps> = ({
   const [resolutionError, setResolutionError] = useState<string | null>(null);
   const [imgLoaded, setImgLoaded] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Clean raw handle input
+  const displayLabel = label || (mode === 'request' ? 'Request From' : 'Recipient');
+
+  // Clean raw handle input: handle pasted URLs (x.com/user, twitter.com/user), @ symbols, spaces
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    const cleaned = raw.replace(/^@+/, '').replace(/\s+/g, '').toLowerCase();
-    onChange(cleaned);
+    let raw = e.target.value;
+    // Strip web prefix if pasted
+    raw = raw.replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, '');
+    const clean = raw.replace(/^@+/, '').replace(/\s+/g, '').toLowerCase().split(/[?#]/)[0];
+    onChange(clean);
   };
 
   useEffect(() => {
-    const clean = value.replace(/^@+/, '').replace(/\s+/g, '').toLowerCase();
+    let clean = value.replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, '').replace(/^@+/, '').replace(/\s+/g, '').toLowerCase().split(/[?#]/)[0];
 
     if (!clean) {
       setIsResolving(false);
       setResolvedAccount(null);
       setResolutionError(null);
       setImgLoaded(false);
-      onResolved?.(null, false);
+      onResolved?.(null, null);
       return;
     }
 
@@ -65,10 +74,17 @@ export const HandleInput: React.FC<HandleInputProps> = ({
       abortControllerRef.current.abort();
     }
 
-    if (clean.length < 1) {
+    // Quick regex validation before hitting network
+    const isValidFormat = /^[a-z0-9_]{1,15}$/.test(clean);
+    if (!isValidFormat) {
       setIsResolving(false);
       setResolvedAccount(null);
-      setResolutionError(null);
+      if (clean.length > 15) {
+        setResolutionError('𝕏 handles cannot exceed 15 characters');
+      } else {
+        setResolutionError('Only letters, numbers, and underscores allowed');
+      }
+      onResolved?.(null, false);
       return;
     }
 
@@ -90,7 +106,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
       } finally {
         setIsResolving(false);
       }
-    }, 320);
+    }, 450);
 
     return () => {
       clearTimeout(timer);
@@ -98,10 +114,10 @@ export const HandleInput: React.FC<HandleInputProps> = ({
   }, [value]);
 
   return (
-    <div className="w-full space-y-2.5">
+    <div className="w-full space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-bold uppercase tracking-wider text-stone-600 dark:text-stone-400">
-          {label}
+        <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400">
+          {displayLabel}
         </label>
         {isResolving ? (
           <span className="text-xs text-stone-500 flex items-center space-x-1.5 font-mono animate-pulse">
@@ -113,7 +129,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>{resolvedAccount.isRegistered ? 'UPRAIL Account' : 'Valid 𝕏 Account'}</span>
           </span>
-        ) : resolutionError ? (
+        ) : resolutionError && !isFocused ? (
           <span className="text-xs text-red-500 dark:text-red-400 flex items-center space-x-1 font-medium">
             <AlertCircle className="w-3.5 h-3.5" />
             <span>Not found</span>
@@ -123,21 +139,23 @@ export const HandleInput: React.FC<HandleInputProps> = ({
 
       {/* Input container */}
       <div
-        className={`relative flex items-center rounded-2xl bg-stone-50 dark:bg-stone-900 border transition-all duration-200 ${
+        onClick={() => inputRef.current?.focus()}
+        className={`relative flex items-center rounded-2xl bg-stone-50 dark:bg-stone-900 border transition-all duration-200 cursor-text ${
           isFocused
             ? 'border-stone-900 dark:border-stone-100 ring-1 ring-stone-900 dark:ring-stone-100 bg-white dark:bg-stone-950'
-            : resolutionError
+            : resolutionError && !isFocused
             ? 'border-red-300 dark:border-red-800 bg-red-50/20'
             : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700'
         } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         {/* At Prefix */}
-        <div className="pl-4 pr-1 text-stone-500 dark:text-stone-400 font-mono font-bold flex items-center pointer-events-none select-none">
-          <AtSign className="w-5 h-5" />
+        <div className="pl-4 pr-1 text-stone-400 dark:text-stone-500 font-mono text-base font-normal flex items-center pointer-events-none select-none">
+          @
         </div>
 
         {/* Input */}
         <input
+          ref={inputRef}
           type="text"
           value={value}
           onChange={handleInputChange}
@@ -145,16 +163,22 @@ export const HandleInput: React.FC<HandleInputProps> = ({
           onBlur={() => setIsFocused(false)}
           disabled={disabled}
           placeholder={placeholder}
-          spellCheck={false}
+          autoCapitalize="none"
+          autoCorrect="off"
           autoComplete="off"
-          className="w-full bg-transparent py-3.5 pr-10 text-stone-900 dark:text-stone-100 placeholder-stone-400 font-medium text-base focus:outline-none"
+          spellCheck={false}
+          className="w-full min-w-0 bg-transparent py-3.5 pr-10 text-stone-900 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 font-normal text-base focus:outline-none"
         />
 
         {/* Clear or Status Indicator */}
         {value ? (
           <button
             type="button"
-            onClick={() => onChange('')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange('');
+              inputRef.current?.focus();
+            }}
             disabled={disabled}
             className="absolute right-3.5 p-1 rounded-full text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200 dark:hover:bg-stone-800 transition-colors cursor-pointer"
             title="Clear"
@@ -162,32 +186,27 @@ export const HandleInput: React.FC<HandleInputProps> = ({
             <X className="w-4 h-4" />
           </button>
         ) : (
-          <div className="absolute right-3.5 text-stone-400 pointer-events-none">
+          <div className="absolute right-3.5 text-stone-300 dark:text-stone-600 pointer-events-none">
             <User className="w-4 h-4" />
           </div>
         )}
       </div>
 
-      {/* Cool DP & Account Animation Card */}
+      {/* Account Verification & Avatar Card */}
       <AnimatePresence mode="wait">
         {resolvedAccount && !isResolving ? (
           <motion.div
             key={`resolved-${resolvedAccount.cleanHandle}`}
-            initial={{ opacity: 0, scale: 0.94, y: 6 }}
+            initial={{ opacity: 0, scale: 0.96, y: 4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.94, y: 4 }}
+            exit={{ opacity: 0, scale: 0.96, y: 4 }}
             transition={{ type: 'spring', stiffness: 350, damping: 25 }}
-            className="relative overflow-hidden rounded-2xl p-3.5 bg-gradient-to-r from-stone-50 to-stone-100/70 dark:from-stone-900/90 dark:to-stone-900/50 border border-stone-200 dark:border-stone-800 shadow-xs"
+            className="relative overflow-hidden rounded-2xl p-3 bg-gradient-to-r from-stone-50 to-stone-100/70 dark:from-stone-900/90 dark:to-stone-900/50 border border-stone-200 dark:border-stone-800 shadow-xs"
           >
-            <div className="flex items-center space-x-3.5">
-              {/* DP Avatar with animated ring and pulse */}
+            <div className="flex items-center space-x-3">
+              {/* DP Avatar */}
               <div className="relative flex-shrink-0">
-                <motion.div
-                  initial={{ scale: 0.9, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: 0.05, duration: 0.2 }}
-                  className="w-12 h-12 rounded-full overflow-hidden bg-stone-200 dark:bg-stone-800 border-2 border-white dark:border-stone-700 shadow-xs flex items-center justify-center relative"
-                >
+                <div className="w-10 h-10 rounded-full overflow-hidden bg-stone-200 dark:bg-stone-800 border border-white dark:border-stone-700 shadow-xs flex items-center justify-center relative">
                   {resolvedAccount.avatarUrl ? (
                     <img
                       src={resolvedAccount.avatarUrl}
@@ -197,21 +216,20 @@ export const HandleInput: React.FC<HandleInputProps> = ({
                         imgLoaded ? 'opacity-100' : 'opacity-0'
                       }`}
                       onError={(e) => {
-                        // Fallback on image load error
                         (e.target as HTMLElement).style.display = 'none';
                       }}
                     />
                   ) : null}
                   {!imgLoaded && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-stone-800 text-white font-bold text-sm font-mono">
+                    <div className="absolute inset-0 flex items-center justify-center bg-stone-800 text-white font-medium text-xs font-mono">
                       {resolvedAccount.cleanHandle.slice(0, 2).toUpperCase()}
                     </div>
                   )}
-                </motion.div>
+                </div>
 
                 {/* Status indicator on avatar */}
                 <div
-                  className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-white dark:border-stone-900 flex items-center justify-center text-[9px] ${
+                  className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border border-white dark:border-stone-900 flex items-center justify-center text-[8px] ${
                     resolvedAccount.isRegistered
                       ? 'bg-emerald-500 text-white'
                       : 'bg-blue-500 text-white'
@@ -219,9 +237,9 @@ export const HandleInput: React.FC<HandleInputProps> = ({
                   title={resolvedAccount.isRegistered ? 'UPRAIL Registered' : 'Verified 𝕏 Account'}
                 >
                   {resolvedAccount.isRegistered ? (
-                    <ShieldCheck className="w-2.5 h-2.5" />
+                    <ShieldCheck className="w-2 h-2" />
                   ) : (
-                    <Sparkles className="w-2.5 h-2.5" />
+                    <Sparkles className="w-2 h-2" />
                   )}
                 </div>
               </div>
@@ -229,23 +247,23 @@ export const HandleInput: React.FC<HandleInputProps> = ({
               {/* Profile Details */}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center space-x-1.5 truncate">
-                  <span className="font-bold text-sm text-stone-900 dark:text-stone-100 truncate">
+                  <span className="font-semibold text-xs sm:text-sm text-stone-900 dark:text-stone-100 truncate">
                     {resolvedAccount.name || resolvedAccount.cleanHandle}
                   </span>
                   {resolvedAccount.isRegistered && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800">
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-semibold border border-emerald-200 dark:border-emerald-800">
                       REGISTERED
                     </span>
                   )}
                 </div>
 
-                <div className="flex items-center space-x-2 text-xs text-stone-500 dark:text-stone-400 font-mono">
+                <div className="flex items-center space-x-1.5 text-[11px] text-stone-500 dark:text-stone-400 font-mono truncate">
                   <span>@{resolvedAccount.cleanHandle}</span>
                   <span>•</span>
-                  <span className="text-[11px] truncate">
-                    {resolvedAccount.isRegistered
-                      ? 'Instant vault transfer'
-                      : 'Held in escrow until claimed'}
+                  <span className="truncate">
+                    {mode === 'request'
+                      ? (resolvedAccount.isRegistered ? 'Instant request notification' : 'Direct request via 𝕏')
+                      : (resolvedAccount.isRegistered ? 'Instant vault transfer' : 'Held in escrow until claimed')}
                   </span>
                 </div>
               </div>
@@ -254,17 +272,19 @@ export const HandleInput: React.FC<HandleInputProps> = ({
         ) : resolutionError && !isResolving ? (
           <motion.div
             key="error-banner"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1, x: [0, -4, 4, -2, 2, 0] }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.25 }}
-            className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 flex items-center space-x-2.5 shadow-xs"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.2 }}
+            className="p-3 rounded-2xl bg-red-50/70 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 flex items-start space-x-2.5 shadow-xs"
           >
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
             <div className="min-w-0 flex-1 leading-snug">
               <span className="font-medium">{resolutionError}</span>
-              <p className="text-[11px] text-red-500/80 mt-0.5 font-sans">
-                Please check the spelling. Payments to non-existent accounts cannot be claimed.
+              <p className="text-[11px] text-red-600/80 dark:text-red-400/80 mt-0.5 font-sans">
+                {mode === 'request'
+                  ? 'Please check the spelling. Requests must be sent to a valid 𝕏 account.'
+                  : 'Please check the spelling. Payments to non-existent accounts cannot be claimed.'}
               </p>
             </div>
           </motion.div>
@@ -273,7 +293,10 @@ export const HandleInput: React.FC<HandleInputProps> = ({
 
       {!resolvedAccount && !resolutionError && (
         <p className="text-[11px] text-stone-500 dark:text-stone-400 font-sans">
-          Double-check the exact handle — transfers are non-reversible.
+          {helperText ||
+            (mode === 'request'
+              ? 'Enter the 𝕏 handle of the person you are requesting money from.'
+              : 'Double-check the exact handle — transfers are non-reversible.')}
         </p>
       )}
     </div>

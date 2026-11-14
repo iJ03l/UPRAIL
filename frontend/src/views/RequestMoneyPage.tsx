@@ -146,7 +146,7 @@ export const RequestMoneyPage: React.FC = () => {
             </div>
           )}
 
-          {/* Recipient Handle */}
+          {/* Payer Handle */}
           <HandleInput
             value={recipientHandle}
             onChange={(val) => {
@@ -155,12 +155,14 @@ export const RequestMoneyPage: React.FC = () => {
             }}
             onResolved={(_acc, isValid) => setIsHandleValid(isValid)}
             disabled={isSubmitting}
-            placeholder="Recipient's 𝕏 handle"
+            placeholder="username"
+            label="Request From (𝕏 Handle)"
+            mode="request"
           />
 
           {/* Amount & Asset Selector */}
           <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-stone-600 dark:text-stone-400">
+            <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400">
               Amount & Asset
             </label>
             <div className="flex items-center space-x-2 p-2 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800">
@@ -196,7 +198,7 @@ export const RequestMoneyPage: React.FC = () => {
 
           {/* Memo / Purpose */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold uppercase tracking-wider text-stone-600 dark:text-stone-400">
+            <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400">
               Reason / Memo (Optional)
             </label>
             <input
@@ -212,7 +214,7 @@ export const RequestMoneyPage: React.FC = () => {
 
           {/* Expiry Selector */}
           <div className="space-y-1.5">
-            <label className="text-xs font-bold uppercase tracking-wider text-stone-600 dark:text-stone-400 flex items-center space-x-1">
+            <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400 flex items-center space-x-1">
               <Clock className="w-3.5 h-3.5" />
               <span>Expires In</span>
             </label>
@@ -242,7 +244,7 @@ export const RequestMoneyPage: React.FC = () => {
           <div className="p-3 rounded-2xl bg-stone-50 dark:bg-stone-950/60 border border-stone-200 dark:border-stone-800 text-[11px] font-sans text-stone-500 dark:text-stone-400 flex items-start space-x-2">
             <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
             <span>
-              The recipient will receive a secure UPRAIL request link. They can accept or decline anytime voluntarily.
+              The payer will receive a secure UPRAIL request link. They can accept or decline anytime voluntarily.
             </span>
           </div>
 
