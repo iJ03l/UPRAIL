@@ -128,7 +128,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           >
             @5194
           </a>{' '}
-          · for{' '}
+          · at{' '}
           <a
             href="https://nearhackathon.com"
             target="_blank"

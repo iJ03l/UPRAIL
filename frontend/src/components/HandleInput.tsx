@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { CheckCircle2, User, X, AlertCircle, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, User, X, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../lib/api';
 
@@ -127,7 +127,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
         ) : resolvedAccount ? (
           <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center space-x-1 font-medium">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>{resolvedAccount.isRegistered ? 'UPRAIL Account' : 'Valid 𝕏 Account'}</span>
+            <span>{resolvedAccount.isRegistered ? 'On UPRAIL' : 'Valid 𝕏 Account'}</span>
           </span>
         ) : resolutionError && !isFocused ? (
           <span className="text-xs text-red-500 dark:text-red-400 flex items-center space-x-1 font-medium">
@@ -228,17 +228,19 @@ export const HandleInput: React.FC<HandleInputProps> = ({
 
                 {/* Status indicator on avatar */}
                 <div
-                  className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border border-white dark:border-stone-900 flex items-center justify-center text-[8px] ${
+                  className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[1.5px] border-white dark:border-stone-900 flex items-center justify-center ${
                     resolvedAccount.isRegistered
                       ? 'bg-emerald-500 text-white'
-                      : 'bg-blue-500 text-white'
+                      : 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950'
                   }`}
-                  title={resolvedAccount.isRegistered ? 'UPRAIL Registered' : 'Verified 𝕏 Account'}
+                  title={resolvedAccount.isRegistered ? 'On UPRAIL' : '𝕏 Account (not on UPRAIL yet)'}
                 >
                   {resolvedAccount.isRegistered ? (
-                    <ShieldCheck className="w-2 h-2" />
+                    <ShieldCheck className="w-2.5 h-2.5" />
                   ) : (
-                    <Sparkles className="w-2 h-2" />
+                    <svg className="w-2 h-2 fill-current" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                    </svg>
                   )}
                 </div>
               </div>
@@ -250,8 +252,8 @@ export const HandleInput: React.FC<HandleInputProps> = ({
                     {resolvedAccount.name || resolvedAccount.cleanHandle}
                   </span>
                   {resolvedAccount.isRegistered && (
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-semibold border border-emerald-200 dark:border-emerald-800">
-                      REGISTERED
+                    <span className="flex-shrink-0 text-[9px] font-mono tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800">
+                      // UPRAIL
                     </span>
                   )}
                 </div>

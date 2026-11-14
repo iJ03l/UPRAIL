@@ -425,7 +425,7 @@ export const LandingPage: React.FC = () => {
             >
               @5194
             </a>{' '}
-            · for{' '}
+            · at{' '}
             <a
               href="https://nearhackathon.com"
               target="_blank"
