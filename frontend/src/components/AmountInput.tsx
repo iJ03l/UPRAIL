@@ -68,7 +68,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
       </div>
 
       {/* Input container */}
-      <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 focus-within:border-black focus-within:bg-white transition-all shadow-xs">
+      <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 transition-colors shadow-xs">
         <div className="flex items-center justify-between gap-3">
           <input
             type="text"
@@ -77,7 +77,8 @@ export const AmountInput: React.FC<AmountInputProps> = ({
             onChange={handleInputChange}
             disabled={disabled}
             placeholder="0.00"
-            className="w-full bg-transparent text-2xl sm:text-3xl font-extrabold text-stone-950 placeholder-stone-300 focus:outline-none focus:ring-0 outline-none"
+            style={{ outline: 'none', boxShadow: 'none' }}
+            className="w-full min-w-0 border-0 bg-transparent p-0 text-2xl sm:text-3xl font-extrabold text-stone-950 placeholder-stone-300 focus:outline-none focus-visible:outline-none focus:ring-0 outline-none"
           />
 
           <AssetPicker

@@ -140,16 +140,14 @@ export const HandleInput: React.FC<HandleInputProps> = ({
       {/* Input container */}
       <div
         onClick={() => inputRef.current?.focus()}
-        className={`relative flex items-center rounded-2xl bg-stone-50 dark:bg-stone-900 border transition-all duration-200 cursor-text ${
-          isFocused
-            ? 'border-stone-900 dark:border-stone-100 bg-white dark:bg-stone-950'
-            : resolutionError && !isFocused
+        className={`relative flex items-center rounded-2xl bg-stone-50 border transition-colors duration-200 cursor-text ${
+          resolutionError && !isFocused
             ? 'border-red-300 dark:border-red-800 bg-red-50/20'
-            : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700'
+            : 'border-stone-200'
         } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
       >
         {/* At Prefix */}
-        <div className="pl-4 pr-1 text-stone-400 dark:text-stone-500 font-mono text-base font-normal flex items-center pointer-events-none select-none">
+        <div className="pl-4 pr-0.5 text-stone-400 text-base font-normal leading-normal flex items-center pointer-events-none select-none">
           @
         </div>
 
@@ -167,7 +165,8 @@ export const HandleInput: React.FC<HandleInputProps> = ({
           autoCorrect="off"
           autoComplete="off"
           spellCheck={false}
-          className="w-full min-w-0 bg-transparent py-3.5 pr-10 text-stone-900 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-500 font-normal text-base focus:outline-none focus:ring-0 outline-none"
+          style={{ outline: 'none', boxShadow: 'none' }}
+          className="w-full min-w-0 border-0 bg-transparent pl-0 py-3.5 pr-10 text-stone-900 placeholder-stone-400 font-normal text-base leading-normal focus:outline-none focus-visible:outline-none focus:ring-0 outline-none"
         />
 
         {/* Clear or Status Indicator */}

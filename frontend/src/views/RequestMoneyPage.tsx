@@ -165,9 +165,10 @@ export const RequestMoneyPage: React.FC = () => {
             <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400">
               Amount & Asset
             </label>
-            <div className="flex items-center space-x-2 p-2 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 focus-within:border-stone-900 dark:focus-within:border-stone-100 focus-within:bg-white dark:focus-within:bg-stone-950 transition-colors">
+            <div className="flex items-center space-x-2 p-2 rounded-2xl bg-stone-50 border border-stone-200 transition-colors">
               <input
                 type="text"
+                inputMode="decimal"
                 value={amount}
                 onChange={(e) => {
                   let val = e.target.value;
@@ -178,7 +179,8 @@ export const RequestMoneyPage: React.FC = () => {
                 }}
                 placeholder="0.00"
                 disabled={isSubmitting}
-                className="w-full bg-transparent px-3 text-2xl font-mono font-bold text-stone-950 dark:text-white focus:outline-none focus:ring-0 outline-none"
+                style={{ outline: 'none', boxShadow: 'none' }}
+                className="w-full min-w-0 border-0 bg-transparent px-3 text-2xl font-mono font-bold text-stone-950 focus:outline-none focus-visible:outline-none focus:ring-0 outline-none"
               />
               <div className="flex-shrink-0">
                 <AssetPicker
@@ -208,7 +210,8 @@ export const RequestMoneyPage: React.FC = () => {
               placeholder="e.g. Lunch reimbursement, freelance design, etc."
               maxLength={280}
               disabled={isSubmitting}
-              className="w-full p-3 rounded-2xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 text-xs font-sans text-stone-900 dark:text-white outline-hidden focus:border-stone-900 dark:focus:border-stone-600 transition-colors"
+              style={{ outline: 'none', boxShadow: 'none' }}
+              className="w-full p-3 rounded-2xl bg-stone-50 border border-stone-200 text-base sm:text-xs font-sans text-stone-900 placeholder-stone-400 focus:outline-none focus-visible:outline-none transition-colors"
             />
           </div>
 

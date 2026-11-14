@@ -286,17 +286,35 @@
   .dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.32); }
 
   /* form controls in dark mode */
-  .dark input:not([type="checkbox"]):not([type="radio"]),
-  .dark select,
-  .dark textarea {
+  .dark input:not([type="checkbox"]):not([type="radio"]):not(.bg-transparent),
+  .dark select:not(.bg-transparent),
+  .dark textarea:not(.bg-transparent) {
     background-color: var(--bg-subtle);
     color: var(--fg);
     border-color: var(--line-strong);
     color-scheme: dark;
   }
+  .dark input.bg-transparent,
+  .dark select.bg-transparent,
+  .dark textarea.bg-transparent {
+    background-color: transparent !important;
+    color: var(--fg);
+    border-color: transparent;
+    color-scheme: dark;
+  }
   .dark select option {
     background-color: var(--bg-subtle);
     color: var(--fg);
+  }
+
+  input:focus,
+  input:focus-visible,
+  textarea:focus,
+  textarea:focus-visible,
+  select:focus,
+  select:focus-visible {
+    outline: none !important;
+    outline-offset: 0 !important;
   }
 
   /* hovers */
