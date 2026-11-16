@@ -1319,7 +1319,7 @@ export const CirclesView: React.FC = () => {
                             to={`/verify?kind=circle&id=${encodeURIComponent(
                               circle.onchainCircleId || circle.id
                             )}`}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100/80 hover:bg-emerald-200/80 border border-emerald-300 text-emerald-800 font-mono text-[10px] font-bold transition-colors"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100/80 hover:bg-emerald-200/80 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300 font-mono text-[10px] font-bold transition-colors"
                             title="Inspect Circle signers and balances on circle.uprail.near"
                           >
                             <ShieldCheck className="w-3 h-3" />
@@ -1822,7 +1822,7 @@ export const CirclesView: React.FC = () => {
                             to={`/verify?kind=gift&id=${encodeURIComponent(
                               gift.onchainGiftId || gift.id
                             )}`}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-mono font-bold"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-emerald-700 dark:text-emerald-300 text-xs font-mono font-bold"
                           >
                             <ShieldCheck className="w-3 h-3" />
                             <span>Verify</span>
@@ -1844,7 +1844,7 @@ export const CirclesView: React.FC = () => {
                             disabled={isActionBusyId === gift.id || isAuthorizing}
                             onClick={() => handleClaimGift(gift)}
                             title="30 days have passed since unlock and recipient has not claimed yet — reclaim vault shares + yield back to your account"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-display font-bold cursor-pointer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-200 text-xs font-display font-bold cursor-pointer"
                           >
                             <Fingerprint className="w-3 h-3" />
                             <span>Reclaim Unclaimed</span>

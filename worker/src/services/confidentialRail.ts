@@ -646,6 +646,7 @@ export async function waitForSettlement(
     intervalMs?: number;
     signer?: RailSigner;
     accessToken?: string;
+    allowPublic?: boolean;
   } = {}
 ): Promise<SettlementPollResult> {
   const timeoutMs = opts.timeoutMs ?? 60_000;
@@ -654,7 +655,9 @@ export async function waitForSettlement(
   let last: SettlementPollResult = { status: 'UNKNOWN', terminal: false, raw: {} };
   const accessToken = opts.accessToken
     ? opts.accessToken
-    : (await sessionFor(env, xId, opts.signer || 'user')).accessToken;
+    : opts.allowPublic
+      ? (await sessionFor(env, xId, opts.signer || 'user').catch(() => null))?.accessToken
+      : (await sessionFor(env, xId, opts.signer || 'user')).accessToken;
 
   while (Date.now() - started < timeoutMs) {
     const status = await getExecutionStatus(env, depositAddress, opts.depositMemo, accessToken);

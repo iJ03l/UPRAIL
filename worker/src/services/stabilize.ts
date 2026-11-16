@@ -17,6 +17,7 @@
 import type { Env, Session } from '../types';
 import * as nearRpc from './nearRpc';
 import {
+  OneClickError,
   generateSwapIntent,
   requestQuote,
   submitSwapIntent,
@@ -660,14 +661,6 @@ export async function executeStabilize(
   session: Session,
   input: StabilizeQuoteInput
 ): Promise<StabilizeExecuteResult> {
-  if (!isConfidentialRailEnabled(env)) {
-    throw new StabilizeError(
-      'CONFIDENTIAL_RAIL_DISABLED',
-      'Confidential Intents rail is required for private stabilization.',
-      503
-    );
-  }
-
   const oneClickTokens = await getOneClickTokens(env).catch(() => [] as OneClickToken[]);
   const destination = resolveTargetStablecoin(input.targetAsset, oneClickTokens);
   const origin = await resolveOriginToken(env, input.sourceAsset, oneClickTokens);
@@ -722,72 +715,122 @@ export async function executeStabilize(
   }
 
   const split = computeStabilizeSplit(grossAtomic, origin.decimals, env.FEE_PERCENT);
-
-  // Confidential 1Click Swap (CONFIDENTIAL_INTENTS -> CONFIDENTIAL_INTENTS)
-  let shieldedAtomic = 0n;
-  try {
-    const ensured = await ensureConfidentialFunds(
-      env,
-      session.x_id,
-      origin.assetId,
-      split.grossAtomic
-    );
-    shieldedAtomic = ensured.shieldedAtomic;
-  } catch (err: any) {
-    const msg = err?.message || String(err);
+  const confEnabled = isConfidentialRailEnabled(env);
+  const hasPublicFunds = spendable.publicIntentsAtomic >= split.netInputAtomic;
+  if (!confEnabled && !hasPublicFunds) {
     throw new StabilizeError(
-      'SHIELD_FAILED',
-      `Could not shield ${origin.symbol} into Confidential Intents: ${msg}`,
-      502
+      'CONFIDENTIAL_RAIL_DISABLED',
+      'Confidential Intents rail is required for private stabilization.',
+      503
     );
   }
 
-  const userSession = await getUserSession(env, session.x_id);
   const deadline = new Date(Date.now() + QUOTE_TTL_MS).toISOString();
+  const publicQuoteReq = {
+    dry: false,
+    swapType: 'EXACT_INPUT' as const,
+    originAsset: origin.assetId,
+    destinationAsset: destination.assetId,
+    amount: split.netInputAtomic.toString(),
+    recipient: nearAccount,
+    recipientType: 'INTENTS' as const,
+    refundTo: nearAccount,
+    refundType: 'INTENTS' as const,
+    depositType: 'INTENTS' as const,
+    slippageTolerance: SLIPPAGE_BPS,
+    deadline,
+  };
 
+  let shieldedAtomic = 0n;
+  let isConfidentialSwap = confEnabled;
+  let userSession: { accessToken: string; accountId: string } | null = null;
   let liveQuote;
-  try {
-    liveQuote = await requestQuote(
-      env,
-      {
-        dry: false,
-        swapType: 'EXACT_INPUT',
-        originAsset: origin.assetId,
-        destinationAsset: destination.assetId,
-        amount: split.netInputAtomic.toString(),
-        recipient: userSession.accountId,
-        recipientType: 'CONFIDENTIAL_INTENTS',
-        refundTo: userSession.accountId,
-        refundType: 'CONFIDENTIAL_INTENTS',
-        depositType: 'CONFIDENTIAL_INTENTS',
-        confidentiality: 'basic',
-        slippageTolerance: SLIPPAGE_BPS,
-        deadline,
-      },
-      { userSession: userSession.accessToken }
-    );
-  } catch (err: any) {
-    throw new StabilizeError(
-      'QUOTE_FAILED',
-      `1Click quote failed for ${origin.symbol} → ${destination.symbol}: ${err?.message || String(err)}`,
-      502
-    );
+
+  if (isConfidentialSwap) {
+    try {
+      const ensured = await ensureConfidentialFunds(
+        env,
+        session.x_id,
+        origin.assetId,
+        split.grossAtomic
+      );
+      shieldedAtomic = ensured.shieldedAtomic;
+    } catch (err: any) {
+      if (hasPublicFunds) {
+        isConfidentialSwap = false;
+      } else {
+        const msg = err?.message || String(err);
+        throw new StabilizeError(
+          'SHIELD_FAILED',
+          `Could not shield ${origin.symbol} into Confidential Intents: ${msg}`,
+          502
+        );
+      }
+    }
   }
 
-  const depositAddress = liveQuote.quote?.depositAddress;
+  if (isConfidentialSwap) {
+    userSession = await getUserSession(env, session.x_id);
+    try {
+      liveQuote = await requestQuote(
+        env,
+        {
+          dry: false,
+          swapType: 'EXACT_INPUT',
+          originAsset: origin.assetId,
+          destinationAsset: destination.assetId,
+          amount: split.netInputAtomic.toString(),
+          recipient: userSession.accountId,
+          recipientType: 'CONFIDENTIAL_INTENTS',
+          refundTo: userSession.accountId,
+          refundType: 'CONFIDENTIAL_INTENTS',
+          depositType: 'CONFIDENTIAL_INTENTS',
+          confidentiality: 'basic',
+          slippageTolerance: SLIPPAGE_BPS,
+          deadline,
+        },
+        { userSession: userSession.accessToken }
+      );
+    } catch (err: any) {
+      if (hasPublicFunds && err instanceof OneClickError) {
+        isConfidentialSwap = false;
+      } else {
+        throw new StabilizeError(
+          'QUOTE_FAILED',
+          `1Click quote failed for ${origin.symbol} → ${destination.symbol}: ${err?.message || String(err)}`,
+          502
+        );
+      }
+    }
+  }
+
+  if (!isConfidentialSwap) {
+    try {
+      liveQuote = await requestQuote(env, publicQuoteReq);
+    } catch (err: any) {
+      throw new StabilizeError(
+        'QUOTE_FAILED',
+        `1Click quote failed for ${origin.symbol} → ${destination.symbol}: ${err?.message || String(err)}`,
+        502
+      );
+    }
+  }
+
+  const depositAddress = liveQuote!.quote?.depositAddress;
   if (!depositAddress) {
     throw new StabilizeError(
       'MISSING_DEPOSIT_ADDRESS',
-      '1Click did not return a confidential swap deposit address.',
+      '1Click did not return a swap deposit address.',
       502
     );
   }
 
+  const signerId = userSession?.accountId || nearAccount;
   let intentHash = '';
   try {
     const generated = await generateSwapIntent(env, {
       depositAddress,
-      signerId: userSession.accountId,
+      signerId,
       standard: 'nep413',
     });
     const signedData = await signGeneratedIntent(env, session.x_id, generated);
@@ -796,7 +839,7 @@ export async function executeStabilize(
   } catch (err: any) {
     throw new StabilizeError(
       'SWAP_SUBMISSION_FAILED',
-      `Failed to submit confidential swap intent: ${err?.message || String(err)}`,
+      `Failed to submit swap intent: ${err?.message || String(err)}`,
       502
     );
   }
@@ -805,6 +848,7 @@ export async function executeStabilize(
   const settlement = await waitForSettlement(env, session.x_id, depositAddress, {
     timeoutMs: 2_500,
     intervalMs: 800,
+    allowPublic: !isConfidentialSwap,
   }).catch(() => ({ status: 'PENDING', terminal: false, intentHash }));
 
   const settlementStatus = String(settlement.status || 'PENDING').toUpperCase();
@@ -817,7 +861,7 @@ export async function executeStabilize(
   }
 
   let feeIntentHash: string | undefined;
-  if (split.feeAtomic > 0n && split.feeAmountFormatted !== '0') {
+  if (isConfidentialSwap && split.feeAtomic > 0n && split.feeAmountFormatted !== '0') {
     const feeRecipient = env.FEE_ACCOUNT_ID || env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
     try {
       const feeTransfer = await submitPrivateTransfer(env, session.x_id, {
@@ -833,8 +877,8 @@ export async function executeStabilize(
 
   await (env as any).CACHE?.delete(`plain_bal:${spendable.nearAccount}`).catch(() => {});
 
-  const q = liveQuote.quote;
-  const rawQuoteObj = ((liveQuote.raw as any)?.quote || {}) as Record<string, unknown>;
+  const q = liveQuote!.quote;
+  const rawQuoteObj = ((liveQuote!.raw as any)?.quote || {}) as Record<string, unknown>;
   const amountInUsdStr =
     typeof rawQuoteObj.amountInUsd === 'string' ? rawQuoteObj.amountInUsd : null;
   const amountOutUsdStr =
@@ -876,7 +920,7 @@ export async function executeStabilize(
           id, x_id, asset, amount, destination_address, destination_chain,
           status, tx_hash, deposit_address, privacy_rail, settlement_status,
           created_at, updated_at, confirmed_at
-        ) VALUES (?, ?, ?, ?, ?, 'near', ?, ?, ?, 'confidential', ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, 'near', ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           recordId,
@@ -887,6 +931,7 @@ export async function executeStabilize(
           isCompleted ? 'COMPLETED' : 'PENDING',
           intentHash || depositAddress,
           depositAddress,
+          isConfidentialSwap ? 'confidential' : 'public',
           settlementStatus,
           Date.now(),
           Date.now(),
@@ -928,13 +973,13 @@ export async function executeStabilize(
     exchangeRate,
     slippageBps: SLIPPAGE_BPS,
     timeEstimateSeconds: Number(q.timeEstimate) || 10,
-    confidential: true,
+    confidential: isConfidentialSwap,
     gasSponsored: true,
   };
 }
 
 /**
- * Polls the execution status of a submitted 1Click confidential stabilization swap
+ * Polls the execution status of a submitted 1Click stabilization swap
  * and synchronizes internal ledger and cache state upon completion.
  */
 export async function getStabilizeExecutionStatus(
@@ -948,12 +993,12 @@ export async function getStabilizeExecutionStatus(
   depositAddress: string;
   swapDetails?: Record<string, unknown>;
 }> {
-  const userSession = await getUserSession(env, session.x_id);
+  const userSession = await getUserSession(env, session.x_id).catch(() => null);
   const status = await getExecutionStatus(
     env,
     depositAddress,
     undefined,
-    userSession.accessToken
+    userSession?.accessToken
   );
   const upper = (status.status || 'UNKNOWN').toUpperCase();
   const terminal = isTerminalStatus(upper);

@@ -27,6 +27,7 @@ import { createPaymentInvite } from './inviteService';
 import { resolveAccount } from './accountResolver';
 import { classifyRecipient } from '../routes/payments';
 import {
+  OneClickError,
   generateSwapIntent,
   requestQuote,
   submitSwapIntent,
@@ -1840,14 +1841,136 @@ export async function submitSelfCustodyNearcomWithdraw(params: {
 // 4. SELF-CUSTODY STABILIZE (/api/onchain/stabilize/prepare + /stabilize/submit)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+async function requestStabilizeQuoteWithFallback(params: {
+  env: Env;
+  session: Session;
+  nearAccount: string;
+  originAssetId: string;
+  destinationAssetId: string;
+  netInputAtomic: bigint;
+  pubOriginBal: bigint;
+}): Promise<
+  | { ready: false; shieldPrepare: Record<string, unknown> }
+  | {
+      ready: true;
+      liveQuote: Awaited<ReturnType<typeof requestQuote>>;
+      isConfidentialSwap: boolean;
+    }
+> {
+  const {
+    env,
+    session,
+    nearAccount,
+    originAssetId,
+    destinationAssetId,
+    netInputAtomic,
+    pubOriginBal,
+  } = params;
+
+  const deadline = new Date(Date.now() + STAB_QUOTE_TTL_MS).toISOString();
+  const hasPublicFunds = pubOriginBal >= netInputAtomic;
+  const confEnabled = isConfidentialRailEnabled(env);
+
+  if (!confEnabled && !hasPublicFunds) {
+    throw new CustodyActionError(
+      'Confidential Intents rail is required for stabilization.',
+      503,
+      'CONFIDENTIAL_RAIL_DISABLED'
+    );
+  }
+
+  const publicQuoteReq = {
+    dry: false,
+    swapType: 'EXACT_INPUT' as const,
+    originAsset: originAssetId,
+    destinationAsset: destinationAssetId,
+    amount: netInputAtomic.toString(),
+    recipient: nearAccount,
+    recipientType: 'INTENTS' as const,
+    refundTo: nearAccount,
+    refundType: 'INTENTS' as const,
+    depositType: 'INTENTS' as const,
+    slippageTolerance: STAB_SLIPPAGE_BPS,
+    deadline,
+  };
+
+  if (!confEnabled) {
+    const liveQuote = await requestQuote(env, publicQuoteReq);
+    return { ready: true, liveQuote, isConfidentialSwap: false };
+  }
+
+  let swapDepositType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
+  let swapRefundType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
+  let userAccessToken: string;
+
+  if (hasPublicFunds) {
+    try {
+      const ocSession = await getOneClickSessionOrThrowAuth(env, session);
+      const confBal = await getConfidentialAssetBalance(env, session.x_id, originAssetId).catch(() => ({
+        amountAtomic: 0n,
+      }));
+      userAccessToken = ocSession.accessToken;
+      if (confBal.amountAtomic < netInputAtomic) {
+        swapDepositType = 'INTENTS';
+        swapRefundType = 'INTENTS';
+      }
+    } catch (err: any) {
+      if (err instanceof OneClickError) {
+        const liveQuote = await requestQuote(env, publicQuoteReq);
+        return { ready: true, liveQuote, isConfidentialSwap: false };
+      }
+      throw err;
+    }
+  } else {
+    const ensured = await ensureOrPrepareSelfCustodyConfidentialFunds({
+      env,
+      session,
+      nearAccount,
+      asset: originAssetId,
+      requiredAtomic: netInputAtomic,
+      nextStep: 'stabilize',
+    });
+    if (!ensured.ready) return { ready: false, shieldPrepare: ensured.shieldPrepare };
+    userAccessToken = ensured.accessToken;
+  }
+
+  try {
+    const liveQuote = await requestQuote(
+      env,
+      {
+        dry: false,
+        swapType: 'EXACT_INPUT',
+        originAsset: originAssetId,
+        destinationAsset: destinationAssetId,
+        amount: netInputAtomic.toString(),
+        recipient: nearAccount,
+        recipientType: 'CONFIDENTIAL_INTENTS',
+        refundTo: nearAccount,
+        refundType: swapRefundType,
+        depositType: swapDepositType,
+        confidentiality: 'basic',
+        slippageTolerance: STAB_SLIPPAGE_BPS,
+        deadline,
+      },
+      { userSession: userAccessToken }
+    );
+    return { ready: true, liveQuote, isConfidentialSwap: true };
+  } catch (err: any) {
+    // Tokens like stNEAR (nep141:meta-pool.near) are tradeable on 1Click public INTENTS
+    // but rejected on confidential swap quotes; fall back seamlessly when public funds cover it.
+    if (hasPublicFunds && err instanceof OneClickError) {
+      const liveQuote = await requestQuote(env, publicQuoteReq);
+      return { ready: true, liveQuote, isConfidentialSwap: false };
+    }
+    throw err;
+  }
+}
+
 export async function prepareSelfCustodyStabilize(
   env: Env,
   session: Session,
   input: { sourceAsset: string; targetAsset: string; amount: string }
 ) {
-  if (!isConfidentialRailEnabled(env)) {
-    throw new CustodyActionError('Confidential Intents rail is required for stabilization.', 503, 'CONFIDENTIAL_RAIL_DISABLED');
-  }
   const { nearAccount } = await requireSelfCustodyAccount(env, session);
 
   let oneClickTokens: OneClickToken[] = [];
@@ -1905,52 +2028,18 @@ export async function prepareSelfCustodyStabilize(
   const pubOriginBal =
     (await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null))
       ?.balance ?? 0n;
-  let swapDepositType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
-  let swapRefundType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
-  let userAccessToken: string;
 
-  if (pubOriginBal >= split.netInputAtomic) {
-    const ocSession = await getOneClickSessionOrThrowAuth(env, session);
-    const confBal = await getConfidentialAssetBalance(env, session.x_id, origin.assetId).catch(() => ({
-      amountAtomic: 0n,
-    }));
-    userAccessToken = ocSession.accessToken;
-    if (confBal.amountAtomic < split.netInputAtomic) {
-      swapDepositType = 'INTENTS';
-      swapRefundType = 'INTENTS';
-    }
-  } else {
-    const ensured = await ensureOrPrepareSelfCustodyConfidentialFunds({
-      env,
-      session,
-      nearAccount,
-      asset: origin.assetId,
-      requiredAtomic: split.netInputAtomic,
-      nextStep: 'stabilize',
-    });
-    if (!ensured.ready) return ensured.shieldPrepare;
-    userAccessToken = ensured.accessToken;
-  }
-
-  const liveQuote = await requestQuote(
+  const quoteRes = await requestStabilizeQuoteWithFallback({
     env,
-    {
-      dry: false,
-      swapType: 'EXACT_INPUT',
-      originAsset: origin.assetId,
-      destinationAsset: destination.assetId,
-      amount: split.netInputAtomic.toString(),
-      recipient: nearAccount,
-      recipientType: 'CONFIDENTIAL_INTENTS',
-      refundTo: nearAccount,
-      refundType: swapRefundType,
-      depositType: swapDepositType,
-      confidentiality: 'basic',
-      slippageTolerance: STAB_SLIPPAGE_BPS,
-      deadline: new Date(Date.now() + STAB_QUOTE_TTL_MS).toISOString(),
-    },
-    { userSession: userAccessToken }
-  );
+    session,
+    nearAccount,
+    originAssetId: origin.assetId,
+    destinationAssetId: destination.assetId,
+    netInputAtomic: split.netInputAtomic,
+    pubOriginBal,
+  });
+  if (!quoteRes.ready) return quoteRes.shieldPrepare;
+  const { liveQuote, isConfidentialSwap } = quoteRes;
 
   const depositAddress = liveQuote.quote?.depositAddress;
   if (!depositAddress) {
@@ -1977,6 +2066,7 @@ export async function prepareSelfCustodyStabilize(
     meta: {
       nearAccount,
       depositAddress,
+      isConfidentialSwap,
       sourceAsset: origin.assetId,
       sourceSymbol: origin.symbol,
       sourceDecimals: origin.decimals,
@@ -2042,10 +2132,12 @@ export async function submitSelfCustodyStabilize(params: {
     requireOnchainPasskey: true,
   });
 
+  const isConfidentialSwap = meta.isConfidentialSwap !== false;
   const submitted = await submitSwapIntent(env, signedWebAuthn);
   const settlement = await waitForSettlement(env, session.x_id, meta.depositAddress, {
     timeoutMs: 2_500,
     intervalMs: 800,
+    allowPublic: !isConfidentialSwap,
   }).catch(() => ({ status: 'PENDING' }));
 
   const settlementStatus = String(settlement.status || 'PENDING').toUpperCase();
@@ -2064,7 +2156,7 @@ export async function submitSelfCustodyStabilize(params: {
       id, x_id, x_handle, asset, amount, destination_address, destination_chain,
       status, tx_hash, deposit_address, privacy_rail, settlement_status,
       created_at, updated_at, confirmed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 'near', ?, ?, ?, 'confidential', ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, 'near', ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       recordId,
@@ -2076,6 +2168,7 @@ export async function submitSelfCustodyStabilize(params: {
       isCompleted ? 'COMPLETED' : 'PENDING',
       submitted.intentHash || meta.depositAddress,
       meta.depositAddress,
+      isConfidentialSwap ? 'confidential' : 'public',
       settlementStatus,
       Date.now(),
       Date.now(),
@@ -2115,7 +2208,7 @@ export async function submitSelfCustodyStabilize(params: {
       exchangeRate: '0',
       slippageBps: STAB_SLIPPAGE_BPS,
       timeEstimateSeconds: meta.timeEstimateSeconds,
-      confidential: true,
+      confidential: isConfidentialSwap,
       gasSponsored: true,
     },
   };

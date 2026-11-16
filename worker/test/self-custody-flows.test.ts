@@ -2065,6 +2065,7 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
   let quotedAmount = '';
   let lastQuoteBody: any = null;
   let lastQuoteDepositAddr = '1click_unshield_dep_addr';
+  let rejectStNearConfidential = false;
 
   await withMockFetch(
     {
@@ -2099,6 +2100,16 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
           const reqBody = JSON.parse(String(init?.body || '{}'));
           lastQuoteBody = reqBody;
           quotedAmount = String(reqBody.amount || '');
+          if (
+            rejectStNearConfidential &&
+            reqBody.originAsset === 'nep141:meta-pool.near' &&
+            reqBody.confidentiality === 'basic'
+          ) {
+            return new Response(
+              JSON.stringify({ message: 'Confidential quotes not supported for stNEAR' }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
           const isStnearOut = reqBody.destinationAsset === 'nep141:meta-pool.near';
           const isStabilizeToUsdc =
             reqBody.originAsset === 'nep141:meta-pool.near' &&
@@ -2280,6 +2291,25 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
       assert.equal(lastQuoteBody.depositType, 'INTENTS');
       assert.equal(lastQuoteBody.recipientType, 'CONFIDENTIAL_INTENTS');
       assert.equal(lastQuoteBody.destinationAsset, CIRCLE_GIFT_USDC_ASSET_ID);
+
+      // Step 4b: When 1Click rejects confidential swaps on stNEAR, fall back cleanly to public INTENTS -> INTENTS
+      rejectStNearConfidential = true;
+      const prepStabPublicFallback: any = await prepareSelfCustodyStabilize(env, senderSession, {
+        sourceAsset: 'nep141:meta-pool.near',
+        targetAsset: CIRCLE_GIFT_USDC_ASSET_ID,
+        amount: 'all',
+      });
+      rejectStNearConfidential = false;
+      assert.equal(prepStabPublicFallback.step, 'stabilize');
+      assert.equal(lastQuoteBody.depositType, 'INTENTS');
+      assert.equal(lastQuoteBody.recipientType, 'INTENTS');
+      assert.equal(lastQuoteBody.confidentiality, undefined);
+      assert.equal(lastQuoteBody.destinationAsset, CIRCLE_GIFT_USDC_ASSET_ID);
+      const fallbackPendingAction = mockDb.state.pendingActions.find(
+        (a: any) => a.id === prepStabPublicFallback.actionId
+      );
+      assert.ok(fallbackPendingAction);
+      assert.equal(JSON.parse(fallbackPendingAction.meta_json).isConfidentialSwap, false);
 
       // When swap was already deposited and total USDC across all rails is genuinely short, reject cleanly
       const m = JSON.parse(swapAction.meta_json);
