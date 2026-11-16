@@ -133,6 +133,12 @@ function createMockDb(fixture: MockDbFixture) {
       return { first: row, results: row ? [row] : [] };
     }
 
+    if (sql.startsWith('SELECT x_id FROM x_identities WHERE LOWER(x_handle) = ?')) {
+      const [handle] = bindings;
+      const row = state.identities.find((i) => String(i.x_handle).toLowerCase() === String(handle).toLowerCase()) || null;
+      return { first: row ? { x_id: row.x_id } : null, results: row ? [{ x_id: row.x_id }] : [] };
+    }
+
     if (sql.startsWith('SELECT id, x_id, credential_id, public_key, near_p256_pubkey, onchain_added_at')) {
       const [xId] = bindings;
       const results = state.passkeys.filter((p) => p.x_id === xId);
@@ -166,6 +172,38 @@ function createMockDb(fixture: MockDbFixture) {
       };
       state.pendingActions.push(row);
       return { first: row, results: [row], meta: { changes: 1 } };
+    }
+
+    if (sql.startsWith('SELECT id, used_at, meta_json FROM pending_custody_actions')) {
+      const [xId, actionType, cutoff] = bindings;
+      const results = state.pendingActions
+        .filter(
+          (a) =>
+            a.x_id === xId &&
+            a.action_type === actionType &&
+            a.used_at != null &&
+            Number(a.used_at) >= Number(cutoff)
+        )
+        .sort((a, b) => Number(b.used_at) - Number(a.used_at));
+      return { first: results[0] || null, results };
+    }
+
+    if (sql.startsWith('SELECT meta_json FROM pending_custody_actions WHERE id = ? AND x_id = ?')) {
+      const [id, xId] = bindings;
+      const row = state.pendingActions.find((a) => a.id === id && a.x_id === xId) || null;
+      return { first: row, results: row ? [row] : [] };
+    }
+
+    if (sql.startsWith('UPDATE pending_custody_actions SET meta_json = ? WHERE id = ? AND x_id = ?')) {
+      const [metaJson, id, xId] = bindings;
+      let changes = 0;
+      for (const a of state.pendingActions) {
+        if (a.id === id && a.x_id === xId) {
+          a.meta_json = metaJson;
+          changes++;
+        }
+      }
+      return { first: null, results: [], meta: { changes } };
     }
 
     if (sql.startsWith('SELECT * FROM gifts WHERE id = ?')) {
@@ -1452,8 +1490,14 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     tryExecuteAgentPocketWithdraw,
   } = await import('../src/services/agentPocketService');
 
+  const { getEscrowSigningKey } = await import('../src/services/oneclickAuth');
+  const { createTimestampedNonceBytes, encodeVersionedNonce, saltFromHex } = await import(
+    '../src/services/intentsNonce'
+  );
+
   const senderMainAccount = 'u_alpha.escrow.uprail.near';
   const recipientMainAccount = 'u_beta.escrow.uprail.near';
+  const pocketCache = new Map<string, string>();
   const env: any = {
     ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
     ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
@@ -1462,7 +1506,19 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     APP_URL: 'https://app.uprail.world',
     NEAR_RPC_URL: 'https://rpc.testnet.near.org',
     INTENTS_CONTRACT_ID: 'intents.near',
+    ONE_CLICK_API_KEY: 'test_1click_key',
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    CACHE: {
+      async get(key: string, type?: string) {
+        const raw = pocketCache.get(key) ?? null;
+        return type === 'json' && raw ? JSON.parse(raw) : raw;
+      },
+      async put(key: string, val: string) {
+        pocketCache.set(key, val);
+      },
+    },
   };
+  const escrowKey = await getEscrowSigningKey(env);
 
   const pocket = await deriveUserAgentPocket(env, senderMainAccount);
   assert.match(pocket.accountId, /^[0-9a-f]{64}$/);
@@ -1476,8 +1532,14 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     [recipientMainAccount]: {},
     'escrow.uprail.near': {},
   };
+  const confidentialBalances: Record<string, bigint> = {
+    'escrow.uprail.near': 0n,
+    [recipientMainAccount]: 0n,
+  };
   const insertedPayments: any[] = [];
   const insertedWithdrawals: any[] = [];
+  const oneClickQuotes: any[] = [];
+  let scrubbedPaymentCount = 0;
 
   env.DB = {
     prepare(sql: string) {
@@ -1511,10 +1573,45 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
             },
             async run() {
               if (s.startsWith('INSERT INTO payments')) {
-                insertedPayments.push({ id: args[0], recipient: args[3], amount: args[6], status: 'PENDING' });
-              } else if (s.startsWith('UPDATE payments SET status =')) {
-                const row = insertedPayments.find((p) => p.id === args[6] || p.id === args[4]);
-                if (row) row.status = args[0];
+                insertedPayments.push({
+                  id: args[0],
+                  recipient: args[3],
+                  amount: args[6],
+                  status: 'PENDING',
+                  privacy_rail: 'public',
+                  deposit_address: args[11],
+                  intent_hash: null,
+                  claim_tx_hash: null,
+                  claim_deposit_address: null,
+                  settlement_status: null,
+                });
+              } else if (s.startsWith('UPDATE payments SET status = ?') && s.includes("privacy_rail = 'confidential'")) {
+                const row = insertedPayments.find((p) => p.id === args[10]);
+                if (row) {
+                  row.status = args[0];
+                  row.deposit_address = args[1];
+                  row.intent_hash = args[2];
+                  row.claim_tx_hash = args[3];
+                  row.privacy_rail = 'confidential';
+                  row.settlement_status = args[4];
+                  row.claim_deposit_address = args[5];
+                }
+              } else if (s.startsWith('UPDATE payments SET deposit_address = NULL')) {
+                const row = insertedPayments.find((p) => p.id === args[0]);
+                if (
+                  row &&
+                  row.privacy_rail === 'confidential' &&
+                  row.status === 'CLAIMED' &&
+                  String(row.settlement_status || '').toUpperCase() === 'SUCCESS'
+                ) {
+                  row.deposit_address = null;
+                  row.intent_hash = null;
+                  row.claim_deposit_address = null;
+                  row.claim_tx_hash = null;
+                  scrubbedPaymentCount++;
+                  return { meta: { changes: 1 } };
+                }
+                return { meta: { changes: 0 } };
               } else if (s.startsWith('INSERT INTO withdrawals')) {
                 insertedWithdrawals.push({ id: args[0], destination: args[3], amount: args[5], status: 'PENDING' });
               } else if (s.startsWith('UPDATE withdrawals SET tx_hash =')) {
@@ -1529,15 +1626,137 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     },
   };
 
+  let lastQuoteSigner = '';
+  let lastDepositAddr = '';
+  const quoteByDeposit = new Map<string, any>();
   let lastIntentBroadcast: any = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: any, init?: any) => {
     const url = typeof input === 'string' ? input : input?.url || '';
+    const authHeader = String(init?.headers?.Authorization || init?.headers?.authorization || '');
     if (url.includes('/v0/tokens')) {
       return new Response(JSON.stringify(MOCK_TOKENS), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+    if (url.includes('/v0/auth') && !url.includes('/refresh')) {
+      const body = JSON.parse(String(init?.body || '{}'));
+      const msg = JSON.parse(String(body?.signedData?.payload?.message || body?.payload?.message || '{}'));
+      const token =
+        msg.signer_id === escrowKey.accountId ? 'escrow_oc_token' : 'pocket_oc_token';
+      return new Response(
+        JSON.stringify({
+          accessToken: token,
+          refreshToken: `refresh_${token}`,
+          expiresIn: 3600,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (url.includes('/v0/account/balances')) {
+      const acct = authHeader.includes('escrow_oc_token') ? 'escrow.uprail.near' : pocket.accountId;
+      return new Response(
+        JSON.stringify([
+          {
+            tokenId: CIRCLE_GIFT_USDC_ASSET_ID,
+            available: String(confidentialBalances[acct] ?? 0n),
+          },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (url.includes('/v0/quote')) {
+      const reqBody = JSON.parse(String(init?.body || '{}'));
+      oneClickQuotes.push(reqBody);
+      assert.equal(reqBody.confidentiality, 'basic');
+      assert.equal(reqBody.recipientType, 'CONFIDENTIAL_INTENTS');
+      const depAddr =
+        reqBody.depositType === 'INTENTS'
+          ? 'pocket_to_escrow_conf_dep'
+          : 'escrow_to_recip_conf_dep';
+      quoteByDeposit.set(depAddr, reqBody);
+      lastDepositAddr = depAddr;
+      return new Response(
+        JSON.stringify({
+          quote: {
+            depositAddress: depAddr,
+            deadline: new Date(Date.now() + 600_000).toISOString(),
+            amountIn: reqBody.amount,
+            amountOut: reqBody.amount,
+          },
+          quoteRequest: {
+            confidentiality: 'basic',
+            depositType: reqBody.depositType,
+            recipientType: reqBody.recipientType,
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (url.includes('/v0/generate-intent')) {
+      const reqBody = JSON.parse(String(init?.body || '{}'));
+      lastDepositAddr = reqBody.depositAddress;
+      lastQuoteSigner = reqBody.signerId;
+      return new Response(
+        JSON.stringify({
+          intent: {
+            standard: 'nep413',
+            payload: {
+              message: JSON.stringify({
+                signer_id: reqBody.signerId,
+                verifying_contract: 'intents.near',
+                deadline: new Date(Date.now() + 600_000).toISOString(),
+                intents: [
+                  {
+                    intent: 'transfer',
+                    receiver_id: reqBody.depositAddress,
+                    tokens: {
+                      [CIRCLE_GIFT_USDC_ASSET_ID]:
+                        quoteByDeposit.get(reqBody.depositAddress)?.amount || '0',
+                    },
+                  },
+                ],
+              }),
+              nonce: encodeVersionedNonce(
+                saltFromHex('01020304'),
+                new Date(Date.now() + 600_000),
+                createTimestampedNonceBytes()
+              ),
+              recipient: 'intents.near',
+            },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (url.includes('/v0/submit-intent')) {
+      const reqBody = JSON.parse(String(init?.body || '{}'));
+      const q = quoteByDeposit.get(lastDepositAddr);
+      if (q) {
+        const amt = BigInt(q.amount || '0');
+        if (lastDepositAddr === 'pocket_to_escrow_conf_dep') {
+          intentsBalances[pocket.accountId][CIRCLE_GIFT_USDC_ASSET_ID] -= amt;
+          confidentialBalances['escrow.uprail.near'] += amt;
+        } else if (lastDepositAddr === 'escrow_to_recip_conf_dep') {
+          confidentialBalances['escrow.uprail.near'] -= amt;
+          confidentialBalances[recipientMainAccount] += amt;
+        }
+      }
+      assert.equal(lastQuoteSigner, JSON.parse(reqBody?.signedData?.payload?.message || '{}').signer_id);
+      return new Response(
+        JSON.stringify({ intentHash: `ih_${lastDepositAddr}` }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (url.includes('/v0/status')) {
+      return new Response(
+        JSON.stringify({
+          status: 'SUCCESS',
+          swapDetails: { intentHashes: ['ih_settled'] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
     }
     if (url.includes('api.ref.finance/list-token')) {
       return new Response(
@@ -1572,11 +1791,7 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
         );
       }
       if (rpcReq.method === 'broadcast_tx_commit') {
-        // Simulates applying transfer / ft_withdraw intents on our mock ledger
         lastIntentBroadcast = rpcReq.params?.[0];
-        if (lastIntentBroadcast?.message) {
-          // won't happen for borsh tx, handle below via state tracking
-        }
         return new Response(
           JSON.stringify({
             jsonrpc: '2.0',
@@ -1613,7 +1828,13 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
       if (p.request_type === 'call_function') {
         const args = JSON.parse(Buffer.from(p.args_base64 || 'e30=', 'base64').toString('utf8'));
         let val: any = null;
-        if (p.method_name === 'mt_balance_of') {
+        if (p.method_name === 'current_salt') {
+          val = '01020304';
+        } else if (p.method_name === 'has_public_key') {
+          val = true;
+        } else if (p.method_name === 'public_keys_by_account') {
+          val = [escrowKey.publicKeyB58];
+        } else if (p.method_name === 'mt_balance_of') {
           val = String(intentsBalances[args.account_id]?.[args.token_id] ?? 0n);
         } else if (p.method_name === 'mt_batch_balance_of') {
           val = (args.token_ids || []).map((tid: string) =>
@@ -1672,7 +1893,8 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     assert.equal(probeShort.covered, false);
     assert.equal(probeShort.reason, 'insufficient_pocket_balance');
 
-    // 5. Execute zero-prompt self-custody @handle payment directly from Agent Pocket
+    // 5. Execute zero-prompt self-custody @handle payment from Agent Pocket via Confidential Intents
+    lastIntentBroadcast = null;
     const senderSession: any = {
       session_id: 's_alpha',
       x_id: 'xid_alpha',
@@ -1694,10 +1916,34 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     assert.equal(sendResult.ok, true);
     assert.equal(sendResult.status, 201);
     assert.equal(sendResult.body.status, 'CLAIMED');
+    assert.equal(sendResult.body.privacy, 'confidential');
+    assert.equal(sendResult.body.privacyRail, 'confidential');
     assert.equal(sendResult.body.source, 'agent_pocket');
     assert.equal(sendResult.body.custodyMode, 'self');
     assert.ok(sendResult.body.txHash);
-    assert.equal(insertedPayments[0].status, 'CLAIMED');
+    assert.equal(lastIntentBroadcast, null, 'Agent Pocket send must NEVER broadcast a public intents.near transfer');
+    assert.equal(intentsBalances[recipientMainAccount][CIRCLE_GIFT_USDC_ASSET_ID] ?? 0n, 0n, 'Recipient public Intents must receive 0');
+    assert.equal(confidentialBalances[recipientMainAccount], 4_950_000n, 'Recipient Confidential Intents must receive net 4.95 USDC');
+    assert.equal(confidentialBalances['escrow.uprail.near'], 50_000n, '1% protocol fee retained in escrow confidential balance');
+    assert.equal(oneClickQuotes.length, 2, 'Two confidential 1Click hops: pocket->escrow and escrow->recipient');
+    assert.equal(insertedPayments[0].privacy_rail, 'confidential');
+    assert.equal(scrubbedPaymentCount, 1, 'Settled confidential leg links must be scrubbed immediately');
+    assert.equal(insertedPayments[0].claim_tx_hash, null);
+    assert.equal(insertedPayments[0].deposit_address, null);
+
+    // Fail-closed: if Confidential rail is disabled, refuse rather than landing in public
+    const disabledRes = await executeAgentPocketSingleSend({
+      env: { ...env, CONFIDENTIAL_RAIL_ENABLED: 'false' },
+      senderSession,
+      senderNearAccount: senderMainAccount,
+      pocketAccount: pocket.accountId,
+      coreAsset: probeCovered.coreAsset!,
+      recipientHandle: 'beta',
+      rawAmount: '1',
+    });
+    assert.equal(disabledRes.ok, false);
+    assert.equal(disabledRes.status, 503);
+    assert.equal(disabledRes.body.code, 'CONFIDENTIAL_RAIL_REQUIRED');
 
     // 6. Execute zero-prompt NEAR ft_withdraw directly from Agent Pocket
     const withdrawResult = await tryExecuteAgentPocketWithdraw({
@@ -1723,7 +1969,11 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     const ethRow = allBals.balances.find((b) => b.asset === 'ETH');
     const usdcRow = allBals.balances.find((b) => b.asset === 'USDC');
     assert.ok(ethRow && ethRow.balance === 0.5, 'Agents must read non-USDC/USDT/NEAR balances like ETH');
-    assert.ok(usdcRow && usdcRow.balance >= 15, 'Agents must see unified USDC (Main + Pocket)');
+    assert.equal(
+      usdcRow?.balance,
+      11,
+      'Agents must see unified USDC (Main + Pocket: 16 initial - 5 spent confidentially)'
+    );
     assert.equal(allBals.agentAllowance.balances.length, 1);
 
     // 8. Reclaim all remaining pocket funds back to main vault
@@ -1806,14 +2056,29 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
     },
   };
 
+  const { prepareSelfCustodyStabilize } = await import('../src/services/selfCustodyActions');
+
+  let publicUsdcAvailable = '20000'; // $0.02 public USDC
+  confidentialUsdcAvailable = '6000000'; // $6.00 private USDC
+  let publicStNearAvailable = '0';
+  const expectedStNearOut = '1031258287495697600534552';
   let quotedAmount = '';
+  let lastQuoteBody: any = null;
+  let lastQuoteDepositAddr = '1click_unshield_dep_addr';
+
   await withMockFetch(
     {
       public_keys_by_account: () => [makeTestP256NearPubkey(0x55)],
       is_auth_by_predecessor_id_enabled: () => false,
       current_salt: () => '01020304',
-      mt_balance_of: () => '20000', // $0.02 public USDC
-      mt_batch_balance_of: (args: any) => (args.token_ids || []).map(() => '0'),
+      mt_balance_of: (args: any) => {
+        if (String(args?.token_id || '').includes('meta-pool.near')) return publicStNearAvailable;
+        return publicUsdcAvailable;
+      },
+      mt_batch_balance_of: (args: any) =>
+        (args.token_ids || []).map((tid: string) =>
+          String(tid).includes('meta-pool.near') ? publicStNearAvailable : publicUsdcAvailable
+        ),
     },
     async () => {
       const baseFetch = globalThis.fetch;
@@ -1832,42 +2097,67 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
         }
         if (url.includes('/v0/quote')) {
           const reqBody = JSON.parse(String(init?.body || '{}'));
+          lastQuoteBody = reqBody;
           quotedAmount = String(reqBody.amount || '');
-          assert.equal(reqBody.depositType, 'CONFIDENTIAL_INTENTS');
-          assert.equal(reqBody.recipientType, 'INTENTS');
-          assert.equal(reqBody.recipient, senderAccount);
+          const isStnearOut = reqBody.destinationAsset === 'nep141:meta-pool.near';
+          const isStabilizeToUsdc =
+            reqBody.originAsset === 'nep141:meta-pool.near' &&
+            reqBody.destinationAsset === CIRCLE_GIFT_USDC_ASSET_ID;
+          lastQuoteDepositAddr = isStnearOut
+            ? '1click_gift_swap_dep_addr'
+            : isStabilizeToUsdc
+            ? '1click_stabilize_stnear_dep'
+            : '1click_unshield_dep_addr';
           return new Response(
             JSON.stringify({
               quote: {
-                depositAddress: '1click_unshield_dep_addr',
+                depositAddress: lastQuoteDepositAddr,
                 deadline: new Date(Date.now() + 600_000).toISOString(),
                 amountIn: reqBody.amount,
-                amountOut: reqBody.amount,
+                amountOut: isStnearOut ? expectedStNearOut : '5000000',
               },
-              quoteRequest: { confidentiality: 'basic' },
+              quoteRequest: { confidentiality: reqBody.confidentiality || 'public' },
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } }
           );
         }
         if (url.includes('/v0/generate-intent')) {
+          const genBody = JSON.parse(String(init?.body || '{}'));
+          const dep = genBody.depositAddress || lastQuoteDepositAddr;
+          const { createTimestampedNonceBytes, encodeVersionedNonce, saltFromHex } = await import(
+            '../src/services/intentsNonce'
+          );
           return new Response(
             JSON.stringify({
               intent: {
                 standard: 'webauthn',
                 payload: JSON.stringify({
                   signer_id: senderAccount,
-                  verifying_contract: 'intents.far',
+                  verifying_contract: 'intents.near',
                   deadline: new Date(Date.now() + 600_000).toISOString(),
-                  nonce: Buffer.from(new Uint8Array(32).fill(7)).toString('base64'),
+                  nonce: encodeVersionedNonce(
+                    saltFromHex('01020304'),
+                    new Date(Date.now() + 600_000),
+                    createTimestampedNonceBytes()
+                  ),
                   intents: [
                     {
                       intent: 'transfer',
-                      receiver_id: '1click_unshield_dep_addr',
+                      receiver_id: dep,
                       tokens: { [CIRCLE_GIFT_USDC_ASSET_ID]: quotedAmount },
                     },
                   ],
                 }),
               },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/status')) {
+          return new Response(
+            JSON.stringify({
+              status: 'SUCCESS',
+              swapDetails: { amountOut: expectedStNearOut },
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } }
           );
@@ -1887,16 +2177,21 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
         return await baseFetch(input, init);
       }) as typeof fetch;
 
+      const senderSession: any = {
+        session_id: 's_gift',
+        x_id: 'xid_gift_sender',
+        x_handle: 'giftsender',
+        x_name: 'Gift Sender',
+        near_account: senderAccount,
+        custody_mode: 'self',
+        created_at: Date.now(),
+        expires_at: Date.now() + 3600_000,
+      };
+
+      // Step 1: Confidential shortfall unshields $5.08 into public Intents
       const prep: any = await prepareSelfCustodyGiftCreate({
         env,
-        session: {
-          session_id: 's_gift',
-          x_id: 'xid_gift_sender',
-          x_handle: 'giftsender',
-          x_name: 'Gift Sender',
-          created_at: Date.now(),
-          expires_at: Date.now() + 3600_000,
-        },
+        session: senderSession,
         input: {
           recipientHandle: 'alice',
           vaultAsset: 'stNEAR',
@@ -1910,20 +2205,93 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
       assert.equal(prep.unshieldAmountFormatted, '5.08');
       assert.equal(quotedAmount, '5080000');
 
-      // When total USDC across all rails is genuinely short ($0.02 + $0.01 < 5.1), reports exact available/required
+      // Step 2: Public USDC ($5.10) is ready -> swaps USDC into stNEAR in senderAccount
+      publicUsdcAvailable = '5100000';
+      const prepSwap: any = await prepareSelfCustodyGiftCreate({
+        env,
+        session: senderSession,
+        input: {
+          recipientHandle: 'alice',
+          vaultAsset: 'stNEAR',
+          sourceAsset: CIRCLE_GIFT_USDC_ASSET_ID,
+          amount: '5.1',
+          timelockUntil: Date.now() + 86_400_000,
+        },
+      });
+      assert.equal(prepSwap.step, 'swap_to_vault');
+      assert.equal(prepSwap.depositAddress, '1click_gift_swap_dep_addr');
+
+      // Simulate user signing GIFT_CREATE_SWAP & 1Click delivering 1.031258 stNEAR (USDC now 0!)
+      const swapAction = mockDb.state.pendingActions.find(
+        (a: any) => a.action_type === 'GIFT_CREATE_SWAP'
+      );
+      assert.ok(swapAction);
+      swapAction.used_at = Date.now();
+      publicUsdcAvailable = '0';
+      confidentialUsdcAvailable = '0';
+      publicStNearAvailable = expectedStNearOut;
+
+      // Step 3a: Continuation with completedSwapDepositAddress must NOT demand USDC again!
+      const prepDeposit: any = await prepareSelfCustodyGiftCreate({
+        env,
+        session: senderSession,
+        input: {
+          recipientHandle: 'alice',
+          vaultAsset: 'stNEAR',
+          sourceAsset: CIRCLE_GIFT_USDC_ASSET_ID,
+          amount: '5.1',
+          timelockUntil: Date.now() + 86_400_000,
+          completedSwapDepositAddress: '1click_gift_swap_dep_addr',
+        },
+      });
+      assert.equal(prepDeposit.step, 'gift_create');
+      const parsedDepositMsg = JSON.parse(String(prepDeposit.payloadStr || '{}'));
+      const totalStNearTransferred = (parsedDepositMsg.intents || []).reduce(
+        (sum: bigint, i: any) => sum + BigInt(i?.tokens?.['nep141:meta-pool.near'] || '0'),
+        0n
+      );
+      assert.equal(
+        totalStNearTransferred.toString(),
+        expectedStNearOut,
+        'Gift deposit must use exact 24-decimal stNEAR shares (99% escrow + 1% fee), never USDC 6-decimal units'
+      );
+
+      // Step 3b: Retrying WITHOUT completedSwapDepositAddress rescues stranded stNEAR from the recent swap
+      const prepRescue: any = await prepareSelfCustodyGiftCreate({
+        env,
+        session: senderSession,
+        input: {
+          recipientHandle: 'alice',
+          vaultAsset: 'stNEAR',
+          sourceAsset: CIRCLE_GIFT_USDC_ASSET_ID,
+          amount: '5',
+          timelockUntil: Date.now() + 86_400_000,
+        },
+      });
+      assert.equal(prepRescue.step, 'gift_create');
+
+      // Step 4: Stabilizing stranded public stNEAR -> Confidential USDC works in 1 tap directly from INTENTS
+      const prepStab: any = await prepareSelfCustodyStabilize(env, senderSession, {
+        sourceAsset: 'nep141:meta-pool.near',
+        targetAsset: CIRCLE_GIFT_USDC_ASSET_ID,
+        amount: 'all',
+      });
+      assert.equal(prepStab.step, 'stabilize');
+      assert.equal(lastQuoteBody.depositType, 'INTENTS');
+      assert.equal(lastQuoteBody.recipientType, 'CONFIDENTIAL_INTENTS');
+      assert.equal(lastQuoteBody.destinationAsset, CIRCLE_GIFT_USDC_ASSET_ID);
+
+      // When swap was already deposited and total USDC across all rails is genuinely short, reject cleanly
+      const m = JSON.parse(swapAction.meta_json);
+      swapAction.meta_json = JSON.stringify({ ...m, deposited: true });
+      publicStNearAvailable = '0';
+      publicUsdcAvailable = '20000';
       confidentialUsdcAvailable = '10000';
       await assert.rejects(
         () =>
           prepareSelfCustodyGiftCreate({
             env,
-            session: {
-              session_id: 's_gift',
-              x_id: 'xid_gift_sender',
-              x_handle: 'giftsender',
-              x_name: 'Gift Sender',
-              created_at: Date.now(),
-              expires_at: Date.now() + 3600_000,
-            },
+            session: senderSession,
             input: {
               recipientHandle: 'alice',
               vaultAsset: 'stNEAR',

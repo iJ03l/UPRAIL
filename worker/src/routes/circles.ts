@@ -384,13 +384,21 @@ circlesRouter.post(
     const session = c.get('session')!;
     const circleId = (c.req.param('id') || '').trim();
     try {
-      const body = await c.req.json<{ sourceAsset?: string; amount: string }>();
+      const body = await c.req.json<{
+        sourceAsset?: string;
+        amount: string;
+        completedSwapDepositAddress?: string;
+      }>();
       const result = await prepareSelfCustodyCircleContribute({
         env: c.env,
         session,
         circleId,
         sourceAsset: String(body?.sourceAsset || ''),
         amount: String(body?.amount || ''),
+        completedSwapDepositAddress:
+          typeof body?.completedSwapDepositAddress === 'string'
+            ? body.completedSwapDepositAddress
+            : undefined,
       });
       return c.json(result);
     } catch (err: any) {

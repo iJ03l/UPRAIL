@@ -2997,10 +2997,10 @@ function runCustodyFlow<TResult = any>(
   }
 ): Promise<TResult> {
   return runSelfCustodyAction<TResult>({
-    prepare: () =>
+    prepare: (extra) =>
       custodyJson(preparePath, {
         method: 'POST',
-        body: JSON.stringify(prepareBody),
+        body: JSON.stringify(extra ? { ...prepareBody, ...extra } : prepareBody),
       }),
     submit: (body) =>
       custodyJson(submitPath, {

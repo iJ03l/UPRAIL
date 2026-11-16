@@ -24,6 +24,7 @@ import { resolveAccount } from './accountResolver';
 import { createPaymentInvite } from './inviteService';
 import { resolveOrigin } from './webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
+import { background } from '../utils/background';
 import {
   CustodyActionError,
   consumeAndVerifyWebAuthnPendingAction,
@@ -34,6 +35,7 @@ import {
   getCurrentIntentsSalt,
   getUserSession,
   validateGeneratedIntentForAccount,
+  type UserSigningKey,
 } from './oneclickAuth';
 import { generateSwapIntent, requestQuote, submitSwapIntent } from './oneclickClient';
 import {
@@ -48,7 +50,6 @@ import {
   executeCustodyIntents,
   getAgentPocketBalances,
   getCustodyVaultBalance,
-  transferBatchFromEarnCustody,
   transferFromEarnCustody,
 } from './earnVaults';
 import {
@@ -57,6 +58,9 @@ import {
   getConfidentialAssetBalance,
   getConfidentialBalances,
   isConfidentialRailEnabled,
+  payEscrowPrivate,
+  scrubSettledPaymentLinks,
+  submitImplicitAccountPrivateSendFromPublic,
   waitForSettlement,
 } from './confidentialRail';
 
@@ -616,6 +620,7 @@ export async function executeAgentPocketSingleSend(params: {
   rawAmount: string;
   memo?: string;
   requestId?: string | null;
+  executionCtx?: unknown;
 }): Promise<{
   ok: boolean;
   status: number;
@@ -631,7 +636,19 @@ export async function executeAgentPocketSingleSend(params: {
     rawAmount,
     memo,
     requestId,
+    executionCtx,
   } = params;
+
+  if (!isConfidentialRailEnabled(env)) {
+    return {
+      ok: false,
+      status: 503,
+      body: {
+        error: 'Confidential Intents rail must be enabled for Agent Pocket sends.',
+        code: 'CONFIDENTIAL_RAIL_REQUIRED',
+      },
+    };
+  }
 
   const cleanHandle = recipientHandle.trim().replace(/^@+/, '').toLowerCase();
   if (!cleanHandle || cleanHandle === (senderSession.x_handle || '').toLowerCase()) {
@@ -676,6 +693,21 @@ export async function executeAgentPocketSingleSend(params: {
     }
   }
 
+  const pocket = await deriveUserAgentPocket(env, senderNearAccount);
+  if (pocket.accountId.toLowerCase() !== pocketAccount.toLowerCase()) {
+    return {
+      ok: false,
+      status: 403,
+      body: { error: 'Agent Pocket account mismatch.', code: 'POCKET_ACCOUNT_MISMATCH' },
+    };
+  }
+  const pocketKey: UserSigningKey = {
+    accountId: pocket.accountId,
+    publicKey: pocket.publicKey,
+    privateKey: pocket.privateKey,
+    publicKeyB58: pocket.publicKeyB58,
+  };
+
   const feePercent = Math.max(0, Math.min(0.1, parseFloat(env.FEE_PERCENT || '0.01') || 0.01));
   const grossNum = parseFloat(rawAmount) || 0;
   const protocolFee =
@@ -707,18 +739,6 @@ export async function executeAgentPocketSingleSend(params: {
   const inviteCode = isRecipientRegistered
     ? null
     : await createPaymentInvite(env, paymentId, senderSession.x_id, senderSession.x_handle);
-
-  const transfers =
-    isRecipientRegistered && recipientNearAccount
-      ? [
-          { recipientAccount: recipientNearAccount, assetId: coreAsset.assetId, amountAtomic: netAtomic },
-          ...(feeAtomic > 0n
-            ? [{ recipientAccount: feeRecipient, assetId: coreAsset.assetId, amountAtomic: feeAtomic }]
-            : []),
-        ]
-      : [
-          { recipientAccount: holdingAccount, assetId: coreAsset.assetId, amountAtomic: grossAtomic },
-        ];
 
   // Record FIRST, move funds SECOND
   try {
@@ -759,71 +779,155 @@ export async function executeAgentPocketSingleSend(params: {
     };
   }
 
-  const relay = await transferBatchFromEarnCustody(
-    env,
-    `agent_pocket:${senderNearAccount.toLowerCase()}`,
-    transfers,
-    pocketAccount
-  );
+  const cancelPending = async (reason: string) => {
+    await env.DB!
+      .prepare(
+        `UPDATE payments
+            SET status = ?, cancel_reason = ?, cancel_code = ?, privacy_rail = 'confidential', updated_at = ?
+          WHERE id = ? AND status = ?`
+      )
+      .bind(
+        PaymentStatus.CANCELLED,
+        reason.slice(0, 500),
+        'SETTLEMENT_FAILED',
+        Date.now(),
+        paymentId,
+        PaymentStatus.PENDING
+      )
+      .run()
+      .catch(() => {});
+  };
 
-  if (!relay.success || !relay.txHash) {
-    if (!relay.ambiguous) {
-      await env.DB!
-        .prepare(
-          `UPDATE payments SET status = ?, cancel_reason = ?, cancel_code = ?, updated_at = ? WHERE id = ? AND status = ?`
-        )
-        .bind(
-          PaymentStatus.CANCELLED,
-          (relay.error || 'Pocket transfer failed').slice(0, 500),
-          'SETTLEMENT_FAILED',
-          Date.now(),
-          paymentId,
-          PaymentStatus.PENDING
-        )
-        .run()
-        .catch(() => {});
-      return {
-        ok: false,
-        status: 502,
-        body: {
-          error: publicErrorMessage(new Error(relay.error || ''), 'Pocket transfer failed'),
-          code: 'SETTLEMENT_FAILED',
-        },
-      };
-    }
-
+  let transfer: Awaited<ReturnType<typeof submitImplicitAccountPrivateSendFromPublic>>;
+  try {
+    transfer = await submitImplicitAccountPrivateSendFromPublic(env, pocketKey, {
+      asset: coreAsset.assetId,
+      amount: rawAmount,
+      recipientAccount: holdingAccount,
+    });
+  } catch (confErr: any) {
+    const msg = publicErrorMessage(confErr, 'Confidential pocket transfer failed');
+    await cancelPending(confErr?.message || msg);
     return {
       ok: false,
-      status: 504,
+      status: 502,
+      body: { error: msg, code: 'SETTLEMENT_FAILED' },
+    };
+  }
+
+  const settlement = await waitForSettlement(env, '', transfer.depositAddress, {
+    timeoutMs: 12_000,
+    intervalMs: 1_500,
+    accessToken: transfer.accessToken,
+  }).catch(() => ({ status: 'UNKNOWN', terminal: false } as any));
+
+  let settlementStatus = String(settlement?.status || 'UNKNOWN').toUpperCase();
+  if (settlementStatus === 'FAILED' || settlementStatus === 'REFUNDED') {
+    await cancelPending(`Confidential pocket send ${settlementStatus.toLowerCase()} — funds returned to pocket.`);
+    return {
+      ok: false,
+      status: 502,
       body: {
-        error: 'Payment transfer outcome is ambiguous — check list_payments before retrying.',
-        code: 'PAYMENT_AMBIGUOUS',
+        error: `Confidential pocket settlement ${settlementStatus.toLowerCase()} — funds stayed safely in your Agent Pocket.`,
+        code: 'SETTLEMENT_FAILED',
       },
     };
   }
 
-  const finalStatus = isRecipientRegistered ? PaymentStatus.CLAIMED : PaymentStatus.ESCROWED;
-  const claimTxHash = isRecipientRegistered ? relay.txHash : null;
-  const escrowTxHash = isRecipientRegistered ? null : relay.txHash;
+  let finalStatus: string = PaymentStatus.ESCROWED;
+  let claimTxHash: string | null = null;
+  let claimDepositAddress: string | null = null;
+  let confirmedAt: number | null = settlementStatus === 'SUCCESS' ? Date.now() : null;
+  let recipientPaidAtSend = false;
+
+  if (isRecipientRegistered && recipientNearAccount) {
+    if (settlementStatus === 'SUCCESS') {
+      try {
+        const payout = await payEscrowPrivate(env, {
+          asset: coreAsset.assetId,
+          amount: recipientAmount,
+          recipientAccount: recipientNearAccount,
+          timeoutMs: 10_000,
+        });
+        const payoutStatus = String(payout.status || 'UNKNOWN').toUpperCase();
+        if (payoutStatus !== 'FAILED' && payoutStatus !== 'REFUNDED') {
+          finalStatus = PaymentStatus.CLAIMED;
+          claimTxHash = payout.intentHash;
+          claimDepositAddress = payout.depositAddress;
+          settlementStatus = payoutStatus;
+          confirmedAt = payoutStatus === 'SUCCESS' ? Date.now() : null;
+          recipientPaidAtSend = true;
+        } else {
+          console.warn(`[agentPocket] immediate confidential payout ${payoutStatus}; payment stays ESCROWED`);
+        }
+      } catch (payoutErr) {
+        console.warn('[agentPocket] immediate confidential payout failed; payment stays ESCROWED:', payoutErr);
+      }
+    } else if (executionCtx) {
+      const depAddr = transfer.depositAddress;
+      const token = transfer.accessToken;
+      background(
+        executionCtx,
+        (async () => {
+          const bgSettlement = await waitForSettlement(env, '', depAddr, {
+            timeoutMs: 45_000,
+            intervalMs: 2_000,
+            accessToken: token,
+          }).catch(() => null);
+          if (bgSettlement && String(bgSettlement.status || '').toUpperCase() === 'SUCCESS') {
+            const bgPayout = await payEscrowPrivate(env, {
+              asset: coreAsset.assetId,
+              amount: recipientAmount,
+              recipientAccount: recipientNearAccount,
+              timeoutMs: 30_000,
+            }).catch(() => null);
+            if (bgPayout && bgPayout.status !== 'FAILED' && bgPayout.status !== 'REFUNDED') {
+              await env.DB!.prepare(
+                `UPDATE payments
+                    SET status = 'CLAIMED', settlement_status = ?, claim_tx_hash = ?,
+                        claim_deposit_address = ?, confirmed_at = ?, updated_at = ?
+                  WHERE id = ? AND status = 'ESCROWED' AND privacy_rail = 'confidential'`
+              )
+                .bind(bgPayout.status, bgPayout.intentHash, bgPayout.depositAddress, Date.now(), Date.now(), paymentId)
+                .run();
+              await scrubSettledPaymentLinks(env, paymentId);
+            }
+          }
+        })(),
+        `agent-pocket-payout-${paymentId}`
+      );
+    }
+  }
+
+  const feeDispatchStatus = feeAtomic > 0n ? 'retained' : 'skipped';
+  const feeDispatchError = feeAtomic > 0n ? null : 'no fee';
 
   await env.DB!
     .prepare(
       `UPDATE payments
-          SET status = ?, intent_hash = ?, claim_tx_hash = ?, fee_dispatch_status = ?,
-              confirmed_at = ?, updated_at = ?
+          SET status = ?, deposit_address = ?, intent_hash = ?, claim_tx_hash = ?,
+              privacy_rail = 'confidential', settlement_status = ?,
+              claim_deposit_address = ?, confirmed_at = ?,
+              fee_dispatch_status = ?, fee_dispatch_error = ?, updated_at = ?
         WHERE id = ? AND status = ?`
     )
     .bind(
       finalStatus,
-      escrowTxHash,
+      transfer.depositAddress,
+      transfer.intentHash,
       claimTxHash,
-      isRecipientRegistered ? 'sent' : 'retained',
-      isRecipientRegistered ? Date.now() : null,
+      settlementStatus,
+      claimDepositAddress,
+      confirmedAt,
+      feeDispatchStatus,
+      feeDispatchError,
       Date.now(),
       paymentId,
       PaymentStatus.PENDING
     )
     .run();
+
+  await scrubSettledPaymentLinks(env, paymentId);
 
   if (requestId) {
     await env.DB!
@@ -865,14 +969,17 @@ export async function executeAgentPocketSingleSend(params: {
     body: {
       paymentId,
       status: finalStatus,
-      isDirect: isRecipientRegistered,
+      isDirect: recipientPaidAtSend,
       isRegistered: isRecipientRegistered,
       shareLink,
-      claimLink: isRecipientRegistered ? undefined : shareLink,
-      receiptLink: isRecipientRegistered ? shareLink : undefined,
+      claimLink: recipientPaidAtSend ? undefined : shareLink,
+      receiptLink: recipientPaidAtSend ? shareLink : undefined,
       xShareUrl: `https://x.com/intent/post?text=${encodeURIComponent(tweetText)}`,
       tweetIntentUrl: `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`,
-      txHash: relay.txHash,
+      txHash: recipientPaidAtSend && claimTxHash ? claimTxHash : transfer.intentHash,
+      privacy: 'confidential',
+      privacyRail: 'confidential',
+      settlementStatus,
       source: 'agent_pocket',
       custodyMode: 'self',
     },

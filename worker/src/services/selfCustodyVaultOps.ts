@@ -462,6 +462,402 @@ async function handleVaultUnshieldSubmit(params: {
   };
 }
 
+function estimateVaultPrincipalUsdCents(
+  sharesAtomic: bigint,
+  vaultDecimals: number,
+  vaultPriceUsd: number | undefined,
+  fallbackUsdAmount: string
+): number {
+  const formattedShares = Number(formatAtomic(sharesAtomic.toString(), vaultDecimals));
+  if (vaultPriceUsd && vaultPriceUsd > 0 && Number.isFinite(formattedShares) && formattedShares > 0) {
+    return Math.max(100, Math.round(formattedShares * vaultPriceUsd * 100));
+  }
+  const usdFallback = Number(fallbackUsdAmount);
+  if (Number.isFinite(usdFallback) && usdFallback > 0) {
+    return Math.max(100, Math.round(usdFallback * 100));
+  }
+  return 100;
+}
+
+async function markVaultSwapDeposited(
+  env: Env,
+  xId: string,
+  swapActionId?: string | null
+): Promise<void> {
+  if (!env.DB || !swapActionId) return;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT meta_json FROM pending_custody_actions WHERE id = ? AND x_id = ? LIMIT 1'
+    )
+      .bind(swapActionId, xId)
+      .first<{ meta_json: string | null }>();
+    if (!row) return;
+    let parsed: Record<string, any> = {};
+    try {
+      parsed = row.meta_json ? JSON.parse(row.meta_json) : {};
+    } catch {
+      parsed = {};
+    }
+    parsed.deposited = true;
+    parsed.depositedAt = Date.now();
+    await env.DB.prepare(
+      'UPDATE pending_custody_actions SET meta_json = ? WHERE id = ? AND x_id = ?'
+    )
+      .bind(JSON.stringify(parsed), swapActionId, xId)
+      .run();
+  } catch (err) {
+    console.warn(`[selfCustodyVaultOps] failed to mark swap ${swapActionId} deposited:`, err);
+  }
+}
+
+async function fetchSwapStatusWithOptionalAuth(
+  env: Env,
+  xId: string,
+  depositAddress: string
+) {
+  let execStatus = await getExecutionStatus(env, depositAddress).catch(() => null);
+  if ((!execStatus || execStatus.status === 'UNKNOWN') && isConfidentialRailEnabled(env)) {
+    const ocSession = await getUserSession(env, xId).catch(() => null);
+    if (ocSession?.accessToken) {
+      execStatus = await getExecutionStatus(
+        env,
+        depositAddress,
+        undefined,
+        ocSession.accessToken
+      ).catch(() => null);
+    }
+  }
+  return execStatus;
+}
+
+async function readPublicVaultBalanceWithRetry(
+  env: Env,
+  vaultAssetId: string,
+  nearAccount: string
+): Promise<bigint> {
+  let bal =
+    (await nearRpc.getIntentAssetBalance(env, vaultAssetId, nearAccount).catch(() => null))
+      ?.balance ?? 0n;
+  if (bal <= 0n) {
+    await new Promise((r) => setTimeout(r, 500));
+    bal =
+      (await nearRpc.getIntentAssetBalance(env, vaultAssetId, nearAccount).catch(() => null))
+        ?.balance ?? 0n;
+  }
+  return bal;
+}
+
+async function userHasSufficientUsdcAnywhere(
+  env: Env,
+  session: Session,
+  nearAccount: string,
+  origin: { assetId: string; symbol: string; decimals: number; nearContractId?: string },
+  grossAtomic: bigint
+): Promise<boolean> {
+  const pubBal = await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null);
+  let total = pubBal?.balance ?? 0n;
+  if (total >= grossAtomic) return true;
+
+  const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
+  const matchingPlain = plain.find(
+    (b) =>
+      nearRpc.assetsMatch(b.defuse_asset_id, origin.assetId) ||
+      nearRpc.assetsMatch(b.nearContractId, origin.nearContractId)
+  );
+  total += BigInt(matchingPlain?.amount || '0');
+  if (total >= grossAtomic) return true;
+
+  if (isConfidentialRailEnabled(env)) {
+    const conf = await getAvailableConfidentialAtomicForAsset(
+      env,
+      session.x_id,
+      origin.assetId,
+      origin.decimals,
+      origin.symbol
+    ).catch(() => ({ availableAtomic: 0n }));
+    total += conf.availableAtomic;
+  }
+  return total >= grossAtomic;
+}
+
+/**
+ * Shared vault-deposit share resolver for self-custody Circles and Earn Gifts.
+ *
+ * Ensures USDC unshield -> USDC->vault swap (`swap_to_vault`) hands off cleanly
+ * into the final contract/escrow deposit using exact vault-token base units (`vault.decimals`),
+ * and automatically recovers un-deposited shares from a recent interrupted swap
+ * (so a user who signed swap_to_vault cleanly never gets stranded holding stNEAR/etc.).
+ */
+async function resolvePreparedVaultSharesForDeposit(params: {
+  env: Env;
+  session: Session;
+  nearAccount: string;
+  vault: { assetId: string; symbol: string; decimals: number; priceUsd?: number };
+  origin: { assetId: string; symbol: string; decimals: number; nearContractId?: string };
+  grossAtomic: bigint;
+  amountStr: string;
+  nextStep: 'circle_contribute' | 'gift_create';
+  completedSwapDepositAddress?: string;
+  circleId?: string;
+  memberId?: string;
+}): Promise<
+  | {
+      ready: true;
+      depositSharesAtomic: bigint;
+      swapActionId?: string;
+      sourceAsset: string;
+      sourceSymbol: string;
+      sourceDecimals: number;
+      sourceGrossAtomic: string;
+      principalUsdCents: number;
+    }
+  | {
+      ready: false;
+      prepareResponse: Record<string, any>;
+    }
+> {
+  const {
+    env,
+    session,
+    nearAccount,
+    vault,
+    origin,
+    grossAtomic,
+    amountStr,
+    nextStep,
+    completedSwapDepositAddress,
+    circleId,
+    memberId,
+  } = params;
+
+  const sameAsset = origin.assetId.toLowerCase() === vault.assetId.toLowerCase();
+  if (sameAsset) {
+    const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
+      env,
+      session,
+      nearAccount,
+      origin,
+      grossAtomic,
+      nextStep,
+    });
+    if (!fundsCheck.ready) {
+      return { ready: false, prepareResponse: fundsCheck.prepareResponse };
+    }
+    return {
+      ready: true,
+      depositSharesAtomic: grossAtomic,
+      sourceAsset: fundsCheck.originAssetId,
+      sourceSymbol: origin.symbol,
+      sourceDecimals: origin.decimals,
+      sourceGrossAtomic: grossAtomic.toString(),
+      principalUsdCents: estimateVaultPrincipalUsdCents(
+        grossAtomic,
+        vault.decimals,
+        vault.priceUsd,
+        amountStr
+      ),
+    };
+  }
+
+  const swapActionType =
+    nextStep === 'circle_contribute' ? 'CIRCLE_CONTRIBUTE_SWAP' : 'GIFT_CREATE_SWAP';
+  const completedDepAddr = (completedSwapDepositAddress || '').trim().toLowerCase();
+  const swapLookbackCutoff = Date.now() - 24 * 60 * 60 * 1000;
+
+  if (env.DB) {
+    const swapRows = await env.DB.prepare(
+      `SELECT id, used_at, meta_json
+         FROM pending_custody_actions
+        WHERE x_id = ? AND action_type = ? AND used_at IS NOT NULL AND used_at >= ?
+        ORDER BY used_at DESC
+        LIMIT 10`
+    )
+      .bind(session.x_id, swapActionType, swapLookbackCutoff)
+      .all<{ id: string; used_at: number; meta_json: string | null }>();
+
+    const candidates: Array<{ id: string; meta: Record<string, any> }> = [];
+    for (const row of swapRows.results || []) {
+      let parsed: Record<string, any> | null = null;
+      try {
+        parsed = row.meta_json ? JSON.parse(row.meta_json) : null;
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || parsed.deposited === true || parsed.deposited === 1) continue;
+      if (String(parsed.vaultAssetId || '').toLowerCase() !== vault.assetId.toLowerCase()) continue;
+      if (String(parsed.nearAccount || '').toLowerCase() !== nearAccount.toLowerCase()) continue;
+      if (circleId && parsed.circleId && String(parsed.circleId) !== circleId) continue;
+      if (!parsed.depositAddress) continue;
+      candidates.push({ id: row.id, meta: parsed });
+    }
+
+    if (candidates.length > 0) {
+      let hasUsdcChecked: boolean | null = null;
+      const checkUsdcOnce = async () => {
+        if (hasUsdcChecked === null) {
+          hasUsdcChecked = await userHasSufficientUsdcAnywhere(
+            env,
+            session,
+            nearAccount,
+            origin,
+            grossAtomic
+          );
+        }
+        return hasUsdcChecked;
+      };
+
+      for (const cand of candidates) {
+        const depAddr = String(cand.meta.depositAddress);
+        const isExplicitMatch = Boolean(completedDepAddr && depAddr.toLowerCase() === completedDepAddr);
+        if (completedDepAddr && !isExplicitMatch) continue;
+
+        let swappedGrossAtomic = 0n;
+        try {
+          swappedGrossAtomic = BigInt(cand.meta.grossAtomic || '0');
+        } catch {
+          swappedGrossAtomic = 0n;
+        }
+
+        if (!isExplicitMatch) {
+          if (swappedGrossAtomic <= 0n) continue;
+          const matchesWithin5Pct =
+            grossAtomic * 100n >= swappedGrossAtomic * 95n &&
+            grossAtomic * 100n <= swappedGrossAtomic * 105n;
+          if (!matchesWithin5Pct) {
+            const sufficientUsdc = await checkUsdcOnce();
+            if (sufficientUsdc || grossAtomic * 100n > swappedGrossAtomic * 105n) {
+              continue;
+            }
+          }
+        }
+
+        const execStatus = await fetchSwapStatusWithOptionalAuth(env, session.x_id, depAddr);
+        const remoteStatus = String(execStatus?.status || '').toUpperCase();
+        if (remoteStatus !== 'SUCCESS') continue;
+
+        const reportedOut = BigInt((execStatus?.swapDetails as any)?.amountOut || '0');
+        const estimatedOut = BigInt(cand.meta.estimatedSharesOutAtomic || '0');
+        const swappedOutAtomic = reportedOut > 0n ? reportedOut : estimatedOut;
+
+        const liveVaultBal = await readPublicVaultBalanceWithRetry(env, vault.assetId, nearAccount);
+        if (liveVaultBal <= 0n) continue;
+
+        if (!isExplicitMatch && swappedOutAtomic > 0n && liveVaultBal < (swappedOutAtomic * 90n) / 100n) {
+          continue;
+        }
+
+        const usableOut =
+          swappedOutAtomic > 0n
+            ? swappedOutAtomic < liveVaultBal
+              ? swappedOutAtomic
+              : liveVaultBal
+            : liveVaultBal;
+
+        let depositSharesAtomic = usableOut;
+        let sourceGrossAtomic = swappedGrossAtomic > 0n ? swappedGrossAtomic.toString() : grossAtomic.toString();
+        if (!isExplicitMatch && swappedGrossAtomic > 0n && grossAtomic * 100n < swappedGrossAtomic * 95n) {
+          depositSharesAtomic = (usableOut * grossAtomic) / swappedGrossAtomic;
+          if (depositSharesAtomic > liveVaultBal) depositSharesAtomic = liveVaultBal;
+          sourceGrossAtomic = grossAtomic.toString();
+        }
+        if (depositSharesAtomic <= 0n) continue;
+
+        return {
+          ready: true,
+          depositSharesAtomic,
+          swapActionId: cand.id,
+          sourceAsset: String(cand.meta.originAsset || origin.assetId),
+          sourceSymbol: String(cand.meta.originSymbol || origin.symbol),
+          sourceDecimals: Number(cand.meta.originDecimals ?? origin.decimals),
+          sourceGrossAtomic,
+          principalUsdCents: estimateVaultPrincipalUsdCents(
+            depositSharesAtomic,
+            vault.decimals,
+            vault.priceUsd,
+            amountStr
+          ),
+        };
+      }
+    }
+  }
+
+  const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
+    env,
+    session,
+    nearAccount,
+    origin,
+    grossAtomic,
+    nextStep,
+  });
+  if (!fundsCheck.ready) {
+    return { ready: false, prepareResponse: fundsCheck.prepareResponse };
+  }
+
+  const swapQuote = await requestQuote(env, {
+    dry: false,
+    swapType: 'EXACT_INPUT',
+    originAsset: fundsCheck.originAssetId,
+    destinationAsset: vault.assetId,
+    amount: grossAtomic.toString(),
+    recipient: nearAccount,
+    recipientType: 'INTENTS',
+    refundTo: nearAccount,
+    refundType: 'INTENTS',
+    depositType: 'INTENTS',
+    slippageTolerance: 300,
+    deadline: new Date(Date.now() + SWAP_QUOTE_TTL_MS).toISOString(),
+  });
+  const depAddr = swapQuote.quote.depositAddress;
+  const generated = await generateSwapIntent(env, {
+    depositAddress: depAddr,
+    signerId: nearAccount,
+    standard: 'webauthn',
+  });
+  const payloadStr = validateGeneratedOneClickDepositIntent(
+    generated.rawPayload,
+    generated.payload?.message,
+    nearAccount,
+    depAddr
+  );
+  const estimatedSharesOutAtomic =
+    swapQuote.quote.amountOut || swapQuote.quote.minAmountOut || '0';
+  const pending = await createPendingCustodyAction({
+    env,
+    xId: session.x_id,
+    actionType: swapActionType,
+    payloadStr,
+    meta: {
+      ...(circleId ? { circleId } : {}),
+      ...(memberId ? { memberId } : {}),
+      nearAccount,
+      depositAddress: depAddr,
+      originAsset: fundsCheck.originAssetId,
+      originSymbol: origin.symbol,
+      originDecimals: origin.decimals,
+      grossAtomic: grossAtomic.toString(),
+      vaultAssetId: vault.assetId,
+      vaultSymbol: vault.symbol,
+      vaultDecimals: vault.decimals,
+      estimatedSharesOutAtomic,
+    },
+    requireOnchainPasskey: true,
+    ttlMs: VAULT_ACTION_TTL_MS,
+  });
+
+  return {
+    ready: false,
+    prepareResponse: {
+      step: 'swap_to_vault' as const,
+      ...(circleId ? { circleId } : {}),
+      depositAddress: depAddr,
+      vaultAssetId: vault.assetId,
+      vaultSymbol: vault.symbol,
+      estimatedSharesOut: formatAtomic(swapQuote.quote.amountOut || '0', vault.decimals),
+      ...pending,
+    },
+  };
+}
+
 function normalizeMembersWithQuotas(
   creatorHandleRaw: string,
   membersRaw: Array<{ handle: string; shareBps?: number; percentageShare?: number; quotaUsdCents?: number }>,
@@ -1128,6 +1524,7 @@ export async function prepareSelfCustodyCircleContribute(params: {
   circleId: string;
   sourceAsset: string;
   amount: string;
+  completedSwapDepositAddress?: string;
 }) {
   const { env, session, circleId } = params;
   if (!env.DB) throw new CustodyActionError('Database unavailable', 503, 'DB_UNAVAILABLE');
@@ -1193,79 +1590,24 @@ export async function prepareSelfCustodyCircleContribute(params: {
   const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, origin.decimals) || '0');
   if (grossAtomic <= 0n) throw new CustodyActionError('Amount must be greater than zero.', 400, 'INVALID_AMOUNT');
 
-  const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
+  const resolved = await resolvePreparedVaultSharesForDeposit({
     env,
     session,
     nearAccount,
+    vault,
     origin,
     grossAtomic,
+    amountStr,
     nextStep: 'circle_contribute',
+    completedSwapDepositAddress: params.completedSwapDepositAddress,
+    circleId,
+    memberId: member.id,
   });
-  if (!fundsCheck.ready) {
-    return fundsCheck.prepareResponse;
-  }
-  const effectiveOriginAssetId = fundsCheck.originAssetId;
-
-  const sameAsset = effectiveOriginAssetId.toLowerCase() === vault.assetId.toLowerCase();
-  if (!sameAsset) {
-    // Zero-stranding 2-step flow: swap sourceAsset -> vault.assetId to member's OWN intents.near account first!
-    const swapQuote = await requestQuote(env, {
-      dry: false,
-      swapType: 'EXACT_INPUT',
-      originAsset: effectiveOriginAssetId,
-      destinationAsset: vault.assetId,
-      amount: grossAtomic.toString(),
-      recipient: nearAccount,
-      recipientType: 'INTENTS',
-      refundTo: nearAccount,
-      refundType: 'INTENTS',
-      depositType: 'INTENTS',
-      slippageTolerance: 300,
-      deadline: new Date(Date.now() + SWAP_QUOTE_TTL_MS).toISOString(),
-    });
-    const depAddr = swapQuote.quote.depositAddress;
-    const generated = await generateSwapIntent(env, {
-      depositAddress: depAddr,
-      signerId: nearAccount,
-      standard: 'webauthn',
-    });
-    const payloadStr = validateGeneratedOneClickDepositIntent(
-      generated.rawPayload,
-      generated.payload?.message,
-      nearAccount,
-      depAddr
-    );
-    const pending = await createPendingCustodyAction({
-      env,
-      xId: session.x_id,
-      actionType: 'CIRCLE_CONTRIBUTE_SWAP',
-      payloadStr,
-      meta: {
-        circleId,
-        memberId: member.id,
-        nearAccount,
-        depositAddress: depAddr,
-        originAsset: origin.assetId,
-        originSymbol: origin.symbol,
-        originDecimals: origin.decimals,
-        grossAtomic: grossAtomic.toString(),
-        vaultAssetId: vault.assetId,
-        vaultSymbol: vault.symbol,
-        vaultDecimals: vault.decimals,
-        estimatedSharesOutAtomic: swapQuote.quote.amountOut || swapQuote.quote.minAmountOut || '0',
-      },
-      requireOnchainPasskey: true,
-      ttlMs: VAULT_ACTION_TTL_MS,
-    });
-    return {
-      step: 'swap_to_vault' as const,
-      circleId,
-      depositAddress: depAddr,
-      estimatedSharesOut: formatAtomic(swapQuote.quote.amountOut || '0', vault.decimals),
-      ...pending,
-    };
+  if (!resolved.ready) {
+    return resolved.prepareResponse;
   }
 
+  const depositSharesAtomic = resolved.depositSharesAtomic;
   const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
   const targetReceiver = isContract
     ? String(circle.escrow_contract_id || getCircleContractId(env)!).toLowerCase()
@@ -1276,13 +1618,13 @@ export async function prepareSelfCustodyCircleContribute(params: {
       ? {
           intent: 'transfer',
           receiver_id: targetReceiver,
-          tokens: { [vault.assetId]: grossAtomic.toString() },
+          tokens: { [vault.assetId]: depositSharesAtomic.toString() },
           msg: buildContributeCircleMsg(circle.onchain_circle_id),
         }
       : {
           intent: 'transfer',
           receiver_id: targetReceiver,
-          tokens: { [vault.assetId]: grossAtomic.toString() },
+          tokens: { [vault.assetId]: depositSharesAtomic.toString() },
         },
   ];
 
@@ -1293,9 +1635,6 @@ export async function prepareSelfCustodyCircleContribute(params: {
     intents: actions,
     ttlMs: VAULT_ACTION_TTL_MS,
   });
-
-  const estimatedUsd =
-    vault.priceUsd && vault.priceUsd > 0 ? Math.round(Number(amountStr) * vault.priceUsd * 100) : 100;
 
   const pending = await createPendingCustodyAction({
     env,
@@ -1312,8 +1651,13 @@ export async function prepareSelfCustodyCircleContribute(params: {
       vaultAssetId: vault.assetId,
       vaultSymbol: vault.symbol,
       vaultDecimals: vault.decimals,
-      sharesAtomic: grossAtomic.toString(),
-      usdCents: Math.max(1, estimatedUsd),
+      sharesAtomic: depositSharesAtomic.toString(),
+      usdCents: resolved.principalUsdCents,
+      swapActionId: resolved.swapActionId || null,
+      sourceAsset: resolved.sourceAsset,
+      sourceSymbol: resolved.sourceSymbol,
+      sourceDecimals: resolved.sourceDecimals,
+      sourceGrossAtomic: resolved.sourceGrossAtomic,
     },
     requireOnchainPasskey: true,
     ttlMs: VAULT_ACTION_TTL_MS,
@@ -1323,7 +1667,7 @@ export async function prepareSelfCustodyCircleContribute(params: {
     step: 'circle_contribute' as const,
     circleId,
     contractMode: isContract ? 'contract' : 'escrow',
-    sharesFormatted: formatAtomic(grossAtomic.toString(), vault.decimals),
+    sharesFormatted: formatAtomic(depositSharesAtomic.toString(), vault.decimals),
     ...pending,
   };
 }
@@ -1460,6 +1804,8 @@ export async function submitSelfCustodyCircleContribute(params: {
     actualDelta = afterVal - beforeCustodyBal;
   }
 
+  await markVaultSwapDeposited(env, session.x_id, meta.swapActionId);
+
   const contribId = generateSecureId('ccon');
   const now = Date.now();
   await env.DB.prepare(
@@ -1474,10 +1820,10 @@ export async function submitSelfCustodyCircleContribute(params: {
       circleId,
       meta.memberId,
       session.x_id,
-      meta.vaultAssetId,
-      meta.vaultSymbol,
-      meta.vaultDecimals,
-      actualDelta.toString(),
+      meta.sourceAsset || meta.vaultAssetId,
+      meta.sourceSymbol || meta.vaultSymbol,
+      meta.sourceDecimals ?? meta.vaultDecimals,
+      meta.sourceGrossAtomic || actualDelta.toString(),
       meta.usdCents,
       meta.sharesAtomic,
       beforeCustodyBal.toString(),
@@ -1911,6 +2257,7 @@ export async function prepareSelfCustodyGiftCreate(params: {
     message?: string;
     showAmount?: boolean;
     mode?: 'contract' | 'escrow';
+    completedSwapDepositAddress?: string;
   };
 }) {
   const { env, session, input } = params;
@@ -1938,87 +2285,35 @@ export async function prepareSelfCustodyGiftCreate(params: {
   const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, origin.decimals) || '0');
   if (grossAtomic <= 0n) throw new CustodyActionError('Amount must be greater than zero.', 400, 'INVALID_AMOUNT');
 
-  const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
+  const resolved = await resolvePreparedVaultSharesForDeposit({
     env,
     session,
     nearAccount,
+    vault,
     origin,
     grossAtomic,
+    amountStr,
     nextStep: 'gift_create',
+    completedSwapDepositAddress: input.completedSwapDepositAddress,
   });
-  if (!fundsCheck.ready) {
-    return fundsCheck.prepareResponse;
-  }
-  const effectiveOriginAssetId = fundsCheck.originAssetId;
-
-  const sameAsset = effectiveOriginAssetId.toLowerCase() === vault.assetId.toLowerCase();
-  if (!sameAsset) {
-    // Swap sourceAsset -> vault.assetId to sender's OWN intents account (zero stranding)
-    const swapQuote = await requestQuote(env, {
-      dry: false,
-      swapType: 'EXACT_INPUT',
-      originAsset: effectiveOriginAssetId,
-      destinationAsset: vault.assetId,
-      amount: grossAtomic.toString(),
-      recipient: nearAccount,
-      recipientType: 'INTENTS',
-      refundTo: nearAccount,
-      refundType: 'INTENTS',
-      depositType: 'INTENTS',
-      slippageTolerance: 300,
-      deadline: new Date(Date.now() + SWAP_QUOTE_TTL_MS).toISOString(),
-    });
-    const depAddr = swapQuote.quote.depositAddress;
-    const generated = await generateSwapIntent(env, {
-      depositAddress: depAddr,
-      signerId: nearAccount,
-      standard: 'webauthn',
-    });
-    const payloadStr = validateGeneratedOneClickDepositIntent(
-      generated.rawPayload,
-      generated.payload?.message,
-      nearAccount,
-      depAddr
-    );
-    const pending = await createPendingCustodyAction({
-      env,
-      xId: session.x_id,
-      actionType: 'GIFT_CREATE_SWAP',
-      payloadStr,
-      meta: {
-        nearAccount,
-        depositAddress: depAddr,
-        originAsset: origin.assetId,
-        originSymbol: origin.symbol,
-        originDecimals: origin.decimals,
-        grossAtomic: grossAtomic.toString(),
-        vaultAssetId: vault.assetId,
-        vaultSymbol: vault.symbol,
-        vaultDecimals: vault.decimals,
-      },
-      requireOnchainPasskey: true,
-      ttlMs: VAULT_ACTION_TTL_MS,
-    });
-    return {
-      step: 'swap_to_vault' as const,
-      depositAddress: depAddr,
-      estimatedSharesOut: formatAtomic(swapQuote.quote.amountOut || '0', vault.decimals),
-      ...pending,
-    };
+  if (!resolved.ready) {
+    return resolved.prepareResponse;
   }
 
   const contractEnabled = isCircleContractEnabled(env) && Boolean(getAttestorPublicKey(env));
   const useContract = input.mode !== 'escrow' && contractEnabled;
   const giftId = generateSecureId('gft');
-  const shareSplit = computeStabilizeSplit(grossAtomic, vault.decimals, env.FEE_PERCENT);
+  const shareSplit = computeStabilizeSplit(resolved.depositSharesAtomic, vault.decimals, env.FEE_PERCENT);
   const feeRecipient = env.FEE_ACCOUNT_ID || env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
   const occasion = sanitizeUserText(input.occasion || 'just_because', 32) || 'just_because';
   const message = sanitizeUserText(input.message, 280) || null;
   const showAmount = Boolean(input.showAmount);
-  const principalUsdCents =
-    vault.priceUsd && vault.priceUsd > 0
-      ? Math.max(1, Math.round((Number(shareSplit.netInputFormatted) || 0) * vault.priceUsd * 100))
-      : 100;
+  const principalUsdCents = estimateVaultPrincipalUsdCents(
+    shareSplit.netInputAtomic,
+    vault.decimals,
+    vault.priceUsd,
+    amountStr
+  );
 
   let recipientXId: string | null = null;
   const recRow = await env.DB.prepare('SELECT x_id FROM x_identities WHERE LOWER(x_handle) = ? LIMIT 1')
@@ -2123,7 +2418,11 @@ export async function prepareSelfCustodyGiftCreate(params: {
       vaultAssetId: vault.assetId,
       vaultSymbol: vault.symbol,
       vaultDecimals: vault.decimals,
-      grossAtomic: grossAtomic.toString(),
+      grossAtomic: resolved.sourceGrossAtomic,
+      sourceAsset: resolved.sourceAsset,
+      sourceSymbol: resolved.sourceSymbol,
+      sourceDecimals: resolved.sourceDecimals,
+      swapActionId: resolved.swapActionId || null,
       netSharesAtomic: shareSplit.netInputAtomic.toString(),
       feeSharesAtomic: shareSplit.feeAtomic.toString(),
       principalUsdCents,
@@ -2251,6 +2550,8 @@ export async function submitSelfCustodyGiftCreate(params: {
     actualNetShares = afterEscrowBal - beforeEscrowBal;
   }
 
+  await markVaultSwapDeposited(env, session.x_id, meta.swapActionId);
+
   const now = Date.now();
   await env.DB.prepare(
     `INSERT INTO gifts (
@@ -2276,9 +2577,9 @@ export async function submitSelfCustodyGiftCreate(params: {
       meta.vaultAssetId,
       meta.vaultSymbol,
       meta.vaultDecimals,
-      meta.vaultAssetId,
-      meta.vaultSymbol,
-      meta.vaultDecimals,
+      meta.sourceAsset || meta.vaultAssetId,
+      meta.sourceSymbol || meta.vaultSymbol,
+      meta.sourceDecimals ?? meta.vaultDecimals,
       meta.grossAtomic,
       meta.principalUsdCents,
       meta.custodyAccount,

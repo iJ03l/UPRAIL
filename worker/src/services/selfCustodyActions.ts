@@ -1902,15 +1902,35 @@ export async function prepareSelfCustodyStabilize(
   }
 
   const split = computeStabilizeSplit(grossAtomic, origin.decimals, env.FEE_PERCENT);
-  const ensured = await ensureOrPrepareSelfCustodyConfidentialFunds({
-    env,
-    session,
-    nearAccount,
-    asset: origin.assetId,
-    requiredAtomic: split.netInputAtomic,
-    nextStep: 'stabilize',
-  });
-  if (!ensured.ready) return ensured.shieldPrepare;
+  const pubOriginBal =
+    (await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null))
+      ?.balance ?? 0n;
+  let swapDepositType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
+  let swapRefundType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
+  let userAccessToken: string;
+
+  if (pubOriginBal >= split.netInputAtomic) {
+    const ocSession = await getOneClickSessionOrThrowAuth(env, session);
+    const confBal = await getConfidentialAssetBalance(env, session.x_id, origin.assetId).catch(() => ({
+      amountAtomic: 0n,
+    }));
+    userAccessToken = ocSession.accessToken;
+    if (confBal.amountAtomic < split.netInputAtomic) {
+      swapDepositType = 'INTENTS';
+      swapRefundType = 'INTENTS';
+    }
+  } else {
+    const ensured = await ensureOrPrepareSelfCustodyConfidentialFunds({
+      env,
+      session,
+      nearAccount,
+      asset: origin.assetId,
+      requiredAtomic: split.netInputAtomic,
+      nextStep: 'stabilize',
+    });
+    if (!ensured.ready) return ensured.shieldPrepare;
+    userAccessToken = ensured.accessToken;
+  }
 
   const liveQuote = await requestQuote(
     env,
@@ -1923,13 +1943,13 @@ export async function prepareSelfCustodyStabilize(
       recipient: nearAccount,
       recipientType: 'CONFIDENTIAL_INTENTS',
       refundTo: nearAccount,
-      refundType: 'CONFIDENTIAL_INTENTS',
-      depositType: 'CONFIDENTIAL_INTENTS',
+      refundType: swapRefundType,
+      depositType: swapDepositType,
       confidentiality: 'basic',
       slippageTolerance: STAB_SLIPPAGE_BPS,
       deadline: new Date(Date.now() + STAB_QUOTE_TTL_MS).toISOString(),
     },
-    { userSession: ensured.accessToken }
+    { userSession: userAccessToken }
   );
 
   const depositAddress = liveQuote.quote?.depositAddress;

@@ -552,6 +552,7 @@ export async function executeAgentPay(
           rawAmount: r.amount,
           memo,
           requestId: rawBody?.requestId || null,
+          executionCtx: c.executionCtx,
         });
 
         if (sendRes.ok && sendRes.status === 201) {
@@ -601,6 +602,7 @@ export async function executeAgentPay(
           rawAmount: r.amount,
           memo,
           requestId: null,
+          executionCtx: c.executionCtx,
         });
         if (!sendRes.ok || sendRes.status !== 201) {
           if (results.length === 0) {

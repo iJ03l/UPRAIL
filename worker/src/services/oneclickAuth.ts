@@ -517,6 +517,41 @@ export async function getEscrowSession(
   return await work;
 }
 
+/**
+ * Returns a 1Click User-Session for an implicit 64-hex Intents keypair
+ * (such as a user's deterministic Agent Allowance Pocket account).
+ * Implicit Ed25519 accounts verify NEP-413 signatures natively on `intents.near`,
+ * so no on-chain `add_public_key` call is required before `/v0/auth`.
+ */
+export async function getImplicitAccountSession(
+  env: Env,
+  key: UserSigningKey,
+  opts: { force?: boolean } = {}
+): Promise<{ accessToken: string; accountId: string }> {
+  const cacheKey = `${SESSION_CACHE_PREFIX}implicit:${key.accountId.toLowerCase()}`;
+  if (!opts.force) {
+    const cached = await sessionFromCache(env, cacheKey);
+    if (cached) return cached;
+    const inflight = userSessionInflight.get(cacheKey);
+    if (inflight) return inflight;
+  }
+
+  const work = (async () => {
+    const signedData = await signEmptyIntent(env, key);
+    const session = await authenticateUser(env, signedData);
+    return await cacheSession(env, cacheKey, key.accountId, session);
+  })();
+
+  userSessionInflight.set(cacheKey, work);
+  const cleanup = () => {
+    if (userSessionInflight.get(cacheKey) === work) {
+      userSessionInflight.delete(cacheKey);
+    }
+  };
+  work.then(cleanup, cleanup);
+  return await work;
+}
+
 export async function clearUserSession(env: Env, xId: string): Promise<void> {
   userSessionInflight.delete(sessionCacheKey(xId));
   try {

@@ -22,9 +22,13 @@ import {
 } from './oneclickClient';
 import {
   getEscrowSession,
+  getImplicitAccountSession,
   getUserSession,
   signGeneratedIntent,
   signGeneratedIntentForEscrow,
+  signGeneratedIntentWithKey,
+  validateGeneratedIntentForAccount,
+  type UserSigningKey,
 } from './oneclickAuth';
 import { resolveWithdrawalAssetPair } from './oneclickWithdraw';
 
@@ -551,6 +555,79 @@ export async function submitPrivateSendFromPublic(
   };
 }
 
+/**
+ * Moves funds from an implicit 64-hex account's public Intents balance (such as a
+ * self-custody user's Agent Allowance Pocket) into Confidential Intents (typically
+ * pooled escrow before `payEscrowPrivate` or held escrow), using the implicit keypair.
+ */
+export async function submitImplicitAccountPrivateSendFromPublic(
+  env: Env,
+  key: UserSigningKey,
+  params: {
+    asset: string;
+    amount: string;
+    recipientAccount: string;
+    confidentiality?: OneClickConfidentiality;
+  }
+): Promise<{
+  depositAddress: string;
+  intentHash: string;
+  quote: OneClickQuoteResponse;
+  accessToken: string;
+}> {
+  if (!isConfidentialRailEnabled(env)) {
+    throw new Error('Confidential rail is disabled');
+  }
+  if (!params.recipientAccount.trim()) throw new Error('recipientAccount is required');
+  const token = await resolveToken(env, params.asset);
+  const assetId = token.defuse_asset_id || `nep141:${token.nearContractId}`;
+  const amountAtomic = nearRpc.toBaseUnits(params.amount, token.decimals);
+  if (!amountAtomic || amountAtomic === '0') throw new Error(`Invalid amount: ${params.amount}`);
+
+  const confidentiality = params.confidentiality || 'basic';
+  if (confidentiality === 'public') {
+    throw new Error('Confidential rail refuses public confidentiality');
+  }
+
+  const session = await getImplicitAccountSession(env, key);
+  const quote = await requestQuote(
+    env,
+    {
+      dry: false,
+      swapType: 'EXACT_INPUT',
+      originAsset: assetId,
+      destinationAsset: assetId,
+      amount: amountAtomic,
+      recipient: params.recipientAccount,
+      recipientType: 'CONFIDENTIAL_INTENTS',
+      refundTo: session.accountId,
+      refundType: 'INTENTS',
+      depositType: 'INTENTS',
+      confidentiality,
+      slippageTolerance: 100,
+      deadline: new Date(Date.now() + QUOTE_TTL_MS).toISOString(),
+    },
+    { userSession: session.accessToken }
+  );
+
+  const depositAddress = quote.quote.depositAddress;
+  const generated = await generateSwapIntent(env, {
+    depositAddress,
+    signerId: session.accountId,
+    standard: 'nep413',
+  });
+  validateGeneratedIntentForAccount(env, generated, session.accountId);
+  const signedData = await signGeneratedIntentWithKey(env, key, generated);
+  const submitted = await submitSwapIntent(env, signedData);
+
+  return {
+    depositAddress,
+    intentHash: submitted.intentHash,
+    quote,
+    accessToken: session.accessToken,
+  };
+}
+
 export interface SettlementPollResult {
   status: string;
   terminal: boolean;
@@ -568,16 +645,19 @@ export async function waitForSettlement(
     timeoutMs?: number;
     intervalMs?: number;
     signer?: RailSigner;
+    accessToken?: string;
   } = {}
 ): Promise<SettlementPollResult> {
   const timeoutMs = opts.timeoutMs ?? 60_000;
   const intervalMs = opts.intervalMs ?? 2_000;
   const started = Date.now();
   let last: SettlementPollResult = { status: 'UNKNOWN', terminal: false, raw: {} };
-  const session = await sessionFor(env, xId, opts.signer || 'user');
+  const accessToken = opts.accessToken
+    ? opts.accessToken
+    : (await sessionFor(env, xId, opts.signer || 'user')).accessToken;
 
   while (Date.now() - started < timeoutMs) {
-    const status = await getExecutionStatus(env, depositAddress, opts.depositMemo, session.accessToken);
+    const status = await getExecutionStatus(env, depositAddress, opts.depositMemo, accessToken);
     last = {
       status: status.status,
       terminal: isTerminalStatus(status.status),

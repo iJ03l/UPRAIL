@@ -469,7 +469,7 @@ export type SelfCustodyProgressStage =
   | 'submitting';
 
 export interface RunSelfCustodyActionParams<TResult = any> {
-  prepare: () => Promise<any>;
+  prepare: (extra?: Record<string, unknown>) => Promise<any>;
   submit: (body: { actionId: string; assertion: unknown; step?: string }) => Promise<TResult>;
   submitOneClickSession?: (body: { actionId: string; assertion: unknown }) => Promise<any>;
   pollSwapStatus?: (prep: {
@@ -489,12 +489,13 @@ export async function runSelfCustodyAction<TResult = any>(
   params: RunSelfCustodyActionParams<TResult>
 ): Promise<TResult> {
   const { prepare, submit, submitOneClickSession, pollSwapStatus, onProgress, onNativeAuthFallback } = params;
+  let nextPrepareExtra: Record<string, unknown> | undefined;
 
   for (let round = 0; round < 6; round++) {
     onProgress?.('preparing', 'Preparing on-chain authorization…');
     let prep: any;
     try {
-      prep = await prepare();
+      prep = await prepare(nextPrepareExtra);
     } catch (err: any) {
       if (
         err instanceof SelfCustodyApiError &&
@@ -627,9 +628,9 @@ export async function runSelfCustodyAction<TResult = any>(
         assertion,
         step: 'swap_to_vault',
       });
-      if (pollSwapStatus && (swapRes?.depositAddress || activePrep.depositAddress)) {
+      const depAddr = swapRes?.depositAddress || activePrep.depositAddress;
+      if (pollSwapStatus && depAddr) {
         onProgress?.('polling_swap', 'Waiting for Earn Vault shares to arrive…');
-        const depAddr = swapRes?.depositAddress || activePrep.depositAddress;
         const vaultAssetId = swapRes?.vaultAssetId || activePrep.vaultAssetId;
         const balanceBeforeAtomic = swapRes?.balanceBeforeAtomic || activePrep.balanceBeforeAtomic || '0';
         const deadline = Date.now() + 65_000;
@@ -653,6 +654,12 @@ export async function runSelfCustodyAction<TResult = any>(
         if (!ready) {
           throw new Error('Vault conversion is still settling on 1Click. Wait a few seconds and retry deposit.');
         }
+      }
+      if (depAddr) {
+        nextPrepareExtra = {
+          ...(nextPrepareExtra || {}),
+          completedSwapDepositAddress: depAddr,
+        };
       }
       continue;
     }
