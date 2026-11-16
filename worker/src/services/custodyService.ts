@@ -1560,7 +1560,7 @@ export async function verifyPublicCustodyState(env: Env, accountOrHandle: string
   let onchain = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
 
   // If this account was upgraded to Self-Custody before native L1 key rotation was introduced,
-  // automatically rotate its L1 FullAccess key to backupPubkey once plain L1 balances are empty.
+  // automatically rotate its L1 FullAccess key to backupPubkey now.
   if (
     dbProfile?.custodyMode === 'self' &&
     dbProfile.backupPubkey &&
@@ -1568,23 +1568,15 @@ export async function verifyPublicCustodyState(env: Env, accountOrHandle: string
     onchain.l1AccessKeys.some((k) => k.publicKey === derivedServerKey!.publicKeyB58)
   ) {
     try {
-      const plainBalances = await nearRpc.getPlainBalances(env, nearAccount);
-      const hasUnsweptPlain = plainBalances.some(
-        (b) =>
-          b.nearContractId &&
-          (b.symbol.toUpperCase() !== 'NEAR' || Number(b.amountFormatted || '0') > 0.03)
+      const rot = await nearRpc.rotateSubAccountL1KeyToBackup(
+        env,
+        nearAccount,
+        derivedServerKey.publicKey,
+        derivedServerKey.privateKey,
+        dbProfile.backupPubkey
       );
-      if (!hasUnsweptPlain) {
-        const rot = await nearRpc.rotateSubAccountL1KeyToBackup(
-          env,
-          nearAccount,
-          derivedServerKey.publicKey,
-          derivedServerKey.privateKey,
-          dbProfile.backupPubkey
-        );
-        if (rot.rotated) {
-          onchain = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
-        }
+      if (rot.rotated) {
+        onchain = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
       }
     } catch (rotErr) {
       console.warn('[verify] L1 key auto-rotation notice:', rotErr);
