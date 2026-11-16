@@ -506,7 +506,6 @@ export async function sweepPlainBalancesBeforeUpgrade(
     custody_mode: custody.custodyMode,
   });
 
-  await (env as any).CACHE?.delete(`plain_bal:${nearAccount}`).catch(() => {});
   const plainBalances = await nearRpc.getPlainBalances(env, nearAccount);
   const swept: Array<{ symbol: string; amount: string; txHash?: string; skipped?: string }> = [];
 
@@ -533,6 +532,9 @@ export async function sweepPlainBalancesBeforeUpgrade(
     } else {
       swept.push({ symbol: b.symbol, amount: sweepAmount, skipped: res.reason });
     }
+  }
+  if (swept.some((s) => !s.skipped)) {
+    await (env as any).CACHE?.delete(`plain_bal:${nearAccount}`).catch(() => {});
   }
   return { nearAccount, swept };
 }
