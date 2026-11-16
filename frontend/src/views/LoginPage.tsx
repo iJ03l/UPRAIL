@@ -10,6 +10,9 @@ import {
   ShieldCheck,
   Loader2,
   KeyRound,
+  Copy,
+  Download,
+  Check,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { webauthn, describePasskeyError, WebAuthnSupportStatus } from '../lib/webauthn';
@@ -43,6 +46,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [pendingRecoveryBackup, setPendingRecoveryBackup] = useState<{
+    recoveryKey: string;
+    nearAccount: string;
+    backupPubkey: string;
+    backupNearPrivateKey: string;
+  } | null>(null);
+  const [copiedRecoveryKey, setCopiedRecoveryKey] = useState(false);
+  const [downloadedRecoveryKey, setDownloadedRecoveryKey] = useState(false);
+  const [savedRecoveryConfirmed, setSavedRecoveryConfirmed] = useState(false);
   const [successStepMessage, setSuccessStepMessage] = useState('');
   const [urlInvite, setUrlInvite] = useState('');
 
@@ -151,15 +163,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   // code, which grants one replacement registration) is required before the
   // rest of the app is reachable.
   const needsPasskeyConfirmation =
-    !isLoading && !!user && user.hasPasskey === true && user.passkeyVerified !== true && !recoveryAuthorized;
+    !isLoading && !!user && user.hasPasskey === true && user.passkeyVerified !== true && !recoveryAuthorized && !pendingRecoveryBackup;
   const needsPasskeyCreation =
-    !isLoading && !!user && (user.hasPasskey !== true || recoveryAuthorized);
+    !isLoading && !!user && (user.hasPasskey !== true || recoveryAuthorized) && !pendingRecoveryBackup;
   const isComplete =
     !isLoading &&
     !!user &&
     user.hasPasskey === true &&
     user.passkeyVerified === true &&
-    !needsPasskeyCreation;
+    !needsPasskeyCreation &&
+    !pendingRecoveryBackup;
 
   // Where this session was originally headed (share links send people to
   // /claim/<id>?invite=... — dropping that sends the recipient back to square one).
@@ -214,10 +227,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
       const result = await webauthn.registerPasskey(user.handle);
       if (result.success) {
-        setIsSuccess(true);
-        setSuccessStepMessage('You\'re all set. This device can now sign you in.');
         setRecoveryAuthorized(false);
         setShowRecovery(false);
+
+        if (result.recoveryKey) {
+          setCopiedRecoveryKey(false);
+          setDownloadedRecoveryKey(false);
+          setSavedRecoveryConfirmed(false);
+          setPendingRecoveryBackup({
+            recoveryKey: result.recoveryKey,
+            nearAccount: result.nearAccount || user.nearAccount || '',
+            backupPubkey: result.backupPubkey || '',
+            backupNearPrivateKey: result.backupNearPrivateKey || '',
+          });
+        } else {
+          setIsSuccess(true);
+          setSuccessStepMessage('You\'re all set. This device can now sign you in.');
+        }
 
         if (typeof window !== 'undefined') {
           localStorage.setItem('uprail_has_signed_up', 'true');
@@ -880,6 +906,124 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   Use a different 𝕏 account
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* STEP 2B: Save Offline Self-Custody Recovery Key (New Signups) */}
+          {/* ============================================================== */}
+          {pendingRecoveryBackup && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="space-y-1.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3.5">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-700">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span className="text-sm">Non-Custodial Vault Locked to Your Passkey</span>
+                </div>
+                <p className="text-xs leading-relaxed text-stone-600">
+                  Save your offline Recovery Key before continuing. It is generated only in your browser and never sent to UPRAIL.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-line bg-surface-subtle p-4 space-y-3">
+                <div className="text-[11px] font-mono uppercase tracking-wider text-muted font-bold">
+                  Offline Recovery Key
+                </div>
+                <div className="rounded-xl bg-surface border border-line p-3 font-mono text-xs font-semibold tracking-wider text-ink select-all break-all text-center">
+                  {pendingRecoveryBackup.recoveryKey}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(pendingRecoveryBackup.recoveryKey);
+                      setCopiedRecoveryKey(true);
+                    }}
+                    className="btn-secondary flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold cursor-pointer"
+                  >
+                    {copiedRecoveryKey ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Key</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const handle = (user?.handle || 'uprail').replace(/[^a-zA-Z0-9_-]/g, '');
+                      const content = [
+                        'UPRAIL SELF-CUSTODY RECOVERY KEY (DEVICE-ONLY — NEVER SENT TO SERVER)',
+                        '========================================================================',
+                        `Handle: @${handle}`,
+                        `NEAR Intents & L1 Account: ${pendingRecoveryBackup.nearAccount}`,
+                        `Backup Public Key: ${pendingRecoveryBackup.backupPubkey}`,
+                        `NEAR L1 FullAccess Private Key: ${pendingRecoveryBackup.backupNearPrivateKey}`,
+                        '',
+                        `Recovery Key: ${pendingRecoveryBackup.recoveryKey}`,
+                        '',
+                        'IMPORTANT:',
+                        '- Keep this Recovery Key offline (password manager, hardware vault, or paper).',
+                        '- Anyone with this key + your X sign-in can authorize a replacement passkey.',
+                        '- Uprail never stores this key and cannot regenerate it for you.',
+                      ].join('\n');
+                      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `uprail-recovery-key-${handle}.txt`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                      setDownloadedRecoveryKey(true);
+                    }}
+                    className="btn-secondary flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold cursor-pointer"
+                  >
+                    {downloadedRecoveryKey ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Saved .txt</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download .txt</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <label className="flex items-start gap-2.5 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={savedRecoveryConfirmed}
+                    onChange={(e) => setSavedRecoveryConfirmed(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-stone-300 accent-emerald-600"
+                  />
+                  <span className="text-xs text-stone-600 leading-snug">
+                    I have saved my Recovery Key offline. I understand UPRAIL cannot recover my account without it if I lose my passkey.
+                  </span>
+                </label>
+              </div>
+
+              <button
+                type="button"
+                disabled={!savedRecoveryConfirmed || (!copiedRecoveryKey && !downloadedRecoveryKey)}
+                onClick={() => {
+                  setIsSuccess(true);
+                  setSuccessStepMessage('You\'re all set. Non-custodial vault active.');
+                  setPendingRecoveryBackup(null);
+                }}
+                className="btn-primary w-full h-12 rounded-2xl px-5 font-display font-bold text-sm tracking-tight flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <span>Continue to UPRAIL</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
             </div>
           )}
 

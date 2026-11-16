@@ -421,6 +421,34 @@ export async function getCustodyPreflight(env: Env, xId: string, xHandle: string
     }))
     .filter((b) => b.canSweepToIntents);
 
+  let resolvedAuthState = authState;
+  if (
+    custody.custodyMode === 'self' &&
+    custody.backupPubkey &&
+    plainBalancesToSweep.length === 0
+  ) {
+    try {
+      const derived = await nearRpc.deriveUserNearKeypair(env, xId);
+      const serverL1StillPresent = resolvedAuthState.l1AccessKeys.some(
+        (k) => k.publicKey === derived.publicKeyB58
+      );
+      if (serverL1StillPresent) {
+        const rot = await nearRpc.rotateSubAccountL1KeyToBackup(
+          env,
+          nearAccount,
+          derived.publicKey,
+          derived.privateKey,
+          custody.backupPubkey
+        );
+        if (rot.rotated) {
+          resolvedAuthState = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
+        }
+      }
+    } catch (rotErr) {
+      console.warn('[custody/preflight] L1 key auto-rotation notice:', rotErr);
+    }
+  }
+
   const blockingReasons: string[] = [];
   if (eligiblePasskeys.length === 0) {
     blockingReasons.push('Register a P-256 passkey on this device first.');
@@ -441,7 +469,7 @@ export async function getCustodyPreflight(env: Env, xId: string, xHandle: string
     oneClickSessionActive,
     recoveryCodesRemaining: recoveryStatus.remaining,
     eligiblePasskeys,
-    authState,
+    authState: resolvedAuthState,
     plainBalancesToSweep,
     activeEscrowCircles,
     activeEscrowGifts,
@@ -689,11 +717,13 @@ export async function submitUpgradeToSelfCustody(params: {
   //    intents.near as part of migration. For any NEP-141 token whose contract has no
   //    storage registered for intents.near yet, escrow.uprail.near automatically pays
   //    and registers NEP-145 storage_deposit on that token contract before transferring.
+  let sweepHadError = false;
   const sweepResult = await sweepPlainBalancesBeforeUpgrade(
     env,
     xId,
     params.xHandle || ''
   ).catch((sweepErr) => {
+    sweepHadError = true;
     console.warn('[custody/upgrade] L1 auto-sweep notice:', sweepErr);
     return { nearAccount: meta.nearAccount, swept: [] };
   });
@@ -749,21 +779,50 @@ export async function submitUpgradeToSelfCustody(params: {
     );
   }
 
-  // Read live intents.near keys to verify lock-out of server key and activation of user keys.
-  const authState = await nearRpc.getAccountIntentsAuthState(env, meta.nearAccount);
-  const signerKeyAuthorized = authState.publicKeys.includes(passkey.near_p256_pubkey!);
-  const backupKeyAuthorized = authState.publicKeys.includes(meta.backupPubkey);
-  const serverKeyRemoved = !authState.publicKeys.includes(meta.serverPubkeyB58);
-  const predDisabled = !authState.isAuthByPredecessorEnabled;
+  // Read live intents.near keys to verify lock-out of server key and activation of user keys (fail-closed).
+  let authState = await nearRpc.getAccountIntentsAuthState(env, meta.nearAccount);
+  let signerKeyAuthorized = authState.publicKeys.includes(passkey.near_p256_pubkey!);
+  let backupKeyAuthorized = authState.publicKeys.includes(meta.backupPubkey);
+  let serverKeyRemoved = !authState.publicKeys.includes(meta.serverPubkeyB58);
+  let predDisabled = !authState.isAuthByPredecessorEnabled;
+
+  for (
+    let attempt = 0;
+    attempt < 3 && (!signerKeyAuthorized || !backupKeyAuthorized || !serverKeyRemoved || !predDisabled);
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    authState = await nearRpc.getAccountIntentsAuthState(env, meta.nearAccount);
+    signerKeyAuthorized = authState.publicKeys.includes(passkey.near_p256_pubkey!);
+    backupKeyAuthorized = authState.publicKeys.includes(meta.backupPubkey);
+    serverKeyRemoved = !authState.publicKeys.includes(meta.serverPubkeyB58);
+    predDisabled = !authState.isAuthByPredecessorEnabled;
+  }
 
   if (!signerKeyAuthorized || !backupKeyAuthorized || !serverKeyRemoved || !predDisabled) {
-    console.warn('[custody/upgrade] Post-upgrade verification check partial mismatch:', {
-      nearAccount: meta.nearAccount,
-      signerKeyAuthorized,
-      backupKeyAuthorized,
-      serverKeyRemoved,
-      predDisabled,
-    });
+    throw new CustodyActionError(
+      'Post-upgrade on-chain key verification failed on intents.near; custody_mode was not updated.',
+      502,
+      'ONCHAIN_VERIFICATION_FAILED'
+    );
+  }
+
+  // 3. Once all plain L1 assets are swept (none skipped), atomically rotate the native
+  //    NEAR L1 FullAccess key on u_*.escrow.uprail.near from the server-derived key to
+  //    the user's offline backupPubkey (`AddKey(backupPubkey) + DeleteKey(serverKey)`).
+  let l1KeyRotated = false;
+  let l1RotationTxHash: string | undefined;
+  const allSweptCleanly = !sweepHadError && sweepResult.swept.every((s) => !s.skipped);
+  if (allSweptCleanly) {
+    const rot = await nearRpc.rotateSubAccountL1KeyToBackup(
+      env,
+      meta.nearAccount,
+      derived.publicKey,
+      derived.privateKey,
+      meta.backupPubkey
+    );
+    l1KeyRotated = rot.rotated;
+    l1RotationTxHash = rot.txHash;
   }
 
   const now = Date.now();
@@ -809,6 +868,8 @@ export async function submitUpgradeToSelfCustody(params: {
   return {
     success: true,
     txHash: relay.txHash,
+    l1KeyRotated,
+    l1RotationTxHash,
     custodyMode: 'self' as const,
     nearAccount: meta.nearAccount,
     backupPubkey: meta.backupPubkey,
@@ -821,6 +882,193 @@ export async function submitUpgradeToSelfCustody(params: {
       predDisabled,
       onchainKeys: authState.publicKeys,
     },
+  };
+}
+
+/**
+ * Provisions a brand-new user directly into non-custodial Self-Custody mode at first passkey signup:
+ * 1. Creates `u_<hex>.escrow.uprail.near` and registers bootstrap key on `intents.near`.
+ * 2. Warms the 30-day refreshable 1Click `User-Session` for Confidential Intents.
+ * 3. Atomically adds `nearP256Pubkey` + `backupPubkey`, removes the server key, and disables
+ *    `auth_by_predecessor_id` on `intents.near`, then verifies fail-closed on-chain.
+ * 4. Atomically rotates the native NEAR L1 `FullAccess` key on `u_<hex>.escrow.uprail.near`
+ *    to `backupPubkey` (`AddKey(backupPubkey) + DeleteKey(serverKey)`).
+ * 5. Marks `x_identities.custody_mode = 'self'`, `backup_pubkey`, `self_custody_at`, and `passkeys.onchain_added_at`.
+ */
+export async function provisionInitialSelfCustodyOnchain(params: {
+  env: Env;
+  xId: string;
+  xHandle: string;
+  nearP256Pubkey: string;
+  backupPubkey: string;
+}): Promise<{
+  nearAccount: string;
+  backupPubkey: string;
+  txHash?: string;
+  l1KeyRotated: boolean;
+}> {
+  const { env, xId, nearP256Pubkey } = params;
+  const parsedBackup = parseNearPublicKey(params.backupPubkey);
+  if (parsedBackup.kind !== 'ed25519') {
+    throw new CustodyActionError(
+      'Backup key must be an ed25519:<base58> public key derived from your device Recovery Key',
+      400,
+      'INVALID_BACKUP_PUBKEY'
+    );
+  }
+  const parsedP256 = parseNearPublicKey(nearP256Pubkey);
+  if (parsedP256.kind !== 'p256') {
+    throw new CustodyActionError('Passkey must be a P-256 public key', 400, 'INVALID_PASSKEY_PUBKEY');
+  }
+
+  const derived = await nearRpc.deriveUserNearKeypair(env, xId);
+  const nearAccount = derived.accountId;
+
+  const created = await nearRpc.createOnchainSubAccount(
+    env,
+    nearAccount,
+    derived.publicKey,
+    derived.privateKey,
+    true
+  );
+  if (!created.success) {
+    throw new CustodyActionError(
+      created.error || 'Could not provision NEAR sub-account on-chain',
+      502,
+      'SUBACCOUNT_PROVISION_FAILED'
+    );
+  }
+
+  const keyReady = await nearRpc.ensureKeyOnIntents(
+    env,
+    nearAccount,
+    derived.publicKey,
+    derived.privateKey
+  );
+  if (!keyReady.registered) {
+    throw new CustodyActionError(
+      keyReady.reason || 'Bootstrap key could not be registered on intents.near',
+      502,
+      'BOOTSTRAP_KEY_NOT_REGISTERED'
+    );
+  }
+
+  await getUserSession(env, xId).catch(() => {});
+
+  const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+  const saltHex = await getCurrentIntentsSalt(env);
+  const { payloadStr, body: payloadBody } = buildIntentsPayloadString({
+    signerId: nearAccount,
+    verifyingContract: intentsId,
+    saltHex,
+    intents: [
+      { intent: 'add_public_key', public_key: parsedP256.formatted },
+      { intent: 'add_public_key', public_key: parsedBackup.formatted },
+      { intent: 'remove_public_key', public_key: derived.publicKeyB58 },
+      { intent: 'set_auth_by_predecessor_id', enabled: false },
+    ],
+    ttlMs: ACTION_TTL_MS,
+  });
+
+  const nonceBytes = Uint8Array.from(atob(payloadBody.nonce), (c) => c.charCodeAt(0));
+  const serialized = nearRpc.nep413Serialize(payloadStr, nonceBytes, intentsId);
+  const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(serialized));
+  const { ed25519 } = await import('@noble/curves/ed25519.js');
+  const { base58Encode } = await import('../utils/base58');
+  const sigBytes = ed25519.sign(new Uint8Array(digest), derived.privateKey);
+  const signedPayload = {
+    standard: 'nep413',
+    payload: {
+      message: payloadStr,
+      nonce: payloadBody.nonce,
+      recipient: intentsId,
+    },
+    public_key: derived.publicKeyB58,
+    signature: `ed25519:${base58Encode(sigBytes)}`,
+  };
+
+  const sim = await nearRpc.simulateIntentsRelayed(env, [signedPayload]);
+  if (!sim.ok) {
+    throw new CustodyActionError(
+      `Initial self-custody provisioning simulation failed: ${sim.error || 'unknown error'}`,
+      400,
+      'SIMULATION_FAILED'
+    );
+  }
+
+  const relay = await nearRpc.executeIntentsBatchRelayed(env, [signedPayload], 150000000000000n);
+  if (!relay.success) {
+    throw new CustodyActionError(
+      relay.error || 'Failed to execute initial self-custody lock on intents.near',
+      502,
+      'RELAY_FAILED'
+    );
+  }
+
+  let authState = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
+  let signerKeyAuthorized = authState.publicKeys.includes(parsedP256.formatted);
+  let backupKeyAuthorized = authState.publicKeys.includes(parsedBackup.formatted);
+  let serverKeyRemoved = !authState.publicKeys.includes(derived.publicKeyB58);
+  let predDisabled = !authState.isAuthByPredecessorEnabled;
+
+  for (
+    let attempt = 0;
+    attempt < 3 && (!signerKeyAuthorized || !backupKeyAuthorized || !serverKeyRemoved || !predDisabled);
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    authState = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
+    signerKeyAuthorized = authState.publicKeys.includes(parsedP256.formatted);
+    backupKeyAuthorized = authState.publicKeys.includes(parsedBackup.formatted);
+    serverKeyRemoved = !authState.publicKeys.includes(derived.publicKeyB58);
+    predDisabled = !authState.isAuthByPredecessorEnabled;
+  }
+
+  if (!signerKeyAuthorized || !backupKeyAuthorized || !serverKeyRemoved || !predDisabled) {
+    throw new CustodyActionError(
+      'Initial self-custody on-chain key verification failed on intents.near.',
+      502,
+      'ONCHAIN_VERIFICATION_FAILED'
+    );
+  }
+
+  const rot = await nearRpc.rotateSubAccountL1KeyToBackup(
+    env,
+    nearAccount,
+    derived.publicKey,
+    derived.privateKey,
+    parsedBackup.formatted
+  );
+
+  const now = Date.now();
+  if (env.DB) {
+    await env.DB.prepare(
+      `UPDATE x_identities
+       SET near_account = ?,
+           custody_mode = 'self',
+           backup_pubkey = ?,
+           self_custody_at = COALESCE(self_custody_at, ?),
+           self_custody_version = self_custody_version + 1,
+           updated_at = ?
+       WHERE x_id = ?`
+    )
+      .bind(nearAccount, parsedBackup.formatted, now, now, xId)
+      .run();
+
+    await env.DB.prepare(
+      `UPDATE passkeys
+       SET onchain_added_at = COALESCE(onchain_added_at, ?)
+       WHERE x_id = ? AND near_p256_pubkey = ?`
+    )
+      .bind(now, xId, parsedP256.formatted)
+      .run();
+  }
+
+  return {
+    nearAccount,
+    backupPubkey: parsedBackup.formatted,
+    txHash: relay.txHash,
+    l1KeyRotated: rot.rotated,
   };
 }
 

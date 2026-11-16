@@ -50,6 +50,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
 
   const [recoveryPhrase, setRecoveryPhrase] = useState('');
   const [backupPubkey, setBackupPubkey] = useState('');
+  const [backupNearPrivateKey, setBackupNearPrivateKey] = useState('');
   const [copiedKey, setCopiedKey] = useState(false);
   const [downloadedKey, setDownloadedKey] = useState(false);
   const [savedConfirmed, setSavedConfirmed] = useState(false);
@@ -86,6 +87,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
     setDownloadedKey(false);
     setUpgradeResult(null);
     setBackupPubkey('');
+    setBackupNearPrivateKey('');
     setSubmitStatus(null);
     void loadPreflight();
 
@@ -118,6 +120,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
         const kp = await deriveBackupEd25519Keypair(recoveryPhrase, resolvedNearAccount);
         if (!cancelled) {
           setBackupPubkey(kp.nearPublicKey);
+          setBackupNearPrivateKey(kp.nearPrivateKey);
         }
       } catch {
         if (!cancelled) {
@@ -146,8 +149,9 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
       'UPRAIL SELF-CUSTODY RECOVERY KEY (DEVICE-ONLY — NEVER SENT TO SERVER)',
       '========================================================================',
       `Handle: @${handle}`,
-      `NEAR Intents Account: ${preflight?.nearAccount || user?.nearAccount || ''}`,
+      `NEAR Intents & L1 Account: ${preflight?.nearAccount || user?.nearAccount || ''}`,
       `Backup Public Key: ${backupPubkey}`,
+      `NEAR L1 FullAccess Private Key: ${backupNearPrivateKey}`,
       '',
       `Recovery Key: ${recoveryPhrase}`,
       '',

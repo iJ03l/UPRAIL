@@ -261,9 +261,10 @@ authRouter.get('/callback', async (c) => {
 
     // Persist / refresh the identity in D1 (the single source of truth)
     let nearAccount: string | null = null;
+    let custodyMode: 'server' | 'self' = 'self';
     if (c.env.DB) {
       const existing = await c.env.DB.prepare(
-        'SELECT x_id, x_handle, x_name, near_account FROM x_identities WHERE x_id = ?'
+        'SELECT x_id, x_handle, x_name, near_account, custody_mode FROM x_identities WHERE x_id = ?'
       )
         .bind(xUser.id)
         .first<{
@@ -271,20 +272,27 @@ authRouter.get('/callback', async (c) => {
           x_handle: string;
           x_name: string;
           near_account: string | null;
+          custody_mode?: string | null;
         }>();
 
       if (existing) {
         nearAccount = existing.near_account;
+        custodyMode = existing.custody_mode === 'self' ? 'self' : 'server';
         await c.env.DB.prepare(
           'UPDATE x_identities SET x_handle = ?, x_name = ?, updated_at = ? WHERE x_id = ?'
         )
           .bind(xUser.username.toLowerCase(), xUser.name, now, xUser.id)
           .run();
       } else {
+        try {
+          const derived = await nearRpc.deriveUserNearKeypair(c.env, xUser.id);
+          nearAccount = derived.accountId;
+        } catch {}
+        custodyMode = 'self';
         await c.env.DB.prepare(
-          'INSERT INTO x_identities (x_id, x_handle, x_name, near_account, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)'
+          "INSERT INTO x_identities (x_id, x_handle, x_name, near_account, custody_mode, created_at, updated_at) VALUES (?, ?, ?, ?, 'self', ?, ?)"
         )
-          .bind(xUser.id, xUser.username.toLowerCase(), xUser.name, now, now)
+          .bind(xUser.id, xUser.username.toLowerCase(), xUser.name, nearAccount, now, now)
           .run();
       }
     }
@@ -326,21 +334,25 @@ authRouter.get('/callback', async (c) => {
       x_handle: xUser.username.toLowerCase(),
       x_name: xUser.name,
       near_account: nearAccount,
+      custody_mode: custodyMode,
       is_activated: isActivated,
       personal_invite_code: personalInviteCode,
     });
 
-    // Login == account exists. Provision the confidential intent sub-account
-    // right away so the first deposit/withdraw never has to wait on it.
-    background(
-      c.executionCtx,
-      nearRpc.ensureIntentAccount(c.env, {
-        x_id: xUser.id,
-        x_handle: xUser.username.toLowerCase(),
-        near_account: nearAccount,
-      }),
-      'intent account provisioning (oauth)'
-    );
+    // Only pre-provision server-custody legacy accounts on OAuth login;
+    // non-custodial accounts are provisioned & locked to the user's passkey
+    // and offline Recovery Key at passkey registration.
+    if (custodyMode !== 'self') {
+      background(
+        c.executionCtx,
+        nearRpc.ensureIntentAccount(c.env, {
+          x_id: xUser.id,
+          x_handle: xUser.username.toLowerCase(),
+          near_account: nearAccount,
+        }),
+        'intent account provisioning (oauth)'
+      );
+    }
 
     // X OAuth always hands control back to /login. The browser, not the
     // server, knows whether this device already holds a passkey; LoginPage

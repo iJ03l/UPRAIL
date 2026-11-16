@@ -242,6 +242,10 @@ export const webauthn = {
   async registerPasskey(handle: string): Promise<{
     success: boolean;
     credentialId: string;
+    nearAccount?: string;
+    recoveryKey?: string;
+    backupPubkey?: string;
+    backupNearPrivateKey?: string;
   }> {
     const cleanHandle = handle.replace(/^@/, '').toLowerCase();
     const isSupported = browserSupportsWebAuthn();
@@ -249,7 +253,7 @@ export const webauthn = {
       throw new Error('WebAuthn is not supported on this browser.');
     }
 
-    const rawOptions = await api.getPasskeyRegisterOptions(cleanHandle);
+    const rawOptions = (await api.getPasskeyRegisterOptions(cleanHandle)) as any;
 
     // Prefer the device's built-in authenticator (fingerprint / face / screen
     // lock). When one is available we constrain to 'platform' so Chrome skips
@@ -308,8 +312,23 @@ export const webauthn = {
       );
     }
 
-    // Register with backend
-    await api.registerPasskeyAttestation(attResp);
+    const nearAccount = typeof rawOptions?.nearAccount === 'string' ? rawOptions.nearAccount : '';
+    const isInitialPasskey =
+      !Array.isArray(rawOptions?.excludeCredentials) || rawOptions.excludeCredentials.length === 0;
+
+    let recoveryKey: string | undefined;
+    let backupPubkey: string | undefined;
+    let backupNearPrivateKey: string | undefined;
+    if (nearAccount && isInitialPasskey) {
+      const { generateDeviceRecoveryKey, deriveBackupEd25519Keypair } = await import('./selfCustody');
+      recoveryKey = await generateDeviceRecoveryKey();
+      const derived = await deriveBackupEd25519Keypair(recoveryKey, nearAccount);
+      backupPubkey = derived.nearPublicKey;
+      backupNearPrivateKey = derived.nearPrivateKey;
+    }
+
+    // Register with backend (provisions & locks non-custodial self-custody on-chain for initial passkey)
+    const regRes = await api.registerPasskeyAttestation(attResp, backupPubkey);
 
     // Save passkey record locally
     const passkeyInfo: StoredPasskeyInfo = {
@@ -325,6 +344,10 @@ export const webauthn = {
     return {
       success: true,
       credentialId: attResp.id,
+      nearAccount: regRes?.nearAccount || nearAccount || undefined,
+      recoveryKey,
+      backupPubkey: regRes?.backupPubkey || backupPubkey,
+      backupNearPrivateKey,
     };
   },
 

@@ -365,6 +365,7 @@ export interface ClaimPendingResponse {
  */
 export interface RegisterPasskeyRequest {
   attestation: any;
+  backupPubkey?: string;
 }
 
 export interface RegisterPasskeyResponse {
@@ -372,6 +373,7 @@ export interface RegisterPasskeyResponse {
   nearAccount: string;
   credentialId: string;
   custodyMode?: CustodyMode;
+  backupPubkey?: string;
   pendingOnchainPasskeyAdd?: string;
 }
 

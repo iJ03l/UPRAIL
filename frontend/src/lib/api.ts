@@ -1290,13 +1290,13 @@ export const api = {
   },
 
   // Registers a new passkey attestation on the server (sets API_BASE correctly)
-  async registerPasskeyAttestation(attestation: unknown): Promise<any> {
+  async registerPasskeyAttestation(attestation: unknown, backupPubkey?: string): Promise<any> {
     const url = API_BASE ? `${API_BASE}/api/claim/register` : '/api/claim/register';
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ attestation }),
+      body: JSON.stringify({ attestation, ...(backupPubkey ? { backupPubkey } : {}) }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as any;
@@ -2673,6 +2673,7 @@ export const api = {
       params.expectedDestination ||
       '';
     const status = res.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING';
+    const cleanSym = cleanAssetSymbol(res.asset || params.asset);
     return {
       success: Boolean(res.success ?? true),
       withdrawalId: res.withdrawalId || '',
@@ -2681,7 +2682,7 @@ export const api = {
       intentHash: res.intentHash || res.txHash || '',
       destinationAddress: dest,
       intentsAccountId: res.intentsAccountId || '',
-      asset: res.asset || params.asset,
+      asset: cleanSym,
       amount: res.amount || params.amount,
       privacy: 'confidential',
       rail: 'nearcom_internal',
@@ -2689,7 +2690,7 @@ export const api = {
       message:
         res.message ||
         (status === 'COMPLETED'
-          ? `Withdrew ${params.amount} ${params.asset} confidentially to near.com`
+          ? `Withdrew ${params.amount} ${cleanSym} confidentially to near.com`
           : `Withdrawal submitted confidentially to near.com`),
     };
   },

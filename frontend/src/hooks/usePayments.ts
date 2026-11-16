@@ -264,19 +264,12 @@ export function usePayments() {
       let payment: PaymentIntent;
 
       if (user?.custodyMode === 'self') {
-        const matchingQuote =
-          quote?.token?.id?.toLowerCase() === selectedToken.id.toLowerCase() &&
-          quote.amount === amount
-            ? quote
-            : null;
         payment = await api.sendPaymentSelfCustody(
           {
             recipientHandle: cleanHandle,
             tokenId: selectedToken.id,
             amount,
             memo,
-            quoteSignature: matchingQuote?.quoteSignature,
-            depositAddress: matchingQuote?.depositAddress,
             token: selectedToken,
           },
           (stage) => setTxStage(stage === 'submitting' ? 'sending' : 'authorizing')

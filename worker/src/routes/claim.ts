@@ -25,6 +25,7 @@ import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
 import { ensureRecoveryCodes } from '../services/recoveryCodes';
 import { cosePublicKeyToNearP256 } from '../services/selfCustodyCrypto';
+import { provisionInitialSelfCustodyOnchain } from '../services/custodyService';
 import { background } from '../utils/background';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import {
@@ -321,7 +322,15 @@ claimRouter.get('/register-options', requireAuth(), async (c) => {
       ttlSeconds: 300,
     });
 
-    return c.json(options);
+    let nearAccount = session.near_account || null;
+    if (!nearAccount) {
+      try {
+        const derived = await nearRpc.deriveUserNearKeypair(c.env, session.x_id);
+        nearAccount = derived.accountId;
+      } catch {}
+    }
+
+    return c.json({ ...options, ...(nearAccount ? { nearAccount } : {}) });
   } catch (err: any) {
     console.error('Generate WebAuthn options error:', err);
     return c.json<ErrorResponse>(
@@ -516,11 +525,28 @@ claimRouter.post('/register', requireAuth(), async (c) => {
         .run();
     }
 
+    let finalCustodyMode = custody.custodyMode;
+    let finalBackupPubkey = custody.backupPubkey || undefined;
+
+    // For brand-new signups (first passkey registration with client-derived backupPubkey),
+    // provision and lock self-custody on-chain immediately so new accounts are non-custodial from day 1.
+    if (existingPasskeys === 0 && !recoveryAuthorized && nearP256Pubkey && body.backupPubkey) {
+      const provisioned = await provisionInitialSelfCustodyOnchain({
+        env: c.env,
+        xId: session.x_id,
+        xHandle: session.x_handle,
+        nearP256Pubkey,
+        backupPubkey: body.backupPubkey.trim(),
+      });
+      finalCustodyMode = 'self';
+      finalBackupPubkey = provisioned.backupPubkey;
+    }
+
     // 3. Update the active session cookie: this device has now proven the
     // passkey, and any recovery grant is single-use.
     await updateSession(c, {
       near_account: nearAccount,
-      custody_mode: custody.custodyMode,
+      custody_mode: finalCustodyMode,
       passkey_verified: true,
       passkey_verified_at: now,
       recovery_authorized: false,
@@ -538,7 +564,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     // Signup completes with the first passkey — provision the intent account
     // now rather than on the user's first balance read. Never re-inject server
     // keys onto an account already in self-custody.
-    if (custody.custodyMode !== 'self') {
+    if (finalCustodyMode !== 'self') {
       background(
         c.executionCtx,
         nearRpc.ensureIntentAccount(c.env, {
@@ -551,7 +577,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     }
 
     const pendingOnchainPasskeyAdd =
-      custody.custodyMode === 'self' && existingPasskeys > 0 && nearP256Pubkey
+      finalCustodyMode === 'self' && existingPasskeys > 0 && nearP256Pubkey
         ? nearP256Pubkey
         : undefined;
 
@@ -559,7 +585,8 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       success: true,
       nearAccount,
       credentialId: verification.credentialId,
-      custodyMode: custody.custodyMode,
+      custodyMode: finalCustodyMode,
+      ...(finalBackupPubkey ? { backupPubkey: finalBackupPubkey } : {}),
       ...(pendingOnchainPasskeyAdd ? { pendingOnchainPasskeyAdd } : {}),
     });
   } catch (err: any) {

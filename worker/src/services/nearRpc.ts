@@ -3613,6 +3613,119 @@ export async function getAccountIntentsAuthState(
 }
 
 /**
+ * Atomically adds the user's offline Ed25519 backup key (`backupPubkeyB58`) as a
+ * FullAccess key on `subAccount` (`u_<hex>.escrow.uprail.near`) and deletes the
+ * server-derived FullAccess key (`serverPubKey`) in a single NEAR L1 transaction.
+ *
+ * After this transaction lands, Uprail has zero L1 keys on `subAccount` and zero
+ * keys on `intents.near`, while the user retains full L1 and Intents sovereignty
+ * via their passkey and offline Recovery Key.
+ */
+export async function rotateSubAccountL1KeyToBackup(
+  env: Env,
+  subAccount: string,
+  serverPubKey: Uint8Array,
+  serverPrivKey: Uint8Array,
+  backupPubkeyB58: string
+): Promise<{ rotated: boolean; alreadyRotated?: boolean; txHash?: string; reason?: string }> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const serverPubKeyB58 = `ed25519:${base58Encode(serverPubKey)}`;
+  const cleanBackupB58 = backupPubkeyB58.startsWith('ed25519:')
+    ? backupPubkeyB58
+    : `ed25519:${backupPubkeyB58}`;
+  const backupRaw = base58Decode(cleanBackupB58.slice('ed25519:'.length));
+  if (backupRaw.length !== 32) {
+    return { rotated: false, reason: 'Invalid ed25519 backup public key length' };
+  }
+
+  try {
+    const [hasServerKey, hasBackupKey] = await Promise.all([
+      hasAccessKey(env, subAccount, serverPubKeyB58),
+      hasAccessKey(env, subAccount, cleanBackupB58),
+    ]);
+
+    if (!hasServerKey && hasBackupKey) {
+      return { rotated: true, alreadyRotated: true };
+    }
+    if (!hasServerKey) {
+      return { rotated: false, reason: 'Server L1 key is no longer present on sub-account' };
+    }
+
+    await ensureRegistrationGas(env, subAccount);
+
+    const statusData = await nearRpc(rpcUrl, 'status', [] as any);
+    const latestBlockHash = base58Decode(statusData?.sync_info?.latest_block_hash || '');
+    if (latestBlockHash.length !== 32) {
+      return { rotated: false, reason: 'Could not read latest block hash for L1 key rotation' };
+    }
+
+    const keyData = await nearRpc(rpcUrl, 'query', {
+      request_type: 'view_access_key',
+      finality: 'final',
+      account_id: subAccount,
+      public_key: serverPubKeyB58,
+    });
+    if (keyData?.nonce === undefined || keyData?.nonce === null) {
+      return { rotated: false, reason: 'Could not read server L1 access key nonce' };
+    }
+    const nonce = BigInt(keyData.nonce) + 1n;
+
+    const actionsCount = hasBackupKey ? 1 : 2;
+    const w = new BorshWriter();
+    w.writeString(subAccount);
+    w.writePublicKey(serverPubKey);
+    w.writeU64(nonce);
+    w.writeString(subAccount);
+    w.writeBytes(latestBlockHash);
+    w.writeU32(actionsCount);
+
+    if (!hasBackupKey) {
+      // Action 1: AddKey(backupPubKey, FullAccess)
+      w.writeU8(5); // Action::AddKey
+      w.writePublicKey(backupRaw);
+      w.writeU64(0n); // AccessKey.nonce = 0
+      w.writeU8(1); // AccessKeyPermission::FullAccess
+    }
+
+    // Action 2: DeleteKey(serverPubKey)
+    w.writeU8(6); // Action::DeleteKey
+    w.writePublicKey(serverPubKey);
+
+    const txBytes = w.toBytes();
+    const digest = await crypto.subtle.digest('SHA-256', txBytes);
+    const sig = ed25519.sign(new Uint8Array(digest), serverPrivKey);
+
+    const signedW = new BorshWriter();
+    signedW.writeBytes(txBytes);
+    signedW.writeU8(0); // KeyType::ED25519
+    signedW.writeBytes(sig);
+    const signedBytes = signedW.toBytes();
+
+    let binary = '';
+    for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
+
+    const txResult = await nearRpc(rpcUrl, 'broadcast_tx_commit', [btoa(binary)] as any);
+    const ok =
+      txResult?.status?.SuccessValue !== undefined ||
+      txResult?.status?.SuccessReceiptId !== undefined;
+    const txHash = typeof txResult?.transaction?.hash === 'string' ? txResult.transaction.hash : undefined;
+    if (!ok) {
+      return {
+        rotated: false,
+        reason: `L1 key rotation transaction failed: ${JSON.stringify(txResult?.status || txResult).slice(0, 300)}`,
+      };
+    }
+
+    verifiedSubAccountMem.delete(`${rpcUrl}:${subAccount}:${serverPubKeyB58}`);
+
+    return { rotated: true, txHash };
+  } catch (err: any) {
+    console.warn('[rotateSubAccountL1KeyToBackup] error:', err?.message || err);
+    return { rotated: false, reason: err?.message || String(err) };
+  }
+}
+
+/**
  * Dry-runs one or more signed intents via intents.near::simulate_intents without
  * broadcasting a state-changing transaction or spending gas.
  */
@@ -3850,10 +3963,11 @@ export async function createOnchainSubAccount(
   env: Env,
   subAccount: string,
   userPubKey?: Uint8Array,
-  userPrivKey?: Uint8Array
+  userPrivKey?: Uint8Array,
+  allowBootstrapSelfCustody = false
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   // Never re-attach or overwrite keys on an account opted into self-custody.
-  if (await isSelfCustodyAccount(env, subAccount)) {
+  if (!allowBootstrapSelfCustody && (await isSelfCustodyAccount(env, subAccount))) {
     return { success: true };
   }
 

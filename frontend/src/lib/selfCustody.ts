@@ -329,7 +329,12 @@ export async function parseDeviceRecoveryEntropy(phrase: string): Promise<Uint8A
 export async function deriveBackupEd25519Keypair(
   phrase: string,
   nearAccount: string
-): Promise<{ seed32: Uint8Array; publicKeyBytes: Uint8Array; nearPublicKey: string }> {
+): Promise<{
+  seed32: Uint8Array;
+  publicKeyBytes: Uint8Array;
+  nearPublicKey: string;
+  nearPrivateKey: string;
+}> {
   const entropy = await parseDeviceRecoveryEntropy(phrase);
   const ikm = await crypto.subtle.importKey(
     'raw',
@@ -354,6 +359,7 @@ export async function deriveBackupEd25519Keypair(
     seed32,
     publicKeyBytes,
     nearPublicKey: `ed25519:${base58Encode(publicKeyBytes)}`,
+    nearPrivateKey: `ed25519:${base58Encode(concatBytes(seed32, publicKeyBytes))}`,
   };
 }
 

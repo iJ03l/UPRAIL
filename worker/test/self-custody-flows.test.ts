@@ -190,6 +190,35 @@ function createMockDb(fixture: MockDbFixture) {
       return { first: results[0] || null, results };
     }
 
+    if (sql.startsWith('UPDATE x_identities SET near_account = ?, custody_mode = \'self\'')) {
+      const [nearAccount, backupPubkey, selfCustodyAt, updatedAt, xId] = bindings;
+      let changes = 0;
+      for (const i of state.identities) {
+        if (i.x_id === xId) {
+          i.near_account = nearAccount;
+          i.custody_mode = 'self';
+          i.backup_pubkey = backupPubkey;
+          i.self_custody_at = i.self_custody_at ?? selfCustodyAt;
+          i.self_custody_version = Number(i.self_custody_version || 0) + 1;
+          i.updated_at = updatedAt;
+          changes++;
+        }
+      }
+      return { first: null, results: [], meta: { changes } };
+    }
+
+    if (sql.startsWith('UPDATE passkeys SET onchain_added_at = COALESCE(onchain_added_at, ?)')) {
+      const [addedAt, xId, nearP256Pubkey] = bindings;
+      let changes = 0;
+      for (const p of state.passkeys) {
+        if (p.x_id === xId && p.near_p256_pubkey === nearP256Pubkey) {
+          p.onchain_added_at = p.onchain_added_at ?? addedAt;
+          changes++;
+        }
+      }
+      return { first: null, results: [], meta: { changes } };
+    }
+
     throw new Error(`Unhandled SQL in mock DB: ${sql}`);
   }
 
@@ -1153,3 +1182,231 @@ test('Migration L1 sweep sponsors missing intents.near NEP-145 storage from escr
     globalThis.fetch = originalFetch;
   }
 });
+
+test('Initial non-custodial signup provisions intents.near lock, rotates L1 FullAccess key to backupPubkey, and fails closed if verification mismatches', async () => {
+  const { provisionInitialSelfCustodyOnchain } = await import('../src/services/custodyService');
+  const { deriveUserNearKeypair } = await import('../src/services/nearRpc');
+  const { p256 } = await import('@noble/curves/nist.js');
+
+  const p256Uncompressed = p256.getPublicKey(new Uint8Array(32).fill(0x77), false);
+  const p256Key = `p256:${base58Encode(p256Uncompressed.subarray(1))}`;
+  const backupKp = makeTestNearPrivateKey(0x88);
+  const db = createMockDb({
+    identities: [
+      {
+        x_id: 'xid_newuser',
+        x_handle: 'newuser',
+        near_account: null,
+        is_activated: 1,
+        custody_mode: 'self',
+        backup_pubkey: null,
+        self_custody_at: null,
+        self_custody_version: 0,
+      },
+    ],
+    passkeys: [
+      {
+        id: 'pk_newuser_1',
+        x_id: 'xid_newuser',
+        credential_id: 'cred_newuser_1',
+        public_key: 'aabbcc',
+        near_p256_pubkey: p256Key,
+        onchain_added_at: null,
+      },
+    ],
+  });
+
+  const env: any = {
+    DB: db,
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    NEAR_RPC_URL: 'https://rpc.testnet.near.org',
+    INTENTS_CONTRACT_ID: 'intents.near',
+  };
+
+  const derived = await deriveUserNearKeypair(env, 'xid_newuser');
+  let simulateFailureNext = false;
+  let verifyMismatchNext = false;
+  let l1RotatedOnchain = false;
+  let intentsLockedOnchain = false;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = typeof input === 'string' ? input : input?.url || '';
+    if (url.includes('1click.chaindefuser.com')) {
+      return new Response(JSON.stringify({ jwt: 'mock_jwt' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes('rpc.testnet.near.org') || url.includes('fastnear.com')) {
+      const rpcReq = JSON.parse(String(init?.body || '{}'));
+      if (rpcReq.method === 'status') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: {
+              sync_info: {
+                latest_block_hash: base58Encode(new Uint8Array(32).fill(0x55)),
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (rpcReq.method === 'broadcast_tx_commit') {
+        const txB64 = rpcReq.params?.[0] || '';
+        const rawBytes = Buffer.from(txB64, 'base64');
+        const rawStr = rawBytes.toString('utf8');
+        if (rawStr.includes('execute_intents')) {
+          intentsLockedOnchain = true;
+        } else if (rawStr.includes(derived.accountId) && rawBytes.includes(backupKp.pubRaw[0])) {
+          // L1 AddKey(backup) + DeleteKey(server)
+          l1RotatedOnchain = true;
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: {
+              status: { SuccessValue: '' },
+              transaction: { hash: 'tx_initial_self_custody_999' },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      const params = rpcReq.params || {};
+      if (params.request_type === 'view_account') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { amount: '50000000000000000000000', storage_usage: 500 },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (params.request_type === 'view_access_key') {
+        const pub = params.public_key;
+        if (pub === derived.publicKeyB58 && l1RotatedOnchain) {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: rpcReq.id,
+              error: { message: 'Access key does not exist' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (pub === backupKp.pub && !l1RotatedOnchain) {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: rpcReq.id,
+              error: { message: 'Access key does not exist' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { nonce: 42, permission: 'FullAccess' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (params.request_type === 'view_access_key_list') {
+        const keys = l1RotatedOnchain
+          ? [{ public_key: backupKp.pub, access_key: { permission: 'FullAccess' } }]
+          : [{ public_key: derived.publicKeyB58, access_key: { permission: 'FullAccess' } }];
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { keys },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (params.request_type === 'call_function') {
+        let value: any = null;
+        if (params.method_name === 'has_public_key') {
+          value = true;
+        } else if (params.method_name === 'current_salt') {
+          value = '01020304';
+        } else if (params.method_name === 'simulate_intents') {
+          value = simulateFailureNext ? { invariant_violated: 'mock_fail' } : {};
+        } else if (params.method_name === 'public_keys_of') {
+          value = verifyMismatchNext
+            ? [derived.publicKeyB58] // server key still present -> fail-closed!
+            : intentsLockedOnchain
+            ? [p256Key, backupKp.pub]
+            : [derived.publicKeyB58];
+        } else if (params.method_name === 'is_auth_by_predecessor_id_enabled') {
+          value = verifyMismatchNext ? true : !intentsLockedOnchain;
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: {
+              result: Array.from(new TextEncoder().encode(JSON.stringify(value))),
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+    throw new Error(`Unexpected fetch in initial self-custody test: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    // 1. Test fail-closed verification when on-chain keys do not match after relay
+    verifyMismatchNext = true;
+    await assert.rejects(
+      () =>
+        provisionInitialSelfCustodyOnchain({
+          env,
+          xId: 'xid_newuser',
+          xHandle: 'newuser',
+          nearP256Pubkey: p256Key,
+          backupPubkey: backupKp.pub,
+        }),
+      (err: any) => err instanceof CustodyActionError && err.code === 'ONCHAIN_VERIFICATION_FAILED'
+    );
+    assert.equal(
+      db.state.identities[0].self_custody_at,
+      null,
+      'Fail-closed verification must not finalize self_custody_at when on-chain keys mismatch'
+    );
+
+    // 2. Now allow verification to succeed and verify full non-custodial lock + L1 key rotation
+    verifyMismatchNext = false;
+    intentsLockedOnchain = false;
+    l1RotatedOnchain = false;
+
+    const provisioned = await provisionInitialSelfCustodyOnchain({
+      env,
+      xId: 'xid_newuser',
+      xHandle: 'newuser',
+      nearP256Pubkey: p256Key,
+      backupPubkey: backupKp.pub,
+    });
+
+    assert.equal(provisioned.nearAccount, derived.accountId);
+    assert.equal(provisioned.backupPubkey, backupKp.pub);
+    assert.equal(provisioned.l1KeyRotated, true, 'Native NEAR L1 key must be rotated to backupPubkey');
+    assert.equal(l1RotatedOnchain, true);
+    assert.equal(db.state.identities[0].custody_mode, 'self');
+    assert.equal(db.state.identities[0].backup_pubkey, backupKp.pub);
+    assert.ok(db.state.identities[0].self_custody_at, 'self_custody_at must be populated');
+    assert.ok(db.state.passkeys[0].onchain_added_at, 'Passkey onchain_added_at must be populated');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+

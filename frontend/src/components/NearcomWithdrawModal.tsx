@@ -387,7 +387,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
       setReceipt(result);
       setMode('success');
       setAmount('');
-      toast(`Withdrew ${result.amount} ${result.asset} to near.com`);
+      toast(`Withdrew ${result.amount} ${selectedToken.symbol || cleanMemeSymbol(result.asset) || result.asset} to near.com`);
       onSuccess?.();
     } catch (err: any) {
       setShowConfirm(false);
