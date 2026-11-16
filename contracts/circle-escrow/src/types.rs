@@ -42,6 +42,7 @@ pub struct WebAuthnProof {
 #[serde(crate = "near_sdk::serde")]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuthProof {
+    #[serde(alias = "webauthn")]
     WebAuthn(WebAuthnProof),
     Ed25519 { pubkey: String, signature: String },
 }

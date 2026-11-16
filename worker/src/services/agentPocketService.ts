@@ -489,14 +489,16 @@ export async function submitAgentPocketFund(params: {
     });
 
     const submitted = await submitSwapIntent(env, signedWebAuthn);
-    await waitForSettlement(env, session.x_id, meta.depositAddress, {
+    const settlement = await waitForSettlement(env, session.x_id, meta.depositAddress, {
       timeoutMs: 25_000,
     }).catch(() => null);
+    const settled = String(settlement?.status || '').toUpperCase() === 'SUCCESS';
 
     return {
       funded: meta.mode === 'confidential_direct',
       completed: meta.mode === 'confidential_direct',
       unshielded: meta.mode === 'confidential_topup',
+      settled,
       txHash: submitted.intentHash,
       pocketAccount: meta.pocketAccount,
       asset: meta.symbol,

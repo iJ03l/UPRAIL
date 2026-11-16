@@ -1365,3 +1365,46 @@ fn dissolve_16_member_circle_batches_refunds_without_exceeding_gas() {
 fn serde_json_msg_circle(circle_id: &str) -> String {
     format!(r#"{{"action":"contribute_circle","circle_id":"{}"}}"#, circle_id)
 }
+
+#[test]
+fn auth_proof_deserializes_live_webauthn_json_and_verifies_mainnet_circle_vector() {
+    // Exact proof & payload captured from failed tx Fbr6tGZY7UPxBGReEGonVX4mmuamMRXpyB6KwPyKEEbX:
+    // AuthProof with snake_case tag deserializes "web_authn" (plus alias "webauthn").
+    let proof_json_snake = r#"{
+        "kind": "web_authn",
+        "pubkey": "p256:3suNJM4bFQXCAfxzeUDtBnx1F4jj9ouB1PFWe8UNXEbDVUn9vKdDqSKoxk7pfVaDupcAAR8QnxvWpWHVo54kCrYB",
+        "authenticator_data": "JArvS44gIdZ2EbYnwZjd-qj8C4EtWtPVOlPqJxPYSicZAAAAAA",
+        "client_data_json": "{\"type\":\"webauthn.get\",\"challenge\":\"Lhmvv6dYDzDPzNIjVGSSxuRIUtTU3Dj8NapGYpPlS-A\",\"origin\":\"https://app.uprail.world\",\"crossOrigin\":false,\"other_keys_can_be_added_here\":\"do not compare clientDataJSON against a template. See https://goo.gl/yabPex\"}",
+        "signature": "p256:5WKJ3UfJYKJws8oYptKLwu44fBKswUxzoJKRLMvq8zMvpVbtuC9rnQ1GoLt41dXJnMzANtPVP3SBAFCDEmSkVALL"
+    }"#;
+    let proof: AuthProof =
+        near_sdk::serde_json::from_str(proof_json_snake).expect("web_authn kind must deserialize");
+
+    let proof_alias: AuthProof = near_sdk::serde_json::from_str(&proof_json_snake.replace("web_authn", "webauthn"))
+        .expect("webauthn alias must also deserialize");
+    assert!(matches!(proof_alias, AuthProof::WebAuthn(_)));
+
+    let t0 = 1_794_824_760_000u64;
+    let (mut contract, _, _) = setup_contract(t0);
+    set_context("escrow.uprail.near".parse().unwrap(), t0);
+
+    let view = contract.create_circle(
+        "circ_1cfd34e656588a545181fdb78d72336a".into(),
+        AssetSpec::Intents {
+            token_id: "nep141:eth-0x0f38f1ce62776d4a0038bc6cac66877a5687383b.omft.near".into(),
+        },
+        vec![CircleMemberInput {
+            account_id: "u_fc982587d85af44f.escrow.uprail.near".parse().unwrap(),
+            pubkey: "p256:3suNJM4bFQXCAfxzeUDtBnx1F4jj9ouB1PFWe8UNXEbDVUn9vKdDqSKoxk7pfVaDupcAAR8QnxvWpWHVo54kCrYB".into(),
+            share_bps: 10_000,
+        }],
+        0,
+        "u_fc982587d85af44f.escrow.uprail.near".parse().unwrap(),
+        "d47607e97aec1be4dade4d86966a9c2e99043ff79915745bed12196baa1afd77".into(),
+        U128(48_583_029_449),
+        Some(proof),
+    );
+    assert_eq!(view.status, CircleStatus::Active);
+    assert!(view.members[0].agreed);
+}
+

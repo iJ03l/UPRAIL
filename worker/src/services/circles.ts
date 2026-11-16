@@ -26,7 +26,7 @@ import {
   type OneClickToken,
 } from './stabilize';
 import { getExecutionStatus, requestQuote } from './oneclickClient';
-import { formatAtomic } from './confidentialRail';
+import { formatAtomic, topUpPublicIntentsFromConfidentialIfShort } from './confidentialRail';
 import {
   CIRCLE_GIFT_USDC_ASSET_ID,
   computeVaultPositionValuation,
@@ -1190,6 +1190,22 @@ export async function contributeToCircle(
       );
     }
 
+    const curPubAmt =
+      (await nearRpc.getIntentAssetBalance(env, origin.assetId, senderNearAccount).catch(() => null))
+        ?.balance ?? 0n;
+    if (curPubAmt < grossAtomic) {
+      await topUpPublicIntentsFromConfidentialIfShort({
+        env,
+        xId: session.x_id,
+        originAssetId: origin.assetId,
+        originDecimals: origin.decimals,
+        originSymbol: origin.symbol,
+        requiredAtomic: grossAtomic,
+        nearAccount: senderNearAccount,
+        currentPublicAtomic: curPubAmt,
+      });
+    }
+
     let depositSharesAtomic = grossAtomic;
     let usdCents = Math.max(100, Math.round((estUsd > 0 ? estUsd : 1) * 100));
     let swapIntentHash: string | null = null;
@@ -1390,6 +1406,22 @@ export async function contributeToCircle(
         `Insufficient ${origin.symbol} balance (${avail.toFixed(4)} available, ${grossAmountFormatted} required).`,
         400
       );
+    }
+
+    const curPubAmt =
+      (await nearRpc.getIntentAssetBalance(env, origin.assetId, senderNearAccount).catch(() => null))
+        ?.balance ?? 0n;
+    if (curPubAmt < grossAtomic) {
+      await topUpPublicIntentsFromConfidentialIfShort({
+        env,
+        xId: session.x_id,
+        originAssetId: origin.assetId,
+        originDecimals: origin.decimals,
+        originSymbol: origin.symbol,
+        requiredAtomic: grossAtomic,
+        nearAccount: senderNearAccount,
+        currentPublicAtomic: curPubAmt,
+      });
     }
 
     // 100% of member contribution enters the Earn Vault; the 1% fee is charged on Circle payout

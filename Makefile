@@ -3,9 +3,9 @@
 help:
 	@echo "UPRAIL Verification Suite (NEAR Hackathon)"
 	@echo "=========================================="
-	@echo "make verify           Run 11 live mainnet/feature checks + 203 automated tests (189 Worker + 14 contract)"
+	@echo "make verify           Run 11 live mainnet/feature checks + 205 automated tests (190 Worker + 15 contract)"
 	@echo "make check-mainnet    Verify sponsor, sub-accounts, intents.near, Circles/Gifts & live APIs (11 checks)"
-	@echo "make test             Run 189 Worker tests (40 suites) + 14 Rust smart contract tests"
+	@echo "make test             Run 190 Worker tests (40 suites) + 15 Rust smart contract tests"
 	@echo "make check-endpoints  Quick curl inspection of live production endpoints"
 	@echo "make deploy-circle    Securely deploy/upgrade circle.uprail.near (hidden TTY key prompt)"
 
@@ -21,7 +21,7 @@ deploy-circle:
 	@node scripts/deploy-circle-contract.mjs
 
 test:
-	@echo "\n--> Running worker automated test suite (189 tests) + contract Rust tests (14 tests)..."
+	@echo "\n--> Running worker automated test suite (190 tests) + contract Rust tests (15 tests)..."
 	@cargo test --manifest-path contracts/circle-escrow/Cargo.toml
 	@if [ -s "$$HOME/.nvm/nvm.sh" ]; then \
 		bash -c "source $$HOME/.nvm/nvm.sh && nvm use 22.22.0 >/dev/null 2>&1 || true && cd worker && npm test"; \

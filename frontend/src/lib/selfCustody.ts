@@ -569,6 +569,54 @@ export async function runSelfCustodyAction<TResult = any>(
       continue;
     }
 
+    // Handle multi-step unshielding (confidential pool -> public intents.near)
+    if (activePrep?.step === 'unshield') {
+      onProgress?.(
+        'shielding',
+        `Tap passkey to move ${activePrep.unshieldAmountFormatted || ''} ${activePrep.symbol || 'USDC'} from private balance…`
+      );
+      const assertion = await performWebAuthnAssertion(activePrep.options);
+      onProgress?.('submitting', 'Moving funds into swap balance…');
+      const unshieldRes: any = await submit({
+        actionId: activePrep.actionId,
+        assertion,
+        step: 'unshield',
+      });
+      if (
+        !unshieldRes?.settled &&
+        pollSwapStatus &&
+        (unshieldRes?.depositAddress || activePrep.depositAddress)
+      ) {
+        onProgress?.('polling_swap', 'Waiting for private funds to settle into swap balance…');
+        const depAddr = unshieldRes?.depositAddress || activePrep.depositAddress;
+        const vaultAssetId = unshieldRes?.vaultAssetId || activePrep.vaultAssetId || activePrep.assetId;
+        const balanceBeforeAtomic =
+          unshieldRes?.balanceBeforeAtomic || activePrep.balanceBeforeAtomic || '0';
+        const deadline = Date.now() + 65_000;
+        let ready = false;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const st = await pollSwapStatus({
+            depositAddress: depAddr,
+            vaultAssetId,
+            balanceBeforeAtomic,
+          }).catch(() => null);
+          const upper = String(st?.status || '').toUpperCase();
+          if (st?.readyToDeposit || upper === 'SUCCESS') {
+            ready = true;
+            break;
+          }
+          if (upper === 'FAILED' || upper === 'REFUNDED') {
+            throw new Error(`Private unshield ${upper.toLowerCase()}. Your funds stayed safely in your private balance.`);
+          }
+        }
+        if (!ready) {
+          throw new Error('Private funds are still settling (~15s). Please tap retry in a moment.');
+        }
+      }
+      continue;
+    }
+
     // Handle multi-step Circle/Gift cross-asset swap into Earn vault shares before contract deposit
     if (activePrep?.step === 'swap_to_vault') {
       onProgress?.('swapping', 'Confirm passkey to swap into Earn Vault shares…');

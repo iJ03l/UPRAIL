@@ -411,7 +411,7 @@ export const CirclesView: React.FC = () => {
   // Both Circles and Vault Gifts are strictly USDC-only.
   const availableOriginAssets = useMemo(() => {
     const usdcId = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
-    const heldUsdc = balances.find((b) => {
+    const nativeUsdc = balances.find((b) => {
       const sym = (b.symbol || '').toUpperCase();
       const id = (b.defuse_asset_id || '').toLowerCase();
       const cid = (b.nearContractId || '').toLowerCase();
@@ -422,13 +422,19 @@ export const CirclesView: React.FC = () => {
           id.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'))
       );
     });
+    const anyUsdc =
+      nativeUsdc && parseFloat(nativeUsdc.amountFormatted || '0') > 0
+        ? nativeUsdc
+        : balances.find(
+            (b) => (b.symbol || '').toUpperCase() === 'USDC' && parseFloat(b.amountFormatted || '0') > 0
+          ) || nativeUsdc;
     return [
       {
-        assetId: usdcId,
+        assetId: (anyUsdc?.defuse_asset_id || usdcId),
         symbol: 'USDC',
-        balanceFormatted: heldUsdc?.amountFormatted || '0.00',
+        balanceFormatted: anyUsdc?.amountFormatted || '0.00',
         priceUsd:
-          typeof heldUsdc?.priceUsd === 'number' && heldUsdc.priceUsd > 0 ? heldUsdc.priceUsd : 1,
+          typeof anyUsdc?.priceUsd === 'number' && anyUsdc.priceUsd > 0 ? anyUsdc.priceUsd : 1,
         chain: 'near',
       },
     ];

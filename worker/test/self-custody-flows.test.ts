@@ -1735,4 +1735,208 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
   }
 });
 
+test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unshields Confidential USDC shortfall', async () => {
+  const { webAuthnToContractProof } = await import('../src/services/circleContract');
+  const { prepareSelfCustodyGiftCreate } = await import('../src/services/selfCustodyVaultOps');
+  const { CIRCLE_GIFT_USDC_ASSET_ID } = await import('../src/services/earnVaults');
+
+  const contractProof = webAuthnToContractProof({
+    standard: 'webauthn',
+    payload: '{}',
+    public_key: 'p256:testpk',
+    authenticator_data: 'auth',
+    client_data_json: '{}',
+    signature: 'p256:sig',
+  });
+  assert.equal(contractProof.kind, 'web_authn');
+
+  const senderAccount = 'u_sender_gift.escrow.uprail.near';
+  let confidentialUsdcAvailable = '6000000'; // $6.00 private USDC
+  const cacheMap = new Map<string, string>();
+  const mockDb = createMockDb({
+    identities: [
+      {
+        x_id: 'xid_gift_sender',
+        x_handle: 'giftsender',
+        near_account: senderAccount,
+        custody_mode: 'self',
+        is_activated: 1,
+      },
+    ],
+    passkeys: [
+      {
+        id: 'pk_gift_sender',
+        x_id: 'xid_gift_sender',
+        credential_id: Buffer.from([1, 2, 3, 4]).toString('base64url'),
+        public_key: '',
+        near_p256_pubkey: makeTestP256NearPubkey(0x55),
+        onchain_added_at: Date.now() - 1000,
+        created_at: Date.now() - 2000,
+      },
+    ],
+  });
+
+  const env: any = {
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    NEAR_RPC_URL: 'https://rpc.testnet.near.org',
+    INTENTS_CONTRACT_ID: 'intents.near',
+    ONE_CLICK_API_KEY: 'test_1click_key',
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    WEBAUTHN_RP_ID: 'uprail.world',
+    WEBAUTHN_RP_NAME: 'UPRAIL',
+    WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+    DB: mockDb,
+    CACHE: {
+      async get(key: string, type?: string) {
+        if (key.startsWith('1click:user-session:')) {
+          const val = {
+            accessToken: 'test_oc_token',
+            accountId: senderAccount,
+            expiresAt: Date.now() + 600_000,
+          };
+          return type === 'json' ? val : JSON.stringify(val);
+        }
+        const raw = cacheMap.get(key) ?? null;
+        return type === 'json' && raw ? JSON.parse(raw) : raw;
+      },
+      async put(key: string, val: string) {
+        cacheMap.set(key, val);
+      },
+    },
+  };
+
+  let quotedAmount = '';
+  await withMockFetch(
+    {
+      public_keys_by_account: () => [makeTestP256NearPubkey(0x55)],
+      is_auth_by_predecessor_id_enabled: () => false,
+      current_salt: () => '01020304',
+      mt_balance_of: () => '20000', // $0.02 public USDC
+      mt_batch_balance_of: (args: any) => (args.token_ids || []).map(() => '0'),
+    },
+    async () => {
+      const baseFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: any, init?: any) => {
+        const url = typeof input === 'string' ? input : input?.url || '';
+        if (url.includes('/v0/account/balances')) {
+          return new Response(
+            JSON.stringify([
+              {
+                tokenId: CIRCLE_GIFT_USDC_ASSET_ID,
+                available: confidentialUsdcAvailable,
+              },
+            ]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/quote')) {
+          const reqBody = JSON.parse(String(init?.body || '{}'));
+          quotedAmount = String(reqBody.amount || '');
+          assert.equal(reqBody.depositType, 'CONFIDENTIAL_INTENTS');
+          assert.equal(reqBody.recipientType, 'INTENTS');
+          assert.equal(reqBody.recipient, senderAccount);
+          return new Response(
+            JSON.stringify({
+              quote: {
+                depositAddress: '1click_unshield_dep_addr',
+                deadline: new Date(Date.now() + 600_000).toISOString(),
+                amountIn: reqBody.amount,
+                amountOut: reqBody.amount,
+              },
+              quoteRequest: { confidentiality: 'basic' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/generate-intent')) {
+          return new Response(
+            JSON.stringify({
+              intent: {
+                standard: 'webauthn',
+                payload: JSON.stringify({
+                  signer_id: senderAccount,
+                  verifying_contract: 'intents.far',
+                  deadline: new Date(Date.now() + 600_000).toISOString(),
+                  nonce: Buffer.from(new Uint8Array(32).fill(7)).toString('base64'),
+                  intents: [
+                    {
+                      intent: 'transfer',
+                      receiver_id: '1click_unshield_dep_addr',
+                      tokens: { [CIRCLE_GIFT_USDC_ASSET_ID]: quotedAmount },
+                    },
+                  ],
+                }),
+              },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('api.fastnear.com/v1/account/')) {
+          return new Response(JSON.stringify({ tokens: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.includes('api.ref.finance/list-token')) {
+          return new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return await baseFetch(input, init);
+      }) as typeof fetch;
+
+      const prep: any = await prepareSelfCustodyGiftCreate({
+        env,
+        session: {
+          session_id: 's_gift',
+          x_id: 'xid_gift_sender',
+          x_handle: 'giftsender',
+          x_name: 'Gift Sender',
+          created_at: Date.now(),
+          expires_at: Date.now() + 3600_000,
+        },
+        input: {
+          recipientHandle: 'alice',
+          vaultAsset: 'stNEAR',
+          sourceAsset: CIRCLE_GIFT_USDC_ASSET_ID,
+          amount: '5.1',
+          timelockUntil: Date.now() + 86_400_000,
+        },
+      });
+      assert.equal(prep.step, 'unshield');
+      assert.equal(prep.nextStep, 'gift_create');
+      assert.equal(prep.unshieldAmountFormatted, '5.08');
+      assert.equal(quotedAmount, '5080000');
+
+      // When total USDC across all rails is genuinely short ($0.02 + $0.01 < 5.1), reports exact available/required
+      confidentialUsdcAvailable = '10000';
+      await assert.rejects(
+        () =>
+          prepareSelfCustodyGiftCreate({
+            env,
+            session: {
+              session_id: 's_gift',
+              x_id: 'xid_gift_sender',
+              x_handle: 'giftsender',
+              x_name: 'Gift Sender',
+              created_at: Date.now(),
+              expires_at: Date.now() + 3600_000,
+            },
+            input: {
+              recipientHandle: 'alice',
+              vaultAsset: 'stNEAR',
+              sourceAsset: CIRCLE_GIFT_USDC_ASSET_ID,
+              amount: '5.1',
+              timelockUntil: Date.now() + 86_400_000,
+            },
+          }),
+        /0\.03 available, 5\.1 required/i
+      );
+    }
+  );
+});
+
+
 

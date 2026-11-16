@@ -71,6 +71,7 @@ import {
   CustodyActionError,
   consumeAndVerifyWebAuthnPendingAction,
   createPendingCustodyAction,
+  prepareOneClickWebAuthnSession,
 } from './custodyService';
 import { prepareSweepPlainL1ToIntents, submitNativeL1Operation } from './nativeL1Auth';
 import {
@@ -84,8 +85,14 @@ import {
   requestQuote,
   submitSwapIntent,
 } from './oneclickClient';
+import { OneClickSelfCustodyAuthRequiredError, getUserSession } from './oneclickAuth';
 import { computeStabilizeSplit, getOneClickTokens, resolveOriginToken } from './stabilize';
-import { formatAtomic } from './confidentialRail';
+import {
+  formatAtomic,
+  getAvailableConfidentialAtomicForAsset,
+  isConfidentialRailEnabled,
+  waitForSettlement,
+} from './confidentialRail';
 import { allowedWebAuthnOrigins } from './webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
 
@@ -241,6 +248,218 @@ function validateGeneratedOneClickDepositIntent(
     throw new CustodyActionError('Intent receiver mismatch from 1Click.', 502, 'INTENT_RECEIVER_MISMATCH');
   }
   return payloadStr;
+}
+
+async function ensureSelfCustodyUsdcInPublicIntents(params: {
+  env: Env;
+  session: Session;
+  nearAccount: string;
+  origin: { assetId: string; symbol: string; decimals: number; nearContractId?: string };
+  grossAtomic: bigint;
+  nextStep: 'circle_contribute' | 'gift_create';
+}): Promise<
+  | { ready: true; originAssetId: string }
+  | { ready: false; prepareResponse: Record<string, any> }
+> {
+  const { env, session, nearAccount, origin, grossAtomic, nextStep } = params;
+
+  const pubBal = await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null);
+  let pubAmt = pubBal?.balance ?? 0n;
+  if (pubAmt < grossAtomic) {
+    pubAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, origin.assetId, grossAtomic, pubAmt);
+  }
+  if (pubAmt >= grossAtomic) {
+    return { ready: true, originAssetId: origin.assetId };
+  }
+
+  // Check if user holds another bridged/native USDC variant directly in public intents.near
+  const intentBals = await nearRpc.getIntentBalances(env, nearAccount).catch(() => []);
+  const matchingAlt = intentBals.find(
+    (b) =>
+      b.defuse_asset_id &&
+      (b.symbol || '').trim().toUpperCase() === origin.symbol.trim().toUpperCase() &&
+      (b.decimals ?? origin.decimals) === origin.decimals &&
+      BigInt(b.amount || '0') >= grossAtomic
+  );
+  if (matchingAlt?.defuse_asset_id) {
+    return { ready: true, originAssetId: matchingAlt.defuse_asset_id };
+  }
+
+  // Check plain NEAR L1 balance on the user's sub-account
+  const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
+  const matchingPlain = plain.find(
+    (b) =>
+      nearRpc.assetsMatch(b.defuse_asset_id, origin.assetId) ||
+      nearRpc.assetsMatch(b.nearContractId, origin.nearContractId)
+  );
+  const plainAmt = BigInt(matchingPlain?.amount || '0');
+  if (plainAmt + pubAmt >= grossAtomic && plainAmt > 0n) {
+    const prepareResponse = await prepareSweepPlainL1ToIntents({
+      env,
+      session,
+      nearAccount,
+      asset: origin.assetId,
+      symbol: origin.symbol,
+      amount:
+        matchingPlain?.amountFormatted ||
+        formatAtomic((grossAtomic - pubAmt).toString(), origin.decimals),
+      nextStep,
+    });
+    return { ready: false, prepareResponse };
+  }
+
+  // Check Confidential Intents balance and unshield exact shortfall into public intents.near
+  let confAvailAtomic = 0n;
+  if (isConfidentialRailEnabled(env)) {
+    let ocSession: { accessToken: string; accountId: string };
+    try {
+      ocSession = await getUserSession(env, session.x_id);
+    } catch (err) {
+      if (err instanceof OneClickSelfCustodyAuthRequiredError) {
+        const oneClickPrepare = await prepareOneClickWebAuthnSession(
+          env,
+          session.x_id,
+          session.x_handle
+        );
+        throw new CustodyActionError(
+          'Passkey signature needed to unlock your private balance.',
+          401,
+          'ONECLICK_AUTH_REQUIRED',
+          { oneClickPrepare }
+        );
+      }
+      throw err;
+    }
+
+    const conf = await getAvailableConfidentialAtomicForAsset(
+      env,
+      session.x_id,
+      origin.assetId,
+      origin.decimals,
+      origin.symbol
+    );
+    confAvailAtomic = conf.availableAtomic;
+    const shortfall = grossAtomic - pubAmt;
+
+    if (confAvailAtomic >= shortfall && shortfall > 0n) {
+      const unshieldQuote = await requestQuote(
+        env,
+        {
+          dry: false,
+          swapType: 'EXACT_INPUT',
+          originAsset: conf.assetId,
+          destinationAsset: origin.assetId,
+          amount: shortfall.toString(),
+          recipient: nearAccount,
+          recipientType: 'INTENTS',
+          refundTo: nearAccount,
+          refundType: 'CONFIDENTIAL_INTENTS',
+          depositType: 'CONFIDENTIAL_INTENTS',
+          confidentiality: 'basic',
+          slippageTolerance: 100,
+          deadline: new Date(Date.now() + SWAP_QUOTE_TTL_MS).toISOString(),
+        },
+        { userSession: ocSession.accessToken }
+      );
+      const depAddr = unshieldQuote.quote.depositAddress;
+      const generated = await generateSwapIntent(env, {
+        depositAddress: depAddr,
+        signerId: nearAccount,
+        standard: 'webauthn',
+      });
+      const payloadStr = validateGeneratedOneClickDepositIntent(
+        generated.rawPayload,
+        generated.payload?.message,
+        nearAccount,
+        depAddr
+      );
+      const pending = await createPendingCustodyAction({
+        env,
+        xId: session.x_id,
+        actionType: 'VAULT_UNSHIELD_USDC',
+        payloadStr,
+        meta: {
+          nearAccount,
+          depositAddress: depAddr,
+          assetId: origin.assetId,
+          symbol: origin.symbol,
+          decimals: origin.decimals,
+          shortfallAtomic: shortfall.toString(),
+          balanceBeforeAtomic: pubAmt.toString(),
+          nextStep,
+        },
+        requireOnchainPasskey: true,
+        ttlMs: VAULT_ACTION_TTL_MS,
+      });
+
+      return {
+        ready: false,
+        prepareResponse: {
+          step: 'unshield' as const,
+          nextStep,
+          assetId: origin.assetId,
+          vaultAssetId: origin.assetId,
+          symbol: origin.symbol,
+          unshieldAmountFormatted: formatAtomic(shortfall.toString(), origin.decimals),
+          depositAddress: depAddr,
+          balanceBeforeAtomic: pubAmt.toString(),
+          ...pending,
+        },
+      };
+    }
+  }
+
+  const totalAvail = pubAmt + plainAmt + confAvailAtomic;
+  const availFmt = formatAtomic(totalAvail.toString(), origin.decimals);
+  const reqFmt = formatAtomic(grossAtomic.toString(), origin.decimals);
+  throw new CustodyActionError(
+    `Insufficient ${origin.symbol} balance (${availFmt} available, ${reqFmt} required).`,
+    400,
+    'INSUFFICIENT_FUNDS'
+  );
+}
+
+async function handleVaultUnshieldSubmit(params: {
+  env: Env;
+  session: Session;
+  actionId: string;
+  assertion: unknown;
+}) {
+  const { env, session, actionId, assertion } = params;
+  const { signedWebAuthn, meta } = await consumeAndVerifyWebAuthnPendingAction<any>({
+    env,
+    xId: session.x_id,
+    actionId,
+    assertion,
+    expectedActionType: 'VAULT_UNSHIELD_USDC',
+    requireOnchainPasskey: true,
+  });
+
+  await submitSwapIntent(env, signedWebAuthn);
+  const settlement = await waitForSettlement(env, session.x_id, meta.depositAddress, {
+    timeoutMs: 25_000,
+  }).catch(() => null);
+  const upperStatus = String(settlement?.status || '').toUpperCase();
+  if (upperStatus === 'FAILED' || upperStatus === 'REFUNDED') {
+    throw new CustodyActionError(
+      `Moving private ${meta.symbol || 'USDC'} ${upperStatus.toLowerCase()} — your funds stayed safely in your private balance.`,
+      502,
+      'UNSHIELD_FAILED'
+    );
+  }
+  const curBal =
+    (await nearRpc.getIntentAssetBalance(env, meta.assetId, meta.nearAccount).catch(() => null))
+      ?.balance ?? 0n;
+  const settled =
+    upperStatus === 'SUCCESS' || curBal > BigInt(meta.balanceBeforeAtomic || '0');
+
+  return {
+    step: 'unshield' as const,
+    depositAddress: meta.depositAddress,
+    vaultAssetId: meta.assetId,
+    balanceBeforeAtomic: meta.balanceBeforeAtomic || '0',
+    settled,
+  };
 }
 
 function normalizeMembersWithQuotas(
@@ -974,41 +1193,26 @@ export async function prepareSelfCustodyCircleContribute(params: {
   const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, origin.decimals) || '0');
   if (grossAtomic <= 0n) throw new CustodyActionError('Amount must be greater than zero.', 400, 'INVALID_AMOUNT');
 
-  // Ensure balance exists in Intents; auto-pull from Agent Pocket or trigger L1 sweep cleanly
-  const pubBal = await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null);
-  let pubAmt = pubBal?.balance ?? 0n;
-  if (pubAmt < grossAtomic) {
-    pubAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, origin.assetId, grossAtomic, pubAmt);
+  const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
+    env,
+    session,
+    nearAccount,
+    origin,
+    grossAtomic,
+    nextStep: 'circle_contribute',
+  });
+  if (!fundsCheck.ready) {
+    return fundsCheck.prepareResponse;
   }
-  if (pubAmt < grossAtomic) {
-    const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-    const matchingPlain = plain.find(
-      (b) =>
-        nearRpc.assetsMatch(b.defuse_asset_id, origin.assetId) ||
-        nearRpc.assetsMatch(b.nearContractId, origin.nearContractId)
-    );
-    const plainAmt = BigInt(matchingPlain?.amount || '0');
-    if (plainAmt + pubAmt >= grossAtomic && plainAmt > 0n) {
-      return await prepareSweepPlainL1ToIntents({
-        env,
-        session,
-        nearAccount,
-        asset: origin.assetId,
-        symbol: origin.symbol,
-        amount: matchingPlain?.amountFormatted || formatAtomic((grossAtomic - pubAmt).toString(), origin.decimals),
-        nextStep: 'circle_contribute',
-      });
-    }
-    throw new CustodyActionError(`Insufficient ${origin.symbol} balance inside Intents.`, 400, 'INSUFFICIENT_FUNDS');
-  }
+  const effectiveOriginAssetId = fundsCheck.originAssetId;
 
-  const sameAsset = origin.assetId.toLowerCase() === vault.assetId.toLowerCase();
+  const sameAsset = effectiveOriginAssetId.toLowerCase() === vault.assetId.toLowerCase();
   if (!sameAsset) {
     // Zero-stranding 2-step flow: swap sourceAsset -> vault.assetId to member's OWN intents.near account first!
     const swapQuote = await requestQuote(env, {
       dry: false,
       swapType: 'EXACT_INPUT',
-      originAsset: origin.assetId,
+      originAsset: effectiveOriginAssetId,
       destinationAsset: vault.assetId,
       amount: grossAtomic.toString(),
       recipient: nearAccount,
@@ -1141,6 +1345,10 @@ export async function submitSelfCustodyCircleContribute(params: {
 
   if (params.step === 'native_auth' || peek?.action_type === 'AUTHORIZE_NATIVE_L1_KEY') {
     return await submitNativeL1Operation({ env, session, actionId, assertion });
+  }
+
+  if (params.step === 'unshield' || peek?.action_type === 'VAULT_UNSHIELD_USDC') {
+    return await handleVaultUnshieldSubmit({ env, session, actionId, assertion });
   }
 
   if (params.step === 'swap_to_vault' || peek?.action_type === 'CIRCLE_CONTRIBUTE_SWAP') {
@@ -1318,19 +1526,27 @@ export async function checkCircleContributeSwapStatus(params: {
 }) {
   const { env, session, depositAddress, vaultAssetId, balanceBeforeAtomic } = params;
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
-  const execStatus = await getExecutionStatus(env, depositAddress).catch(() => ({
-    status: 'PENDING',
-    swapDetails: undefined,
-    raw: undefined,
-  }));
-  const remote = String(execStatus.status || 'PENDING').toUpperCase();
+  let execStatus = await getExecutionStatus(env, depositAddress).catch(() => null);
+  if ((!execStatus || execStatus.status === 'UNKNOWN') && isConfidentialRailEnabled(env)) {
+    const ocSession = await getUserSession(env, session.x_id).catch(() => null);
+    if (ocSession?.accessToken) {
+      execStatus = await getExecutionStatus(
+        env,
+        depositAddress,
+        undefined,
+        ocSession.accessToken
+      ).catch(() => null);
+    }
+  }
+  const safeExec = execStatus || { status: 'PENDING', swapDetails: undefined, raw: undefined };
+  const remote = String(safeExec.status || 'PENDING').toUpperCase();
   if (remote !== 'SUCCESS') {
     return { status: remote, readyToDeposit: false };
   }
   const current =
     (await nearRpc.getIntentAssetBalance(env, vaultAssetId, nearAccount).catch(() => null))?.balance ?? 0n;
   const before = BigInt(balanceBeforeAtomic || '0');
-  const delta = current > before ? current - before : BigInt((execStatus.swapDetails as any)?.amountOut || '0');
+  const delta = current > before ? current - before : BigInt((safeExec.swapDetails as any)?.amountOut || '0');
   const vault = await resolveEarnVault(env, vaultAssetId).catch(() => null);
   return {
     status: 'SUCCESS',
@@ -1722,41 +1938,26 @@ export async function prepareSelfCustodyGiftCreate(params: {
   const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, origin.decimals) || '0');
   if (grossAtomic <= 0n) throw new CustodyActionError('Amount must be greater than zero.', 400, 'INVALID_AMOUNT');
 
-  // If balance sits in Agent Pocket or NEAR L1, pull pocket shortfall / trigger L1 sweep cleanly
-  const pubBal = await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null);
-  let pubAmt = pubBal?.balance ?? 0n;
-  if (pubAmt < grossAtomic) {
-    pubAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, origin.assetId, grossAtomic, pubAmt);
+  const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
+    env,
+    session,
+    nearAccount,
+    origin,
+    grossAtomic,
+    nextStep: 'gift_create',
+  });
+  if (!fundsCheck.ready) {
+    return fundsCheck.prepareResponse;
   }
-  if (pubAmt < grossAtomic) {
-    const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-    const matchingPlain = plain.find(
-      (b) =>
-        nearRpc.assetsMatch(b.defuse_asset_id, origin.assetId) ||
-        nearRpc.assetsMatch(b.nearContractId, origin.nearContractId)
-    );
-    const plainAmt = BigInt(matchingPlain?.amount || '0');
-    if (plainAmt + pubAmt >= grossAtomic && plainAmt > 0n) {
-      return await prepareSweepPlainL1ToIntents({
-        env,
-        session,
-        nearAccount,
-        asset: origin.assetId,
-        symbol: origin.symbol,
-        amount: matchingPlain?.amountFormatted || formatAtomic((grossAtomic - pubAmt).toString(), origin.decimals),
-        nextStep: 'gift_create',
-      });
-    }
-    throw new CustodyActionError(`Insufficient ${origin.symbol} balance in Intents.`, 400, 'INSUFFICIENT_FUNDS');
-  }
+  const effectiveOriginAssetId = fundsCheck.originAssetId;
 
-  const sameAsset = origin.assetId.toLowerCase() === vault.assetId.toLowerCase();
+  const sameAsset = effectiveOriginAssetId.toLowerCase() === vault.assetId.toLowerCase();
   if (!sameAsset) {
     // Swap sourceAsset -> vault.assetId to sender's OWN intents account (zero stranding)
     const swapQuote = await requestQuote(env, {
       dry: false,
       swapType: 'EXACT_INPUT',
-      originAsset: origin.assetId,
+      originAsset: effectiveOriginAssetId,
       destinationAsset: vault.assetId,
       amount: grossAtomic.toString(),
       recipient: nearAccount,
@@ -1959,6 +2160,10 @@ export async function submitSelfCustodyGiftCreate(params: {
 
   if (params.step === 'native_auth' || peek?.action_type === 'AUTHORIZE_NATIVE_L1_KEY') {
     return await submitNativeL1Operation({ env, session, actionId, assertion });
+  }
+
+  if (params.step === 'unshield' || peek?.action_type === 'VAULT_UNSHIELD_USDC') {
+    return await handleVaultUnshieldSubmit({ env, session, actionId, assertion });
   }
 
   if (params.step === 'swap_to_vault' || peek?.action_type === 'GIFT_CREATE_SWAP') {

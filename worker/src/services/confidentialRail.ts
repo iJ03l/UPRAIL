@@ -213,7 +213,7 @@ async function quoteForConfidentialIntents(
     destinationAsset: string;
     amountAtomic: string;
     recipient: string;
-    recipientType: 'DESTINATION_CHAIN' | 'CONFIDENTIAL_INTENTS';
+    recipientType: 'DESTINATION_CHAIN' | 'CONFIDENTIAL_INTENTS' | 'INTENTS';
     depositType?: 'INTENTS' | 'CONFIDENTIAL_INTENTS';
     refundType?: 'INTENTS' | 'CONFIDENTIAL_INTENTS';
     confidentiality?: OneClickConfidentiality;
@@ -918,3 +918,155 @@ export async function reconcileConfidentialWithdrawals(
   }
   return { checked: rows.length, completed, failed };
 }
+
+/**
+ * Computes net spendable confidential balance in atomic units for `assetId`
+ * (subtracting any in-flight confidential withdrawals), falling back to a
+ * matching symbol/decimals token (e.g. multi-chain USDC) when the exact ID has 0.
+ */
+export async function getAvailableConfidentialAtomicForAsset(
+  env: Env,
+  xId: string,
+  assetId: string,
+  decimals = 6,
+  fallbackSymbol?: string
+): Promise<{ assetId: string; availableAtomic: bigint }> {
+  const balances = await getConfidentialBalances(env, xId);
+  let pendingRows: Array<{ asset: string; amount: string }> = [];
+  if (env.DB) {
+    try {
+      const pending = await env.DB.prepare(
+        `SELECT asset, amount FROM withdrawals
+          WHERE x_id = ? AND privacy_rail = 'confidential' AND status = 'PENDING'`
+      )
+        .bind(xId)
+        .all<{ asset: string; amount: string }>();
+      pendingRows = pending.results || [];
+    } catch {}
+  }
+
+  const netAtomicFor = (b: ConfidentialBalance): bigint => {
+    let raw = BigInt(b.amountAtomic || '0');
+    const dec = b.decimals || decimals;
+    for (const row of pendingRows) {
+      if (nearRpc.assetsMatch(row.asset, b.assetId) || nearRpc.assetsMatch(row.asset, b.symbol)) {
+        const sub = BigInt(nearRpc.toBaseUnits(row.amount, dec) || '0');
+        raw = raw > sub ? raw - sub : 0n;
+      }
+    }
+    return raw;
+  };
+
+  const lower = assetId.toLowerCase();
+  const exact = balances.find((b) => b.assetId.toLowerCase() === lower);
+  const exactNet = exact ? netAtomicFor(exact) : 0n;
+  if (exact && exactNet > 0n) {
+    return { assetId: exact.assetId, availableAtomic: exactNet };
+  }
+
+  if (fallbackSymbol) {
+    const targetSym = fallbackSymbol.trim().toUpperCase();
+    for (const b of balances) {
+      if ((b.symbol || '').trim().toUpperCase() !== targetSym) continue;
+      if ((b.decimals || decimals) !== decimals) continue;
+      const net = netAtomicFor(b);
+      if (net > 0n) return { assetId: b.assetId, availableAtomic: net };
+    }
+  }
+
+  return { assetId, availableAtomic: 0n };
+}
+
+/**
+ * Unshields funds from Confidential Intents -> public `intents.near` for a
+ * `'server'`-custody user so subsequent INTENTS deposits/swaps succeed cleanly.
+ */
+export async function unshieldConfidentialToPublicIntentsForServerUser(
+  env: Env,
+  xId: string,
+  originAssetId: string,
+  destinationAssetId: string,
+  amountAtomic: bigint,
+  recipientNearAccount: string
+): Promise<{ ok: boolean; status: string; depositAddress: string; error?: string }> {
+  if (!isConfidentialRailEnabled(env)) {
+    return { ok: false, status: 'DISABLED', depositAddress: '', error: 'Confidential rail is disabled' };
+  }
+  const { quote } = await quoteForConfidentialIntents(env, xId, {
+    originAsset: originAssetId,
+    destinationAsset: destinationAssetId,
+    amountAtomic: amountAtomic.toString(),
+    recipient: recipientNearAccount,
+    recipientType: 'INTENTS',
+    depositType: 'CONFIDENTIAL_INTENTS',
+    refundType: 'CONFIDENTIAL_INTENTS',
+  });
+  const submitted = await signAndSubmit(env, xId, quote.quote.depositAddress, 'user');
+  const settlement = await waitForSettlement(env, xId, submitted.depositAddress, {
+    timeoutMs: 30_000,
+  });
+  const status = String(settlement.status || 'PENDING').toUpperCase();
+  return {
+    ok: status === 'SUCCESS',
+    status,
+    depositAddress: submitted.depositAddress,
+    ...(status !== 'SUCCESS' ? { error: `Confidential unshield ended in ${status}` } : {}),
+  };
+}
+
+/**
+ * If a server-custody user holds insufficient balance in public `intents.near`
+ * but has enough in Confidential Intents, unshields the exact shortfall.
+ */
+export async function topUpPublicIntentsFromConfidentialIfShort(params: {
+  env: Env;
+  xId: string;
+  originAssetId: string;
+  originDecimals: number;
+  originSymbol: string;
+  requiredAtomic: bigint;
+  nearAccount: string;
+  currentPublicAtomic: bigint;
+}): Promise<bigint> {
+  const {
+    env,
+    xId,
+    originAssetId,
+    originDecimals,
+    originSymbol,
+    requiredAtomic,
+    nearAccount,
+    currentPublicAtomic,
+  } = params;
+  if (currentPublicAtomic >= requiredAtomic || !isConfidentialRailEnabled(env)) {
+    return currentPublicAtomic;
+  }
+  const shortfall = requiredAtomic - currentPublicAtomic;
+  const conf = await getAvailableConfidentialAtomicForAsset(
+    env,
+    xId,
+    originAssetId,
+    originDecimals,
+    originSymbol
+  ).catch(() => ({ assetId: originAssetId, availableAtomic: 0n }));
+  if (conf.availableAtomic < shortfall) {
+    return currentPublicAtomic;
+  }
+  const unshielded = await unshieldConfidentialToPublicIntentsForServerUser(
+    env,
+    xId,
+    conf.assetId,
+    originAssetId,
+    shortfall,
+    nearAccount
+  );
+  if (!unshielded.ok) {
+    throw new Error(unshielded.error || 'Failed to move confidential funds into swap balance.');
+  }
+  const refreshed = await nearRpc
+    .getIntentAssetBalance(env, originAssetId, nearAccount)
+    .catch(() => null);
+  return refreshed?.balance ?? currentPublicAtomic + shortfall;
+}
+
+

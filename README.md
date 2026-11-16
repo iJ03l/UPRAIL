@@ -20,7 +20,7 @@ UPRAIL is a **non-custodial social money ecosystem built around NEAR Intents** (
 ## 📑 Index
 
 - **[Live Stats & Traction](#live-mainnet-traction-real-people-real-money)** — Live NEAR Mainnet user, transaction, and USDC volume metrics
-- **[Quick Start & Verification](#-quick-start--live-verification)** — `make check-mainnet`, 203 automated tests (189 Worker + 14 Rust contract), curl checks, and feature verification
+- **[Quick Start & Verification](#-quick-start--live-verification)** — `make check-mainnet`, 205 automated tests (190 Worker + 15 Rust contract), curl checks, and feature verification
 - **[Track-by-Track Map](#-judging-map-track-by-track-verification)** — Every track mapped to verified source files and tests
 - **[Why UPRAIL](#why-uprail)** — Non-custodial social money around NEAR Intents and `@handle` identity
 - **[How UPRAIL Works](#how-uprail-works)** — Passkey Self-Custody, `UP1-...` Recovery Keys, Agent Allowance Pocket, Circles & Vault Gifts, Confidential Intents, `near.com`, and MCP
@@ -77,7 +77,7 @@ make check-mainnet
 🎉 ALL ON-CHAIN SPONSOR, MAINNET & FEATURE CHECKS PASSED!
 ```
 
-### 2. Full Automated Test Suite (203 Tests, 0 Failures)
+### 2. Full Automated Test Suite (205 Tests, 0 Failures)
 Run the Worker unit, Miniflare integration, Self-Custody & Agent Pocket flows, confidential rail, stabilization, coffee, Circles & Earn Vault Gifting, launchpad, and NEAR smart-contract test suites *(requires Node 22+ and Rust/Cargo; `make test` automatically switches via `nvm` when present)*:
 ```bash
 make test
@@ -86,8 +86,8 @@ make test
 ```
 **Expected Output:**
 ```text
-Worker tests   : 120 + 69 = 189 passed, 0 failed (40 suites)
-Contract tests : 14 passed, 0 failed (uprail-circle-escrow)
+Worker tests   : 120 + 70 = 190 passed, 0 failed (40 suites)
+Contract tests : 15 passed, 0 failed (uprail-circle-escrow)
 ```
 
 ### 3. Public Endpoint Checks (Curl)
@@ -357,7 +357,7 @@ flowchart TD
 ```text
 /
 ├── contracts/circle-escrow/               # Rust NEAR smart contract (near-sdk 5.30 -> circle.uprail.near)
-│   └── src/                               # lib.rs, crypto.rs (P-256/Ed25519 verify), types.rs, ext.rs, tests.rs (14 Rust tests)
+│   └── src/                               # lib.rs, crypto.rs (P-256/Ed25519 verify), types.rs, ext.rs, tests.rs (15 Rust tests)
 │
 ├── scripts/                               # Deployment & mainnet audit scripts
 │   ├── deploy-circle-contract.mjs         # Interactive masked-key NEAR deploy/migrate + Wrangler secret helper (--self-test)
@@ -380,7 +380,7 @@ flowchart TD
 │   ├── src/services/                      # nearRpc, custodyService, selfCustodyCrypto, selfCustodyActions, selfCustodyVaultOps, agentPocketService,
 │   │                                      # nativeL1Auth, nativeL1Grant, circleContract, confidentialRail, coffee, circles, gifts, earnVaults,
 │   │                                      # stabilize, oneclickClient, oneclickAuth, oneclickWithdraw, intentsNonce, launchpadFees, launchpadIntegrations, refunds
-│   └── test/                              # 20 automated test files (189 tests across 40 suites: Miniflare integration + unit tests)
+│   └── test/                              # 20 automated test files (190 tests across 40 suites: Miniflare integration + unit tests)
 │
 ├── go-near-service/                       # Go 1.25 Settlement Microservice
 │   ├── cmd/server/main.go                 # Chi HTTP server, graceful shutdown, route wiring

@@ -23,7 +23,7 @@ export type ContractAssetSpec =
   | { rail: 'nep141'; contract_id: string };
 
 export interface ContractWebAuthnProof {
-  kind: 'webauthn';
+  kind: 'web_authn';
   pubkey: string;
   authenticator_data: string;
   client_data_json: string;
@@ -286,7 +286,7 @@ export function canonicalUnclaimedRefundPayload(params: {
 
 export function webAuthnToContractProof(signed: SignedWebAuthnPayload): ContractWebAuthnProof {
   return {
-    kind: 'webauthn',
+    kind: 'web_authn',
     pubkey: signed.public_key,
     authenticator_data: signed.authenticator_data,
     client_data_json: signed.client_data_json,
