@@ -12,7 +12,11 @@ import {
   ExternalLink,
   AlertCircle,
   Clock,
+  ShieldCheck,
+  XCircle,
+  Loader2,
 } from 'lucide-react';
+import { Link } from '../lib/router';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
@@ -28,7 +32,7 @@ import { activityStatusMeta, cancellationReason } from '../lib/statusLabels';
 export const HistoryPage: React.FC = () => {
   const { user } = useXAuth();
   const { toast } = useToast();
-  const { history, isLoadingHistory, loadHistory } = usePayments();
+  const { history, isLoadingHistory, loadHistory, cancelPayment } = usePayments();
   const {
     transactions,
     tokens,
@@ -41,6 +45,7 @@ export const HistoryPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedSharePayment, setSelectedSharePayment] = useState<PaymentIntent | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
 
   const loadRequests = async () => {
@@ -500,6 +505,48 @@ export const HistoryPage: React.FC = () => {
                           <Share2 className="w-3.5 h-3.5" />
                         </button>
                       )}
+
+                      {tx.payment &&
+                        tx.isSent &&
+                        ['ready', 'escrowed', 'ESCROWED'].includes(tx.status) && (
+                          <button
+                            type="button"
+                            disabled={cancellingId === tx.id}
+                            onClick={async () => {
+                              setCancellingId(tx.id);
+                              try {
+                                await cancelPayment(tx.id);
+                                toast('Payment cancelled & refunded to your balance');
+                              } catch (err: any) {
+                                toast(err?.message || 'Failed to cancel & refund payment', 'error');
+                              } finally {
+                                setCancellingId(null);
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-amber-700 hover:text-amber-900 hover:bg-amber-50 border border-amber-200/80 transition-colors cursor-pointer disabled:opacity-50"
+                            title="Cancel unclaimed send & refund"
+                          >
+                            {cancellingId === tx.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <XCircle className="w-3 h-3" />
+                            )}
+                            <span>Cancel & Refund</span>
+                          </button>
+                        )}
+
+                      {tx.payment?.contractMode === 'contract' &&
+                        (tx.payment.escrowSendId || tx.payment.id) && (
+                          <Link
+                            to={`/verify?kind=send&id=${encodeURIComponent(
+                              tx.payment.escrowSendId || tx.payment.id
+                            )}`}
+                            className="p-1.5 rounded-lg text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 transition-colors"
+                            title="Verify on-chain contract escrow"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          </Link>
+                        )}
 
                       {tx.explorerUrl && (
                         <a

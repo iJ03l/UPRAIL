@@ -17,6 +17,7 @@ import { Portal } from './Portal';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TokenIcon } from './TokenIcon';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
+import { useXAuth } from '../hooks/useXAuth';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from './Toast';
 import {
@@ -54,6 +55,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   initialAmount,
   onSuccess,
 }) => {
+  const { user } = useXAuth();
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   useBodyScrollLock(isOpen);
   const { toast } = useToast();
@@ -295,12 +297,6 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     setElapsedSeconds(0);
 
     try {
-      const assertion = await authorizeWithPasskey(
-        `Stabilize ${quote.grossAmount} ${selectedToken.symbol} to ${targetAsset}`
-      );
-
-      setProgressStep('submitting');
-
       const isMax =
         selectedToken.balance &&
         amount.trim() === selectedToken.balance.trim();
@@ -312,12 +308,30 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
           ? `nep141:${selectedToken.nearContractId}`
           : selectedToken.id || selectedToken.symbol;
 
-      const res = await api.stabilizeAsset({
-        sourceAsset: sourceId,
-        targetAsset,
-        amount: isMax ? 'all' : amount.trim(),
-        passkeyAssertion: assertion,
-      });
+      let res: StabilizeResult;
+      if (user?.custodyMode === 'self') {
+        res = await api.stabilizeAssetSelfCustody(
+          {
+            sourceAsset: sourceId,
+            targetAsset,
+            amount: isMax ? 'all' : amount.trim(),
+          },
+          (stage) => setProgressStep(stage === 'submitting' ? 'submitting' : 'authorizing')
+        );
+      } else {
+        const assertion = await authorizeWithPasskey(
+          `Stabilize ${quote.grossAmount} ${selectedToken.symbol} to ${targetAsset}`
+        );
+
+        setProgressStep('submitting');
+
+        res = await api.stabilizeAsset({
+          sourceAsset: sourceId,
+          targetAsset,
+          amount: isMax ? 'all' : amount.trim(),
+          passkeyAssertion: assertion,
+        });
+      }
 
       setIsConfirmOpen(false);
 

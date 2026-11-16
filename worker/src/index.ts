@@ -32,6 +32,7 @@ import { requestsRouter } from './routes/requests';
 import { coffeeRouter } from './routes/coffee';
 import { circlesRouter } from './routes/circles';
 import { giftsRouter } from './routes/gifts';
+import { custodyRouter, verifyRouter } from './routes/custody';
 import { oauthRouter } from './routes/oauth';
 import { approvalRouter } from './routes/approval';
 import { getAuthorizationServer } from './oauth/authorization';
@@ -250,6 +251,10 @@ apiRouter.route('/coffee', coffeeRouter);
 // Multi-member quota Circles & 1-to-1 Timelocked Earn Vault Gifting
 apiRouter.route('/circles', circlesRouter);
 apiRouter.route('/gifts', giftsRouter);
+
+// Opt-in passkey Self-Custody & public on-chain custody verification
+apiRouter.route('/custody', custodyRouter);
+apiRouter.route('/verify', verifyRouter);
 
 app.route('/api', apiRouter);
 

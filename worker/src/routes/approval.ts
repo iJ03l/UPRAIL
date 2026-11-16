@@ -17,6 +17,10 @@ import { hasRecentPasskey, verifyPasskeyAssertion } from '../middleware/passkeyA
 import { resolveOrigin } from '../services/webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
 import { handleSendPayment, paymentsRouter } from './payments';
+import * as nearRpc from '../services/nearRpc';
+import { submitOneClickWebAuthnSession } from '../services/custodyService';
+import { prepareSelfCustodySend, submitSelfCustodySend } from '../services/selfCustodyActions';
+import { handleCustodyActionError } from '../utils/custodyResponse';
 
 export const approvalRouter = new Hono<AppContext>();
 
@@ -479,11 +483,123 @@ async function handleGetApproval(c: Context<AppContext>): Promise<Response> {
     return errorScreen('Unauthorized', 'This payment authorization request belongs to a different UPRAIL account.', 403);
   }
 
-  const recentPasskey = hasRecentPasskey(session);
+  const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+  const isSelfCustody = custody?.custodyMode === 'self';
+  const recentPasskey = isSelfCustody ? false : hasRecentPasskey(session);
   const recipientCount = payload.recipients.length;
   const isMultiple = recipientCount > 1;
 
-  const script = recentPasskey
+  const selfCustodyScript = `
+function b64urlToBuf(value){
+  let s=String(value).replace(/-/g,'+').replace(/_/g,'/');
+  while(s.length%4)s+='=';
+  const bin=atob(s);const out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out.buffer;
+}
+function bufToB64url(buf){
+  const bytes=new Uint8Array(buf);let bin='';
+  for(let i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
+}
+function serialize(cred){
+  const r=cred.response;
+  return {
+    id:cred.id,
+    rawId:bufToB64url(cred.rawId),
+    type:cred.type,
+    response:{
+      clientDataJSON:bufToB64url(r.clientDataJSON),
+      authenticatorData:bufToB64url(r.authenticatorData),
+      signature:bufToB64url(r.signature),
+      userHandle:r.userHandle?bufToB64url(r.userHandle):undefined
+    },
+    clientExtensionResults:cred.getClientExtensionResults()
+  };
+}
+function toPublicKeyOptions(options){
+  const pk={
+    challenge:b64urlToBuf(options.challenge),
+    rpId:options.rpId,
+    timeout:options.timeout||60000,
+    userVerification:options.userVerification||'required'
+  };
+  if(Array.isArray(options.allowCredentials)&&options.allowCredentials.length){
+    pk.allowCredentials=options.allowCredentials.map(c=>({
+      type:c.type||'public-key',
+      id:b64urlToBuf(c.id),
+      transports:Array.isArray(c.transports)?c.transports:undefined
+    }));
+  }
+  return pk;
+}
+const err=document.getElementById('error');
+const approve=document.getElementById('approve');
+const statusEl=document.getElementById('self-status');
+const approvalId=${JSON.stringify(approvalId)};
+approve.addEventListener('click',async()=>{
+  approve.disabled=true;
+  err.style.display='none';
+  try{
+    while(true){
+      if(statusEl)statusEl.textContent='Preparing on-chain authorization...';
+      const prepRes=await fetch('/api/agent/approval/'+encodeURIComponent(approvalId)+'/prepare',{
+        method:'POST',
+        credentials:'include',
+        headers:{'content-type':'application/json',accept:'application/json'},
+        body:'{}'
+      });
+      const prep=await prepRes.json().catch(()=>({}));
+      if(prep&&prep.done){
+        window.location.reload();
+        return;
+      }
+      let step=prep&&prep.step?prep.step:undefined;
+      if(prepRes.status===409&&prep&&prep.code==='ONECLICK_AUTH_REQUIRED'&&prep.actionId&&prep.options){
+        step='oneclick_auth';
+        if(statusEl)statusEl.textContent='Tap passkey to unlock your confidential 1Click session...';
+      }else if(!prepRes.ok){
+        throw new Error((prep&&prep.error)||'Could not prepare payment approval.');
+      }else if(prep&&prep.step==='shield'){
+        if(statusEl)statusEl.textContent='Tap passkey to shield funds into Confidential Intents...';
+      }else{
+        const label=prep&&prep.recipientHandle?'@'+String(prep.recipientHandle).replace(/^@+/,''):'recipient';
+        const idx=(typeof prep.recipientIndex==='number'&&typeof prep.totalRecipients==='number')
+          ?' ('+(prep.recipientIndex+1)+' of '+prep.totalRecipients+')':'';
+        if(statusEl)statusEl.textContent='Tap passkey to sign payment to '+label+idx+'...';
+      }
+      if(!prep||!prep.actionId||!prep.options){
+        throw new Error((prep&&prep.error)||'Missing WebAuthn challenge from server.');
+      }
+      const cred=await navigator.credentials.get({publicKey:toPublicKeyOptions(prep.options)});
+      if(!cred)throw new Error('Passkey signature was cancelled.');
+      if(statusEl)statusEl.textContent='Submitting signed transaction...';
+      const subRes=await fetch('/api/agent/approval/'+encodeURIComponent(approvalId)+'/submit',{
+        method:'POST',
+        credentials:'include',
+        headers:{'content-type':'application/json',accept:'application/json'},
+        body:JSON.stringify({actionId:prep.actionId,assertion:serialize(cred),step})
+      });
+      const sub=await subRes.json().catch(()=>({}));
+      if(!subRes.ok){
+        throw new Error((sub&&sub.error)||'Failed to submit signed payment.');
+      }
+      if(sub&&sub.done){
+        window.location.reload();
+        return;
+      }
+    }
+  }catch(e){
+    if(statusEl)statusEl.textContent='';
+    err.textContent=e&&e.message?e.message:'Passkey confirmation failed.';
+    err.style.display='block';
+    approve.disabled=false;
+  }
+});`;
+
+  const script = isSelfCustody
+    ? selfCustodyScript
+    : recentPasskey
     ? `const form=document.getElementById('approval-form');const approve=document.getElementById('approve');approve.addEventListener('click',()=>{approve.disabled=true;form.submit()});`
     : `
 function b64urlToBuf(value){
@@ -549,6 +665,10 @@ approve.addEventListener('click',async()=>{
     )
     .join('');
 
+  const noticeText = isSelfCustody
+    ? `Your UPRAIL account uses passkey self-custody — confirming with your passkey signs the on-chain transfer directly on your device.${isMultiple ? ` (${recipientCount} recipients will be signed in sequence.)` : ''}`
+    : `Payment exceeds your ${payload.exceededReason === 'daily_limit' ? 'daily limit' : 'per-payment limit'}${typeof payload.limitUsd === 'number' ? ` ($${payload.limitUsd.toFixed(2)})` : ''}. Confirming with Passkey will execute the transfer immediately.`;
+
   return page(
     'Authorize AI Payment',
     `<div class="brand-bar">
@@ -556,12 +676,12 @@ approve.addEventListener('click',async()=>{
          <img src="/brand/uprail-icon.png" alt="UPRAIL">
          <span class="brand-name">UPRAIL</span>
        </div>
-       <span class="badge">NEAR INTENTS</span>
+       <span class="badge">${isSelfCustody ? 'SELF-CUSTODY' : 'NEAR INTENTS'}</span>
      </div>
      
      <div class="agent-tag">🤖 ${escapeHtml(payload.agentName || 'AI Agent')}</div>
      <h1>Authorize ${isMultiple ? `${recipientCount} Payments` : 'Payment'}</h1>
-     <p class="desc">${escapeHtml(payload.agentName || 'AI Agent')} requested a confidential payment exceeding your guardrail.</p>
+     <p class="desc">${escapeHtml(payload.agentName || 'AI Agent')} requested a confidential payment${isSelfCustody ? ' requiring your device passkey signature' : ' exceeding your guardrail'}.</p>
      
      <div class="summary-box">
        <div>
@@ -571,28 +691,27 @@ approve.addEventListener('click',async()=>{
        <div class="summary-usd">~$${escapeHtml(payload.totalUsd.toFixed(2))} USD</div>
      </div>
 
-     <div class="notice">
-       Payment exceeds your ${payload.exceededReason === 'daily_limit' ? 'daily limit' : 'per-payment limit'}${typeof payload.limitUsd === 'number' ? ` ($${payload.limitUsd.toFixed(2)})` : ''}. Confirming with Passkey will execute the transfer immediately.
-     </div>
+     <div class="notice">${noticeText}</div>
 
      <div class="recipients-label">Recipient${isMultiple ? 's' : ''}</div>
      <div class="recipients">${recipientsHtml}</div>
      ${payload.memo ? `<div class="memo-box"><strong>Memo:</strong> ${escapeHtml(payload.memo)}</div>` : ''}
 
      <div class="error" id="error"></div>
+     ${isSelfCustody ? '<div id="self-status" style="font-size:12px;color:var(--muted);margin-bottom:10px;text-align:center"></div>' : ''}
 
      <form id="approval-form" method="post" action="/approve/submit">
        <input type="hidden" name="id" value="${escapeHtml(approvalId)}">
        <input type="hidden" name="passkeyAssertion" id="passkeyAssertion" value="">
        <div class="actions">
          <button class="approve" id="approve" type="button">
-           ${recentPasskey ? 'Approve & Send' : 'Confirm with Passkey'}
+           ${isSelfCustody ? 'Sign & Authorize with Passkey' : recentPasskey ? 'Approve & Send' : 'Confirm with Passkey'}
          </button>
          <button class="deny" type="submit" formaction="/approve/deny" formnovalidate>Reject</button>
        </div>
      </form>
      <div class="foot">
-       Authorized using WebAuthn passkeys · Sent from UPRAIL vault
+       ${isSelfCustody ? 'Direct on-chain WebAuthn signature · UPRAIL cannot sign without your device' : 'Authorized using WebAuthn passkeys · Sent from UPRAIL vault'}
      </div>
      <script>${script}</script>`
   );
@@ -626,6 +745,15 @@ approvalRouter.post('/approve/submit', async (c) => {
 
   if (row.x_id !== session.x_id) {
     return errorScreen('Unauthorized', 'This payment authorization request belongs to another account.', 403);
+  }
+
+  const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+  if (custody?.custodyMode === 'self') {
+    return errorScreen(
+      'Self-Custody Passkey Required',
+      'This account uses self-custody. Use the "Sign & Authorize with Passkey" button on the approval screen so your device signs the transaction directly.',
+      409
+    );
   }
 
   if (row.status !== 'PENDING') {
@@ -815,6 +943,230 @@ approvalRouter.get('/api/agent/approval/:id', async (c) => {
     decidedAt: row.decided_at,
     result: resultData,
   });
+});
+
+interface LoadedApprovalContext {
+  session: NonNullable<ReturnType<Context<AppContext>['get']> extends infer _ ? Context<AppContext>['var']['session'] : never>;
+  row: any;
+  payload: ApprovalPayload;
+  completedPayments: any[];
+}
+
+async function loadSelfCustodyApproval(
+  c: Context<AppContext>,
+  approvalId: string
+): Promise<{ ok: true; data: LoadedApprovalContext } | { ok: false; response: Response }> {
+  const session = c.get('session');
+  if (!session) {
+    return { ok: false, response: c.json({ error: 'Authentication required', code: 'UNAUTHORIZED' }, 401) };
+  }
+
+  const row = await c.env.DB.prepare(
+    'SELECT id, x_id, agent_key_id, payload, status, result, created_at, expires_at FROM agent_approvals WHERE id = ?'
+  )
+    .bind(approvalId)
+    .first<any>();
+
+  if (!row) {
+    return { ok: false, response: c.json({ error: 'Approval request not found.', code: 'NOT_FOUND' }, 404) };
+  }
+  if (row.x_id !== session.x_id) {
+    return {
+      ok: false,
+      response: c.json({ error: 'Approval request belongs to another account.', code: 'FORBIDDEN' }, 403),
+    };
+  }
+
+  const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+  if (custody?.custodyMode !== 'self') {
+    return {
+      ok: false,
+      response: c.json(
+        { error: 'Direct WebAuthn signing is only used for self-custody accounts.', code: 'NOT_SELF_CUSTODY' },
+        400
+      ),
+    };
+  }
+
+  let payload: ApprovalPayload;
+  try {
+    payload = JSON.parse(row.payload);
+  } catch {
+    return { ok: false, response: c.json({ error: 'Malformed approval payload.', code: 'INVALID_PAYLOAD' }, 500) };
+  }
+
+  let completedPayments: any[] = [];
+  if (row.result) {
+    try {
+      const parsed = JSON.parse(row.result);
+      if (Array.isArray(parsed?.payments)) {
+        completedPayments = parsed.payments;
+      }
+    } catch {}
+  }
+
+  if (row.status === 'APPROVED') {
+    return {
+      ok: false,
+      response: c.json({ done: true, status: 'APPROVED', payments: completedPayments }),
+    };
+  }
+  if (row.status !== 'PENDING') {
+    return {
+      ok: false,
+      response: c.json(
+        { error: `This approval request is ${String(row.status).toLowerCase()}.`, code: 'INVALID_STATUS' },
+        409
+      ),
+    };
+  }
+  if (row.expires_at < Date.now()) {
+    return { ok: false, response: c.json({ error: 'Approval request expired.', code: 'EXPIRED' }, 410) };
+  }
+
+  return {
+    ok: true,
+    data: { session, row, payload, completedPayments },
+  };
+}
+
+approvalRouter.post('/api/agent/approval/:id/prepare', async (c) => {
+  try {
+    const approvalId = c.req.param('id');
+    const loaded = await loadSelfCustodyApproval(c, approvalId);
+    if (!loaded.ok) return loaded.response;
+
+    const { session, payload, completedPayments } = loaded.data;
+    if (completedPayments.length >= payload.recipients.length) {
+      await c.env.DB.prepare(
+        "UPDATE agent_approvals SET status = 'APPROVED', decided_at = ? WHERE id = ? AND status = 'PENDING'"
+      )
+        .bind(Date.now(), approvalId)
+        .run();
+      return c.json({ done: true, status: 'APPROVED', payments: completedPayments });
+    }
+
+    const targetIndex = completedPayments.length;
+    const recipient = payload.recipients[targetIndex];
+    const recipientHandle = recipient.recipientHandle.replace(/^@+/, '');
+
+    const quoteReq = new Request('https://uprail.internal/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientHandle, asset: payload.asset, amount: recipient.amount }),
+    });
+    const quoteRes = await paymentsRouter.fetch(quoteReq, c.env, c.executionCtx);
+    if (!quoteRes.ok) {
+      return c.json(
+        { error: `Failed to quote payment to @${recipientHandle}`, code: 'QUOTE_FAILED' },
+        502
+      );
+    }
+    const quote = (await quoteRes.json()) as { quoteSignature: string; depositAddress: string };
+
+    const prepared = await prepareSelfCustodySend(c.env, session, {
+      recipientHandle,
+      asset: payload.asset,
+      amount: recipient.amount,
+      memo: payload.memo,
+      quoteSignature: quote.quoteSignature,
+      depositAddress: quote.depositAddress,
+    });
+
+    return c.json({
+      ...prepared,
+      recipientIndex: targetIndex,
+      totalRecipients: payload.recipients.length,
+      recipientHandle,
+      amount: recipient.amount,
+      asset: payload.asset,
+    });
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'APPROVAL_PREPARE_FAILED', '[approval/prepare]');
+  }
+});
+
+approvalRouter.post('/api/agent/approval/:id/submit', async (c) => {
+  try {
+    const approvalId = c.req.param('id');
+    const loaded = await loadSelfCustodyApproval(c, approvalId);
+    if (!loaded.ok) return loaded.response;
+
+    const { session, payload, completedPayments } = loaded.data;
+    const body = await c.req
+      .json<{ actionId?: string; assertion?: unknown; step?: string }>()
+      .catch(() => null);
+    if (!body?.actionId || !body?.assertion) {
+      return c.json({ error: 'Missing actionId or WebAuthn assertion', code: 'INVALID_REQUEST' }, 400);
+    }
+
+    if (body.step === 'oneclick_auth') {
+      await submitOneClickWebAuthnSession({
+        env: c.env,
+        xId: session.x_id,
+        actionId: body.actionId,
+        assertion: body.assertion,
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      return c.json({ step: 'oneclick_auth_complete', nextAction: true, done: false });
+    }
+
+    if (completedPayments.length >= payload.recipients.length) {
+      return c.json({ done: true, status: 'APPROVED', payments: completedPayments });
+    }
+
+    const result = await submitSelfCustodySend({
+      env: c.env,
+      session,
+      actionId: body.actionId,
+      assertion: body.assertion,
+      step: body.step,
+    });
+    await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+
+    const payment = (result as any)?.payment;
+    if (!payment) {
+      return c.json({ ...(result as Record<string, unknown>), done: false });
+    }
+
+    const entry = {
+      recipientHandle: String(payment.recipientHandle || '').replace(/^@+/, ''),
+      amount: String(payment.amount ?? ''),
+      asset: String(payment.asset || payload.asset),
+      paymentId: payment.paymentId,
+      shareLink: payment.shareLink,
+      claimLink: payment.claimLink || payment.shareLink,
+      xShareUrl: payment.xShareUrl,
+      tweetIntentUrl: payment.tweetIntentUrl,
+      status: payment.status,
+    };
+    const nextPayments = [...completedPayments, entry];
+    const allDone = nextPayments.length >= payload.recipients.length;
+
+    await c.env.DB.prepare(
+      'UPDATE agent_approvals SET status = ?, result = ?, decided_at = ? WHERE id = ?'
+    )
+      .bind(
+        allDone ? 'APPROVED' : 'PENDING',
+        JSON.stringify({
+          payments: nextPayments,
+          shareLinks: nextPayments.map((x) => x.shareLink).filter(Boolean),
+        }),
+        allDone ? Date.now() : null,
+        approvalId
+      )
+      .run();
+
+    return c.json({
+      done: allDone,
+      completedCount: nextPayments.length,
+      totalRecipients: payload.recipients.length,
+      payment,
+      payments: nextPayments,
+    });
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'APPROVAL_SUBMIT_FAILED', '[approval/submit]');
+  }
 });
 
 function renderSuccessScreen(payload: ApprovalPayload, payments: any[]): Response {

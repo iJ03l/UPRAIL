@@ -15,9 +15,10 @@
 
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse } from '../types';
-import { requireAuth } from '../middleware/session';
+import { requireAuth, updateSession } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { rateLimit } from '../middleware/rateLimit';
+import { handleCustodyActionError } from '../utils/custodyResponse';
 import { publicErrorMessage } from '../utils/errors';
 import { getEarnVaults } from '../services/earnVaults';
 import {
@@ -29,6 +30,15 @@ import {
   listUserGifts,
   quoteGift,
 } from '../services/gifts';
+import {
+  checkGiftCreateSwapStatus,
+  prepareSelfCustodyGiftClaim,
+  prepareSelfCustodyGiftCreate,
+  prepareSelfCustodyGiftReclaim,
+  submitSelfCustodyGiftClaim,
+  submitSelfCustodyGiftCreate,
+  submitSelfCustodyGiftReclaim,
+} from '../services/selfCustodyVaultOps';
 
 export const giftsRouter = new Hono<AppContext>();
 
@@ -207,6 +217,228 @@ giftsRouter.post(
         { error: publicErrorMessage(err), code: 'GIFT_CLAIM_FAILED' },
         502
       );
+    }
+  }
+);
+
+giftsRouter.post(
+  '/prepare',
+  rateLimit({ limit: 20, prefix: 'gift_create_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const res = await prepareSelfCustodyGiftCreate({
+        env: c.env,
+        session,
+        input: body,
+      });
+      return c.json(res);
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_PREPARE_FAILED', '[gifts/prepare]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/submit',
+  rateLimit({ limit: 20, prefix: 'gift_create_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const body = await c.req.json().catch(() => ({}));
+    const actionId = typeof body?.actionId === 'string' ? body.actionId.trim() : '';
+    const assertion = body?.assertion;
+    const step = typeof body?.step === 'string' ? body.step.trim() : undefined;
+    if (!actionId || !assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion.', code: 'MISSING_FIELDS' },
+        400
+      );
+    }
+    try {
+      const res = await submitSelfCustodyGiftCreate({
+        env: c.env,
+        session,
+        actionId,
+        assertion,
+        step,
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const giftId = (res as any)?.giftId;
+      const gift =
+        giftId && (res as any)?.completed !== false
+          ? await getAuthenticatedGift(c.env, session, giftId).catch(() => null)
+          : null;
+      return c.json({ ...res, ...(gift ? { gift } : {}) });
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_SUBMIT_FAILED', '[gifts/submit]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/swap-status',
+  rateLimit({ limit: 60, prefix: 'gift_swap_status', strict: false }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const body = await c.req.json().catch(() => ({}));
+    const depositAddress = typeof body?.depositAddress === 'string' ? body.depositAddress.trim() : '';
+    const vaultAssetId = typeof body?.vaultAssetId === 'string' ? body.vaultAssetId.trim() : '';
+    const balanceBeforeAtomic =
+      typeof body?.balanceBeforeAtomic === 'string' ? body.balanceBeforeAtomic.trim() : '0';
+    if (!depositAddress || !vaultAssetId) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing depositAddress or vaultAssetId.', code: 'MISSING_FIELDS' },
+        400
+      );
+    }
+    try {
+      const res = await checkGiftCreateSwapStatus({
+        env: c.env,
+        session,
+        depositAddress,
+        vaultAssetId,
+        balanceBeforeAtomic,
+      });
+      return c.json(res);
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_SWAP_STATUS_FAILED', '[gifts/swap-status]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/:id/claim/prepare',
+  rateLimit({ limit: 20, prefix: 'gift_claim_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const giftId = (c.req.param('id') || '').trim();
+    try {
+      const res = await prepareSelfCustodyGiftClaim({
+        env: c.env,
+        session,
+        giftId,
+      });
+      return c.json(res);
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_CLAIM_PREPARE_FAILED', '[gifts/claim/prepare]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/:id/claim/submit',
+  rateLimit({ limit: 20, prefix: 'gift_claim_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const giftId = (c.req.param('id') || '').trim();
+    const body = await c.req.json().catch(() => ({}));
+    const actionId = typeof body?.actionId === 'string' ? body.actionId.trim() : '';
+    const assertion = body?.assertion;
+    if (!actionId || !assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion.', code: 'MISSING_FIELDS' },
+        400
+      );
+    }
+    try {
+      const res = await submitSelfCustodyGiftClaim({
+        env: c.env,
+        session,
+        giftId,
+        actionId,
+        assertion,
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const gift = await getAuthenticatedGift(c.env, session, giftId).catch(() => null);
+      return c.json({
+        ...res,
+        ...(gift ? { gift, sharesClaimed: gift.sharesFormatted } : {}),
+      });
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_CLAIM_SUBMIT_FAILED', '[gifts/claim/submit]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/:id/reclaim/prepare',
+  rateLimit({ limit: 20, prefix: 'gift_reclaim_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const giftId = (c.req.param('id') || '').trim();
+    try {
+      const res = await prepareSelfCustodyGiftReclaim({
+        env: c.env,
+        session,
+        giftId,
+      });
+      return c.json(res);
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_RECLAIM_PREPARE_FAILED', '[gifts/reclaim/prepare]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/:id/reclaim/submit',
+  rateLimit({ limit: 20, prefix: 'gift_reclaim_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const giftId = (c.req.param('id') || '').trim();
+    const body = await c.req.json().catch(() => ({}));
+    const actionId = typeof body?.actionId === 'string' ? body.actionId.trim() : '';
+    const assertion = body?.assertion;
+    if (!actionId || !assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion.', code: 'MISSING_FIELDS' },
+        400
+      );
+    }
+    try {
+      const res = await submitSelfCustodyGiftReclaim({
+        env: c.env,
+        session,
+        giftId,
+        actionId,
+        assertion,
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const gift = await getAuthenticatedGift(c.env, session, giftId).catch(() => null);
+      return c.json({
+        ...res,
+        ...(gift ? { gift, sharesClaimed: gift.sharesFormatted } : {}),
+      });
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_RECLAIM_SUBMIT_FAILED', '[gifts/reclaim/submit]');
     }
   }
 );

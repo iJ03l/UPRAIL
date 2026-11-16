@@ -3,6 +3,7 @@ import './globals.css';
 import { DomainGate } from '@/components/DomainGate';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { ToastProvider } from '@/components/Toast';
+import { NativeL1AuthHost } from '@/components/NativeL1AuthHost';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://app.uprail.world'),
@@ -98,6 +99,7 @@ export default function RootLayout({
         <ThemeProvider>
           <ToastProvider>
             <DomainGate>{children}</DomainGate>
+            <NativeL1AuthHost />
           </ToastProvider>
         </ThemeProvider>
       </body>

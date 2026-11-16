@@ -99,6 +99,7 @@ export async function createSession(
     x_handle: string;
     x_name: string;
     near_account?: string | null;
+    custody_mode?: 'server' | 'self';
     is_activated?: boolean;
     personal_invite_code?: string | null;
     passkey_verified?: boolean;
@@ -115,6 +116,7 @@ export async function createSession(
     x_handle: userData.x_handle,
     x_name: userData.x_name,
     near_account: userData.near_account || null,
+    custody_mode: userData.custody_mode || 'server',
     is_activated: userData.is_activated,
     personal_invite_code: userData.personal_invite_code || null,
     passkey_verified: userData.passkey_verified === true,

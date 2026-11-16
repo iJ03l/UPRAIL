@@ -22,6 +22,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { AssetPicker } from './AssetPicker';
 import { TokenIcon } from './TokenIcon';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
+import { useXAuth } from '../hooks/useXAuth';
 import { useToast } from './Toast';
 import {
   api,
@@ -145,6 +146,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
   tokens,
   onSuccess,
 }) => {
+  const { user } = useXAuth();
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   const { toast } = useToast();
 
@@ -363,15 +365,24 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
     setIsWithdrawing(true);
 
     try {
-      const assertion = await authorizeWithPasskey(
-        `Withdraw ${amount} ${selectedToken.symbol} to ${destination.nearcomAddress}`
-      );
-      const result = await api.withdrawToNearcom({
-        asset: selectedToken.id || selectedToken.symbol,
-        amount: amount.trim(),
-        expectedDestination: destination.nearcomAddress,
-        passkeyAssertion: assertion,
-      });
+      let result: NearcomWithdrawResponse;
+      if (user?.custodyMode === 'self') {
+        result = await api.withdrawToNearcomSelfCustody({
+          asset: selectedToken.id || selectedToken.symbol,
+          amount: amount.trim(),
+          expectedDestination: destination.nearcomAddress,
+        });
+      } else {
+        const assertion = await authorizeWithPasskey(
+          `Withdraw ${amount} ${selectedToken.symbol} to ${destination.nearcomAddress}`
+        );
+        result = await api.withdrawToNearcom({
+          asset: selectedToken.id || selectedToken.symbol,
+          amount: amount.trim(),
+          expectedDestination: destination.nearcomAddress,
+          passkeyAssertion: assertion,
+        });
+      }
       setShowConfirm(false);
       setReceipt(result);
       setMode('success');

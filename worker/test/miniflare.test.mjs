@@ -101,6 +101,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
       '0015_rescued_deposits.sql',
       '0016_buy_me_a_coffee.sql',
       '0017_circles_and_gifts.sql',
+      '0018_self_custody.sql',
     ];
     for (const file of migrations) {
       const raw = await readFile(new URL(`../src/db/migrations/${file}`, import.meta.url), 'utf8');

@@ -20,6 +20,8 @@ import {
   Clock,
   CircleDot,
   Leaf,
+  ShieldCheck,
+  X,
 } from 'lucide-react';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
@@ -40,14 +42,17 @@ import { FlowPulseWidget } from '../components/FlowPulseWidget';
 import { NearcomWithdrawModal } from '../components/NearcomWithdrawModal';
 import { StabilizeModal } from '../components/StabilizeModal';
 import { CoffeeModal, CoinPouchIcon } from '../components/CoffeeModal';
+import { SelfCustodyUpgradeModal } from '../components/SelfCustodyUpgradeModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { activityStatusMeta, cancellationReason } from '../lib/statusLabels';
 
+const SC_BANNER_DISMISS_KEY = 'uprail_self_custody_banner_dismissed';
+
 export const AppHome: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useXAuth();
+  const { user, refreshSession } = useXAuth();
   const { toast } = useToast();
   const {
     tokens: paymentTokens,
@@ -79,6 +84,14 @@ export const AppHome: React.FC = () => {
   const [isStabilizeModalOpen, setIsStabilizeModalOpen] = useState<boolean>(false);
   const [stabilizeInitialToken, setStabilizeInitialToken] = useState<Token | null>(null);
   const [isCoffeeModalOpen, setIsCoffeeModalOpen] = useState<boolean>(false);
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState<boolean>(false);
+  const [scBannerDismissed, setScBannerDismissed] = useState<boolean>(() => {
+    try {
+      return typeof window !== 'undefined' && window.localStorage.getItem(SC_BANNER_DISMISS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
 
   const handleManualRefresh = async () => {
     if (isRefreshing) return;
@@ -403,7 +416,48 @@ export const AppHome: React.FC = () => {
   }, [history, requests, transactions, user?.handle, tokens, balances, coffeeDonations]);
 
   return (
-    <div className="w-full">
+    <div className="w-full space-y-5">
+      {user && user.custodyMode !== 'self' && !scBannerDismissed && (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.08] px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-4 h-4 text-emerald-700" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-display font-bold text-stone-900">
+                Passkey Self-Custody is available
+              </div>
+              <p className="text-[11px] text-stone-600 leading-snug">
+                Remove server signing from your on-chain Intents account and authorize every move directly from your device passkey.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsUpgradeModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold transition-colors cursor-pointer"
+            >
+              Upgrade Now
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setScBannerDismissed(true);
+                try {
+                  window.localStorage.setItem(SC_BANNER_DISMISS_KEY, '1');
+                } catch {}
+              }}
+              className="p-1.5 rounded-lg text-stone-500 hover:text-stone-900 hover:bg-stone-200/60 transition-colors cursor-pointer"
+              aria-label="Dismiss Self-Custody banner"
+              title="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
 
         {/* ── LEFT COLUMN: Balance, Quick Actions, Receive via Intents ── */}
@@ -412,10 +466,22 @@ export const AppHome: React.FC = () => {
           {/* Balance Hero Card — live from onchain intent account */}
           <div className="rounded-3xl p-5 sm:p-8 md:p-10 bg-white border border-stone-200 shadow-xs space-y-5 sm:space-y-6 relative">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5 min-w-0">
-                <Shield className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
-                <span className="truncate">UPRAIL Account</span>
-              </span>
+              <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5 min-w-0">
+                  <Shield className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+                  <span className="truncate">UPRAIL Account</span>
+                </span>
+                {user?.custodyMode === 'self' && user.nearAccount && (
+                  <Link
+                    to={`/verify?q=${encodeURIComponent(user.nearAccount)}`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-bold text-emerald-700 hover:bg-emerald-500/25 transition-colors"
+                    title="Verify Self-Custody Keys On-Chain"
+                  >
+                    <ShieldCheck className="w-3 h-3" />
+                    <span>Self-Custody</span>
+                  </Link>
+                )}
+              </div>
               <div className="flex items-center space-x-1 flex-shrink-0">
                 <button
                   type="button"
@@ -1081,6 +1147,15 @@ export const AppHome: React.FC = () => {
         isOpen={isCoffeeModalOpen}
         onClose={() => setIsCoffeeModalOpen(false)}
         xHandle={user?.handle || ''}
+      />
+
+      <SelfCustodyUpgradeModal
+        isOpen={isUpgradeModalOpen}
+        onClose={() => setIsUpgradeModalOpen(false)}
+        onUpgraded={() => {
+          void refreshSession();
+          void handleManualRefresh();
+        }}
       />
     </div>
   );

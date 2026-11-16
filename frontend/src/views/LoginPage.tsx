@@ -15,6 +15,7 @@ import { useXAuth } from '../hooks/useXAuth';
 import { webauthn, describePasskeyError, WebAuthnSupportStatus } from '../lib/webauthn';
 import { clearInvite, currentInvite, sanitizeReturnPath, stripInvite, withInvite } from '../lib/invite';
 import { api } from '../lib/api';
+import { signNep413RecoveryPayload } from '../lib/selfCustody';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { LegalModal, LegalTab } from '../components/LegalModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -36,6 +37,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState('');
+  const [revokeLostPasskeys, setRevokeLostPasskeys] = useState(true);
   const [isRecoveryLoading, setIsRecoveryLoading] = useState(false);
   const [recoveryAuthorized, setRecoveryAuthorized] = useState(false);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
@@ -314,13 +316,45 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   const handleRecoverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isSelfCustody = user?.custodyMode === 'self';
     if (!recoveryCode.trim()) {
-      setError('Enter one of your recovery codes.');
+      setError(
+        isSelfCustody
+          ? 'Paste your UP1-… Offline Recovery Key to authorize a replacement passkey.'
+          : 'Enter one of your recovery codes.'
+      );
       return;
     }
     try {
       setIsRecoveryLoading(true);
       setError(null);
+
+      if (isSelfCustody) {
+        const regOpts = await api.getSelfCustodyRecoveryRegisterOptions();
+        const { startRegistration } = await import('@simplewebauthn/browser');
+        const attestation = await startRegistration(regOpts.options);
+        const prep = await api.prepareSelfCustodyRecovery({
+          attestation,
+          expectedChallenge: regOpts.challenge,
+          revokeLostPasskeys,
+        });
+        const signedNep413 = await signNep413RecoveryPayload({
+          phrase: recoveryCode.trim(),
+          nearAccount: prep.nearAccount || user.nearAccount || regOpts.nearAccount,
+          payload: prep.nep413Payload,
+        });
+        await api.submitSelfCustodyRecovery({
+          recoveryActionId: prep.recoveryActionId,
+          signedNep413,
+        });
+        setRecoveryCode('');
+        setShowRecovery(false);
+        setSuccessStepMessage('Self-Custody passkey recovered on-chain! Taking you to your account…');
+        setIsSuccess(true);
+        await refreshSession();
+        return;
+      }
+
       await api.verifyRecoveryCode(recoveryCode);
       setRecoveryCode('');
       setShowRecovery(false);
@@ -328,7 +362,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       setSuccessStepMessage('Recovery code accepted. Create a new passkey for this device.');
       setIsSuccess(true);
     } catch (err: any) {
-      setError(err?.message || 'That recovery code is invalid or has already been used.');
+      setError(
+        describePasskeyError(err) ||
+          err?.message ||
+          (isSelfCustody
+            ? 'Could not recover Self-Custody passkey. Verify your UP1-… Recovery Key and try again.'
+            : 'That recovery code is invalid or has already been used.')
+      );
     } finally {
       setIsRecoveryLoading(false);
     }
@@ -416,7 +456,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   : isStep1
                   ? 'Sign in to UPRAIL'
                   : showRecovery
-                  ? 'Use a recovery code'
+                  ? user?.custodyMode === 'self'
+                    ? 'Use Offline Recovery Key'
+                    : 'Use a recovery code'
                   : needsPasskeyConfirmation
                   ? 'Confirm it\'s you'
                   : needsPasskeyCreation
@@ -429,7 +471,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   : isStep1
                   ? 'Use your 𝕏 account to get a payment handle. No crypto wallet or password to remember.'
                   : showRecovery
-                  ? 'Enter one of the single-use codes you saved. It lets you replace a lost passkey.'
+                  ? user?.custodyMode === 'self'
+                    ? 'Paste your offline UP1-… Recovery Key to authorize a replacement passkey directly on-chain.'
+                    : 'Enter one of the single-use codes you saved. It lets you replace a lost passkey.'
                   : needsPasskeyConfirmation
                   ? 'Your 𝕏 account is connected. Confirm this sign-in with the passkey on this device.'
                   : needsPasskeyCreation
@@ -615,21 +659,40 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                       <span className="text-sm">Lost your passkey?</span>
                     </div>
                     <p className="text-xs leading-relaxed text-amber-800/90">
-                      Enter one saved code. It works once, then you&apos;ll create a new passkey on this device.
+                      {user?.custodyMode === 'self'
+                        ? 'Paste your saved UP1-… Recovery Key. Your browser signs an on-chain authorization locally to enroll a replacement passkey.'
+                        : 'Enter one saved code. It works once, then you\'ll create a new passkey on this device.'}
                     </p>
                   </div>
                   <input
                     type="text"
                     value={recoveryCode}
                     onChange={(e) => {
-                      setRecoveryCode(e.target.value.toUpperCase());
+                      setRecoveryCode(
+                        user?.custodyMode === 'self'
+                          ? e.target.value
+                          : e.target.value.toUpperCase()
+                      );
                       setError(null);
                     }}
-                    placeholder="XXXX-XXXX-XXXX"
+                    placeholder={
+                      user?.custodyMode === 'self' ? 'UP1-XXXX-XXXX-…' : 'XXXX-XXXX-XXXX'
+                    }
                     autoComplete="one-time-code"
                     spellCheck={false}
-                    className="w-full h-14 rounded-2xl border border-line bg-surface px-4 font-mono text-sm tracking-[0.18em] text-ink placeholder:text-subtle focus:outline-none focus:border-ink transition-colors"
+                    className="w-full h-14 rounded-2xl border border-line bg-surface px-4 font-mono text-sm tracking-[0.12em] text-ink placeholder:text-subtle focus:outline-none focus:border-ink transition-colors"
                   />
+                  {user?.custodyMode === 'self' && (
+                    <label className="flex items-center gap-2 text-xs text-muted px-1 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={revokeLostPasskeys}
+                        onChange={(e) => setRevokeLostPasskeys(e.target.checked)}
+                        className="rounded border-line"
+                      />
+                      <span>Revoke old lost passkey(s) on-chain during recovery</span>
+                    </label>
+                  )}
                   <button
                     type="submit"
                     disabled={isRecoveryLoading || !recoveryCode.trim()}
@@ -638,10 +701,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     {isRecoveryLoading ? (
                       <>
                         <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        <span className="font-mono text-xs uppercase tracking-wider">Checking…</span>
+                        <span className="font-mono text-xs uppercase tracking-wider">
+                          {user?.custodyMode === 'self' ? 'Recovering…' : 'Checking…'}
+                        </span>
                       </>
                     ) : (
-                      <span>Use recovery code</span>
+                      <span>
+                        {user?.custodyMode === 'self'
+                          ? 'Enroll new passkey with Recovery Key'
+                          : 'Use recovery code'}
+                      </span>
                     )}
                   </button>
                   <div className="text-center">
@@ -703,7 +772,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                       className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-50"
                     >
                       <KeyRound className="w-3.5 h-3.5" />
-                      <span>Use a recovery code</span>
+                      <span>
+                        {user?.custodyMode === 'self'
+                          ? 'Use your Offline Recovery Key'
+                          : 'Use a recovery code'}
+                      </span>
                     </button>
                   </div>
                 </>

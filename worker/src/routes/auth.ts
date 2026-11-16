@@ -12,6 +12,7 @@ import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { rateLimit } from '../middleware/rateLimit';
 import * as webauthnService from '../services/webauthn';
 import * as nearRpc from '../services/nearRpc';
+import { hasCachedOneClickSession } from '../services/oneclickAuth';
 import { redeemInvite } from '../services/inviteService';
 import {
   ensureRecoveryCodes,
@@ -386,6 +387,9 @@ const getSessionHandler = async (c: any) => {
   let isActivated = session.is_activated;
   let personalInviteCode = session.personal_invite_code;
   let nearAccount = session.near_account;
+  let custodyMode: 'server' | 'self' = session.custody_mode === 'self' ? 'self' : 'server';
+  let backupPubkey: string | null = null;
+  let selfCustodyAt: number | null = null;
 
   if (c.env.DB) {
     try {
@@ -399,6 +403,10 @@ const getSessionHandler = async (c: any) => {
         if (idRow.personal_invite_code) personalInviteCode = idRow.personal_invite_code;
         if (idRow.near_account) nearAccount = idRow.near_account;
       }
+      const custodyRec = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+      custodyMode = custodyRec.custodyMode;
+      backupPubkey = custodyRec.backupPubkey;
+      selfCustodyAt = custodyRec.selfCustodyAt;
     } catch {}
   }
 
@@ -406,13 +414,31 @@ const getSessionHandler = async (c: any) => {
   // without a registered credential must read as "no passkey" so the client
   // sends the user through create-passkey instead of a doomed credential lookup.
   let hasPasskey = false;
+  let pendingOnchainPasskeysCount = 0;
   if (c.env.DB) {
     try {
       const pk = await c.env.DB.prepare('SELECT id FROM passkeys WHERE x_id = ?')
         .bind(session.x_id)
         .first();
       if (pk) hasPasskey = true;
+      if (custodyMode === 'self') {
+        const pending = (await c.env.DB.prepare(
+          'SELECT COUNT(*) AS cnt FROM passkeys WHERE x_id = ? AND near_p256_pubkey IS NOT NULL AND onchain_added_at IS NULL'
+        )
+          .bind(session.x_id)
+          .first()) as { cnt: number } | null;
+        pendingOnchainPasskeysCount = Number(pending?.cnt || 0);
+      }
     } catch {}
+  }
+
+  let oneClickSessionActive = custodyMode === 'server';
+  if (custodyMode === 'self') {
+    try {
+      oneClickSessionActive = await hasCachedOneClickSession(c.env, session.x_id);
+    } catch {
+      oneClickSessionActive = false;
+    }
   }
 
   // Recovery-code status is optional metadata. A missing pepper or transient
@@ -444,6 +470,11 @@ const getSessionHandler = async (c: any) => {
     recoveryAuthorized,
     hasRecoveryCodes,
     recoveryCodesRemaining,
+    custodyMode,
+    backupPubkey,
+    selfCustodyAt,
+    oneClickSessionActive,
+    pendingOnchainPasskeysCount,
     isActivated: !!isActivated,
     personalInviteCode: personalInviteCode || null,
   };
@@ -461,6 +492,11 @@ const getSessionHandler = async (c: any) => {
       recoveryAuthorized,
       hasRecoveryCodes,
       recoveryCodesRemaining,
+      custodyMode,
+      backupPubkey,
+      selfCustodyAt,
+      oneClickSessionActive,
+      pendingOnchainPasskeysCount,
       expiresAt: session.expires_at,
       isActivated: !!isActivated,
       personalInviteCode: personalInviteCode || null,
@@ -649,12 +685,15 @@ authRouter.post('/passkey/login-verify', async (c) => {
         .catch(() => {});
     }
 
+    const custodyRec = await nearRpc.getUserCustodyRecord(c.env, userProfile.x_id);
+
     // Create session and set cookie (zero KV writes)
     const session = await createSession(c, {
       x_id: userProfile.x_id,
       x_handle: userProfile.x_handle,
       x_name: userProfile.x_name,
       near_account: userProfile.near_account,
+      custody_mode: custodyRec.custodyMode,
       is_activated: userProfile.is_activated === 1,
       personal_invite_code: userProfile.personal_invite_code || null,
       passkey_verified: true,
@@ -684,6 +723,8 @@ authRouter.post('/passkey/login-verify', async (c) => {
         nearAccount: session.near_account,
         hasPasskey: true,
         passkeyVerified: true,
+        custodyMode: custodyRec.custodyMode,
+        backupPubkey: custodyRec.backupPubkey,
         hasRecoveryCodes: recovery?.hasCodes ?? true,
         recoveryCodesRemaining: recovery?.remaining ?? undefined,
         isActivated: !!isActivated,
@@ -791,6 +832,16 @@ authRouter.post(
   async (c) => {
     try {
       const session = c.get('session')!;
+      const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+      if (custody.custodyMode === 'self') {
+        return c.json<ErrorResponse>(
+          {
+            error: 'Self-custody accounts must recover using the device Recovery Key you saved during upgrade.',
+            code: 'SELF_CUSTODY_BACKUP_KEY_REQUIRED',
+          },
+          403
+        );
+      }
       const body = await c.req.json<{ code?: string }>().catch(() => null);
       const result = await verifyRecoveryCode(c.env, session.x_id, body?.code);
 
@@ -843,10 +894,22 @@ authRouter.post('/recovery/regenerate', requireAuth({ passkeyVerified: true }), 
 /**
  * GET /auth/export-key-challenge
  * Generates a challenge for the user to authenticate with their WebAuthn passkey
- * before exporting their authentic NEAR private key.
+ * before inspecting their standard (server-derived) NEAR private key.
+ * Disabled once upgraded to Self-Custody.
  */
 authRouter.get('/export-key-challenge', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
+  const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+  if (custody.custodyMode === 'self') {
+    return c.json<ErrorResponse>(
+      {
+        error:
+          'This account uses Passkey Self-Custody. Uprail no longer holds or exports an account private key — only your passkey and your saved device Recovery Key control this account.',
+        code: 'SELF_CUSTODY_NO_EXPORT',
+      },
+      403
+    );
+  }
   const rpId = resolveRpId(c.env);
 
   let passkey: any = null;
@@ -882,11 +945,22 @@ authRouter.get('/export-key-challenge', requireAuth({ passkeyVerified: true }), 
 
 /**
  * POST /auth/export-key
- * Verifies the WebAuthn passkey assertion and returns the user's authentic
- * NEAR master keypair for self-custody export.
+ * Verifies the WebAuthn passkey assertion and returns the server-derived NEAR
+ * signing keypair for standard (custody_mode='server') accounts.
  */
 authRouter.post('/export-key', requireAuth({ passkeyVerified: true }), async (c) => {
   const session = c.get('session')!;
+  const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+  if (custody.custodyMode === 'self') {
+    return c.json<ErrorResponse>(
+      {
+        error:
+          'Self-custody accounts have no server-exportable private key. Your passkey (on-chain P-256) and device Recovery Key exclusively control this account.',
+        code: 'SELF_CUSTODY_NO_EXPORT',
+      },
+      403
+    );
+  }
   const body = (await c.req.json().catch(() => ({}))) as any;
   const { assertion, challengeToken } = body;
 
@@ -961,12 +1035,15 @@ authRouter.post('/export-key', requireAuth({ passkeyVerified: true }), async (c)
     );
   }
 
-  // Passkey verified! Derive authentic NEAR keypair
+  // Passkey verified for standard custody_mode='server' account.
   const derived = await nearRpc.deriveUserNearKeypair(c.env, session.x_id);
   const nearAccount = session.near_account || derived.accountId;
 
   return c.json({
     success: true,
+    custodyMode: 'server',
+    custodyNote:
+      'Standard managed key: Uprail derives this key on demand when you authorize actions. Upgrade to Self-Custody in Settings to revoke server signing access on intents.near.',
     nearAccount,
     privateKey: derived.privateKeyB58,
     publicKey: derived.publicKeyB58,

@@ -1,52 +1,106 @@
 # Dependencies
 node_modules/
+**/node_modules/
 vendor/
 
-# Cloudflare & Wrangler
+# Cloudflare, Wrangler & Miniflare state
 .wrangler/
 **/.wrangler/
+.wrangler-state/
+**/.wrangler-state/
+wrangler.local.*
+**/wrangler.local.*
 .mf/
 **/.mf/
 
-# Build artifacts & caches
+# Build artifacts, bundles & caches
 dist/
+**/dist/
 dist-test/
+**/dist-test/
 build/
+**/build/
 .next/
 **/.next/
 frontend/out/
+frontend/dist/
+worker/dist/
+worker/dist-test/
+contracts/*/target/
+**/target/
+**/*.wasm
 next-env.d.ts
 *.exe
 *.tsbuildinfo
+**/*.tsbuildinfo
 
 # Secret, Environment & Dot files (NEVER commit secrets or real env files)
 .env
+**/.env
 .env.*
+**/.env.*
 *.env
 *.env.*
 .dev.vars
+**/.dev.vars
 .dev.vars.*
+**/.dev.vars.*
 *.dev.vars
 *.dev.vars.*
+*.vars
+**/*.vars
 .freebuff/
 **/.freebuff/
 
 # Whitelist safe configuration templates
 !.env.example
+!**/.env.example
 !*.env.example
 !.dev.vars.example
+!**/.dev.vars.example
 !*.dev.vars.example
 
-# Cryptographic Keys & Local databases
+# Cryptographic Keys, Credentials & Local databases
 *.pem
+**/*.pem
 *.key
+**/*.key
+*.secret
+**/*.secret
+*.secrets
+**/*.secrets
 *.cert
+**/*.cert
 *.crt
+**/*.crt
+*.p12
+*.pfx
+*.jks
+*.mnemonic
+*.seed
+*-keypair.json
+**/*-keypair.json
+*keypair*.json
+**/*keypair*.json
+*credentials*.json
+**/*credentials*.json
+.near-credentials/
+**/.near-credentials/
+*.local.json
+**/*.local.json
+*.local.vars
+**/*.local.vars
 *.sqlite
 *.sqlite-*
+*.db
+*.db-*
+*.dump
+*.sql.bak
+worker/test/.tmp/
 
 # System & OS logs
 *.log
+**/*.log
 .DS_Store
 Thumbs.db
 

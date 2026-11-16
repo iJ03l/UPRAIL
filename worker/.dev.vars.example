@@ -55,3 +55,10 @@ CONFIDENTIAL_RAIL_ENABLED="false"
 # Creator-fee balance-delta routing. Off by default because escrow also holds
 # user funds; use a verified transaction hash instead.
 CREATOR_FEES_ENABLED="false"
+
+# Locked on-chain escrow contract for Circles, Gifts, and unclaimed @handle sends
+CIRCLE_CONTRACT_ID="circle.uprail.near"
+
+# Dedicated ed25519 attestor seed for circle.uprail.near handle claims
+# (distinct from ESCROW_PRIVATE_KEY and circle.uprail.near owner key)
+ATTESTOR_PRIVATE_KEY=""

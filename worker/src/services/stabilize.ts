@@ -187,8 +187,8 @@ const NATIVE_NEAR_DESCRIPTOR: StabilizeTokenDescriptor = {
   supportsOneClick: true,
 };
 
-const QUOTE_TTL_MS = 20 * 60 * 1000;
-const SLIPPAGE_BPS = 500; // 5.00% default slippage
+export const QUOTE_TTL_MS = 20 * 60 * 1000;
+export const SLIPPAGE_BPS = 500; // 5.00% default slippage
 
 export function resolveTargetStablecoin(
   rawTarget: string,
@@ -436,7 +436,7 @@ export async function getTotalSpendableOriginAtomic(
 export const MIN_STABILIZE_USD = 1;
 export const MIN_NEAR_STABILIZE_ATOMIC = 50000000000000000000000n; // 0.05 NEAR
 
-function assertStabilizeMinimum(
+export function assertStabilizeMinimum(
   origin: StabilizeTokenDescriptor,
   grossAtomic: bigint,
   rawAmount: string,

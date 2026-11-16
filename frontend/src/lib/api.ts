@@ -15,9 +15,23 @@ import {
   NearcomWithdrawResponse,
   Contact,
   PaymentRequest,
+  CustodyPreflight,
+  PublicVerifyState,
+  ContractVerifyResponse,
+  CirclePurpose,
+  CircleView,
+  GiftOccasion,
+  AuthenticatedGiftView,
+  StabilizeResult,
 } from '../types';
 import { fetchOnchainTokens } from './onchainApi';
 import { pruneStoredPasskeys } from './passkeyStorage';
+import {
+  performWebAuthnAssertion,
+  runSelfCustodyAction,
+  SelfCustodyApiError,
+  type SelfCustodyProgressStage,
+} from './selfCustody';
 import type { WithdrawChain } from './withdrawChains';
 
 /**
@@ -450,6 +464,25 @@ const API_BASE =
   (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_URL) ||
   (typeof process !== 'undefined' && process.env?.API_URL) ||
   '';
+
+async function custodyJson<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  const url = API_BASE ? `${API_BASE}${path}` : path;
+  const headers: Record<string, string> = {
+    ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  const res = await fetch(url, { credentials: 'include', ...init, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new SelfCustodyApiError(
+      data?.error || `Request failed (${res.status})`,
+      res.status,
+      data?.code,
+      data
+    );
+  }
+  return data as T;
+}
 
 import { getOnchainIcon } from './onchainIcons';
 import { currentInvite, sanitizeReturnPath, takeInvite } from './invite';
@@ -2116,6 +2149,7 @@ export const api = {
     amount: string;
     timelockUntil: number | string;
     fundingMode?: 'BALANCE' | 'EXTERNAL_DEPOSIT';
+    mode?: 'contract' | 'escrow';
     passkeyAssertion: unknown;
   }): Promise<import('../types').AuthenticatedGiftView> {
     const base = API_BASE ? `${API_BASE}/api/gifts` : '/api/gifts';
@@ -2197,6 +2231,7 @@ export const api = {
       shareBps?: number;
       percentageShare?: number;
     }>;
+    mode?: 'contract' | 'escrow';
     passkeyAssertion: unknown;
   }): Promise<import('../types').CircleView> {
     const base = API_BASE ? `${API_BASE}/api/circles` : '/api/circles';
@@ -2315,7 +2350,611 @@ export const api = {
     }
     return data;
   },
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SELF-CUSTODY, TWO-STEP NEAR L1 KEY AUTH, RECOVERY & PUBLIC VERIFY
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async getCustodyPreflight(): Promise<CustodyPreflight> {
+    return custodyJson<CustodyPreflight>('/api/custody/preflight');
+  },
+
+  async sweepPlainL1SelfCustody(
+    params: { asset?: string; symbol?: string; amount?: string; nextStep?: string } = {},
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{
+    completed?: boolean;
+    swept?: Array<{ symbol: string; assetId: string; amount: string; txHash: string }>;
+    failed?: Array<{ symbol: string; error: string }>;
+  }> {
+    return runCustodyFlow(
+      '/api/custody/sweep-plain/prepare',
+      '/api/custody/sweep-plain/submit',
+      { ...params, nextStep: params.nextStep || 'settings' },
+      { onProgress }
+    );
+  },
+
+  async requestNativeL1Auth(
+    params: { asset?: string; symbol?: string; amount?: string; nextStep?: string } = {},
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<any> {
+    return runCustodyFlow(
+      '/api/custody/native-auth/prepare',
+      '/api/custody/native-auth/submit',
+      { ...params, nextStep: params.nextStep || 'completed' },
+      { onProgress }
+    );
+  },
+
+  async prepareUpgradeToSelfCustody(backupPubkey: string): Promise<{
+    actionId: string;
+    challenge: string;
+    options: Record<string, unknown>;
+    nearAccount: string;
+    backupPubkey: string;
+    oneClickPrepare?: { actionId: string; options: Record<string, unknown> } | null;
+    summary?: Record<string, unknown>;
+  }> {
+    return custodyJson('/api/custody/upgrade/prepare', {
+      method: 'POST',
+      body: JSON.stringify({ backupPubkey }),
+    });
+  },
+
+  async submitUpgradeToSelfCustody(body: {
+    actionId: string;
+    assertion: unknown;
+    oneClickActionId?: string;
+    oneClickAuthAssertion?: unknown;
+  }): Promise<{
+    upgraded: boolean;
+    custodyMode: 'self';
+    nearAccount: string;
+    backupPubkey: string;
+    selfCustodyAt: number;
+    txHash: string;
+    oneClickSessionActive?: boolean;
+    serverKeyPresentOnchain?: boolean;
+  }> {
+    return custodyJson('/api/custody/upgrade/submit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async submitOneClickWebAuthnSession(body: {
+    actionId: string;
+    assertion: unknown;
+  }): Promise<{ authenticated: boolean; expiresAt?: number }> {
+    return custodyJson('/api/custody/oneclick-session/submit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async addPasskeyOnchainWithPasskey(
+    targetNearP256Pubkey?: string,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{ added: boolean; nearP256Pubkey: string; txHash?: string }> {
+    return runCustodyFlow(
+      '/api/custody/passkey/add/prepare',
+      '/api/custody/passkey/add/submit',
+      targetNearP256Pubkey ? { targetNearP256Pubkey } : {},
+      { onProgress }
+    );
+  },
+
+  async getSelfCustodyRecoveryRegisterOptions(): Promise<{
+    options: any;
+    challenge: string;
+    nearAccount: string;
+    backupPubkey: string;
+  }> {
+    return custodyJson('/api/custody/recovery/register-options');
+  },
+
+  async prepareSelfCustodyRecovery(body: {
+    attestation: unknown;
+    expectedChallenge: string;
+    revokeLostPasskeys?: boolean;
+  }): Promise<{
+    recoveryActionId: string;
+    nearAccount: string;
+    backupPubkey: string;
+    newPasskeyPubkey: string;
+    nep413Payload: { message: string; nonce: string; recipient: string };
+    expiresAt: number;
+  }> {
+    return custodyJson('/api/custody/recovery/prepare', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async submitSelfCustodyRecovery(body: {
+    recoveryActionId: string;
+    signedNep413: unknown;
+  }): Promise<{
+    recovered: boolean;
+    nearAccount: string;
+    newPasskeyPubkey: string;
+    txHash?: string;
+  }> {
+    return custodyJson('/api/custody/recovery/submit', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  async verifyPublicCustody(q: string): Promise<PublicVerifyState> {
+    return custodyJson<PublicVerifyState>(
+      `/api/verify?q=${encodeURIComponent(q.trim())}`
+    );
+  },
+
+  async verifyContractObject(
+    kind: 'circle' | 'gift' | 'send',
+    id: string
+  ): Promise<ContractVerifyResponse> {
+    return custodyJson<ContractVerifyResponse>(
+      `/api/verify/${encodeURIComponent(kind)}/${encodeURIComponent(id.trim())}`
+    );
+  },
+
+  async sendPaymentSelfCustody(
+    params: CreatePaymentRequest,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<PaymentIntent> {
+    const cleanHandle = normalizeRecipientInput(params.recipientHandle).recipient;
+    let quoteSignature = params.quoteSignature;
+    let depositAddress = params.depositAddress;
+    let selectedTokenId = params.tokenId;
+    if (!quoteSignature || !depositAddress) {
+      const quote = await api.getQuote(
+        params.tokenId,
+        params.amount,
+        cleanHandle || 'escrow',
+        params.token
+      );
+      quoteSignature = quote.quoteSignature;
+      depositAddress = quote.depositAddress;
+      if (
+        quote.token.id === params.tokenId ||
+        quote.token.symbol.toLowerCase() === params.tokenId.toLowerCase()
+      ) {
+        selectedTokenId = quote.token.id;
+      } else {
+        throw new Error(
+          `Quote was signed for ${quote.token.id} but ${params.tokenId} was selected — refusing to send a different asset`
+        );
+      }
+    }
+
+    const res = await runCustodyFlow<any>(
+      '/api/send/prepare',
+      '/api/send/submit',
+      {
+        recipientHandle: cleanHandle,
+        asset: selectedTokenId,
+        amount: params.amount,
+        memo: params.memo,
+        requestId: params.requestId,
+        quoteSignature,
+        depositAddress,
+      },
+      { onProgress }
+    );
+
+    const p = res.payment || {};
+    const tokens = await api.getTokens();
+    const resolvedToken = params.token || resolveTokenForAsset(selectedTokenId, tokens);
+    const price = tokenUsdPrice(resolvedToken);
+    const netAmount = String(p.amount || res.recipientAmount || params.amount);
+    const numNet = parseFloat(netAmount) || 0;
+    const grossAmount = String(params.amount || netAmount);
+    const numGross = parseFloat(grossAmount) || numNet;
+    const feeVal = String(p.fee ?? res.fee ?? '0');
+    const numFee = parseFloat(feeVal) || 0;
+    const paymentId = String(p.id || res.paymentId || '');
+
+    return {
+      id: paymentId,
+      claimCode: p.claimCode || paymentId,
+      senderHandle: p.senderHandle || '',
+      recipientHandle: p.recipientHandle || cleanHandle,
+      token: resolvedToken,
+      amount: netAmount,
+      grossAmount,
+      amountUsd: price === null ? null : numNet * price,
+      grossAmountUsd: price === null ? null : numGross * price,
+      fee: feeVal,
+      feeUsd: price === null ? null : numFee * price,
+      feeRecipient: p.feeRecipient || res.feeRecipient || 'escrow.uprail.near',
+      inviteCode: p.inviteCode || res.inviteCode,
+      memo: p.memo || params.memo || '',
+      status: mapBackendStatus(p.status || res.status || 'ESCROWED'),
+      depositAddress: p.depositAddress || res.depositAddress || depositAddress || 'escrow.uprail.near',
+      claimLink:
+        p.claimLink ??
+        res.claimLink ??
+        p.shareLink ??
+        res.shareLink ??
+        (res.isDirect ? '' : claimUrlFor(paymentId, p.inviteCode || res.inviteCode)),
+      isDirect: res.isDirect ?? p.isDirect,
+      claimTxHash: res.txHash ?? p.claimTxHash,
+      createdAt: p.createdAt || new Date().toISOString(),
+      expiresAt: p.expiresAt || new Date(Date.now() + 86400000 * 30).toISOString(),
+      contractMode: res.contractMode || p.contractMode,
+      escrowSendId: res.escrowSendId || p.escrowSendId,
+    };
+  },
+
+  async cancelPaymentServer(
+    paymentId: string,
+    passkeyAssertion?: unknown
+  ): Promise<{ success: boolean; paymentId: string; status: string; txHash?: string }> {
+    return custodyJson(`/api/payments/${encodeURIComponent(paymentId)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify(passkeyAssertion ? { passkeyAssertion } : {}),
+    });
+  },
+
+  async cancelPaymentSelfCustody(
+    paymentId: string,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{ success?: boolean; refunded?: boolean; paymentId?: string; status: string; txHash?: string }> {
+    const id = encodeURIComponent(paymentId);
+    try {
+      return await runCustodyFlow(
+        `/api/payments/${id}/cancel/prepare`,
+        `/api/payments/${id}/cancel/submit`,
+        {},
+        { onProgress }
+      );
+    } catch (err: any) {
+      if (err?.code === 'USE_STANDARD_CANCEL') {
+        onProgress?.('authorizing', 'Confirm with passkey to refund escrow payment…');
+        const opts = await api.getTxAuthOptions();
+        const { startAuthentication } = await import('@simplewebauthn/browser');
+        const assertion = await startAuthentication({
+          challenge: opts.challenge,
+          rpId: opts.rpId,
+          timeout: opts.timeout ?? 60000,
+          userVerification: 'preferred',
+        });
+        onProgress?.('submitting', 'Refunding payment…');
+        return await api.cancelPaymentServer(paymentId, assertion);
+      }
+      throw err;
+    }
+  },
+
+  async withdrawSelfCustody(
+    params: {
+      destinationAddress: string;
+      asset?: string;
+      amount?: string;
+      destinationChain?: string;
+    },
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{
+    success: boolean;
+    txHash: string;
+    withdrawalId?: string;
+    destinationAddress: string;
+    amount: string;
+    asset: string;
+    shareLink?: string;
+    message?: string;
+  }> {
+    return runCustodyFlow(
+      '/api/claim/withdraw/prepare',
+      '/api/claim/withdraw/submit',
+      params,
+      { onProgress }
+    );
+  },
+
+  async withdrawToNearcomSelfCustody(
+    params: { asset: string; amount: string; expectedDestination?: string },
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<NearcomWithdrawResponse> {
+    const res = await runCustodyFlow<any>(
+      '/api/claim/nearcom-withdraw/prepare',
+      '/api/claim/nearcom-withdraw/submit',
+      params,
+      { onProgress }
+    );
+    const dest =
+      res.destinationAddress ||
+      res.nearcomAddress ||
+      params.expectedDestination ||
+      '';
+    const status = res.status === 'COMPLETED' ? 'COMPLETED' : 'PENDING';
+    return {
+      success: Boolean(res.success ?? true),
+      withdrawalId: res.withdrawalId || '',
+      status,
+      txHash: res.txHash || '',
+      intentHash: res.intentHash || res.txHash || '',
+      destinationAddress: dest,
+      intentsAccountId: res.intentsAccountId || '',
+      asset: res.asset || params.asset,
+      amount: res.amount || params.amount,
+      privacy: 'confidential',
+      rail: 'nearcom_internal',
+      shareLink: res.shareLink,
+      message:
+        res.message ||
+        (status === 'COMPLETED'
+          ? `Withdrew ${params.amount} ${params.asset} confidentially to near.com`
+          : `Withdrawal submitted confidentially to near.com`),
+    };
+  },
+
+  async stabilizeAssetSelfCustody(
+    params: { sourceAsset: string; targetAsset: string; amount: string },
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<StabilizeResult> {
+    const res = await runCustodyFlow<any>(
+      '/api/onchain/stabilize/prepare',
+      '/api/onchain/stabilize/submit',
+      params,
+      { onProgress }
+    );
+    return (res?.result || res) as StabilizeResult;
+  },
+
+  async createCircleSelfCustody(
+    params: {
+      name: string;
+      purpose: import('../types').CirclePurpose;
+      customPurpose?: string;
+      note?: string;
+      targetAmountUsd: number | string;
+      vaultAsset: string;
+      payoutHandle?: string;
+      members: Array<{
+        handle: string;
+        shareBps?: number;
+        percentageShare?: number;
+      }>;
+      mode?: 'contract' | 'escrow';
+    },
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<CircleView> {
+    const res = await runCustodyFlow<any>(
+      '/api/circles/create/prepare',
+      '/api/circles/create/submit',
+      {
+        ...params,
+        targetAmountUsd: Number(params.targetAmountUsd),
+      },
+      { onProgress }
+    );
+    return res.circle as CircleView;
+  },
+
+  async joinCircleSelfCustody(
+    circleId: string,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<CircleView> {
+    const id = encodeURIComponent(circleId);
+    const res = await runCustodyFlow<any>(
+      `/api/circles/${id}/join/prepare`,
+      `/api/circles/${id}/join/submit`,
+      {},
+      { onProgress }
+    );
+    if (res?.circle) return res.circle as CircleView;
+    return api.getCircle(circleId);
+  },
+
+  async contributeToCircleSelfCustody(
+    params: { circleId: string; originAsset: string; amount: string },
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{
+    circle: CircleView;
+    sharesAdded: string;
+    txHash: string;
+    status?: 'COMPLETED' | 'PENDING_FUNDING';
+  }> {
+    const id = encodeURIComponent(params.circleId);
+    const res = await runCustodyFlow<any>(
+      `/api/circles/${id}/contribute/prepare`,
+      `/api/circles/${id}/contribute/submit`,
+      { sourceAsset: params.originAsset, amount: params.amount },
+      {
+        onProgress,
+        pollSwapStatus: (prep) =>
+          custodyJson(`/api/circles/${id}/contribute/swap-status`, {
+            method: 'POST',
+            body: JSON.stringify(prep),
+          }),
+      }
+    );
+    if (!res.circle) {
+      res.circle = await api.getCircle(params.circleId);
+    }
+    return res;
+  },
+
+  async settleCircleSelfCustody(
+    circleId: string,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void,
+    options?: { retry?: boolean }
+  ): Promise<{
+    circle: CircleView;
+    payoutTxHash: string;
+    feeTxHash: string;
+    payoutShares: string;
+    feeShares: string;
+  }> {
+    const id = encodeURIComponent(circleId);
+    if (options?.retry) {
+      return custodyJson(`/api/circles/${id}/settle/submit`, {
+        method: 'POST',
+        body: JSON.stringify({ retry: true }),
+      });
+    }
+    return runCustodyFlow(
+      `/api/circles/${id}/settle/prepare`,
+      `/api/circles/${id}/settle/submit`,
+      {},
+      { onProgress }
+    );
+  },
+
+  async dissolveCircleSelfCustody(
+    circleId: string,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void,
+    options?: { finalizeSafeguard?: boolean }
+  ): Promise<{
+    circle: CircleView;
+    allSigned: boolean;
+    refundedMembers: number;
+  }> {
+    const id = encodeURIComponent(circleId);
+    if (options?.finalizeSafeguard) {
+      return custodyJson(`/api/circles/${id}/dissolve/submit`, {
+        method: 'POST',
+        body: JSON.stringify({ finalizeSafeguard: true }),
+      });
+    }
+    return runCustodyFlow(
+      `/api/circles/${id}/dissolve/prepare`,
+      `/api/circles/${id}/dissolve/submit`,
+      {},
+      { onProgress }
+    );
+  },
+
+  async createGiftSelfCustody(
+    params: {
+      recipientHandle: string;
+      occasion: import('../types').GiftOccasion;
+      customOccasion?: string;
+      message?: string;
+      showAmount?: boolean;
+      vaultAsset: string;
+      originAsset: string;
+      amount: string;
+      timelockUntil: number | string;
+      mode?: 'contract' | 'escrow';
+    },
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<AuthenticatedGiftView> {
+    const occasionValue =
+      params.occasion === 'CUSTOM' && params.customOccasion?.trim()
+        ? `CUSTOM:${params.customOccasion.trim()}`
+        : params.occasion;
+    const timelockMs =
+      typeof params.timelockUntil === 'number'
+        ? params.timelockUntil
+        : new Date(params.timelockUntil).getTime();
+
+    const res = await runCustodyFlow<any>(
+      '/api/gifts/prepare',
+      '/api/gifts/submit',
+      {
+        recipientHandle: params.recipientHandle,
+        occasion: occasionValue,
+        message: params.message,
+        showAmount: params.showAmount,
+        vaultAsset: params.vaultAsset,
+        sourceAsset: params.originAsset,
+        amount: params.amount,
+        timelockUntil: timelockMs,
+        mode: params.mode,
+      },
+      {
+        onProgress,
+        pollSwapStatus: (prep) =>
+          custodyJson('/api/gifts/swap-status', {
+            method: 'POST',
+            body: JSON.stringify(prep),
+          }),
+      }
+    );
+    return res.gift as AuthenticatedGiftView;
+  },
+
+  async claimGiftSelfCustody(
+    giftId: string,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{
+    gift: AuthenticatedGiftView;
+    txHash: string;
+    sharesClaimed: string;
+  }> {
+    const id = encodeURIComponent(giftId);
+    return runCustodyFlow(
+      `/api/gifts/${id}/claim/prepare`,
+      `/api/gifts/${id}/claim/submit`,
+      {},
+      { onProgress }
+    );
+  },
+
+  async reclaimGiftSelfCustody(
+    giftId: string,
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{
+    gift?: AuthenticatedGiftView;
+    reclaimed?: boolean;
+    txHash?: string;
+  }> {
+    const id = encodeURIComponent(giftId);
+    return runCustodyFlow(
+      `/api/gifts/${id}/reclaim/prepare`,
+      `/api/gifts/${id}/reclaim/submit`,
+      {},
+      { onProgress }
+    );
+  },
+
+  async reclaimGiftServer(params: {
+    giftId: string;
+    passkeyAssertion: unknown;
+  }): Promise<{
+    gift: AuthenticatedGiftView;
+    txHash: string;
+    sharesClaimed: string;
+  }> {
+    return api.claimGift(params);
+  },
 };
+
+function runCustodyFlow<TResult = any>(
+  preparePath: string,
+  submitPath: string,
+  prepareBody: Record<string, unknown>,
+  opts?: {
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void;
+    pollSwapStatus?: (prep: {
+      depositAddress: string;
+      vaultAssetId?: string;
+      balanceBeforeAtomic?: string;
+    }) => Promise<{ status: string; readyToDeposit?: boolean }>;
+  }
+): Promise<TResult> {
+  return runSelfCustodyAction<TResult>({
+    prepare: () =>
+      custodyJson(preparePath, {
+        method: 'POST',
+        body: JSON.stringify(prepareBody),
+      }),
+    submit: (body) =>
+      custodyJson(submitPath, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    submitOneClickSession: (body) => api.submitOneClickWebAuthnSession(body),
+    pollSwapStatus: opts?.pollSwapStatus,
+    onProgress: opts?.onProgress,
+  });
+}
 
 /**
  * Normalizes any asset or contract ID into a clean display ticker (e.g. USDC).

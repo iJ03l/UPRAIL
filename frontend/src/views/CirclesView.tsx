@@ -23,6 +23,7 @@ import {
   Share2,
   CheckCircle2,
   Clock,
+  ShieldCheck,
 } from 'lucide-react';
 import { api, formatUsd } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
@@ -239,6 +240,71 @@ function StyledSelect<T extends string>({
   );
 }
 
+function CustodySettlementToggle({
+  isSelfCustody,
+  value,
+  onChange,
+  kindLabel,
+}: {
+  isSelfCustody: boolean;
+  value: 'contract' | 'escrow';
+  onChange: (next: 'contract' | 'escrow') => void;
+  kindLabel: string;
+}) {
+  if (!isSelfCustody) {
+    return (
+      <div className="px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-[11px] font-mono text-stone-600 flex items-center justify-between gap-2">
+        <span>Settlement: Standard Escrow Vault</span>
+        <span className="text-stone-400">Passkey Self-Custody optional in Settings</span>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-mono font-semibold uppercase text-stone-600">
+        Custody &amp; Settlement Mode
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => onChange('contract')}
+          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+            value === 'contract'
+              ? 'bg-emerald-50 border-emerald-400 text-emerald-950'
+              : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
+          }`}
+        >
+          <div className="flex items-center gap-1 text-xs font-display font-bold">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>On-Chain Contract</span>
+          </div>
+          <p className="text-[10px] font-mono text-stone-500 mt-0.5">
+            Non-custodial {kindLabel} bound to signer passkeys
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange('escrow')}
+          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+            value === 'escrow'
+              ? 'bg-stone-950 border-stone-950 text-white'
+              : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
+          }`}
+        >
+          <div className="text-xs font-display font-bold">Escrow Passthrough</div>
+          <p
+            className={`text-[10px] font-mono mt-0.5 ${
+              value === 'escrow' ? 'text-stone-300' : 'text-stone-500'
+            }`}
+          >
+            Standard escrow vault settlement (works with any @handle)
+          </p>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export const CirclesView: React.FC = () => {
   const { user } = useXAuth();
   const { balances, refresh: refreshOnchain } = useOnchainData();
@@ -275,6 +341,9 @@ export const CirclesView: React.FC = () => {
   const [circleMembers, setCircleMembers] = useState<Array<{ handle: string; percentage: string }>>([
     { handle: user?.handle || '', percentage: '100' },
   ]);
+  const [circleCreateMode, setCircleCreateMode] = useState<'contract' | 'escrow'>(
+    user?.custodyMode === 'self' ? 'contract' : 'escrow'
+  );
   const [isSubmittingCircle, setIsSubmittingCircle] = useState(false);
 
   // Contribute form state
@@ -294,9 +363,20 @@ export const CirclesView: React.FC = () => {
   const [giftTimelockLocal, setGiftTimelockLocal] = useState(() =>
     defaultTimelockForOccasion('BIRTHDAY')
   );
+  const [giftCreateMode, setGiftCreateMode] = useState<'contract' | 'escrow'>(
+    user?.custodyMode === 'self' ? 'contract' : 'escrow'
+  );
   const [giftQuote, setGiftQuote] = useState<GiftQuoteResult | null>(null);
   const [isQuotingGift, setIsQuotingGift] = useState(false);
   const [isSubmittingGift, setIsSubmittingGift] = useState(false);
+
+  // Default creation mode tracks loaded custodyMode without locking user overrides
+  useEffect(() => {
+    const defaultMode: 'contract' | 'escrow' =
+      user?.custodyMode === 'self' ? 'contract' : 'escrow';
+    setCircleCreateMode(defaultMode);
+    setGiftCreateMode(defaultMode);
+  }, [user?.custodyMode]);
 
   // Live 1-second ticker for gift countdowns
   useEffect(() => {
@@ -734,22 +814,37 @@ export const CirclesView: React.FC = () => {
 
     setIsSubmittingCircle(true);
     try {
-      const assertion = await authorizeWithPasskey(
-        `Create Circle "${circleName}" on ${circleVaultSymbol} Earn Vault`
-      );
-      const created = await api.createCircle({
-        name: circleName.trim(),
-        purpose: circlePurpose,
-        customPurpose: circlePurpose === 'CUSTOM' ? circleCustomPurpose.trim() : undefined,
-        targetAmountUsd: parseFloat(circleTargetUsd),
-        vaultAsset: circleVaultSymbol,
-        payoutHandle: user?.handle,
-        members: effectiveMembers.map((m) => ({
-          handle: m.handle.trim().replace(/^@+/, ''),
-          percentageShare: parseFloat(m.percentage),
-        })),
-        passkeyAssertion: assertion,
-      });
+      const cleanMembers = effectiveMembers.map((m) => ({
+        handle: m.handle.trim().replace(/^@+/, ''),
+        percentageShare: parseFloat(m.percentage),
+      }));
+      const created =
+        user?.custodyMode === 'self'
+          ? await api.createCircleSelfCustody({
+              name: circleName.trim(),
+              purpose: circlePurpose,
+              customPurpose:
+                circlePurpose === 'CUSTOM' ? circleCustomPurpose.trim() : undefined,
+              targetAmountUsd: parseFloat(circleTargetUsd),
+              vaultAsset: circleVaultSymbol,
+              payoutHandle: user?.handle,
+              members: cleanMembers,
+              mode: circleCreateMode,
+            })
+          : await api.createCircle({
+              name: circleName.trim(),
+              purpose: circlePurpose,
+              customPurpose:
+                circlePurpose === 'CUSTOM' ? circleCustomPurpose.trim() : undefined,
+              targetAmountUsd: parseFloat(circleTargetUsd),
+              vaultAsset: circleVaultSymbol,
+              payoutHandle: user?.handle,
+              members: cleanMembers,
+              mode: circleCreateMode,
+              passkeyAssertion: await authorizeWithPasskey(
+                `Create Circle "${circleName}" on ${circleVaultSymbol} Earn Vault`
+              ),
+            });
       setCircles((prev) => [created, ...prev]);
       setIsCreateCircleOpen(false);
       setCircleName('');
@@ -768,13 +863,15 @@ export const CirclesView: React.FC = () => {
   const handleJoinCircle = async (circle: CircleView) => {
     setIsActionBusyId(circle.id);
     try {
-      const assertion = await authorizeWithPasskey(
-        `Sign & Join Circle "${circle.name}" (${circle.vaultSymbol} Earn Vault)`
-      );
-      const updated = await api.joinCircle({
-        circleId: circle.id,
-        passkeyAssertion: assertion,
-      });
+      const updated =
+        user?.custodyMode === 'self'
+          ? await api.joinCircleSelfCustody(circle.id)
+          : await api.joinCircle({
+              circleId: circle.id,
+              passkeyAssertion: await authorizeWithPasskey(
+                `Sign & Join Circle "${circle.name}" (${circle.vaultSymbol} Earn Vault)`
+              ),
+            });
       setCircles((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
       toast(
         `Signed & joined ${updated.name}! You can add funds to your share at any point.`,
@@ -792,22 +889,32 @@ export const CirclesView: React.FC = () => {
     if (!contributeCircle) return;
     setIsSubmittingContrib(true);
     try {
-      const assertion = await authorizeWithPasskey(
-        `Add ${contribAmount} to ${contributeCircle.name}`
-      );
-      const res = await api.contributeToCircle({
-        circleId: contributeCircle.id,
-        originAsset: contribOriginAsset,
-        amount: contribAmount.trim(),
-        fundingMode: 'BALANCE',
-        passkeyAssertion: assertion,
-      });
+      const res =
+        user?.custodyMode === 'self'
+          ? await api.contributeToCircleSelfCustody({
+              circleId: contributeCircle.id,
+              originAsset: contribOriginAsset,
+              amount: contribAmount.trim(),
+            })
+          : await api.contributeToCircle({
+              circleId: contributeCircle.id,
+              originAsset: contribOriginAsset,
+              amount: contribAmount.trim(),
+              fundingMode: 'BALANCE',
+              passkeyAssertion: await authorizeWithPasskey(
+                `Add ${contribAmount} to ${contributeCircle.name}`
+              ),
+            });
       setCircles((prev) => prev.map((c) => (c.id === res.circle.id ? res.circle : c)));
       setContributeCircle(null);
       setContribAmount('');
       refreshOnchain();
+      const addedLabel =
+        (res as any).sharesAddedFormatted || (res as any).sharesAdded || contribAmount.trim();
       toast(
-        `Added ${res.sharesAddedFormatted} ${res.circle.vaultSymbol} into ${res.circle.name}!`,
+        (res as any).status === 'PENDING_FUNDING'
+          ? `Contribution submitted to ${res.circle.name}; awaiting vault settlement.`
+          : `Added ${addedLabel} ${res.circle.vaultSymbol} into ${res.circle.name}!`,
         'success'
       );
     } catch (err: any) {
@@ -820,17 +927,21 @@ export const CirclesView: React.FC = () => {
   const handleSettleCircle = async (circle: CircleView) => {
     setIsActionBusyId(circle.id);
     try {
-      const assertion = await authorizeWithPasskey(
-        `Settle Circle "${circle.name}" to @${circle.payoutHandle}`
-      );
-      const res = await api.settleCircle({
-        circleId: circle.id,
-        passkeyAssertion: assertion,
-      });
+      const res =
+        user?.custodyMode === 'self'
+          ? await api.settleCircleSelfCustody(circle.id)
+          : await api.settleCircle({
+              circleId: circle.id,
+              passkeyAssertion: await authorizeWithPasskey(
+                `Settle Circle "${circle.name}" to @${circle.payoutHandle}`
+              ),
+            });
       setCircles((prev) => prev.map((c) => (c.id === res.circle.id ? res.circle : c)));
       refreshOnchain();
+      const settledLabel = (res as any).sharesSettledFormatted || (res as any).payoutShares;
+      const settledPayout = (res as any).payoutHandle || circle.payoutHandle;
       toast(
-        `Settled ${res.sharesSettledFormatted} ${circle.vaultSymbol} (principal + yield) to @${res.payoutHandle}!`,
+        `Settled ${settledLabel} ${circle.vaultSymbol} (principal + yield) to @${settledPayout}!`,
         'success'
       );
     } catch (err: any) {
@@ -843,13 +954,15 @@ export const CirclesView: React.FC = () => {
   const handleDissolveCircle = async (circle: CircleView) => {
     setIsActionBusyId(circle.id);
     try {
-      const assertion = await authorizeWithPasskey(
-        `Activate dissolve for Circle "${circle.name}" (requires all contributors)`
-      );
-      const res = await api.dissolveCircle({
-        circleId: circle.id,
-        passkeyAssertion: assertion,
-      });
+      const res =
+        user?.custodyMode === 'self'
+          ? await api.dissolveCircleSelfCustody(circle.id)
+          : await api.dissolveCircle({
+              circleId: circle.id,
+              passkeyAssertion: await authorizeWithPasskey(
+                `Activate dissolve for Circle "${circle.name}" (requires all contributors)`
+              ),
+            });
       setCircles((prev) => prev.map((c) => (c.id === res.circle.id ? res.circle : c)));
       refreshOnchain();
       if (res.circle.status === 'DISSOLVED') {
@@ -894,22 +1007,38 @@ export const CirclesView: React.FC = () => {
 
     setIsSubmittingGift(true);
     try {
-      const assertion = await authorizeWithPasskey(
-        `Gift ${giftAmount} in ${giftVaultSymbol} Earn Vault to @${cleanRecip}`
-      );
-      const created = await api.createGift({
-        recipientHandle: cleanRecip,
-        occasion: giftOccasion,
-        customOccasion: giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
-        message: giftMessage.trim() || undefined,
-        showAmount: false,
-        vaultAsset: giftVaultSymbol,
-        originAsset: giftOriginAsset,
-        amount: giftAmount.trim(),
-        timelockUntil: unlockMs,
-        fundingMode: 'BALANCE',
-        passkeyAssertion: assertion,
-      });
+      const created =
+        user?.custodyMode === 'self'
+          ? await api.createGiftSelfCustody({
+              recipientHandle: cleanRecip,
+              occasion: giftOccasion,
+              customOccasion:
+                giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
+              message: giftMessage.trim() || undefined,
+              showAmount: false,
+              vaultAsset: giftVaultSymbol,
+              originAsset: giftOriginAsset,
+              amount: giftAmount.trim(),
+              timelockUntil: unlockMs,
+              mode: giftCreateMode,
+            })
+          : await api.createGift({
+              recipientHandle: cleanRecip,
+              occasion: giftOccasion,
+              customOccasion:
+                giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
+              message: giftMessage.trim() || undefined,
+              showAmount: false,
+              vaultAsset: giftVaultSymbol,
+              originAsset: giftOriginAsset,
+              amount: giftAmount.trim(),
+              timelockUntil: unlockMs,
+              fundingMode: 'BALANCE',
+              mode: giftCreateMode,
+              passkeyAssertion: await authorizeWithPasskey(
+                `Gift ${giftAmount} in ${giftVaultSymbol} Earn Vault to @${cleanRecip}`
+              ),
+            });
       setSentGifts((prev) => [created, ...prev]);
       setIsCreateGiftOpen(false);
       setGiftRecipient('');
@@ -930,22 +1059,72 @@ export const CirclesView: React.FC = () => {
 
   const handleClaimGift = async (gift: AuthenticatedGiftView) => {
     setIsActionBusyId(gift.id);
-    try {
-      const assertion = await authorizeWithPasskey(
-        `Unwrap & claim ${gift.sharesFormatted} ${gift.vaultSymbol} gift from @${gift.senderHandle}`
+    const myHandle = (user?.handle || '').toLowerCase();
+    const isSenderReclaim =
+      gift.role === 'SENDER' ||
+      Boolean(
+        gift.senderCanReclaim &&
+          myHandle === gift.senderHandle.toLowerCase() &&
+          myHandle !== gift.recipientHandle.toLowerCase()
       );
-      const res = await api.claimGift({
-        giftId: gift.id,
-        passkeyAssertion: assertion,
-      });
-      setReceivedGifts((prev) => prev.map((g) => (g.id === res.gift.id ? res.gift : g)));
+    const applyGiftUpdate = (updated: AuthenticatedGiftView) => {
+      setReceivedGifts((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+      setSentGifts((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+    };
+    try {
+      if (user?.custodyMode === 'self') {
+        if (isSenderReclaim) {
+          const res = await api.reclaimGiftSelfCustody(gift.id);
+          applyGiftUpdate(
+            res.gift || {
+              ...gift,
+              status: 'RECLAIMED',
+              canClaim: false,
+              senderCanReclaim: false,
+            }
+          );
+          refreshOnchain();
+          toast(`Reclaimed ${gift.vaultSymbol} gift back to your vault!`, 'success');
+        } else {
+          const res = await api.claimGiftSelfCustody(gift.id);
+          applyGiftUpdate(res.gift);
+          refreshOnchain();
+          toast(
+            `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) into your vault!`,
+            'success'
+          );
+        }
+        return;
+      }
+
+      const assertion = await authorizeWithPasskey(
+        isSenderReclaim
+          ? `Reclaim unclaimed ${gift.sharesFormatted} ${gift.vaultSymbol} gift`
+          : `Unwrap & claim ${gift.sharesFormatted} ${gift.vaultSymbol} gift from @${gift.senderHandle}`
+      );
+      const res = isSenderReclaim
+        ? await api.reclaimGiftServer({
+            giftId: gift.id,
+            passkeyAssertion: assertion,
+          })
+        : await api.claimGift({
+            giftId: gift.id,
+            passkeyAssertion: assertion,
+          });
+      applyGiftUpdate(res.gift);
       refreshOnchain();
       toast(
-        `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) into your vault!`,
+        isSenderReclaim
+          ? `Reclaimed ${res.sharesClaimed} ${res.gift.vaultSymbol} back to your vault!`
+          : `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) into your vault!`,
         'success'
       );
     } catch (err: any) {
-      toast(err?.message || 'Could not unwrap gift.', 'error');
+      toast(
+        err?.message ||
+          (isSenderReclaim ? 'Could not reclaim gift.' : 'Could not unwrap gift.'),
+        'error'
+      );
     } finally {
       setIsActionBusyId(null);
     }
@@ -1144,6 +1323,22 @@ export const CirclesView: React.FC = () => {
                         <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
                           {circle.vaultSymbol} • {circle.estimatedApyPct}% APY
                         </span>
+                        {circle.contractMode === 'contract' ? (
+                          <Link
+                            to={`/verify?kind=circle&id=${encodeURIComponent(
+                              circle.onchainCircleId || circle.id
+                            )}`}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100/80 hover:bg-emerald-200/80 border border-emerald-300 text-emerald-800 font-mono text-[10px] font-bold transition-colors"
+                            title="Inspect Circle signers and balances on circle.uprail.near"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Contract Verified</span>
+                          </Link>
+                        ) : circle.contractMode === 'escrow' ? (
+                          <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200 text-stone-600 font-mono text-[10px] font-bold">
+                            Escrow Vault
+                          </span>
+                        ) : null}
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -1497,6 +1692,8 @@ export const CirclesView: React.FC = () => {
                           <span>
                             {gift.status === 'CLAIMED'
                               ? 'Unwrapped & Claimed'
+                              : gift.status === 'RECLAIMED'
+                              ? 'Reclaimed by Sender'
                               : formatCountdown(gift.timelockUntil, nowMs)}
                           </span>
                         </div>
@@ -1505,14 +1702,27 @@ export const CirclesView: React.FC = () => {
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <Link
-                          to={`/gift/${gift.id}`}
-                          className="text-xs font-mono text-stone-500 hover:text-stone-900 inline-flex items-center gap-1"
-                        >
-                          <span>View Gift Card</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </Link>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <Link
+                            to={`/gift/${gift.id}`}
+                            className="text-xs font-mono text-stone-500 hover:text-stone-900 inline-flex items-center gap-1"
+                          >
+                            <span>View Gift Card</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </Link>
+                          {gift.contractMode === 'contract' && (
+                            <Link
+                              to={`/verify?kind=gift&id=${encodeURIComponent(
+                                gift.onchainGiftId || gift.id
+                              )}`}
+                              className="text-xs font-mono font-bold text-emerald-700 hover:text-emerald-900 inline-flex items-center gap-1"
+                            >
+                              <ShieldCheck className="w-3 h-3" />
+                              <span>Verify On-Chain</span>
+                            </Link>
+                          )}
+                        </div>
 
                         {gift.status === 'LOCKED' && (
                           <button
@@ -1603,21 +1813,39 @@ export const CirclesView: React.FC = () => {
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => handleCopyLink(gift.id, gift.shareUrl)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-mono text-stone-700 cursor-pointer"
-                      >
-                        {copiedId === gift.id ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                        <span>Copy SEO Gift Link</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyLink(gift.id, gift.shareUrl)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-mono text-stone-700 cursor-pointer"
+                        >
+                          {copiedId === gift.id ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                          <span>Copy SEO Gift Link</span>
+                        </button>
+                        {gift.contractMode === 'contract' ? (
+                          <Link
+                            to={`/verify?kind=gift&id=${encodeURIComponent(
+                              gift.onchainGiftId || gift.id
+                            )}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-mono font-bold"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Verify</span>
+                          </Link>
+                        ) : gift.contractMode === 'escrow' ? (
+                          <span className="px-2 py-1 rounded-lg bg-stone-100 border border-stone-200 text-stone-500 text-[10px] font-mono font-bold">
+                            Escrow
+                          </span>
+                        ) : null}
+                      </div>
 
                       <div className="flex flex-wrap items-center gap-2">
                         {(gift.canClaim ||
+                          gift.senderCanReclaim ||
                           (gift.status === 'LOCKED' &&
                             nowMs >= gift.timelockUntil + 30 * 24 * 60 * 60 * 1000)) && (
                           <button
@@ -1948,6 +2176,13 @@ export const CirclesView: React.FC = () => {
                   </div>
                 </div>
 
+                <CustodySettlementToggle
+                  isSelfCustody={user?.custodyMode === 'self'}
+                  value={circleCreateMode}
+                  onChange={setCircleCreateMode}
+                  kindLabel="Circle pool"
+                />
+
                 {circleValidation.hint && (
                   <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
                     {circleValidation.hint}
@@ -2275,6 +2510,13 @@ export const CirclesView: React.FC = () => {
                     className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm sm:text-xs font-normal"
                   />
                 </div>
+
+                <CustodySettlementToggle
+                  isSelfCustody={user?.custodyMode === 'self'}
+                  value={giftCreateMode}
+                  onChange={setGiftCreateMode}
+                  kindLabel="timelocked gift"
+                />
 
                 {giftValidation.hint && (
                   <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">

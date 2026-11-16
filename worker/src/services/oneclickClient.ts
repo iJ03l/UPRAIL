@@ -7,6 +7,7 @@
  */
 
 import type { Env } from '../types';
+import type { SignedWebAuthnPayload } from './selfCustodyCrypto';
 
 export type OneClickConfidentiality = 'public' | 'basic' | 'advanced';
 export type OneClickDepositType = 'ORIGIN_CHAIN' | 'INTENTS' | 'CONFIDENTIAL_INTENTS';
@@ -80,15 +81,18 @@ export interface OneClickIntentPayload {
 export interface OneClickGeneratedIntent {
   standard: string;
   payload: OneClickIntentPayload;
+  rawPayload?: string;
   correlationId?: string;
 }
 
-export interface OneClickMultiPayload {
-  standard: 'nep413';
-  payload: OneClickIntentPayload;
-  public_key: string;
-  signature: string;
-}
+export type OneClickMultiPayload =
+  | {
+      standard: 'nep413';
+      payload: OneClickIntentPayload;
+      public_key: string;
+      signature: string;
+    }
+  | SignedWebAuthnPayload;
 
 export interface OneClickAuthSession {
   accessToken: string;
@@ -416,12 +420,48 @@ export async function generateSwapIntent(
     'generate-intent'
   );
   const intent = requireObject(raw.intent, 'generate-intent.intent');
+  const standard = stringValue(intent.standard);
+  if (!standard) {
+    throw new OneClickError(
+      '1Click generate-intent returned no signing standard',
+      502,
+      'ONE_CLICK_BAD_INTENT'
+    );
+  }
+  if (typeof intent.payload === 'string') {
+    const rawPayload = intent.payload;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(rawPayload) as Record<string, unknown>;
+    } catch {
+      throw new OneClickError(
+        '1Click generate-intent returned non-JSON string payload',
+        502,
+        'ONE_CLICK_BAD_INTENT'
+      );
+    }
+    const nonce = stringValue(parsed.nonce);
+    const recipient = stringValue(parsed.verifying_contract) || 'intents.near';
+    if (!rawPayload || !nonce) {
+      throw new OneClickError(
+        '1Click generate-intent string payload missing nonce',
+        502,
+        'ONE_CLICK_BAD_INTENT'
+      );
+    }
+    return {
+      standard,
+      rawPayload,
+      payload: { message: rawPayload, nonce, recipient },
+      correlationId: stringValue(raw.correlationId),
+    };
+  }
+
   const payload = requireObject(intent.payload, 'generate-intent.payload');
   const message = stringValue(payload.message);
   const nonce = stringValue(payload.nonce);
   const recipient = stringValue(payload.recipient);
-  const standard = stringValue(intent.standard);
-  if (!message || !nonce || !recipient || !standard) {
+  if (!message || !nonce || !recipient) {
     throw new OneClickError(
       '1Click generate-intent returned no signable payload',
       502,

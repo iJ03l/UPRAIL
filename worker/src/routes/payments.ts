@@ -24,7 +24,7 @@ import { signQuote, verifyQuoteToken } from '../services/quoteAuth';
 import { requireQuoteSecret } from '../utils/secrets';
 import { resolveOrigin } from '../services/webauthnConfig';
 import { createPaymentInvite } from '../services/inviteService';
-import { requireAuth } from '../middleware/session';
+import { requireAuth, updateSession } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { publicErrorMessage } from '../utils/errors';
 import {
@@ -40,20 +40,37 @@ import {
 } from '../services/confidentialRail';
 import { background } from '../utils/background';
 import { resolveAccount } from '../services/accountResolver';
+import { handleCustodyActionError } from '../utils/custodyResponse';
+import {
+  prepareSelfCustodySend,
+  submitSelfCustodySend,
+  type PrepareSendInput,
+} from '../services/selfCustodyActions';
+import {
+  canonicalUnclaimedRefundPayload,
+  getCircleContractId,
+  getUnclaimedSendOnchain,
+  refundUnclaimedSendOnchain,
+  webAuthnToContractProof,
+} from '../services/circleContract';
+import {
+  consumeAndVerifyWebAuthnPendingAction,
+  createPendingCustodyAction,
+} from '../services/custodyService';
 
 export const paymentsRouter = new Hono<AppContext>();
 
 /**
  * Normalizes an X handle by stripping whitespace, leading @ and lowercasing
  */
-function normalizeHandle(rawHandle: string): string {
+export function normalizeHandle(rawHandle: string): string {
   return rawHandle.trim().replace(/^@+/, '').toLowerCase();
 }
 
 /**
  * Validates X handle format (1-15 characters: letters, numbers, underscores)
  */
-function isValidXHandle(handle: string): boolean {
+export function isValidXHandle(handle: string): boolean {
   return /^[a-zA-Z0-9_]{1,15}$/.test(handle);
 }
 
@@ -72,7 +89,7 @@ const IMPLICIT_ACCOUNT_RE = /^[0-9a-f]{64}$/;
  * (EVM/NEAR named accounts are case-insensitive → lowercase; Solana base58
  * and 64-hex implicit accounts are case-sensitive → preserved).
  */
-function classifyRecipient(raw: string): { isAddress: boolean; value: string } {
+export function classifyRecipient(raw: string): { isAddress: boolean; value: string } {
   const t = raw.trim();
   if (EVM_ADDRESS_RE.test(t)) return { isAddress: true, value: t.toLowerCase() };
   if (IMPLICIT_ACCOUNT_RE.test(t)) return { isAddress: true, value: t };
@@ -510,6 +527,19 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     }
 
     const session = c.get('session');
+    if (session) {
+      const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+      if (custody?.custodyMode === 'self') {
+        return c.json<ErrorResponse>(
+          {
+            error:
+              'Self-custody accounts must authorize payments directly with a passkey signature via /api/payments/send/prepare and /api/payments/send/submit.',
+            code: 'SELF_CUSTODY_SIGNATURE_REQUIRED',
+          },
+          409
+        );
+      }
+    }
     paymentId = crypto.randomUUID();
     const now = Date.now();
     const expiryDays = parseInt(c.env.PAYMENT_EXPIRY_DAYS || '30', 10);
@@ -1379,6 +1409,48 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
 // path is identical for both callers.
 paymentsRouter.post('/send', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), handleSendPayment);
 
+// Self-custody send: single-tap passkey signs the on-chain or 1Click payload
+// directly without using server-derived user keys.
+paymentsRouter.post('/send/prepare', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const body = await c.req.json<PrepareSendInput>().catch(() => null);
+    if (!body) {
+      return c.json<ErrorResponse>({ error: 'Invalid request body', code: 'INVALID_REQUEST' }, 400);
+    }
+    const prepared = await prepareSelfCustodySend(c.env, session, body);
+    return c.json(prepared);
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_PREPARE_FAILED', '[payments/send/prepare]');
+  }
+});
+
+paymentsRouter.post('/send/submit', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const body = await c.req
+      .json<{ actionId?: string; assertion?: unknown; step?: string }>()
+      .catch(() => null);
+    if (!body?.actionId || !body?.assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion', code: 'INVALID_REQUEST' },
+        400
+      );
+    }
+    const result = await submitSelfCustodySend({
+      env: c.env,
+      session,
+      actionId: body.actionId,
+      assertion: body.assertion,
+      step: body.step,
+    });
+    await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+    return c.json(result);
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_SUBMIT_FAILED', '[payments/send/submit]');
+  }
+});
+
 /**
  * GET /api/payments
  * Lists sender's payment history from D1 (requires session)
@@ -1530,6 +1602,20 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth({ passkeyVerified: true 
       );
     }
 
+    if (payment.contract_mode === 'contract' && payment.escrow_send_id) {
+      const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+      if (custody.custodyMode === 'self') {
+        return c.json(
+          {
+            error: 'Passkey signature required to refund this self-custody contract escrow.',
+            code: 'SELF_CUSTODY_SIGNATURE_REQUIRED',
+            prepareEndpoint: `/api/payments/${id}/cancel/prepare`,
+          },
+          409
+        );
+      }
+    }
+
     const refund = await refundEscrowedPayment(c.env, payment);
     if (refund.alreadyRefunded) {
       return c.json({ success: true, paymentId: id, status: PaymentStatus.REFUNDED });
@@ -1557,5 +1643,188 @@ paymentsRouter.post('/payments/:id/cancel', requireAuth({ passkeyVerified: true 
       { error: publicErrorMessage(err, 'Failed to cancel payment'), code: 'CANCEL_ERROR' },
       500
     );
+  }
+});
+
+paymentsRouter.post('/payments/:id/cancel/prepare', requireAuth(), async (c) => {
+  try {
+    const id = c.req.param('id');
+    const session = c.get('session')!;
+    const payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?')
+      .bind(id)
+      .first<Payment>();
+    if (!payment) {
+      return c.json<ErrorResponse>({ error: 'Payment not found', code: 'NOT_FOUND' }, 404);
+    }
+    if (!payment.sender_x_id || payment.sender_x_id !== session.x_id) {
+      return c.json<ErrorResponse>({ error: 'Forbidden', code: 'FORBIDDEN' }, 403);
+    }
+    if (payment.status !== PaymentStatus.ESCROWED) {
+      return c.json<ErrorResponse>(
+        { error: `Payment in status ${payment.status} cannot be cancelled`, code: 'INVALID_STATUS' },
+        400
+      );
+    }
+    if (payment.contract_mode !== 'contract' || !payment.escrow_send_id) {
+      return c.json<ErrorResponse>(
+        { error: 'Standard escrow payments cancel directly via POST /api/payments/:id/cancel', code: 'USE_STANDARD_CANCEL' },
+        400
+      );
+    }
+
+    const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+    if (custody.custodyMode !== 'self' || !custody.nearAccount) {
+      return c.json<ErrorResponse>(
+        { error: 'Self-custody account required for passkey contract cancel', code: 'NOT_SELF_CUSTODY' },
+        400
+      );
+    }
+    const contractId = payment.escrow_contract_id || getCircleContractId(c.env);
+    if (!contractId) {
+      return c.json<ErrorResponse>({ error: 'CIRCLE_CONTRACT_ID missing', code: 'CONFIG_ERROR' }, 500);
+    }
+    const onchainSend = await getUnclaimedSendOnchain(c.env, payment.escrow_send_id, contractId).catch(() => null);
+    const senderAccount = onchainSend?.sender_account_id || custody.nearAccount;
+    const requiredPubkey = onchainSend?.sender_pubkey || undefined;
+
+    const payloadStr = canonicalUnclaimedRefundPayload({
+      contractId,
+      sendId: payment.escrow_send_id,
+      senderAccountId: senderAccount,
+    });
+    const pending = await createPendingCustodyAction({
+      env: c.env,
+      xId: session.x_id,
+      actionType: 'UNCLAIMED_SEND_REFUND',
+      payloadStr,
+      meta: {
+        paymentId: id,
+        contractId,
+        sendId: payment.escrow_send_id,
+        senderAccountId: senderAccount,
+        senderPubkey: requiredPubkey || null,
+      },
+      requireOnchainPasskey: true,
+      requiredPubkey,
+    });
+
+    return c.json({
+      step: 'cancel' as const,
+      ...pending,
+      summary: {
+        paymentId: id,
+        recipientHandle: payment.recipient_handle,
+        amount: payment.amount,
+        asset: payment.asset,
+      },
+    });
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'CANCEL_PREPARE_FAILED', '[payments/cancel/prepare]');
+  }
+});
+
+paymentsRouter.post('/payments/:id/cancel/submit', requireAuth(), async (c) => {
+  try {
+    const id = c.req.param('id');
+    const session = c.get('session')!;
+    const body = await c.req.json<{ actionId?: string; assertion?: unknown }>().catch(() => null);
+    if (!body?.actionId || !body?.assertion) {
+      return c.json<ErrorResponse>({ error: 'Missing actionId or assertion', code: 'INVALID_REQUEST' }, 400);
+    }
+
+    const rowPeek = await c.env.DB.prepare('SELECT meta_json FROM pending_custody_actions WHERE id = ? AND x_id = ?')
+      .bind(body.actionId, session.x_id)
+      .first<{ meta_json: string | null }>();
+    let expectedPubkey: string | undefined;
+    try {
+      const parsed = rowPeek?.meta_json ? JSON.parse(rowPeek.meta_json) : null;
+      if (parsed?.senderPubkey) expectedPubkey = String(parsed.senderPubkey);
+    } catch {}
+
+    const { signedWebAuthn, meta } = await consumeAndVerifyWebAuthnPendingAction<{
+      paymentId: string;
+      contractId: string;
+      sendId: string;
+      senderAccountId: string;
+      senderPubkey: string | null;
+    }>({
+      env: c.env,
+      xId: session.x_id,
+      actionId: body.actionId,
+      assertion: body.assertion,
+      expectedActionType: 'UNCLAIMED_SEND_REFUND',
+      requireOnchainPasskey: true,
+      requiredPubkey: expectedPubkey,
+    });
+
+    if (meta.paymentId !== id) {
+      return c.json<ErrorResponse>({ error: 'Prepared cancel does not match payment ID', code: 'PAYMENT_MISMATCH' }, 400);
+    }
+
+    const payment = await c.env.DB.prepare('SELECT * FROM payments WHERE id = ?').bind(id).first<Payment>();
+    if (!payment || payment.sender_x_id !== session.x_id) {
+      return c.json<ErrorResponse>({ error: 'Payment not found', code: 'NOT_FOUND' }, 404);
+    }
+    if (payment.status === PaymentStatus.REFUNDED) {
+      return c.json({ success: true, paymentId: id, status: PaymentStatus.REFUNDED, txHash: payment.refund_tx_hash });
+    }
+    if (payment.status !== PaymentStatus.ESCROWED) {
+      return c.json<ErrorResponse>(
+        { error: `Payment in status ${payment.status} cannot be cancelled`, code: 'INVALID_STATUS' },
+        400
+      );
+    }
+
+    const reserve = await c.env.DB.prepare(
+      'UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?'
+    )
+      .bind(PaymentStatus.REFUNDED, Date.now(), id, PaymentStatus.ESCROWED)
+      .run();
+    if ((reserve.meta?.changes ?? 0) === 0) {
+      return c.json<ErrorResponse>({ error: 'Payment is no longer escrowed', code: 'INVALID_STATUS' }, 409);
+    }
+
+    const res = await refundUnclaimedSendOnchain(
+      c.env,
+      {
+        send_id: meta.sendId,
+        sender_proof: webAuthnToContractProof(signedWebAuthn),
+      },
+      meta.contractId
+    );
+    if (!res.success || !res.txHash) {
+      if (res.ambiguous) {
+        await c.env.DB.prepare('UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?')
+          .bind(PaymentStatus.REFUND_REVIEW, Date.now(), id, PaymentStatus.REFUNDED)
+          .run()
+          .catch(() => {});
+        return c.json<ErrorResponse>({ error: 'Refund broadcast outcome unknown; marked for review', code: 'CANCEL_AMBIGUOUS' }, 502);
+      }
+      await c.env.DB.prepare('UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?')
+        .bind(PaymentStatus.ESCROWED, Date.now(), id, PaymentStatus.REFUNDED)
+        .run()
+        .catch(() => {});
+      return c.json<ErrorResponse>(
+        { error: publicErrorMessage(new Error(res.error || ''), 'Contract refund failed'), code: 'CANCEL_REFUND_FAILED' },
+        502
+      );
+    }
+
+    await c.env.DB.prepare(
+      'UPDATE payments SET refund_tx_hash = ?, updated_at = ? WHERE id = ? AND status = ?'
+    )
+      .bind(res.txHash, Date.now(), id, PaymentStatus.REFUNDED)
+      .run()
+      .catch(() => {});
+
+    await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+    return c.json({
+      success: true,
+      paymentId: id,
+      status: PaymentStatus.REFUNDED,
+      txHash: res.txHash,
+    });
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'CANCEL_SUBMIT_FAILED', '[payments/cancel/submit]');
   }
 });

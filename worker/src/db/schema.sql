@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS x_identities (
   invited_by_handle TEXT,
   avatar_url TEXT,
   coffee_enabled INTEGER NOT NULL DEFAULT 0,
+  custody_mode TEXT NOT NULL DEFAULT 'server',
+  backup_pubkey TEXT,
+  self_custody_at INTEGER,
+  self_custody_version INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -20,6 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_x_identities_handle ON x_identities(x_handle);
 CREATE INDEX IF NOT EXISTS idx_x_identities_near ON x_identities(near_account);
 CREATE INDEX IF NOT EXISTS idx_x_identities_activated ON x_identities(is_activated);
 CREATE INDEX IF NOT EXISTS idx_x_identities_coffee ON x_identities(coffee_enabled);
+CREATE INDEX IF NOT EXISTS idx_x_identities_custody ON x_identities(custody_mode);
 
 -- Passkeys: WebAuthn credentials bound to X identities for claiming
 CREATE TABLE IF NOT EXISTS passkeys (
@@ -27,6 +32,8 @@ CREATE TABLE IF NOT EXISTS passkeys (
   x_id TEXT NOT NULL,
   credential_id TEXT NOT NULL UNIQUE,
   public_key TEXT NOT NULL,
+  near_p256_pubkey TEXT,
+  onchain_added_at INTEGER,
   counter INTEGER NOT NULL DEFAULT 0,
   transports TEXT,
   created_at INTEGER NOT NULL,
@@ -35,6 +42,7 @@ CREATE TABLE IF NOT EXISTS passkeys (
 
 CREATE INDEX IF NOT EXISTS idx_passkeys_x_id ON passkeys(x_id);
 CREATE INDEX IF NOT EXISTS idx_passkeys_cred_id ON passkeys(credential_id);
+CREATE INDEX IF NOT EXISTS idx_passkeys_near_pubkey ON passkeys(near_p256_pubkey);
 
 -- Recovery codes: one-time HMAC digests that can replace a lost passkey.
 CREATE TABLE IF NOT EXISTS recovery_codes (
@@ -82,6 +90,9 @@ CREATE TABLE IF NOT EXISTS payments (
   privacy_rail TEXT NOT NULL DEFAULT 'public',
   settlement_status TEXT,
   claim_deposit_address TEXT,
+  contract_mode TEXT NOT NULL DEFAULT 'escrow',
+  escrow_contract_id TEXT,
+  escrow_send_id TEXT,
   confirmed_at INTEGER,
   claim_tx_hash TEXT,
   refund_tx_hash TEXT,
@@ -449,6 +460,9 @@ CREATE TABLE IF NOT EXISTS gifts (
   gross_atomic TEXT NOT NULL,
   principal_usd_cents INTEGER NOT NULL,
   custody_account TEXT NOT NULL,
+  contract_mode TEXT NOT NULL DEFAULT 'escrow',
+  escrow_contract_id TEXT,
+  onchain_gift_id TEXT,
   deposit_address TEXT,
   deposit_memo TEXT,
   quoted_shares_atomic TEXT NOT NULL,
@@ -486,7 +500,12 @@ CREATE TABLE IF NOT EXISTS circles (
   vault_decimals INTEGER NOT NULL,
   payout_handle TEXT NOT NULL,
   custody_account TEXT NOT NULL,
+  contract_mode TEXT NOT NULL DEFAULT 'escrow',
+  escrow_contract_id TEXT,
+  onchain_circle_id TEXT,
   status TEXT NOT NULL DEFAULT 'ACTIVE',
+  dissolve_initiated_at INTEGER,
+  dissolve_deadline_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   closed_at INTEGER,
@@ -505,6 +524,9 @@ CREATE TABLE IF NOT EXISTS circle_members (
   quota_usd_cents INTEGER NOT NULL,
   contributed_usd_cents INTEGER NOT NULL DEFAULT 0,
   shares_atomic TEXT NOT NULL DEFAULT '0',
+  p256_pubkey TEXT,
+  terms_signed_at INTEGER,
+  dissolve_signed_at INTEGER,
   refunded_at INTEGER,
   refund_tx_hash TEXT,
   joined_at INTEGER,
@@ -545,3 +567,21 @@ CREATE TABLE IF NOT EXISTS circle_contributions (
 CREATE INDEX IF NOT EXISTS idx_circle_contrib_circle ON circle_contributions(circle_id, status);
 CREATE INDEX IF NOT EXISTS idx_circle_contrib_member ON circle_contributions(member_id);
 CREATE INDEX IF NOT EXISTS idx_circle_contrib_status ON circle_contributions(status, updated_at);
+
+-- Single-use prepared WebAuthn custody & transaction signing challenges
+CREATE TABLE IF NOT EXISTS pending_custody_actions (
+  id TEXT PRIMARY KEY,
+  x_id TEXT NOT NULL,
+  action_type TEXT NOT NULL,
+  challenge_digest TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  meta_json TEXT,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(x_id) REFERENCES x_identities(x_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_custody_x_id ON pending_custody_actions(x_id, used_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_pending_custody_digest ON pending_custody_actions(challenge_digest);
+

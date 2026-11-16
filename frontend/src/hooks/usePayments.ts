@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Token, PaymentQuote, PaymentIntent } from '../types';
 import { api, SUPPORTED_TOKENS, normalizeRecipientInput, tokenUsdPrice } from '../lib/api';
+import { triggerNativeL1TwoStepPrompt } from '../lib/selfCustody';
 import { usePasskeyTxAuth } from './usePasskeyTxAuth';
+import { useXAuth } from './useXAuth';
 import { useOnchainData, persistCache, globalCache } from './useOnchainData';
 
 const HISTORY_CACHE_KEY = 'uprail_payment_history_cache';
@@ -19,6 +21,7 @@ let globalHistoryCache: PaymentIntent[] = (() => {
 export type TxStage = 'idle' | 'authorizing' | 'sending';
 
 export function usePayments() {
+  const { user } = useXAuth();
   const { authorizeWithPasskey } = usePasskeyTxAuth();
   const { tokens: onchainTokens, balances, balancesError, refreshBalances } = useOnchainData();
 
@@ -207,7 +210,39 @@ export function usePayments() {
     [tokens]
   );
 
-  // Send confidential payment (authorized by device Passkey)
+  const deductBalanceOptimistically = (tokenId: string, symbol: string, amountStr: string) => {
+    const amt = parseFloat(amountStr) || 0;
+    if (amt <= 0 || !Array.isArray(globalCache.balances)) return;
+    const updatedBalances = globalCache.balances.map((b) => {
+      if (
+        b.symbol.toLowerCase() === symbol.toLowerCase() ||
+        b.defuse_asset_id?.toLowerCase() === tokenId.toLowerCase()
+      ) {
+        const currentFormatted = parseFloat(b.amountFormatted) || 0;
+        const newFormatted = Math.max(0, currentFormatted - amt);
+        return {
+          ...b,
+          amountFormatted: newFormatted.toFixed(Math.min(6, b.decimals || 6)),
+        };
+      }
+      return b;
+    });
+    persistCache({ balances: updatedBalances });
+  };
+
+  const shouldUseNativeL1TwoStep = (tokenId: string, token?: Token) => {
+    const tIdLower = tokenId.toLowerCase();
+    if (quote?.token?.id?.toLowerCase() === tIdLower && quote?.rail === 'native') return true;
+    if (token?.category === 'memes') return true;
+    return balances.some(
+      (b) =>
+        Boolean(b.isPlainOnly) &&
+        (b.defuse_asset_id?.toLowerCase() === tIdLower ||
+          (token?.nearContractId && b.nearContractId?.toLowerCase() === token.nearContractId.toLowerCase()))
+    );
+  };
+
+  // Send payment (routes Self-Custody through prepare/submit + 2-step Native L1 when applicable)
   const sendPayment = async (
     recipientHandle: string,
     amount: string,
@@ -226,48 +261,77 @@ export function usePayments() {
         throw new Error('Please enter a valid amount to send');
       }
 
-      // Step 1: Prompt hardware passkey to authorize fund movement
-      let assertion: unknown = undefined;
-      try {
-        assertion = await authorizeWithPasskey(`Send ${amount} ${selectedToken.symbol} to @${cleanHandle}`);
-      } catch (authErr: any) {
-        const msg = authErr?.message || 'Passkey authorization cancelled';
-        setError(msg);
-        throw new Error(msg);
-      }
+      let payment: PaymentIntent;
 
-      // Step 2: Passkey authorized. Now send payment intent to network
-      setTxStage('sending');
-      const payment = await api.createPayment({
-        recipientHandle: cleanHandle,
-        tokenId: selectedToken.id,
-        amount,
-        memo,
-        passkeyAssertion: assertion,
-        token: selectedToken,
-      });
+      if (user?.custodyMode === 'self') {
+        const matchingQuote =
+          quote?.token?.id?.toLowerCase() === selectedToken.id.toLowerCase() &&
+          quote.amount === amount
+            ? quote
+            : null;
+        payment = await api.sendPaymentSelfCustody(
+          {
+            recipientHandle: cleanHandle,
+            tokenId: selectedToken.id,
+            amount,
+            memo,
+            quoteSignature: matchingQuote?.quoteSignature,
+            depositAddress: matchingQuote?.depositAddress,
+            token: selectedToken,
+          },
+          (stage) => setTxStage(stage === 'submitting' ? 'sending' : 'authorizing')
+        );
+      } else if (shouldUseNativeL1TwoStep(selectedToken.id, selectedToken)) {
+        const opts = await api.getTxAuthOptions();
+        payment = await triggerNativeL1TwoStepPrompt<PaymentIntent>({
+          prepared: {
+            step: 'native_auth',
+            operation: 'native_send',
+            symbol: selectedToken.symbol,
+            amount,
+            target: `@${cleanHandle}`,
+            nearAccount: user?.nearAccount || undefined,
+            actionId: 'tx_auth_native_send',
+            options: opts,
+            summary: `${selectedToken.symbol} settles on NEAR L1. Step 1 signs with your passkey; Step 2 authorizes your NEAR L1 key to transfer ${amount} ${selectedToken.symbol}.`,
+          },
+          submitAuthorized: async (assertion) => {
+            setTxStage('sending');
+            return await api.createPayment({
+              recipientHandle: cleanHandle,
+              tokenId: selectedToken.id,
+              amount,
+              memo,
+              passkeyAssertion: assertion,
+              token: selectedToken,
+            });
+          },
+        });
+      } else {
+        // Step 1: Prompt hardware passkey to authorize fund movement
+        let assertion: unknown = undefined;
+        try {
+          assertion = await authorizeWithPasskey(`Send ${amount} ${selectedToken.symbol} to @${cleanHandle}`);
+        } catch (authErr: any) {
+          const msg = authErr?.message || 'Passkey authorization cancelled';
+          setError(msg);
+          throw new Error(msg);
+        }
+
+        // Step 2: Passkey authorized. Now send payment intent to network
+        setTxStage('sending');
+        payment = await api.createPayment({
+          recipientHandle: cleanHandle,
+          tokenId: selectedToken.id,
+          amount,
+          memo,
+          passkeyAssertion: assertion,
+          token: selectedToken,
+        });
+      }
 
       setCreatedPayment(payment);
-
-      // Optimistically deduct the sent amount from local cache so balance reflects immediately
-      const sendAmt = parseFloat(amount) || 0;
-      if (sendAmt > 0 && Array.isArray(globalCache.balances)) {
-        const updatedBalances = globalCache.balances.map((b) => {
-          if (
-            b.symbol.toLowerCase() === selectedToken.symbol.toLowerCase() ||
-            b.defuse_asset_id?.toLowerCase() === selectedToken.id.toLowerCase()
-          ) {
-            const currentFormatted = parseFloat(b.amountFormatted) || 0;
-            const newFormatted = Math.max(0, currentFormatted - sendAmt);
-            return {
-              ...b,
-              amountFormatted: newFormatted.toFixed(Math.min(6, b.decimals || 6)),
-            };
-          }
-          return b;
-        });
-        persistCache({ balances: updatedBalances });
-      }
+      deductBalanceOptimistically(selectedToken.id, selectedToken.symbol, amount);
 
       // Refresh history & balances
       loadHistory();
@@ -284,13 +348,7 @@ export function usePayments() {
   };
 
   /**
-   * "Send to Wallet": settles from the caller's OWN shielded balance to an
-   * external chain address (NEAR / EVM / Solana / Bitcoin) through the 1Click
-   * withdrawal path.
-   *
-   * Deliberately NOT createPayment(): a payment addressed to a raw wallet
-   * address has no recipient handle and no x_identities row, so nothing could
-   * ever claim it — the funds would sit in escrow until expiry.
+   * "Send to Wallet": settles from the caller's balance to an external chain address.
    */
   const sendToWallet = async (
     destinationAddress: string,
@@ -312,47 +370,73 @@ export function usePayments() {
       }
 
       const tokenId = asset || selectedToken.id;
-      let assertion: unknown = undefined;
-      try {
-        assertion = await authorizeWithPasskey(
-          `Send ${amount} ${selectedToken.symbol} to ${destination}`
+      const targetToken = tokens.find((t) => t.id.toLowerCase() === tokenId.toLowerCase()) || selectedToken;
+
+      let result: {
+        txHash: string;
+        withdrawalId?: string;
+        destinationAddress: string;
+        shareLink?: string;
+      };
+
+      if (user?.custodyMode === 'self') {
+        result = await api.withdrawSelfCustody(
+          {
+            destinationAddress: destination,
+            asset: tokenId,
+            amount,
+            destinationChain,
+          },
+          (stage) => setTxStage(stage === 'submitting' ? 'sending' : 'authorizing')
         );
-      } catch (authErr: any) {
-        const msg = authErr?.message || 'Passkey authorization cancelled';
-        setError(msg);
-        throw new Error(msg);
-      }
-
-      // Step 2: Passkey authorized. Now send withdrawal to network
-      setTxStage('sending');
-      const result = await api.withdraw({
-        destinationAddress: destination,
-        asset: tokenId,
-        amount,
-        destinationChain,
-        passkeyAssertion: assertion,
-      });
-
-      // Optimistically deduct withdrawn amount from local cache so balance reflects immediately
-      const withdrawAmt = parseFloat(amount) || 0;
-      if (withdrawAmt > 0 && Array.isArray(globalCache.balances)) {
-        const updatedBalances = globalCache.balances.map((b) => {
-          if (
-            b.symbol.toLowerCase() === selectedToken.symbol.toLowerCase() ||
-            b.defuse_asset_id?.toLowerCase() === tokenId.toLowerCase()
-          ) {
-            const currentFormatted = parseFloat(b.amountFormatted) || 0;
-            const newFormatted = Math.max(0, currentFormatted - withdrawAmt);
-            return {
-              ...b,
-              amountFormatted: newFormatted.toFixed(Math.min(6, b.decimals || 6)),
-            };
-          }
-          return b;
+      } else if (shouldUseNativeL1TwoStep(tokenId, targetToken)) {
+        const opts = await api.getTxAuthOptions();
+        result = await triggerNativeL1TwoStepPrompt({
+          prepared: {
+            step: 'native_auth',
+            operation: 'native_withdraw',
+            symbol: targetToken.symbol,
+            amount,
+            target: destination,
+            nearAccount: user?.nearAccount || undefined,
+            actionId: 'tx_auth_native_withdraw',
+            options: opts,
+            summary: `${targetToken.symbol} withdraws over NEAR L1. Step 1 signs with your passkey; Step 2 authorizes your NEAR L1 key to transfer ${amount} ${targetToken.symbol} to ${destination}.`,
+          },
+          submitAuthorized: async (assertion) => {
+            setTxStage('sending');
+            return await api.withdraw({
+              destinationAddress: destination,
+              asset: tokenId,
+              amount,
+              destinationChain,
+              passkeyAssertion: assertion,
+            });
+          },
         });
-        persistCache({ balances: updatedBalances });
+      } else {
+        let assertion: unknown = undefined;
+        try {
+          assertion = await authorizeWithPasskey(
+            `Send ${amount} ${targetToken.symbol} to ${destination}`
+          );
+        } catch (authErr: any) {
+          const msg = authErr?.message || 'Passkey authorization cancelled';
+          setError(msg);
+          throw new Error(msg);
+        }
+
+        setTxStage('sending');
+        result = await api.withdraw({
+          destinationAddress: destination,
+          asset: tokenId,
+          amount,
+          destinationChain,
+          passkeyAssertion: assertion,
+        });
       }
 
+      deductBalanceOptimistically(tokenId, targetToken.symbol, amount);
       loadHistory();
       void refreshBalances();
 
@@ -369,6 +453,23 @@ export function usePayments() {
     } finally {
       setIsSubmitting(false);
       setTxStage('idle');
+    }
+  };
+
+  const cancelPayment = async (paymentId: string) => {
+    try {
+      setError(null);
+      const res =
+        user?.custodyMode === 'self'
+          ? await api.cancelPaymentSelfCustody(paymentId)
+          : await api.cancelPaymentServer(paymentId);
+      await loadHistory();
+      void refreshBalances();
+      return res;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to cancel payment';
+      setError(msg);
+      throw err;
     }
   };
 
@@ -418,6 +519,7 @@ export function usePayments() {
     updateQuote,
     sendPayment,
     sendToWallet,
+    cancelPayment,
     loadHistory,
     resetCreatedPayment,
     balancesError,

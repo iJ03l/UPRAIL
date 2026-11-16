@@ -13,6 +13,11 @@ export interface XUser {
   recoveryCodesRemaining?: number;
   isActivated?: boolean;
   personalInviteCode?: string | null;
+  custodyMode?: 'server' | 'self';
+  backupPubkey?: string | null;
+  selfCustodyAt?: number | null;
+  oneClickSessionActive?: boolean;
+  pendingOnchainPasskeysCount?: number;
 }
 
 export interface AuthSession {
@@ -83,6 +88,8 @@ export interface PaymentIntent {
   expiresAt: string;
   claimedAt?: string;
   claimedByPasskeyId?: string;
+  contractMode?: 'escrow' | 'contract';
+  escrowSendId?: string | null;
 }
 
 export interface PaymentQuote {
@@ -432,7 +439,7 @@ export type GiftOccasion =
   | 'JUST_BECAUSE'
   | 'CUSTOM';
 
-export type GiftStatus = 'PENDING_FUNDING' | 'LOCKED' | 'CLAIMING' | 'CLAIMED' | 'EXPIRED';
+export type GiftStatus = 'PENDING_FUNDING' | 'LOCKED' | 'CLAIMING' | 'CLAIMED' | 'RECLAIMED' | 'EXPIRED';
 
 export interface GiftQuoteResult {
   originAssetId: string;
@@ -478,6 +485,7 @@ export interface PublicGiftCardView {
   ogImageUrl: string;
   createdAt: number;
   claimedAt: number | null;
+  contractMode?: 'escrow' | 'contract';
 }
 
 export interface AuthenticatedGiftView {
@@ -514,6 +522,11 @@ export interface AuthenticatedGiftView {
   ogImageUrl: string;
   createdAt: number;
   claimedAt: number | null;
+  contractMode?: 'escrow' | 'contract';
+  escrowContractId?: string | null;
+  onchainGiftId?: string | null;
+  reclaimAvailableAt?: number;
+  senderCanReclaim?: boolean;
 }
 
 export type CirclePurpose =
@@ -556,6 +569,7 @@ export interface CircleMemberView {
   isCurrentUser?: boolean;
   refundedAt: number | null;
   refundTxHash: string | null;
+  p256Pubkey?: string | null;
 }
 
 export interface CircleContributionView {
@@ -613,6 +627,82 @@ export interface CircleView {
   recentContributions: CircleContributionView[];
   createdAt: number;
   closedAt: number | null;
+  contractMode?: 'escrow' | 'contract';
+  escrowContractId?: string | null;
+  onchainCircleId?: string | null;
+  dissolveInitiatedAt?: number | null;
+  dissolveDeadlineAt?: number | null;
+}
+
+export interface CustodyPreflight {
+  nearAccount: string;
+  custodyMode: 'server' | 'self';
+  backupPubkey: string | null;
+  selfCustodyAt: number | null;
+  selfCustodyVersion: number;
+  oneClickSessionActive: boolean;
+  recoveryCodesRemaining: number;
+  eligiblePasskeys: Array<{
+    id: string;
+    credentialId: string;
+    nearP256Pubkey: string;
+    onchainAddedAt: number | null;
+    deviceLabel?: string | null;
+  }>;
+  authState: {
+    authByPredecessorId: boolean;
+    onchainPublicKeys: string[];
+    serverKeyPresentOnchain: boolean;
+  };
+  plainBalancesToSweep: Array<{
+    symbol: string;
+    assetId: string;
+    nearContractId?: string | null;
+    amountFormatted: string;
+    decimals: number;
+  }>;
+  activeEscrowCircles: number;
+  activeEscrowGifts: number;
+  blockingReasons: string[];
+  readyToUpgrade: boolean;
+}
+
+export interface NativeAuthPrepareResponse {
+  step: 'native_auth';
+  nextStep?: string;
+  operation: string;
+  target?: string;
+  asset?: string;
+  symbol?: string;
+  amount?: string;
+  nearAccount?: string;
+  actionId: string;
+  challenge?: string;
+  options: Record<string, unknown>;
+  expiresAt?: number;
+  summary?: string;
+}
+
+export interface PublicVerifyState {
+  nearAccount: string;
+  custodyMode?: 'server' | 'self';
+  handle?: string;
+  selfCustody?: boolean;
+  authByPredecessorId?: boolean;
+  serverKeyPresentOnchain?: boolean;
+  onchainPublicKeys?: string[];
+  backupPubkey?: string | null;
+  registeredPasskeys?: Array<{ nearP256Pubkey: string | null; onchainAddedAt: number | null }>;
+  error?: string;
+}
+
+export interface ContractVerifyResponse {
+  foundOnchain: boolean;
+  kind: 'circle' | 'gift' | 'send';
+  id: string;
+  contractId: string | null;
+  config?: Record<string, unknown> | null;
+  onchain?: Record<string, unknown> | null;
 }
 
 

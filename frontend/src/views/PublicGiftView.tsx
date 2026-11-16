@@ -15,6 +15,7 @@ import {
   Sparkles,
   ExternalLink,
   Shield,
+  ShieldCheck,
 } from 'lucide-react';
 import { api, formatUsd } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
@@ -116,29 +117,73 @@ export const PublicGiftView: React.FC = () => {
     };
   })();
 
-  const handleUnwrap = async () => {
+  const runGiftSettlement = async (mode: 'claim' | 'reclaim') => {
     if (!activeGift) return;
     setIsClaiming(true);
     try {
+      if (user?.custodyMode === 'self') {
+        if (mode === 'reclaim') {
+          const res = await api.reclaimGiftSelfCustody(activeGift.id);
+          if (res.gift) {
+            setAuthGift(res.gift);
+            setPublicGift((prev) => (prev ? { ...prev, status: res.gift!.status } : prev));
+          } else {
+            await loadGift();
+          }
+          toast(
+            `Reclaimed ${activeGift.vaultSymbol} Earn Vault gift back to your vault!`,
+            'success'
+          );
+        } else {
+          const res = await api.claimGiftSelfCustody(activeGift.id);
+          setAuthGift(res.gift);
+          setPublicGift((prev) => (prev ? { ...prev, status: res.gift.status } : prev));
+          toast(
+            `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
+            'success'
+          );
+        }
+        return;
+      }
+
       const assertion = await authorizeWithPasskey(
-        `Unwrap & claim ${activeGift.vaultSymbol} Earn Vault gift from @${activeGift.senderHandle}`
+        mode === 'reclaim'
+          ? `Reclaim unclaimed ${activeGift.vaultSymbol} Earn Vault gift`
+          : `Unwrap & claim ${activeGift.vaultSymbol} Earn Vault gift from @${activeGift.senderHandle}`
       );
-      const res = await api.claimGift({
-        giftId: activeGift.id,
-        passkeyAssertion: assertion,
-      });
+      const res =
+        mode === 'reclaim'
+          ? await api.reclaimGiftServer({
+              giftId: activeGift.id,
+              passkeyAssertion: assertion,
+            })
+          : await api.claimGift({
+              giftId: activeGift.id,
+              passkeyAssertion: assertion,
+            });
       setAuthGift(res.gift);
       setPublicGift((prev) => (prev ? { ...prev, status: res.gift.status } : prev));
       toast(
-        `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
+        mode === 'reclaim'
+          ? `Reclaimed ${res.sharesClaimed} ${res.gift.vaultSymbol} back to your vault!`
+          : `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
         'success'
       );
     } catch (err: any) {
-      toast(err?.message || 'Could not unwrap gift. Verify your passkey and try again.', 'error');
+      toast(
+        err?.message ||
+          (mode === 'reclaim'
+            ? 'Could not reclaim gift. Verify your passkey and try again.'
+            : 'Could not unwrap gift. Verify your passkey and try again.'),
+        'error'
+      );
     } finally {
       setIsClaiming(false);
     }
   };
+
+  const handleUnwrap = () => runGiftSettlement('claim');
+  const handleReclaim = () => runGiftSettlement('reclaim');
 
   const handleCopyShareUrl = () => {
     if (!activeGift) return;
@@ -270,6 +315,8 @@ export const PublicGiftView: React.FC = () => {
                     <span>
                       {activeGift.status === 'CLAIMED'
                         ? 'Claimed by Recipient'
+                        : activeGift.status === 'RECLAIMED'
+                        ? 'Reclaimed by Sender'
                         : isUnlocked
                         ? 'Timelock Reached — Ready to Unwrap!'
                         : 'Timelock Countdown'}
@@ -278,7 +325,7 @@ export const PublicGiftView: React.FC = () => {
                   <span>{new Date(activeGift.timelockUntil).toLocaleString()}</span>
                 </div>
 
-                {!isUnlocked && activeGift.status !== 'CLAIMED' && (
+                {!isUnlocked && activeGift.status === 'LOCKED' && (
                   <div className="grid grid-cols-4 gap-2 text-center">
                     {[
                       { label: 'Days', val: countdownParts.days },
@@ -305,6 +352,10 @@ export const PublicGiftView: React.FC = () => {
                 <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-center text-xs font-mono text-emerald-800 font-bold">
                   ✓ This Earn Vault gift and its compounded yield have been claimed by @
                   {activeGift.recipientHandle}.
+                </div>
+              ) : activeGift.status === 'RECLAIMED' ? (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-center text-xs font-mono text-amber-800 font-bold">
+                  ↺ Unclaimed gift was reclaimed by @{activeGift.senderHandle}.
                 </div>
               ) : !isAuthenticated ? (
                 <button
@@ -337,6 +388,20 @@ export const PublicGiftView: React.FC = () => {
                       : 'Compounding Yield Until Unlock Date'}
                   </span>
                 </button>
+              ) : authGift?.senderCanReclaim ? (
+                <button
+                  type="button"
+                  disabled={isClaiming || isAuthorizing}
+                  onClick={handleReclaim}
+                  className="w-full py-3.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+                >
+                  <Fingerprint className="w-4 h-4" />
+                  <span>
+                    {isClaiming || isAuthorizing
+                      ? 'Reclaiming Gift & Yield to Your Vault...'
+                      : `30d Grace Passed — Reclaim ${activeGift.vaultSymbol} + Yield`}
+                  </span>
+                </button>
               ) : (
                 <div className="p-3.5 rounded-2xl bg-stone-100 text-center text-xs font-mono text-stone-600">
                   Signed in as @{user?.handle}. Only @{activeGift.recipientHandle} can unwrap this gift with their passkey.
@@ -344,19 +409,33 @@ export const PublicGiftView: React.FC = () => {
               )}
 
               {/* Share / Copy SEO Link Footer */}
-              <div className="pt-2 border-t border-stone-100 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyShareUrl}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-mono text-stone-700 cursor-pointer"
-                >
-                  {copied ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
+              <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyShareUrl}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-mono text-stone-700 cursor-pointer"
+                  >
+                    {copied ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>Copy Gift Link</span>
+                  </button>
+
+                  {(authGift?.contractMode || publicGift?.contractMode) === 'contract' && (
+                    <Link
+                      to={`/verify?kind=gift&id=${encodeURIComponent(
+                        authGift?.onchainGiftId || activeGift.id
+                      )}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-xs font-mono font-bold text-emerald-700"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Verify On-Chain</span>
+                    </Link>
                   )}
-                  <span>Copy Gift Link</span>
-                </button>
+                </div>
 
                 <a
                   href={`https://x.com/intent/tweet?text=${encodeURIComponent(

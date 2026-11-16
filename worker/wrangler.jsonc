@@ -26,6 +26,7 @@
     "SOLVER_RELAY_URL": "https://solver-relay-v2.chaindefuser.com/rpc",
     "INTENTS_CONTRACT_ID": "intents.near",
     "ESCROW_ACCOUNT_ID": "escrow.uprail.near",
+    "CIRCLE_CONTRACT_ID": "circle.uprail.near",
     "MASTER_ACCOUNT_ID": "uprail.near",
     // Fees are routed to escrow.uprail.near, not fees.uprail.near. Intents
     // only accepts a signed transfer intent to an account with a public key
@@ -59,8 +60,8 @@
   },
   // Secrets (set via `wrangler secret put NAME`, never committed):
   //   X_CLIENT_SECRET, SESSION_SECRET, INTERNAL_SERVICE_KEY,
-  //   ESCROW_PRIVATE_KEY, NEAR_RPC_URL, SETTLEMENT_SERVICE_URL,
-  //   ONE_CLICK_API_KEY (or legacy ONE_CLICK_JWT)
+  //   ESCROW_PRIVATE_KEY, ATTESTOR_PRIVATE_KEY, NEAR_RPC_URL,
+  //   SETTLEMENT_SERVICE_URL, ONE_CLICK_API_KEY (or legacy ONE_CLICK_JWT)
   //
   // SETTLEMENT_SERVICE_URL is how the worker reaches the Go settlement
   // service. No durable_objects/containers block is declared: this worker is

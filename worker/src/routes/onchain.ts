@@ -15,17 +15,22 @@
 
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse, Session } from '../types';
-import { requireAuth } from '../middleware/session';
+import { requireAuth, updateSession } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import * as nearRpc from '../services/nearRpc';
 import { isConfidentialRailEnabled, getConfidentialBalances } from '../services/confidentialRail';
-import { getUserSession } from '../services/oneclickAuth';
+import { getUserSession, OneClickSelfCustodyAuthRequiredError } from '../services/oneclickAuth';
 import {
   executeStabilize,
   getStabilizeExecutionStatus,
   getStabilizeQuote,
   StabilizeError,
 } from '../services/stabilize';
+import { handleCustodyActionError } from '../utils/custodyResponse';
+import {
+  prepareSelfCustodyStabilize,
+  submitSelfCustodyStabilize,
+} from '../services/selfCustodyActions';
 import { publicErrorMessage } from '../utils/errors';
 import { cleanMemeSymbol } from '../utils/token';
 
@@ -161,6 +166,9 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
       () => [] as nearRpc.OnchainToken[]
     );
 
+    const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+    let oneClickSessionRequired = false;
+
     // Confidential Intents balances are held off the public ledger. Merge them
     // in so the dashboard and Receive tab show the same spendable total the
     // send/withdraw paths use.
@@ -239,6 +247,9 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
           }
         }
       } catch (confErr) {
+        if (confErr instanceof OneClickSelfCustodyAuthRequiredError) {
+          oneClickSessionRequired = true;
+        }
         console.warn('[onchain/balances] confidential balance merge skipped:', confErr);
       }
     }
@@ -329,6 +340,8 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
     return c.json({
       nearAccount,
       balances,
+      custodyMode: custody?.custodyMode ?? 'server',
+      oneClickSessionRequired,
       source: 'onchain_and_virtual',
       fetchedAt: Date.now(),
     });
@@ -968,6 +981,18 @@ onchainRouter.post(
   async (c) => {
     const session = c.get('session')!;
     try {
+      const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+      if (custody?.custodyMode === 'self') {
+        return c.json<ErrorResponse>(
+          {
+            error:
+              'Self-custody accounts must authorize stabilization via /api/onchain/stabilize/prepare and /api/onchain/stabilize/submit.',
+            code: 'SELF_CUSTODY_SIGNATURE_REQUIRED',
+          },
+          409
+        );
+      }
+
       const body = (c.get('parsedBody' as any) ||
         (await c.req
           .json<{
@@ -1006,6 +1031,55 @@ onchainRouter.post(
   }
 );
 
+onchainRouter.post('/stabilize/prepare', requireAuth(), async (c) => {
+  const session = c.get('session')!;
+  try {
+    const body = await c.req
+      .json<{ sourceAsset?: string; targetAsset?: string; amount?: string }>()
+      .catch(() => null);
+    const prepared = await prepareSelfCustodyStabilize(c.env, session, {
+      sourceAsset: body?.sourceAsset || '',
+      targetAsset: body?.targetAsset || 'USDC',
+      amount: body?.amount || '',
+    });
+    return c.json(prepared);
+  } catch (err: any) {
+    if (err instanceof StabilizeError) {
+      return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+    }
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_PREPARE_FAILED', '[onchain/stabilize/prepare]');
+  }
+});
+
+onchainRouter.post('/stabilize/submit', requireAuth(), async (c) => {
+  const session = c.get('session')!;
+  try {
+    const body = await c.req
+      .json<{ actionId?: string; assertion?: unknown; step?: string }>()
+      .catch(() => null);
+    if (!body?.actionId || !body?.assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion', code: 'INVALID_REQUEST' },
+        400
+      );
+    }
+    const result = await submitSelfCustodyStabilize({
+      env: c.env,
+      session,
+      actionId: body.actionId,
+      assertion: body.assertion,
+      step: body.step,
+    });
+    await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+    return c.json(result);
+  } catch (err: any) {
+    if (err instanceof StabilizeError) {
+      return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+    }
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_SUBMIT_FAILED', '[onchain/stabilize/submit]');
+  }
+});
+
 // ─── GET /api/onchain/stabilize/status ────────────────────────────────────────
 /**
  * Polls the settlement status of an in-flight confidential stabilization swap
@@ -1027,6 +1101,15 @@ onchainRouter.get(
       const status = await getStabilizeExecutionStatus(c.env, session, depositAddress);
       return c.json(status);
     } catch (err: any) {
+      if (err instanceof OneClickSelfCustodyAuthRequiredError) {
+        return c.json({
+          status: 'PENDING',
+          terminal: false,
+          depositAddress,
+          oneClickSessionRequired: true,
+          code: 'ONECLICK_AUTH_REQUIRED',
+        });
+      }
       console.warn('[onchain/stabilize/status] status check error:', err);
       return c.json({
         status: 'PENDING',

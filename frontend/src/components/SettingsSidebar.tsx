@@ -20,12 +20,15 @@ import {
   Moon,
   Monitor,
   LifeBuoy,
+  Shield,
+  Fingerprint,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
 import { useTheme } from './ThemeProvider';
 import { api, clearAppStorage } from '../lib/api';
 import { webauthn, describePasskeyError } from '../lib/webauthn';
 import { RecoveryCodesModal } from './RecoveryCodesModal';
+import { SelfCustodyUpgradeModal } from './SelfCustodyUpgradeModal';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MyInviteResponse } from '../types';
@@ -39,12 +42,16 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { user, logout } = useXAuth();
+  const { user, logout, refreshSession } = useXAuth();
   const { mode, setMode } = useTheme();
   const { toast } = useToast();
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showExportConfirm, setShowExportConfirm] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [isSweepingL1, setIsSweepingL1] = useState(false);
+  const [sweepL1Msg, setSweepL1Msg] = useState<string | null>(null);
+  const [isActivatingPasskey, setIsActivatingPasskey] = useState(false);
   const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -60,7 +67,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const [recoveryLegacyCount, setRecoveryLegacyCount] = useState(0);
   const [freshRecoveryCodes, setFreshRecoveryCodes] = useState<string[] | null>(null);
 
-  // Export UPRAIL Account Key states
+  // Export UPRAIL NEAR L1 Key states (2-step: Sign with Passkey -> Reveal Key)
   const [exportedKey, setExportedKey] = useState<{ nearAccount: string; privateKey: string; publicKey: string } | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -78,11 +85,47 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     try {
       const res = await api.exportKeyWithPasskey();
       setExportedKey(res);
-      setShowKey(true);
+      // Step 2 requires an explicit click to reveal the decrypted secret
+      setShowKey(false);
     } catch (err: any) {
       setExportError(err.message || 'Passkey confirmation failed');
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleSweepPlainL1 = async () => {
+    setIsSweepingL1(true);
+    setSweepL1Msg('Preparing NEAR L1 sweep…');
+    try {
+      const res = await api.sweepPlainL1SelfCustody(
+        { nextStep: 'settings' },
+        (_stage, msg) => setSweepL1Msg(msg)
+      );
+      const sweptCount = res?.swept?.length || 0;
+      if (sweptCount > 0) {
+        toast(`Swept ${sweptCount} NEAR L1 asset(s) to Intents`, 'success');
+      } else {
+        toast('No pending NEAR L1 tokens to sweep', 'info');
+      }
+    } catch (err: any) {
+      toast(describePasskeyError(err) || err?.message || 'NEAR L1 sweep cancelled or failed', 'error');
+    } finally {
+      setIsSweepingL1(false);
+      setSweepL1Msg(null);
+    }
+  };
+
+  const handleActivatePendingPasskey = async () => {
+    setIsActivatingPasskey(true);
+    try {
+      await api.addPasskeyOnchainWithPasskey();
+      await refreshSession();
+      toast('Pending passkey activated on-chain!', 'success');
+    } catch (err: any) {
+      toast(describePasskeyError(err) || err?.message || 'Could not activate pending passkey', 'error');
+    } finally {
+      setIsActivatingPasskey(false);
     }
   };
 
@@ -200,32 +243,89 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
             </div>
 
             {/* Account Profile Card */}
-            <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200">
+            <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
               {user ? (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <img
-                      src={user.avatarUrl || `https://unavatar.io/twitter/${user.handle}`}
-                      alt={user.handle}
-                      className="w-9 h-9 rounded-full border border-stone-300"
-                    />
-                    <div>
-                      <div className="text-xs font-bold text-stone-950 font-mono">
-                        @{user.handle}
-                      </div>
-                      <div className="text-[10px] text-stone-500 font-mono">
-                        Passkey verified
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <img
+                        src={user.avatarUrl || `https://unavatar.io/twitter/${user.handle}`}
+                        alt={user.handle}
+                        className="w-9 h-9 rounded-full border border-stone-300"
+                      />
+                      <div>
+                        <div className="text-xs font-bold text-stone-950 font-mono">
+                          @{user.handle}
+                        </div>
+                        <div className="text-[10px] text-stone-500 font-mono">
+                          Passkey verified
+                        </div>
                       </div>
                     </div>
+                    <button
+                      onClick={() => setShowSignOutModal(true)}
+                      className="p-2 rounded-xl text-stone-400 hover:text-stone-900 hover:bg-stone-200/60 transition-colors cursor-pointer"
+                      title="Disconnect Session"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setShowSignOutModal(true)}
-                    className="p-2 rounded-xl text-stone-400 hover:text-stone-900 hover:bg-stone-200/60 transition-colors cursor-pointer"
-                    title="Disconnect Session"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
-                </div>
+
+                  <div className="pt-2 border-t border-stone-200/80 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      {user.custodyMode === 'self' ? (
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-700 border border-emerald-500/30">
+                          <ShieldCheck className="w-3 h-3" />
+                          Passkey Self-Custody
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-200/80 text-stone-700 border border-stone-300">
+                          <Shield className="w-3 h-3" />
+                          Standard Custody
+                        </span>
+                      )}
+                      {user.nearAccount && (
+                        <Link
+                          to={`/verify?q=${encodeURIComponent(user.nearAccount)}`}
+                          onClick={onClose}
+                          className="text-[10px] font-mono font-bold text-stone-700 hover:text-stone-950 inline-flex items-center gap-1 underline underline-offset-2"
+                        >
+                          <span>Verify On-Chain</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </Link>
+                      )}
+                    </div>
+
+                    {user.custodyMode !== 'self' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowUpgradeModal(true)}
+                        className="w-full py-2 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Upgrade to Passkey Self-Custody</span>
+                      </button>
+                    )}
+
+                    {user.custodyMode === 'self' && (user.pendingOnchainPasskeysCount ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleActivatePendingPasskey}
+                        disabled={isActivatingPasskey}
+                        className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        {isActivatingPasskey ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Fingerprint className="w-3.5 h-3.5" />
+                        )}
+                        <span>
+                          Activate {user.pendingOnchainPasskeysCount} Pending Passkey On-Chain
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </>
               ) : (
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-stone-500 font-mono">No active session</span>
@@ -321,11 +421,13 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
               <div className="space-y-2 order-last">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
-                    Recovery Codes
+                    {user.custodyMode === 'self' ? 'Offline Recovery Key' : 'Recovery Codes'}
                   </span>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-800 border border-stone-200 flex items-center gap-1">
                     <KeyRound className="w-2.5 h-2.5" />
-                    {recoveryStatus
+                    {user.custodyMode === 'self'
+                      ? 'UP1 Self-Custody'
+                      : recoveryStatus
                       ? recoveryStatus.remaining > 0
                         ? `${recoveryStatus.remaining} left`
                         : 'No codes left'
@@ -333,6 +435,18 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   </span>
                 </div>
 
+                {user.custodyMode === 'self' ? (
+                  <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-2">
+                    <p className="text-[11px] text-stone-600 leading-relaxed">
+                      Self-Custody uses your offline <code className="font-mono font-bold">UP1-…</code> Recovery Key to authorize replacement passkeys on-chain. Standard server recovery codes are disabled.
+                    </p>
+                    {user.backupPubkey && (
+                      <div className="text-[10px] font-mono text-stone-500 break-all bg-white p-2 rounded-xl border border-stone-200">
+                        Active Backup Key: <span className="text-stone-900">{user.backupPubkey}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
                 <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
                   <p className="text-[11px] text-stone-600 leading-relaxed">
                     Each code works once. View them with your passkey whenever you need them, or replace the set if you no longer have your saved copy.
@@ -396,27 +510,54 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                     </button>
                   )}
                 </div>
+                )}
               </div>
             )}
 
-            {/* Export Vault Key Section (Passkey Protected) */}
+            {/* NEAR L1 Key (Native Assets Only) & Sweep Section */}
             {user && (
               <div className="space-y-2 order-last">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
-                    UPRAIL Account Key
+                    NEAR L1 Key (Native Assets Only)
                   </span>
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-1">
                     <KeyRound className="w-2.5 h-2.5" />
-                    Protected by your passkey
+                    2-Step Passkey Auth
                   </span>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
+                  <div className="space-y-2 pb-2 border-b border-stone-200/80">
+                    <p className="text-[11px] text-stone-600 leading-relaxed">
+                      Move any raw NEAR L1 native tokens on <span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span> into Intents using two-step passkey authorization (<strong>Step 1: Sign</strong> → <strong>Step 2: Authorize L1 Key</strong>).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void handleSweepPlainL1()}
+                      disabled={isSweepingL1}
+                      className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSweepingL1 ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>{sweepL1Msg || 'Authorizing L1 Sweep…'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Fingerprint className="w-3.5 h-3.5" />
+                          <span>Sweep NEAR L1 Assets → Intents</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
                   {!exportedKey ? (
                     <div className="space-y-2">
                       <p className="text-[11px] text-stone-600 leading-relaxed">
-                        Export the Full Access NEAR private key for your UPRAIL account (<span className="font-mono font-semibold">{user.nearAccount || 'u_...'}</span>). Confirmed with your passkey (Face ID, fingerprint, or PIN).
+                        {user.custodyMode === 'self'
+                          ? 'In Self-Custody, your Intents assets, Circles, and Gifts are strictly passkey-only. This Ed25519 L1 key only controls raw NEAR L1 native assets on your sub-account.'
+                          : 'Export the NEAR L1 Ed25519 private key for your UPRAIL sub-account via two steps: Sign with Passkey, then click Reveal Key.'}
                       </p>
                       {exportError && (
                         <p className="text-[11px] font-mono text-red-600 bg-red-50 p-2 rounded-xl border border-red-200">
@@ -432,12 +573,12 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                         {isExporting ? (
                           <>
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Waiting for your passkey...</span>
+                            <span>Step 1: Signing with passkey...</span>
                           </>
                         ) : (
                           <>
                             <KeyRound className="w-3.5 h-3.5" />
-                            <span>Export Private Key</span>
+                            <span>Step 1: Sign with Passkey</span>
                           </>
                         )}
                       </button>
@@ -445,7 +586,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                   ) : (
                     <div className="space-y-2.5 animate-fade-in">
                       <div className="flex items-center justify-between text-[11px] text-stone-500 font-mono">
-                        <span>Account:</span>
+                        <span>L1 Sub-Account:</span>
                         <span className="font-bold text-stone-900 truncate max-w-[170px]">
                           {exportedKey.nearAccount}
                         </span>
@@ -453,7 +594,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase font-mono font-bold text-stone-500">
-                          Private Key (Ed25519)
+                          NEAR L1 Private Key (Ed25519)
                         </label>
                         <div className="p-2.5 rounded-xl bg-stone-950 text-stone-100 font-mono text-xs break-all select-all relative group">
                           {showKey ? exportedKey.privateKey : '••••••••••••••••••••••••••••••••••••••••••••••••'}
@@ -461,40 +602,53 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(exportedKey.privateKey);
-                            setCopiedKey(true);
-                            toast('Private key copied', 'info');
-                            setTimeout(() => setCopiedKey(false), 2000);
-                          }}
-                          className="flex-1 py-2 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
-                        >
-                          {copiedKey ? (
-                            <>
-                              <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>Copied Key</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3.5 h-3.5" />
-                              <span>Copy Key</span>
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowKey(!showKey)}
-                          className="py-2 px-3 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono transition-colors cursor-pointer"
-                          title={showKey ? 'Hide Key' : 'Reveal Key'}
-                        >
-                          {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
+                        {!showKey ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowKey(true)}
+                            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Step 2: Reveal Key</span>
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(exportedKey.privateKey);
+                                setCopiedKey(true);
+                                toast('Private key copied', 'info');
+                                setTimeout(() => setCopiedKey(false), 2000);
+                              }}
+                              className="flex-1 py-2 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs"
+                            >
+                              {copiedKey ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Copied Key</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5" />
+                                  <span>Copy Key</span>
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowKey(false)}
+                              className="py-2 px-3 rounded-xl bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono transition-colors cursor-pointer"
+                              title="Hide Key"
+                            >
+                              <EyeOff className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
                       </div>
 
                       <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-[10px] font-mono text-amber-900 leading-tight">
-                        ⚠️ <strong>Never share this key.</strong> Grants full custody to withdraw money from your UPRAIL account in any wallet.
+                        ⚠️ <strong>Never share this key.</strong> Controls NEAR L1 native tokens on {exportedKey.nearAccount}. Intents balances use your Self-Custody passkey when active.
                       </div>
                     </div>
                   )}
@@ -729,6 +883,14 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         description="This clears locally stored app state and cached payment data on this device, then reloads the page."
         confirmLabel="Reset cache"
         warning="Your on-chain balance and payments are not affected. You may need to confirm with your passkey again."
+      />
+
+      <SelfCustodyUpgradeModal
+        isOpen={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        onUpgraded={() => {
+          void refreshSession();
+        }}
       />
     </>
   );

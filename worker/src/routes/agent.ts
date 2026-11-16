@@ -428,11 +428,86 @@ export async function executeAgentPay(
   const currentSpent = parseFloat(spendRow?.spent || '0') || 0;
   const remainingDaily = Math.max(0, dailyLimit - currentSpent);
 
+  const createAgentApprovalRequest = async (opts: {
+    reason: string;
+    limitUsd: number;
+    custodyMode: 'server' | 'self';
+  }) => {
+    const approvalId = `appr_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+    const now = Date.now();
+    const expiresAt = now + 15 * 60 * 1000;
+    const payload = JSON.stringify({
+      asset,
+      recipients: recipientsWithUsd.map((r) => ({
+        recipientHandle: r.handle,
+        amount: r.amount,
+        usd: r.usd,
+      })),
+      totalAmount: recipientsWithUsd
+        .reduce((sum, r) => sum + r.amountNum, 0)
+        .toFixed(6)
+        .replace(/\.?0+$/, ''),
+      totalUsd,
+      memo,
+      agentName: agent.label || 'AI Agent',
+      exceededReason: opts.reason,
+      limitUsd: opts.limitUsd,
+      custodyMode: opts.custodyMode,
+    });
+
+    await c.env.DB.prepare(
+      `INSERT INTO agent_approvals (id, x_id, agent_key_id, payload, status, created_at, expires_at)
+       VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
+    )
+      .bind(approvalId, agent.x_id, agent.key_id, payload, now, expiresAt)
+      .run();
+
+    const appOrigin = resolveOrigin(c.env);
+    const approvalUrl = `${appOrigin}/approve?id=${approvalId}`;
+    const intro =
+      opts.custodyMode === 'self'
+        ? `This account uses passkey self-custody, so the server cannot sign transactions on your behalf. Tap below to authorize and sign with Touch ID / Face ID on your device:`
+        : `${recipientsWithUsd.length > 1 ? `This batch payment (${recipientsWithUsd.length} accounts, ` : 'This payment ('}~$${totalUsd.toFixed(2)}) exceeds your spend guardrail. Tap below to authorize with Touch ID / Face ID on your device:`;
+
+    return c.json(
+      {
+        status: 'REQUIRES_PASSKEY_APPROVAL',
+        code: 'APPROVAL_REQUIRED',
+        custodyMode: opts.custodyMode,
+        approvalId,
+        approvalUrl,
+        expiresAt,
+        totalUsd: Number(totalUsd.toFixed(2)),
+        recipients: recipientsWithUsd.map((r) => ({
+          recipientHandle: `@${r.handle}`,
+          amount: r.amount,
+          asset,
+        })),
+        message: `${intro}\n\n[Confirm & Authorize with Passkey](${approvalUrl})\n\nOnce approved, the payment will execute immediately.`,
+      },
+      403
+    );
+  };
+
+  const custody = await nearRpc.getUserCustodyRecord(c.env, agent.x_id);
   const exceedsPerTx =
     perTxLimit > 0 &&
     (totalUsd > perTxLimit + 1e-9 ||
       recipientsWithUsd.some((r) => (r.usd ?? 0) > perTxLimit + 1e-9));
   const exceedsDaily = dailyLimit > 0 && totalUsd > remainingDaily + 1e-9;
+
+  if (custody?.custodyMode === 'self') {
+    await markFailed();
+    const reason = exceedsDaily
+      ? 'daily_limit'
+      : exceedsPerTx
+      ? 'per_tx_limit'
+      : hasUnpriced
+      ? 'unpriced_asset'
+      : 'self_custody';
+    const limitUsd = exceedsDaily ? remainingDaily : perTxLimit;
+    return createAgentApprovalRequest({ reason, limitUsd, custodyMode: 'self' });
+  }
 
   // Guardrail limits exceeded -> create instant passkey authorization for multiple accounts (or explicit approval)
   if (exceedsPerTx || exceedsDaily || hasUnpriced) {
@@ -441,54 +516,7 @@ export async function executeAgentPay(
     const limitUsd = exceedsDaily ? remainingDaily : perTxLimit;
 
     if (recipients.length > 1 || rawBody?.requestApproval === true) {
-      const approvalId = `appr_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-      const now = Date.now();
-      const expiresAt = now + 15 * 60 * 1000;
-      const payload = JSON.stringify({
-        asset,
-        recipients: recipientsWithUsd.map((r) => ({
-          recipientHandle: r.handle,
-          amount: r.amount,
-          usd: r.usd,
-        })),
-        totalAmount: recipientsWithUsd
-          .reduce((sum, r) => sum + r.amountNum, 0)
-          .toFixed(6)
-          .replace(/\.?0+$/, ''),
-        totalUsd,
-        memo,
-        agentName: agent.label || 'AI Agent',
-        exceededReason: reason,
-        limitUsd,
-      });
-
-      await c.env.DB.prepare(
-        `INSERT INTO agent_approvals (id, x_id, agent_key_id, payload, status, created_at, expires_at)
-         VALUES (?, ?, ?, ?, 'PENDING', ?, ?)`
-      )
-        .bind(approvalId, agent.x_id, agent.key_id, payload, now, expiresAt)
-        .run();
-
-      const appOrigin = resolveOrigin(c.env);
-      const approvalUrl = `${appOrigin}/approve?id=${approvalId}`;
-
-      return c.json(
-        {
-          status: 'REQUIRES_PASSKEY_APPROVAL',
-          code: 'APPROVAL_REQUIRED',
-          approvalId,
-          approvalUrl,
-          expiresAt,
-          totalUsd: Number(totalUsd.toFixed(2)),
-          recipients: recipientsWithUsd.map((r) => ({
-            recipientHandle: `@${r.handle}`,
-            amount: r.amount,
-            asset,
-          })),
-          message: `${recipientsWithUsd.length > 1 ? `This batch payment (${recipientsWithUsd.length} accounts, ` : 'This payment ('}~$${totalUsd.toFixed(2)}) exceeds your spend guardrail. Tap below to authorize with Touch ID / Face ID on your device:\n\n[Confirm & Authorize with Passkey](${approvalUrl})\n\nOnce approved, the payment will execute immediately.`,
-        },
-        403
-      );
+      return createAgentApprovalRequest({ reason, limitUsd, custodyMode: 'server' });
     }
 
     // Single recipient standard policy denial
@@ -891,6 +919,21 @@ export async function executeAgentWithdraw(
   if (!auth.allowed) {
     await markFailed();
     return auth.response;
+  }
+
+  const custody = await nearRpc.getUserCustodyRecord(c.env, agent.x_id);
+  if (custody?.custodyMode === 'self') {
+    await auth.release();
+    await markFailed();
+    return c.json(
+      {
+        error:
+          'Self-custody accounts cannot execute autonomous withdrawals from an agent key. Ask the account owner to withdraw manually using their passkey in the UPRAIL app.',
+        code: 'SELF_CUSTODY_PASSKEY_REQUIRED',
+        custodyMode: 'self',
+      },
+      403
+    );
   }
 
   c.set('parsedBody' as any, {

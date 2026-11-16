@@ -25,11 +25,17 @@ import {
   saltFromHex,
 } from './intentsNonce';
 import {
+  assertServerCustodyForXId,
   createOnchainSubAccount,
   deriveUserNearKeypair,
   ensureKeyOnIntents,
+  getUserCustodyRecord,
   nep413Serialize,
 } from './nearRpc';
+import {
+  buildIntentsPayloadString,
+  type SignedWebAuthnPayload,
+} from './selfCustodyCrypto';
 
 const SESSION_CACHE_PREFIX = '1click:user-session:';
 const ESCROW_SESSION_CACHE_KEY = '1click:escrow-session';
@@ -162,6 +168,7 @@ async function resolveAccountId(env: Env, xId: string, fallback: string): Promis
 }
 
 async function deriveSigningKey(env: Env, xId: string): Promise<UserSigningKey> {
+  await assertServerCustodyForXId(env, xId);
   const derived = await deriveUserNearKeypair(env, xId);
   const accountId = await resolveAccountId(env, xId, derived.accountId);
   return {
@@ -287,34 +294,54 @@ async function sessionFromCache(env: Env, cacheKey: string): Promise<{ accessTok
   return null;
 }
 
-function validateGeneratedIntent(
+export class OneClickSelfCustodyAuthRequiredError extends Error {
+  readonly code = 'ONE_CLICK_SELF_CUSTODY_AUTH_REQUIRED';
+  readonly xId: string;
+
+  constructor(xId: string, message = 'Passkey authorization is required to open or refresh your 1Click confidential session.') {
+    super(message);
+    this.name = 'OneClickSelfCustodyAuthRequiredError';
+    this.xId = xId;
+  }
+}
+
+export function validateGeneratedIntentForAccount(
   env: Env,
   generated: OneClickGeneratedIntent,
-  key: UserSigningKey
+  accountId: string
 ): void {
-  if (generated.standard !== 'nep413') {
+  if (generated.standard !== 'nep413' && generated.standard !== 'webauthn') {
     throw new Error(`Unsupported 1Click intent standard: ${generated.standard}`);
   }
+  const rawMessage = generated.rawPayload ?? generated.payload?.message;
+  const nonce = generated.payload?.nonce;
+  const recipient = generated.payload?.recipient || intentsAccount(env);
+
   // Confidential swaps are generated against the FAR verifier. Public
   // intents use intents.near; both are the only recipients we sign for.
   const allowedRecipients = new Set([intentsAccount(env), 'intents.far']);
-  if (!allowedRecipients.has(generated.payload.recipient)) {
+  if (!allowedRecipients.has(recipient)) {
     throw new Error(
-      `Refusing to sign an intent for ${generated.payload.recipient}; expected ${intentsAccount(env)} or intents.far`
+      `Refusing to sign an intent for ${recipient}; expected ${intentsAccount(env)} or intents.far`
     );
   }
-  const decoded = decodeVersionedNonce(generated.payload.nonce);
+  const decoded = decodeVersionedNonce(nonce);
   if (decoded.deadline.getTime() <= Date.now()) {
     throw new Error('1Click returned an already-expired intent');
   }
   let message: any;
   try {
-    message = JSON.parse(generated.payload.message);
+    message = JSON.parse(rawMessage);
   } catch {
     throw new Error('1Click returned a non-JSON intent message');
   }
-  if (message?.signer_id !== key.accountId) {
+  if (message?.signer_id !== accountId) {
     throw new Error('1Click intent signer does not match the authenticated account');
+  }
+  if (generated.standard === 'webauthn' && message?.verifying_contract && !allowedRecipients.has(message.verifying_contract)) {
+    throw new Error(
+      `Refusing WebAuthn intent for verifying_contract ${message.verifying_contract}`
+    );
   }
   if (!Array.isArray(message?.intents)) {
     throw new Error('1Click intent message has no intents array');
@@ -325,12 +352,23 @@ function validateGeneratedIntent(
   }
 }
 
+function validateGeneratedIntent(
+  env: Env,
+  generated: OneClickGeneratedIntent,
+  key: UserSigningKey
+): void {
+  validateGeneratedIntentForAccount(env, generated, key.accountId);
+}
+
 /** Signs a 1Click-generated swap intent without modifying its payload. */
 export async function signGeneratedIntentWithKey(
   env: Env,
   key: UserSigningKey,
   generated: OneClickGeneratedIntent
 ): Promise<OneClickMultiPayload> {
+  if (generated.standard !== 'nep413') {
+    throw new Error(`Server key cannot sign ${generated.standard} intent`);
+  }
   validateGeneratedIntent(env, generated, key);
   return await signNep413Async(
     key,
@@ -364,6 +402,51 @@ export async function signGeneratedIntentForEscrow(
   return await signGeneratedIntentWithKey(env, key, generated);
 }
 
+/**
+ * Builds an empty `intents: []` WebAuthn payload for `/v0/auth/authenticate`
+ * so a self-custody user can mint a 30-day cached 1Click User-Session with 1 tap.
+ */
+export async function buildEmptyWebAuthnAuthPayload(
+  env: Env,
+  accountId: string,
+  saltHexOverride?: string
+): Promise<{ payloadStr: string; saltHex: string }> {
+  const saltHex = saltHexOverride || (await getCurrentIntentsSalt(env));
+  const { payloadStr } = buildIntentsPayloadString({
+    signerId: accountId,
+    verifyingContract: intentsAccount(env),
+    saltHex,
+    intents: [],
+    ttlMs: AUTH_DEADLINE_MS,
+  });
+  return { payloadStr, saltHex };
+}
+
+/**
+ * Exchanges a passkey-signed WebAuthn empty intent for a 1Click session and caches it
+ * (including its 30-day refresh token) under `1click:user-session:<xId>`.
+ */
+export async function completeWebAuthnOneClickSession(
+  env: Env,
+  xId: string,
+  accountId: string,
+  signed: SignedWebAuthnPayload
+): Promise<{ accessToken: string; accountId: string }> {
+  const session = await authenticateUser(env, signed);
+  return await cacheSession(env, sessionCacheKey(xId), accountId, session);
+}
+
+/**
+ * Checks if a cached or refreshable 1Click session already exists without throwing.
+ */
+export async function hasCachedOneClickSession(
+  env: Env,
+  xId: string
+): Promise<boolean> {
+  const cached = await sessionFromCache(env, sessionCacheKey(xId));
+  return Boolean(cached?.accessToken);
+}
+
 const userSessionInflight = new Map<string, Promise<{ accessToken: string; accountId: string }>>();
 
 /** Returns a valid User-Session token, refreshing or re-signing as needed. */
@@ -378,6 +461,11 @@ export async function getUserSession(
     if (cached) return cached;
     const inflight = userSessionInflight.get(key);
     if (inflight) return inflight;
+  }
+
+  const custody = await getUserCustodyRecord(env, xId);
+  if (custody.custodyMode === 'self') {
+    throw new OneClickSelfCustodyAuthRequiredError(xId);
   }
 
   const work = (async () => {

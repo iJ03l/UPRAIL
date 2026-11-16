@@ -6,7 +6,7 @@
  * No hardcoded state. No stale caches for critical financial data.
  */
 
-import type { Env, Session } from '../types';
+import type { CustodyMode, Env, Session } from '../types';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { base58Decode, base58Encode } from '../utils/base58';
 import { getOnchainIcon } from './onchainIcons';
@@ -14,6 +14,12 @@ import { getAssetMeta } from './assetMeta';
 import { generate1ClickSwapIntent } from './oneclickWithdraw';
 import { requestQuote } from './oneclickClient';
 import { cleanMemeSymbol } from '../utils/token';
+import {
+  NativeL1KeyGrant,
+  type NativeL1Operation,
+  verifyNativeL1Grant,
+} from './nativeL1Grant';
+export { NativeL1KeyGrant };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -777,7 +783,7 @@ export async function executeEscrowContractCall(
   method: string,
   args: Record<string, unknown> = {},
   gas = 100_000_000_000_000n
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   try {
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
     const signing = escrowSigningKey(env, rpcUrl);
@@ -792,7 +798,7 @@ export async function executeEscrowContractCall(
     });
     return res.ok
       ? { success: true, txHash: res.txHash }
-      : { success: false, error: res.error || `${method} failed` };
+      : { success: false, error: res.error || `${method} failed`, ambiguous: Boolean(res.ambiguous) };
   } catch (err: any) {
     return { success: false, error: err?.message || String(err) };
   }
@@ -3368,6 +3374,227 @@ async function intentsHasPublicKey(
   return res === true;
 }
 
+export class SelfCustodySignatureRequiredError extends Error {
+  readonly code = 'SELF_CUSTODY_SIGNATURE_REQUIRED';
+  readonly xId?: string;
+  readonly accountId?: string | null;
+
+  constructor(message = 'This account uses passkey self-custody; sign this action with your passkey.', xId?: string, accountId?: string | null) {
+    super(message);
+    this.name = 'SelfCustodySignatureRequiredError';
+    this.xId = xId;
+    this.accountId = accountId;
+  }
+}
+
+export interface UserCustodyRecord {
+  custodyMode: CustodyMode;
+  nearAccount: string | null;
+  backupPubkey: string | null;
+  selfCustodyAt: number | null;
+  selfCustodyVersion: number;
+}
+
+export async function getUserCustodyRecord(env: Env, xId: string): Promise<UserCustodyRecord> {
+  if (!env.DB || !xId) {
+    return {
+      custodyMode: 'server',
+      nearAccount: null,
+      backupPubkey: null,
+      selfCustodyAt: null,
+      selfCustodyVersion: 0,
+    };
+  }
+  try {
+    const row = await env.DB.prepare(
+      'SELECT custody_mode, near_account, backup_pubkey, self_custody_at, self_custody_version FROM x_identities WHERE x_id = ? LIMIT 1'
+    )
+      .bind(xId)
+      .first<{
+        custody_mode?: string | null;
+        near_account?: string | null;
+        backup_pubkey?: string | null;
+        self_custody_at?: number | null;
+        self_custody_version?: number | null;
+      }>();
+    if (!row) {
+      return {
+        custodyMode: 'server',
+        nearAccount: null,
+        backupPubkey: null,
+        selfCustodyAt: null,
+        selfCustodyVersion: 0,
+      };
+    }
+    return {
+      custodyMode: row.custody_mode === 'self' ? 'self' : 'server',
+      nearAccount: row.near_account ?? null,
+      backupPubkey: row.backup_pubkey ?? null,
+      selfCustodyAt: row.self_custody_at ?? null,
+      selfCustodyVersion: typeof row.self_custody_version === 'number' ? row.self_custody_version : 0,
+    };
+  } catch (err: any) {
+    // Backwards-compatible fallback if migration 0018 columns are absent in an isolated mock DB.
+    const msg = String(err?.message || '');
+    if (msg.includes('no such column') && msg.includes('custody_mode')) {
+      return {
+        custodyMode: 'server',
+        nearAccount: null,
+        backupPubkey: null,
+        selfCustodyAt: null,
+        selfCustodyVersion: 0,
+      };
+    }
+    throw err;
+  }
+}
+
+export async function isSelfCustodyAccount(env: Env, accountId: string): Promise<boolean> {
+  if (!env.DB || !accountId) return false;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT custody_mode FROM x_identities WHERE near_account = ? LIMIT 1'
+    )
+      .bind(accountId)
+      .first<{ custody_mode?: string | null }>();
+    return row?.custody_mode === 'self';
+  } catch (err: any) {
+    const msg = String(err?.message || '');
+    if (msg.includes('no such column')) return false;
+    throw err;
+  }
+}
+
+/**
+ * Fail-closed guard blocking any server-side derivation or signing for self-custody users.
+ */
+export async function assertServerCustodyForXId(env: Env, xId: string): Promise<UserCustodyRecord> {
+  const rec = await getUserCustodyRecord(env, xId);
+  if (rec.custodyMode === 'self') {
+    throw new SelfCustodySignatureRequiredError(
+      'Self-custody is enabled for this account; Uprail cannot sign intents on your behalf.',
+      xId,
+      rec.nearAccount
+    );
+  }
+  return rec;
+}
+
+export interface IntentsAccountAuthState {
+  accountId: string;
+  intentsContractId: string;
+  publicKeys: string[];
+  isAuthByPredecessorEnabled: boolean;
+  currentSalt: string | null;
+  l1AccountExists: boolean;
+  l1AccessKeys: Array<{ publicKey: string; permission: 'FullAccess' | 'FunctionCall' | 'Unknown' }>;
+}
+
+export async function assertServerOrGrantedNativeL1ForXId(
+  env: Env,
+  xId: string,
+  grant: NativeL1KeyGrant | undefined,
+  expected: {
+    allowedOperations: NativeL1Operation[];
+    target: string;
+    asset?: string;
+  }
+): Promise<void> {
+  const custody = await getUserCustodyRecord(env, xId);
+  if (custody.custodyMode !== 'self') return;
+
+  if (
+    !verifyNativeL1Grant(grant, {
+      xId,
+      allowedOperations: expected.allowedOperations,
+      target: expected.target,
+      asset: expected.asset,
+    })
+  ) {
+    throw new SelfCustodySignatureRequiredError(
+      'Sign with your passkey to authorize the NEAR L1 account key for this native asset action.'
+    );
+  }
+}
+
+/**
+ * Reads live intents.near authorization state (`public_keys_of`,
+ * `is_auth_by_predecessor_id_enabled`, `current_salt`) and NEAR L1 access keys.
+ */
+export async function getAccountIntentsAuthState(
+  env: Env,
+  accountId: string
+): Promise<IntentsAccountAuthState> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+
+  const [publicKeysRes, predRes, saltRes, existsRes, l1KeysRes] = await Promise.all([
+    viewFunction(rpcUrl, intentsId, 'public_keys_of', { account_id: accountId }).catch(() => []),
+    viewFunction(rpcUrl, intentsId, 'is_auth_by_predecessor_id_enabled', {
+      account_id: accountId,
+    }).catch(() => true),
+    viewFunction(rpcUrl, intentsId, 'current_salt', {}).catch(() => null),
+    accountExists(env, accountId).catch(() => false),
+    nearRpc(rpcUrl, 'query', {
+      request_type: 'view_access_key_list',
+      finality: 'final',
+      account_id: accountId,
+    }).catch(() => null),
+  ]);
+
+  const l1KeysRaw = Array.isArray((l1KeysRes as any)?.keys) ? (l1KeysRes as any).keys : [];
+  const l1AccessKeys = l1KeysRaw.map((k: any) => ({
+    publicKey: String(k?.public_key || ''),
+    permission: (
+      k?.access_key?.permission === 'FullAccess'
+        ? 'FullAccess'
+        : k?.access_key?.permission && typeof k.access_key.permission === 'object'
+        ? 'FunctionCall'
+        : 'Unknown'
+    ) as 'FullAccess' | 'FunctionCall' | 'Unknown',
+  }));
+
+  return {
+    accountId,
+    intentsContractId: intentsId,
+    publicKeys: Array.isArray(publicKeysRes) ? publicKeysRes.map(String) : [],
+    isAuthByPredecessorEnabled: predRes === true,
+    currentSalt: typeof saltRes === 'string' ? saltRes : null,
+    l1AccountExists: Boolean(existsRes),
+    l1AccessKeys,
+  };
+}
+
+/**
+ * Dry-runs one or more signed intents via intents.near::simulate_intents without
+ * broadcasting a state-changing transaction or spending gas.
+ */
+export async function simulateIntentsRelayed(
+  env: Env,
+  signedPayloads: any[]
+): Promise<{ ok: boolean; error?: string; raw?: unknown }> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+  try {
+    const res = (await viewFunction(rpcUrl, intentsId, 'simulate_intents', {
+      signed: signedPayloads,
+    })) as any;
+    if (res && typeof res === 'object' && res.invariant_violated) {
+      return {
+        ok: false,
+        error: `Intent simulation invariant violated: ${JSON.stringify(res.invariant_violated)}`,
+        raw: res,
+      };
+    }
+    return { ok: true, raw: res };
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: err?.message || String(err),
+    };
+  }
+}
+
 /**
  * Guarantees the account's signing key is authorized on the verifier contract
  * (`intents.near`) before an intent is signed with it.
@@ -3578,6 +3805,11 @@ export async function createOnchainSubAccount(
   userPubKey?: Uint8Array,
   userPrivKey?: Uint8Array
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  // Never re-attach or overwrite keys on an account opted into self-custody.
+  if (await isSelfCustodyAccount(env, subAccount)) {
+    return { success: true };
+  }
+
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   const pubKeyB58 = userPubKey ? `ed25519:${base58Encode(userPubKey)}` : '';
   const subMemoKey = `${rpcUrl}:${subAccount}:${pubKeyB58}`;
@@ -3817,10 +4049,14 @@ export function nep413Serialize(message: string, nonceBytes: Uint8Array, recipie
  * (network error / malformed reply AFTER the transaction was submitted) —
  * callers must not release reservations in that case, or a retry can double-spend.
  */
-export async function executeIntentsRelayed(
+export async function executeIntentsBatchRelayed(
   env: Env,
-  signedPayload: any
+  signedPayloads: any[],
+  gas?: bigint
 ): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
+  if (!Array.isArray(signedPayloads) || signedPayloads.length === 0) {
+    return { success: false, error: 'Missing signed intents batch' };
+  }
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   const fallbackRpcUrl = 'https://free.rpc.fastnear.com';
   const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
@@ -3828,6 +4064,8 @@ export async function executeIntentsRelayed(
   if (!privKeyStr) {
     return { success: false, error: 'ESCROW_PRIVATE_KEY is missing' };
   }
+  const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
+  const callGas = gas ?? (signedPayloads.length > 1 ? 200000000000000n : 100000000000000n);
 
   let activeRpcUrl = rpcUrl;
   const readRpc = async (method: string, params: Record<string, unknown>) => {
@@ -3897,16 +4135,16 @@ export async function executeIntentsRelayed(
     w.writeString(escrowId);
     w.writePublicKey(escrowPubKey);
     w.writeU64(nonce);
-    w.writeString('intents.near');
+    w.writeString(intentsId);
     w.writeBytes(latestBlockHash);
 
     w.writeU32(1);
     w.writeU8(2); // FunctionCall
     w.writeString('execute_intents');
-    const callArgs = new TextEncoder().encode(JSON.stringify({ signed: [signedPayload] }));
+    const callArgs = new TextEncoder().encode(JSON.stringify({ signed: signedPayloads }));
     w.writeU32(callArgs.length);
     w.writeBytes(callArgs);
-    w.writeU64(100000000000000n); // 100 TGas
+    w.writeU64(callGas);
     w.writeU128(0n); // 0 deposit
 
     const txBytes = w.toBytes();
@@ -3958,6 +4196,13 @@ export async function executeIntentsRelayed(
   }
 }
 
+export async function executeIntentsRelayed(
+  env: Env,
+  signedPayload: any
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
+  return executeIntentsBatchRelayed(env, [signedPayload]);
+}
+
 /**
  * Signs and settles a transfer intent from user to recipient on intents.near.
  */
@@ -3969,6 +4214,7 @@ export async function executeTransferIntent(
   amount: string
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   try {
+    await assertServerCustodyForXId(env, senderXId);
     const tokens = await getSupportedTokens(env);
     let token = resolveTokenForAsset(asset, tokens);
     if (!token) {
@@ -4057,6 +4303,79 @@ export async function executeTransferIntent(
 
     return await executeIntentsRelayed(env, signedPayload);
   } catch (err: any) {
+    if (err instanceof SelfCustodySignatureRequiredError) throw err;
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Executes an arbitrary list of `intents.near` actions (for example `transfer`
+ * with `msg` + fee transfer) signed by a `'server'`-custody user's derived key.
+ * Refuses `'self'`-custody accounts by throwing `SelfCustodySignatureRequiredError`.
+ */
+export async function executeIntentsActionListForServerUser(
+  env: Env,
+  senderXId: string,
+  intents: Array<Record<string, unknown>>,
+  gas?: bigint
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
+  await assertServerCustodyForXId(env, senderXId);
+  try {
+    const senderDerived = await deriveUserNearKeypair(env, senderXId);
+    let senderId = senderDerived.accountId;
+    if (env.DB) {
+      try {
+        const idRow = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+          .bind(senderXId)
+          .first<{ near_account: string | null }>();
+        if (idRow?.near_account) senderId = idRow.near_account;
+      } catch {}
+    }
+
+    await createOnchainSubAccount(env, senderId, senderDerived.publicKey, senderDerived.privateKey);
+    const keyReady = await ensureKeyOnIntents(
+      env,
+      senderId,
+      senderDerived.publicKey,
+      senderDerived.privateKey
+    );
+    if (!keyReady.registered) {
+      return {
+        success: false,
+        error: 'Your signing key is not set up on NEAR Intents yet — please try again in a moment.',
+      };
+    }
+
+    const nonceBytes = crypto.getRandomValues(new Uint8Array(32));
+    let nonceB64 = '';
+    for (let i = 0; i < nonceBytes.length; i++) nonceB64 += String.fromCharCode(nonceBytes[i]);
+    nonceB64 = btoa(nonceB64);
+
+    const intentsContract = env.INTENTS_CONTRACT_ID || 'intents.near';
+    const messageStr = JSON.stringify({
+      signer_id: senderId,
+      deadline: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      intents,
+    });
+    const nep413Bytes = nep413Serialize(messageStr, nonceBytes, intentsContract);
+    const digest = await crypto.subtle.digest('SHA-256', nep413Bytes);
+    const sigBytes = ed25519.sign(new Uint8Array(digest), senderDerived.privateKey);
+
+    const signedPayload = {
+      standard: 'nep413',
+      payload: {
+        message: messageStr,
+        nonce: nonceB64,
+        recipient: intentsContract,
+      },
+      public_key: senderDerived.publicKeyB58,
+      signature: `ed25519:${base58Encode(sigBytes)}`,
+    };
+    return gas
+      ? await executeIntentsBatchRelayed(env, [signedPayload], gas)
+      : await executeIntentsRelayed(env, signedPayload);
+  } catch (err: any) {
+    if (err instanceof SelfCustodySignatureRequiredError) throw err;
     return { success: false, error: err?.message || String(err) };
   }
 }
@@ -4295,7 +4614,7 @@ async function signAndBroadcastFunctionCall(opts: {
   args: string;
   gas: bigint;
   deposit: bigint;
-}): Promise<{ ok: boolean; txHash?: string; error?: string }> {
+}): Promise<{ ok: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   if (opts.method === 'ft_transfer_call') {
     let receiver = '';
     try {
@@ -4342,6 +4661,8 @@ interface BroadcastAttempt {
   error?: string;
   /** True when the node refused the transaction before including it. */
   rejected?: boolean;
+  /** True when broadcast_tx_commit was sent and the HTTP/RPC outcome is uncertain. */
+  ambiguous?: boolean;
 }
 
 async function broadcastFunctionCallOnce(opts: {
@@ -4356,6 +4677,7 @@ async function broadcastFunctionCallOnce(opts: {
   deposit: bigint;
 }): Promise<BroadcastAttempt> {
   const { rpcUrl, signerId, signerPrivKey, signerPubKey, receiverId, method, args, gas, deposit } = opts;
+  let broadcastAttempted = false;
   try {
     const statusRes = await fetch(rpcUrl, {
       method: 'POST',
@@ -4416,6 +4738,7 @@ async function broadcastFunctionCallOnce(opts: {
     let binary = '';
     for (let i = 0; i < signedBytes.length; i++) binary += String.fromCharCode(signedBytes[i]);
 
+    broadcastAttempted = true;
     const txRes = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4435,19 +4758,25 @@ async function broadcastFunctionCallOnce(opts: {
       const errMsg =
         rpcErr?.message ||
         JSON.stringify(txResult?.result?.status?.Failure || txResult?.result || txResult);
+      const isTimeoutRpcErr = Boolean(
+        rpcErr &&
+          !txResult?.result?.status?.Failure &&
+          /timeout/i.test(`${rpcErr?.name || ''} ${rpcErr?.message || ''} ${JSON.stringify(rpcErr?.data || '')}`)
+      );
       // NEAR RPCs answer every rejected transaction with the same bare
       // "Server error"; the actionable cause — InvalidNonce, Expired,
       // NotEnoughBalance, or the contract's own panic — lives only in
       // `error.data`, so dropping it makes every failure undiagnosable.
       return {
         ok: false,
-        rejected: true,
+        rejected: !isTimeoutRpcErr,
+        ambiguous: isTimeoutRpcErr,
         error: `${errMsg}${formatRpcErrorData(rpcErr?.data)}`,
       };
     }
     return { ok: true, txHash: txResult?.result?.transaction?.hash };
   } catch (err: any) {
-    return { ok: false, error: err?.message || String(err) };
+    return { ok: false, error: err?.message || String(err), ambiguous: broadcastAttempted };
   }
 }
 
@@ -5141,6 +5470,22 @@ export async function ensureEscrowStorageRegistered(
   return { registered: res.registered, reason: res.reason };
 }
 
+/**
+ * Registers an arbitrary receiver on a NEP-141 token contract (escrow gas-sponsored)
+ * before an `ft_withdraw` intent settles so the token contract does not bounce funds.
+ */
+export async function ensureSponsoredReceiverStorage(
+  env: Env,
+  contractId: string,
+  receiverId: string
+): Promise<{ registered: boolean; reason?: string }> {
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const sponsor = escrowSigningKey(env, rpcUrl);
+  if ('error' in sponsor) return { registered: false, reason: sponsor.error };
+  const res = await ensureReceiverStorageRegistered(rpcUrl, contractId, receiverId, sponsor);
+  return { registered: res.registered, reason: res.reason };
+}
+
 export interface FtContractMetadata {
   contractId: string;
   symbol: string;
@@ -5229,10 +5574,27 @@ export async function depositPlainBalanceToIntents(
   senderXId: string,
   asset: string,
   amount: string,
-  creditAddress: string
+  creditAddress: string,
+  opts: { nativeL1Grant?: NativeL1KeyGrant } = {}
 ): Promise<{ deposited: boolean; txHash?: string; reason?: string }> {
   try {
     if (!creditAddress) return { deposited: false, reason: 'Missing credit address' };
+    const custody = await getUserCustodyRecord(env, senderXId);
+    if (custody.custodyMode === 'self') {
+      if (!custody.nearAccount || creditAddress.toLowerCase() !== custody.nearAccount.toLowerCase()) {
+        return { deposited: false, reason: 'SELF_CUSTODY_CREDIT_MISMATCH' };
+      }
+      if (
+        !verifyNativeL1Grant(opts.nativeL1Grant, {
+          xId: senderXId,
+          allowedOperations: ['sweep_to_intents'],
+          target: creditAddress,
+          asset,
+        })
+      ) {
+        return { deposited: false, reason: 'SELF_CUSTODY_SIGNATURE_REQUIRED' };
+      }
+    }
     const tokens = await getSupportedTokens(env);
     let token = resolveTokenForAsset(asset, tokens);
     if (!token) token = await resolveRheaToken(env, asset);
@@ -5517,9 +5879,16 @@ export async function depositPlainBalanceToEscrow(
   env: Env,
   senderXId: string,
   asset: string,
-  amount: string
+  amount: string,
+  nativeL1Grant?: NativeL1KeyGrant
 ): Promise<{ deposited: boolean; txHash?: string; reason?: string }> {
   try {
+    const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
+    await assertServerOrGrantedNativeL1ForXId(env, senderXId, nativeL1Grant, {
+      allowedOperations: ['native_escrow_lock'],
+      target: escrowId,
+      asset,
+    });
     const tokens = await getSupportedTokens(env);
     let token = resolveTokenForAsset(asset, tokens);
     if (!token) token = await resolveRheaToken(env, asset);
@@ -5534,7 +5903,6 @@ export async function depositPlainBalanceToEscrow(
     }
 
     const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
-    const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
 
     const sender = await deriveUserNearKeypair(env, senderXId);
     let senderAccountId = sender.accountId;
@@ -5580,6 +5948,7 @@ export async function depositPlainBalanceToEscrow(
       ? { deposited: true, txHash: res.txHash }
       : { deposited: false, reason: res.error || 'ft_transfer to escrow failed' };
   } catch (err: any) {
+    if (err instanceof SelfCustodySignatureRequiredError) throw err;
     return { deposited: false, reason: err?.message || String(err) };
   }
 }
@@ -5706,9 +6075,15 @@ export async function executeDirectFtWithdraw(
   senderXId: string,
   destinationAddress: string,
   asset: string,
-  amount: string
+  amount: string,
+  nativeL1Grant?: NativeL1KeyGrant
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   try {
+    await assertServerOrGrantedNativeL1ForXId(env, senderXId, nativeL1Grant, {
+      allowedOperations: ['native_withdraw', 'native_send'],
+      target: destinationAddress,
+      asset,
+    });
     const tokens = await getSupportedTokens(env);
     let token = resolveTokenForAsset(asset, tokens);
     if (!token) token = await resolveRheaToken(env, asset);
@@ -5788,6 +6163,7 @@ export async function executeDirectFtWithdraw(
       ? { success: true, txHash: res.txHash }
       : { success: false, error: res.error || 'ft_transfer to destination failed' };
   } catch (err: any) {
+    if (err instanceof SelfCustodySignatureRequiredError) throw err;
     return { success: false, error: err?.message || String(err) };
   }
 }
@@ -5883,6 +6259,7 @@ export async function executeWithdrawIntent(
   amount: string
 ): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   try {
+    await assertServerCustodyForXId(env, senderXId);
     const tokens = await getSupportedTokens(env);
     let token = resolveTokenForAsset(asset, tokens);
     if (!token) {
@@ -6026,6 +6403,7 @@ export async function executeCrossChainSwapTransfer(
   depositAddress: string
 ): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
   try {
+    await assertServerCustodyForXId(env, senderXId);
     const senderDerived = await deriveUserNearKeypair(env, senderXId);
     let senderId = senderDerived.accountId;
 
@@ -6253,27 +6631,41 @@ export interface ProvisionReport {
 
 export async function resolveUserNearAccount(
   env: Env,
-  session: { x_id: string; x_handle: string; near_account?: string | null },
+  session: { x_id: string; x_handle: string; near_account?: string | null; custody_mode?: CustodyMode },
   report?: ProvisionReport
 ): Promise<string> {
   // 1. Prefer the account already stored in the session (set during login/claim)
   let accountId = session.near_account || null;
+  let custodyMode: CustodyMode = session.custody_mode === 'self' ? 'self' : 'server';
 
-  // 2. If not in session, look up the DB — this is the authoritative source and
-  //    may differ from the HMAC derivation when the user registered via passkey.
-  if (!accountId && env.DB) {
+  // 2. Always verify custody_mode (and near_account if missing) from DB so a stale
+  //    session cookie can never trigger server-key creation or intents key re-injection.
+  if (env.DB) {
     try {
-      const identity = await env.DB.prepare('SELECT near_account FROM x_identities WHERE x_id = ?')
+      const identity = await env.DB.prepare(
+        'SELECT near_account, custody_mode FROM x_identities WHERE x_id = ?'
+      )
         .bind(session.x_id)
-        .first<{ near_account: string | null }>();
-      if (identity?.near_account) {
+        .first<{ near_account: string | null; custody_mode?: string | null }>();
+      if (identity?.near_account && !accountId) {
         accountId = identity.near_account;
+      }
+      if (identity?.custody_mode === 'self') {
+        custodyMode = 'self';
       }
     } catch {}
   }
 
-  // 3. Fall back to deterministic HMAC derivation only for brand-new users
-  //    who have never registered a passkey or been assigned an account.
+  if (custodyMode === 'self') {
+    if (!accountId) {
+      throw new Error('SELF_CUSTODY_ACCOUNT_MISSING');
+    }
+    session.near_account = accountId;
+    session.custody_mode = 'self';
+    return accountId;
+  }
+
+  // 3. Fall back to deterministic HMAC derivation only for server-custody users.
   const derived = await deriveUserNearKeypair(env, session.x_id);
   if (!accountId) {
     accountId = derived.accountId;
@@ -6699,7 +7091,8 @@ export async function executeRheaStabilizeSwap(
   grossAtomic: bigint,
   feeAtomic: bigint,
   netInputAtomic: bigint,
-  slippageBps = 500
+  slippageBps = 500,
+  nativeL1Grant?: NativeL1KeyGrant
 ): Promise<{
   swapTxHash: string;
   depositTxHash: string;
@@ -6707,6 +7100,12 @@ export async function executeRheaStabilizeSwap(
   amountOutAtomic: bigint;
   minAmountOutAtomic: bigint;
 }> {
+  const custody = await getUserCustodyRecord(env, senderXId);
+  await assertServerOrGrantedNativeL1ForXId(env, senderXId, nativeL1Grant, {
+    allowedOperations: ['native_rhea_stabilize'],
+    target: custody.nearAccount || '',
+    asset: contractIn,
+  });
   const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
   const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
   const escrowId = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';

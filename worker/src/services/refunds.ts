@@ -19,6 +19,12 @@ import {
   submitEscrowPrivateTransfer,
   waitForSettlement,
 } from './confidentialRail';
+import {
+  canonicalUnclaimedRefundPayload,
+  getCircleContractId,
+  refundUnclaimedSendOnchain,
+  signContractPayloadWithServerUserKey,
+} from './circleContract';
 
 export interface RefundResult {
   /** True when the onchain transfer landed and the row is REFUNDED. */
@@ -107,6 +113,80 @@ export async function refundEscrowedPayment(env: Env, payment: Payment): Promise
       // (settlement failed before finalize). Nothing to return.
       return { refunded: false, error: 'no escrow deposit recorded for this payment' };
     }
+
+    if (payment.contract_mode === 'contract' && payment.escrow_send_id) {
+      if (!payment.sender_x_id) {
+        return { refunded: false, error: 'sender identity missing for contract refund' };
+      }
+      const custody = await nearRpc.getUserCustodyRecord(env, payment.sender_x_id);
+      if (custody.custodyMode === 'self') {
+        return {
+          refunded: false,
+          error: 'Self-custody unclaimed sends require sender passkey confirmation to refund.',
+        };
+      }
+      const senderAccount = await resolveSenderAccount(env, payment);
+      const contractId = payment.escrow_contract_id || getCircleContractId(env);
+      if (!senderAccount || !contractId) {
+        return { refunded: false, error: 'contract refund metadata could not be resolved' };
+      }
+
+      try {
+        const reserve = await env.DB.prepare(
+          `UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?`
+        )
+          .bind(Status.REFUNDED, Date.now(), payment.id, Status.ESCROWED)
+          .run();
+        if ((reserve.meta?.changes ?? 0) === 0) {
+          const current = await env.DB.prepare('SELECT status, refund_tx_hash FROM payments WHERE id = ?')
+            .bind(payment.id)
+            .first<{ status: string; refund_tx_hash: string | null }>();
+          if (current?.status === Status.REFUNDED && current.refund_tx_hash) {
+            return { refunded: false, alreadyRefunded: true };
+          }
+          return { refunded: false, error: 'payment is no longer escrowed' };
+        }
+      } catch (err) {
+        console.error(`[refund] contract reserve failed for ${payment.id}:`, err);
+        return { refunded: false, error: 'refund reservation failed' };
+      }
+
+      const payloadStr = canonicalUnclaimedRefundPayload({
+        contractId,
+        sendId: payment.escrow_send_id,
+        senderAccountId: senderAccount,
+      });
+      const proof = await signContractPayloadWithServerUserKey(env, payment.sender_x_id, payloadStr);
+      const res = await refundUnclaimedSendOnchain(
+        env,
+        {
+          send_id: payment.escrow_send_id,
+          sender_proof: proof,
+        },
+        contractId
+      );
+
+      if (!res.success || !res.txHash) {
+        if (res.ambiguous) {
+          await env.DB.prepare('UPDATE payments SET status = ?, updated_at = ? WHERE id = ? AND status = ?')
+            .bind(Status.REFUND_REVIEW, Date.now(), payment.id, Status.REFUNDED)
+            .run()
+            .catch(() => {});
+          return { refunded: false, error: res.error || 'contract refund status unknown' };
+        }
+        await revertToEscrowed(env, payment.id);
+        return { refunded: false, error: res.error || 'contract refund failed' };
+      }
+
+      await env.DB.prepare(
+        'UPDATE payments SET refund_tx_hash = ?, updated_at = ? WHERE id = ? AND status = ?'
+      )
+        .bind(res.txHash, Date.now(), payment.id, Status.REFUNDED)
+        .run()
+        .catch(() => {});
+      return { refunded: true, txHash: res.txHash };
+    }
+
     const senderAccount = await resolveSenderAccount(env, payment);
     if (!senderAccount) {
       return { refunded: false, error: 'sender account could not be resolved' };

@@ -24,6 +24,8 @@ export interface CrossChainQuoteParams {
    * chain is inferred from the address shape exactly as before.
    */
   destinationChain?: string;
+  /** Refund destination on Intents (self-custody swaps must refund to the user's own account). */
+  refundTo?: string;
 }
 
 export interface CrossChainQuoteResult {
@@ -518,7 +520,7 @@ export async function get1ClickWithdrawalQuote(
     amount: amountInBaseUnits,
     recipient: params.destinationAddress,
     recipientType: 'DESTINATION_CHAIN',
-    refundTo: escrowAccount,
+    refundTo: params.refundTo || escrowAccount,
     refundType: 'INTENTS',
     depositType: 'INTENTS',
     slippageTolerance: 100, // 1%

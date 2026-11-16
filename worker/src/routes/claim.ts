@@ -24,6 +24,7 @@ import * as webauthn from '../services/webauthn';
 import * as nearRpc from '../services/nearRpc';
 import { redeemInvite } from '../services/inviteService';
 import { ensureRecoveryCodes } from '../services/recoveryCodes';
+import { cosePublicKeyToNearP256 } from '../services/selfCustodyCrypto';
 import { background } from '../utils/background';
 import { storeChallenge, consumeChallenge } from '../services/challengeService';
 import {
@@ -53,6 +54,21 @@ import {
   saveNearcomDestination,
   executeNearcomWithdrawal,
 } from '../services/nearcomWithdraw';
+import { handleCustodyActionError } from '../utils/custodyResponse';
+import {
+  prepareSelfCustodyWithdraw,
+  submitSelfCustodyWithdraw,
+  prepareSelfCustodyNearcomWithdraw,
+  submitSelfCustodyNearcomWithdraw,
+  type PrepareWithdrawInput,
+} from '../services/selfCustodyActions';
+import {
+  canonicalUnclaimedClaimPayload,
+  claimUnclaimedSendOnchain,
+  getCircleContractId,
+  hashHandleHex,
+  signHandleAttestation,
+} from '../services/circleContract';
 
 export const claimRouter = new Hono<AppContext>();
 
@@ -419,8 +435,27 @@ claimRouter.post('/register', requireAuth(), async (c) => {
       }
     }
 
+    const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+    if (custody.custodyMode === 'self' && recoveryAuthorized) {
+      return c.json<ErrorResponse>(
+        {
+          error: 'Self-custody accounts require your Recovery Key signature to replace a passkey.',
+          code: 'SELF_CUSTODY_BACKUP_KEY_REQUIRED',
+        },
+        403
+      );
+    }
+
+    let nearP256Pubkey: string | null = null;
+    try {
+      nearP256Pubkey = cosePublicKeyToNearP256(verification.publicKeyHex);
+    } catch (coseErr) {
+      console.warn('[claim/register] Could not derive P-256 NEAR pubkey from passkey COSE key:', coseErr);
+    }
+
     // Resolve deterministic, authentic confidential sub-account for user
     // Fully provisions subaccount and registers authentic keys on intents.near
+    // (resolveUserNearAccount returns existing account without server-key injection when self-custody).
     const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
     const now = Date.now();
     const passkeyId = crypto.randomUUID();
@@ -434,12 +469,15 @@ claimRouter.post('/register', requireAuth(), async (c) => {
           x_id,
           credential_id,
           public_key,
+          near_p256_pubkey,
+          onchain_added_at,
           counter,
           transports,
           created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
         ON CONFLICT(credential_id) DO UPDATE SET
           public_key = excluded.public_key,
+          near_p256_pubkey = COALESCE(passkeys.near_p256_pubkey, excluded.near_p256_pubkey),
           counter = excluded.counter
       `
       )
@@ -448,6 +486,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
           session.x_id,
           verification.credentialId,
           verification.publicKeyHex,
+          nearP256Pubkey,
           verification.counter,
           JSON.stringify(body.attestation.response?.transports || []),
           now
@@ -481,6 +520,7 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     // passkey, and any recovery grant is single-use.
     await updateSession(c, {
       near_account: nearAccount,
+      custody_mode: custody.custodyMode,
       passkey_verified: true,
       passkey_verified_at: now,
       recovery_authorized: false,
@@ -496,21 +536,31 @@ claimRouter.post('/register', requireAuth(), async (c) => {
     }
 
     // Signup completes with the first passkey — provision the intent account
-    // now rather than on the user's first balance read.
-    background(
-      c.executionCtx,
-      nearRpc.ensureIntentAccount(c.env, {
-        x_id: session.x_id,
-        x_handle: session.x_handle,
-        near_account: nearAccount,
-      }),
-      'intent account provisioning (passkey)'
-    );
+    // now rather than on the user's first balance read. Never re-inject server
+    // keys onto an account already in self-custody.
+    if (custody.custodyMode !== 'self') {
+      background(
+        c.executionCtx,
+        nearRpc.ensureIntentAccount(c.env, {
+          x_id: session.x_id,
+          x_handle: session.x_handle,
+          near_account: nearAccount,
+        }),
+        'intent account provisioning (passkey)'
+      );
+    }
+
+    const pendingOnchainPasskeyAdd =
+      custody.custodyMode === 'self' && existingPasskeys > 0 && nearP256Pubkey
+        ? nearP256Pubkey
+        : undefined;
 
     return c.json<RegisterPasskeyResponse>({
       success: true,
       nearAccount,
       credentialId: verification.credentialId,
+      custodyMode: custody.custodyMode,
+      ...(pendingOnchainPasskeyAdd ? { pendingOnchainPasskeyAdd } : {}),
     });
   } catch (err: any) {
     console.error('Passkey registration error:', err);
@@ -552,18 +602,23 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
     // to register mid-flight (where a lost race would strand the balance). This
     // is best-effort — the intent rails re-assert registration before signing —
     // but doing it here means a new user is ready before they touch a balance.
+    // Self-custody accounts already manage their own P-256 passkey on intents.near
+    // and must NEVER re-attach the server-derived key.
     try {
-      const recipientDerived = await nearRpc.deriveUserNearKeypair(c.env, session.x_id);
-      const keyReady = await nearRpc.ensureKeyOnIntents(
-        c.env,
-        recipientNearAccount,
-        recipientDerived.publicKey,
-        recipientDerived.privateKey
-      );
-      if (!keyReady.registered) {
-        console.warn(
-          `[claim/execute] signing-key registration did not land for ${recipientNearAccount}: ${keyReady.reason}`
+      const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+      if (custody.custodyMode !== 'self') {
+        const recipientDerived = await nearRpc.deriveUserNearKeypair(c.env, session.x_id);
+        const keyReady = await nearRpc.ensureKeyOnIntents(
+          c.env,
+          recipientNearAccount,
+          recipientDerived.publicKey,
+          recipientDerived.privateKey
         );
+        if (!keyReady.registered) {
+          console.warn(
+            `[claim/execute] signing-key registration did not land for ${recipientNearAccount}: ${keyReady.reason}`
+          );
+        }
       }
     } catch (keyErr) {
       console.warn('[claim/execute] signing-key registration failed:', keyErr);
@@ -671,7 +726,56 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
           }
         }
 
-        if (c.env.ESCROW) {
+        if (payment.contract_mode === 'contract' && payment.escrow_send_id) {
+          const contractId = payment.escrow_contract_id || getCircleContractId(c.env);
+          if (!contractId) {
+            throw new Error('CIRCLE_CONTRACT_ID missing for contract-mode send');
+          }
+          const recipientHandleHash = await hashHandleHex(payment.recipient_handle);
+          const deadlineMs = Date.now() + 5 * 60 * 1000;
+          const attPayload = canonicalUnclaimedClaimPayload({
+            contractId,
+            sendId: payment.escrow_send_id,
+            recipientHandleHash,
+            recipientAccountId: recipientNearAccount,
+            deadlineMs,
+          });
+          const attestorSig = signHandleAttestation(c.env, attPayload);
+          const contractClaim = await claimUnclaimedSendOnchain(
+            c.env,
+            {
+              send_id: payment.escrow_send_id,
+              recipient_account_id: recipientNearAccount,
+              attestor_deadline_ms: deadlineMs,
+              attestor_sig: attestorSig,
+            },
+            contractId
+          );
+          if (!contractClaim?.success || !contractClaim.txHash) {
+            if (contractClaim?.ambiguous) {
+              console.error(
+                `[claim/execute] CRITICAL: ambiguous contract claim for ${paymentId}:`,
+                contractClaim?.error
+              );
+              results.push({
+                paymentId,
+                status: PaymentStatus.CLAIMED,
+                error: `Transfer status unknown — quote payment id ${paymentId} to support`,
+              });
+              continue;
+            }
+            throw new Error(contractClaim?.error || 'circle.uprail.near claim failed');
+          }
+          claimResponse = {
+            payment: {
+              ...payment,
+              status: PaymentStatus.CLAIMED,
+              claim_tx_hash: contractClaim.txHash,
+              updated_at: Date.now(),
+            },
+            txHash: contractClaim.txHash,
+          };
+        } else if (c.env.ESCROW) {
           const doId = c.env.ESCROW.idFromName(paymentId);
           const stub = c.env.ESCROW.get(doId) as any;
 
@@ -873,7 +977,7 @@ claimRouter.post('/execute', requireAuth({ passkeyVerified: true }), requirePass
         // intents rejects — and which previously showed up as a dispatch
         // failure that nobody could see.
         const feeAmount = parseFloat(payment.fee || '0') || 0;
-        if (feeAmount > 0) {
+        if (feeAmount > 0 && payment.contract_mode !== 'contract') {
           const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
           const escrowAccount = c.env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
           let feeDispatchStatus: string;
@@ -1221,6 +1325,46 @@ claimRouter.post('/withdraw', requireAuth({ passkeyVerified: true }), requirePas
   handleWithdraw(c)
 );
 
+claimRouter.post('/withdraw/prepare', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const body = await c.req.json<PrepareWithdrawInput>().catch(() => null);
+    if (!body) {
+      return c.json<ErrorResponse>({ error: 'Invalid request body', code: 'INVALID_REQUEST' }, 400);
+    }
+    const prepared = await prepareSelfCustodyWithdraw(c.env, session, body);
+    return c.json(prepared);
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_PREPARE_FAILED', '[claim/withdraw/prepare]');
+  }
+});
+
+claimRouter.post('/withdraw/submit', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const body = await c.req
+      .json<{ actionId?: string; assertion?: unknown; step?: string }>()
+      .catch(() => null);
+    if (!body?.actionId || !body?.assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion', code: 'INVALID_REQUEST' },
+        400
+      );
+    }
+    const result = await submitSelfCustodyWithdraw({
+      env: c.env,
+      session,
+      actionId: body.actionId,
+      assertion: body.assertion,
+      step: body.step,
+    });
+    await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+    return c.json(result);
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_SUBMIT_FAILED', '[claim/withdraw/submit]');
+  }
+});
+
 /**
  * GET /api/claim/nearcom-destination
  * Returns the authenticated user's configured near.com internal withdrawal destination.
@@ -1299,6 +1443,17 @@ claimRouter.post(
   async (c) => {
     try {
       const session = c.get('session')!;
+      const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+      if (custody?.custodyMode === 'self') {
+        return c.json<ErrorResponse>(
+          {
+            error:
+              'Self-custody accounts must authorize near.com withdrawals via /api/claim/nearcom-withdraw/prepare and /api/claim/nearcom-withdraw/submit.',
+            code: 'SELF_CUSTODY_SIGNATURE_REQUIRED',
+          },
+          409
+        );
+      }
       const body = (c.get('parsedBody' as any) ||
         (await c.req
           .json<{
@@ -1331,6 +1486,45 @@ claimRouter.post(
     }
   }
 );
+
+claimRouter.post('/nearcom-withdraw/prepare', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const body = (await c.req
+      .json<{ asset?: string; amount?: string; expectedDestination?: string }>()
+      .catch(() => null)) || {};
+    const prepared = await prepareSelfCustodyNearcomWithdraw(c.env, session, body);
+    return c.json(prepared);
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_PREPARE_FAILED', '[claim/nearcom-withdraw/prepare]');
+  }
+});
+
+claimRouter.post('/nearcom-withdraw/submit', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const body = await c.req
+      .json<{ actionId?: string; assertion?: unknown; step?: string }>()
+      .catch(() => null);
+    if (!body?.actionId || !body?.assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion', code: 'INVALID_REQUEST' },
+        400
+      );
+    }
+    const result = await submitSelfCustodyNearcomWithdraw({
+      env: c.env,
+      session,
+      actionId: body.actionId,
+      assertion: body.assertion,
+      step: body.step,
+    });
+    await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+    return c.json(result);
+  } catch (err) {
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_SUBMIT_FAILED', '[claim/nearcom-withdraw/submit]');
+  }
+});
 
 /**
  * Confidential withdrawal path: the user's Confidential Intents balance is
@@ -1534,6 +1728,17 @@ async function handleConfidentialWithdraw(
 export async function handleWithdraw(c: Context<AppContext>): Promise<Response> {
   try {
     const session = c.get('session')!;
+    const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
+    if (custody?.custodyMode === 'self') {
+      return c.json<ErrorResponse>(
+        {
+          error:
+            'Self-custody accounts must authorize withdrawals directly with a passkey signature via /api/claim/withdraw/prepare and /api/claim/withdraw/submit.',
+          code: 'SELF_CUSTODY_SIGNATURE_REQUIRED',
+        },
+        409
+      );
+    }
     // Body was already parsed by requirePasskeyAuth()
     const body = (c.get('parsedBody' as any) || await c.req.json<{
       destinationAddress: string;

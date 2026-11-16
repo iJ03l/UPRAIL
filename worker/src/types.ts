@@ -92,6 +92,19 @@ export interface Env {
    * also holds user funds; routing is disabled until attribution is tx-verified.
    */
   CREATOR_FEES_ENABLED?: string;
+  /**
+   * Locked on-chain escrow contract ID for new Circles, Vault Gifts, and
+   * unclaimed @handle sends (circle.uprail.near when enabled/deployed).
+   */
+  CIRCLE_CONTRACT_ID?: string;
+  /**
+   * Scoped ed25519 signing seed for circle.uprail.near X-OAuth handle claims.
+   * Distinct from ESCROW_PRIVATE_KEY so handle attestation never implies
+   * blanket access to treasury or user accounts.
+   */
+  ATTESTOR_PRIVATE_KEY?: string;
+  /** Optional override controlling UI/onboarding availability ('true' | 'false'). */
+  SELF_CUSTODY_ENABLED?: string;
 }
 
 /**
@@ -146,11 +159,16 @@ export interface Payment {
   privacy_rail?: string | null;
   settlement_status?: string | null;
   claim_deposit_address?: string | null;
+  contract_mode?: 'escrow' | 'contract' | string | null;
+  escrow_contract_id?: string | null;
+  escrow_send_id?: string | null;
   confirmed_at?: number | null;
   created_at: number;
   expires_at: number;
   updated_at: number;
 }
+
+export type CustodyMode = 'server' | 'self';
 
 export interface XIdentity {
   x_id: string;
@@ -161,6 +179,10 @@ export interface XIdentity {
   personal_invite_code?: string | null;
   invited_by_code?: string | null;
   invited_by_handle?: string | null;
+  custody_mode?: CustodyMode;
+  backup_pubkey?: string | null;
+  self_custody_at?: number | null;
+  self_custody_version?: number;
   created_at: number;
   updated_at: number;
 }
@@ -170,6 +192,8 @@ export interface Passkey {
   x_id: string;
   credential_id: string;
   public_key: string;
+  near_p256_pubkey?: string | null;
+  onchain_added_at?: number | null;
   counter: number;
   transports?: string | null;
   created_at: number;
@@ -183,6 +207,7 @@ export interface Session {
   near_account?: string | null;
   is_activated?: boolean;
   personal_invite_code?: string | null;
+  custody_mode?: CustodyMode;
   /** True only after this session has proven possession of a passkey. */
   passkey_verified?: boolean;
   /** When the passkey proof happened. Used to invalidate stale sessions after recovery. */
@@ -346,6 +371,8 @@ export interface RegisterPasskeyResponse {
   success: boolean;
   nearAccount: string;
   credentialId: string;
+  custodyMode?: CustodyMode;
+  pendingOnchainPasskeyAdd?: string;
 }
 
 export interface ClaimExecuteRequest {

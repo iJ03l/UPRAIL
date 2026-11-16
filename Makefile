@@ -1,12 +1,13 @@
-.PHONY: help verify check-mainnet test check-endpoints
+.PHONY: help verify check-mainnet test check-endpoints deploy-circle
 
 help:
 	@echo "UPRAIL Verification Suite (NEAR Hackathon)"
 	@echo "=========================================="
-	@echo "make verify           Run 11 live mainnet/feature checks + 174 automated tests"
+	@echo "make verify           Run 11 live mainnet/feature checks + 199 automated tests (185 Worker + 14 contract)"
 	@echo "make check-mainnet    Verify sponsor, sub-accounts, intents.near, Circles/Gifts & live APIs (11 checks)"
-	@echo "make test             Run 174 automated tests across 39 suites (Miniflare + unit)"
+	@echo "make test             Run 185 Worker tests (40 suites) + 14 Rust smart contract tests"
 	@echo "make check-endpoints  Quick curl inspection of live production endpoints"
+	@echo "make deploy-circle    Securely deploy/upgrade circle.uprail.near (hidden TTY key prompt)"
 
 verify: check-mainnet test
 	@echo "\n==========================================================="
@@ -16,8 +17,12 @@ verify: check-mainnet test
 check-mainnet:
 	@python3 scripts/verify-mainnet.py
 
+deploy-circle:
+	@node scripts/deploy-circle-contract.mjs
+
 test:
-	@echo "\n--> Running worker automated test suite (174 tests)..."
+	@echo "\n--> Running worker automated test suite (185 tests) + contract Rust tests (14 tests)..."
+	@cargo test --manifest-path contracts/circle-escrow/Cargo.toml
 	@if [ -s "$$HOME/.nvm/nvm.sh" ]; then \
 		bash -c "source $$HOME/.nvm/nvm.sh && nvm use 22.22.0 >/dev/null 2>&1 || true && cd worker && npm test"; \
 	else \

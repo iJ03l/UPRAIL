@@ -14,12 +14,26 @@
 
 import { Hono } from 'hono';
 import type { AppContext, ErrorResponse } from '../types';
-import { requireAuth } from '../middleware/session';
+import { requireAuth, updateSession } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { rateLimit } from '../middleware/rateLimit';
 import { publicErrorMessage } from '../utils/errors';
+import { handleCustodyActionError } from '../utils/custodyResponse';
 import { getEarnVaults } from '../services/earnVaults';
 import { GiftError, quoteGift } from '../services/gifts';
+import {
+  checkCircleContributeSwapStatus,
+  prepareSelfCustodyCircleContribute,
+  prepareSelfCustodyCircleCreate,
+  prepareSelfCustodyCircleDissolve,
+  prepareSelfCustodyCircleJoin,
+  prepareSelfCustodyCircleSettle,
+  submitSelfCustodyCircleContribute,
+  submitSelfCustodyCircleCreate,
+  submitSelfCustodyCircleDissolve,
+  submitSelfCustodyCircleJoin,
+  submitSelfCustodyCircleSettle,
+} from '../services/selfCustodyVaultOps';
 import {
   CircleError,
   contributeToCircle,
@@ -272,6 +286,265 @@ circlesRouter.post(
         { error: publicErrorMessage(err), code: 'CIRCLE_DISSOLVE_FAILED' },
         502
       );
+    }
+  }
+);
+
+// ─── Self-Custody Circle Prepare / Submit Routes ──────────────────────────────
+
+circlesRouter.post(
+  '/create/prepare',
+  rateLimit({ limit: 15, prefix: 'circle_sc_create_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    try {
+      const body = await c.req.json();
+      const result = await prepareSelfCustodyCircleCreate({ env: c.env, session, input: body });
+      return c.json(result);
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_CREATE_PREPARE_FAILED', '[circles/create/prepare]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/create/submit',
+  rateLimit({ limit: 15, prefix: 'circle_sc_create_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    try {
+      const body = await c.req.json<{ actionId: string; assertion: unknown }>();
+      const res = await submitSelfCustodyCircleCreate({
+        env: c.env,
+        session,
+        actionId: String(body?.actionId || ''),
+        assertion: body?.assertion,
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const circle = await getCircleDetail(c.env, session, res.circleId).catch(() => null);
+      return c.json({ ...res, ...(circle ? { circle } : {}) });
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_CREATE_SUBMIT_FAILED', '[circles/create/submit]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/join/prepare',
+  rateLimit({ limit: 20, prefix: 'circle_sc_join_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const result = await prepareSelfCustodyCircleJoin({ env: c.env, session, circleId });
+      if ((result as any).alreadyActive || (result as any).alreadySigned) {
+        const circle = await getCircleDetail(c.env, session, circleId).catch(() => null);
+        return c.json({ ...result, ...(circle ? { circle } : {}) });
+      }
+      return c.json(result);
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_JOIN_PREPARE_FAILED', '[circles/join/prepare]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/join/submit',
+  rateLimit({ limit: 20, prefix: 'circle_sc_join_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const body = await c.req.json<{ actionId: string; assertion: unknown }>();
+      const res = await submitSelfCustodyCircleJoin({
+        env: c.env,
+        session,
+        circleId,
+        actionId: String(body?.actionId || ''),
+        assertion: body?.assertion,
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const circle = await getCircleDetail(c.env, session, circleId).catch(() => null);
+      return c.json({ ...res, ...(circle ? { circle } : {}) });
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_JOIN_SUBMIT_FAILED', '[circles/join/submit]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/contribute/prepare',
+  rateLimit({ limit: 25, prefix: 'circle_sc_contrib_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const body = await c.req.json<{ sourceAsset?: string; amount: string }>();
+      const result = await prepareSelfCustodyCircleContribute({
+        env: c.env,
+        session,
+        circleId,
+        sourceAsset: String(body?.sourceAsset || ''),
+        amount: String(body?.amount || ''),
+      });
+      return c.json(result);
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_CONTRIBUTE_PREPARE_FAILED', '[circles/contribute/prepare]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/contribute/submit',
+  rateLimit({ limit: 25, prefix: 'circle_sc_contrib_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const body = await c.req.json<{ actionId: string; assertion: unknown; step?: string }>();
+      const res = await submitSelfCustodyCircleContribute({
+        env: c.env,
+        session,
+        circleId,
+        actionId: String(body?.actionId || ''),
+        assertion: body?.assertion,
+        step: body?.step,
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const circle = (res as any).completed
+        ? await getCircleDetail(c.env, session, circleId).catch(() => null)
+        : null;
+      return c.json({ ...res, ...(circle ? { circle } : {}) });
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_CONTRIBUTE_SUBMIT_FAILED', '[circles/contribute/submit]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/contribute/swap-status',
+  rateLimit({ limit: 60, prefix: 'circle_sc_swap_status', strict: false }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    try {
+      const body = await c.req.json<{
+        depositAddress: string;
+        vaultAssetId: string;
+        balanceBeforeAtomic: string;
+      }>();
+      const result = await checkCircleContributeSwapStatus({
+        env: c.env,
+        session,
+        depositAddress: String(body?.depositAddress || ''),
+        vaultAssetId: String(body?.vaultAssetId || ''),
+        balanceBeforeAtomic: String(body?.balanceBeforeAtomic || '0'),
+      });
+      return c.json(result);
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_SWAP_STATUS_FAILED', '[circles/contribute/swap-status]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/settle/prepare',
+  rateLimit({ limit: 10, prefix: 'circle_sc_settle_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const result = await prepareSelfCustodyCircleSettle({ env: c.env, session, circleId });
+      return c.json(result);
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_SETTLE_PREPARE_FAILED', '[circles/settle/prepare]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/settle/submit',
+  rateLimit({ limit: 10, prefix: 'circle_sc_settle_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const body = await c.req.json<{ actionId?: string; assertion?: unknown; retry?: boolean }>();
+      const res = await submitSelfCustodyCircleSettle({
+        env: c.env,
+        session,
+        circleId,
+        actionId: body?.actionId,
+        assertion: body?.assertion,
+        retry: Boolean(body?.retry),
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const circle = await getCircleDetail(c.env, session, circleId).catch(() => null);
+      return c.json({ ...res, ...(circle ? { circle } : {}) });
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_SETTLE_SUBMIT_FAILED', '[circles/settle/submit]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/dissolve/prepare',
+  rateLimit({ limit: 10, prefix: 'circle_sc_dissolve_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const result = await prepareSelfCustodyCircleDissolve({ env: c.env, session, circleId });
+      return c.json(result);
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_DISSOLVE_PREPARE_FAILED', '[circles/dissolve/prepare]');
+    }
+  }
+);
+
+circlesRouter.post(
+  '/:id/dissolve/submit',
+  rateLimit({ limit: 10, prefix: 'circle_sc_dissolve_sub', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const circleId = (c.req.param('id') || '').trim();
+    try {
+      const body = await c.req.json<{
+        actionId?: string;
+        assertion?: unknown;
+        finalizeSafeguard?: boolean;
+      }>();
+      const res = await submitSelfCustodyCircleDissolve({
+        env: c.env,
+        session,
+        circleId,
+        actionId: body?.actionId,
+        assertion: body?.assertion,
+        finalizeSafeguard: Boolean(body?.finalizeSafeguard),
+      });
+      await updateSession(c, { passkey_verified: true, passkey_verified_at: Date.now() });
+      const circle = await getCircleDetail(c.env, session, circleId).catch(() => null);
+      return c.json({
+        ...res,
+        ...(circle
+          ? {
+              circle,
+              refundedMembers: circle.members.filter((m) => Boolean(m.refundedAt)).length,
+            }
+          : {}),
+      });
+    } catch (err: any) {
+      return handleCustodyActionError(c, err, 'CIRCLE_DISSOLVE_SUBMIT_FAILED', '[circles/dissolve/submit]');
     }
   }
 );

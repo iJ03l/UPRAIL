@@ -41,6 +41,25 @@ import {
   transferFromEarnCustody,
   type EarnVaultDescriptor,
 } from './earnVaults';
+import {
+  buildContributeCircleMsg,
+  canonicalCircleAgreePayload,
+  canonicalCircleDissolvePayload,
+  canonicalCircleSettlePayload,
+  createCircleOnchain,
+  finalizeDissolveOnchain,
+  getCircleContractId,
+  getCircleOnchain,
+  hashHandleHex,
+  initiateDissolveOnchain,
+  retryCircleSettlementOnchain,
+  settleCircleOnchain,
+  signCircleTermsOnchain,
+  signContractPayloadWithServerUserKey,
+  signDissolveOnchain,
+  toIntentsContractAssetSpec,
+} from './circleContract';
+import { resolveMemberSignerBinding } from './selfCustodyVaultOps';
 
 export class CircleError extends Error {
   readonly code: string;
@@ -93,6 +112,7 @@ export interface CreateCircleInput {
   targetAmountUsd: number;
   vaultAsset: string;
   payoutHandle?: string;
+  mode?: 'contract' | 'escrow';
   members: CircleMemberInput[];
 }
 
@@ -107,6 +127,7 @@ export interface CircleMemberView {
   handle: string;
   xId: string | null;
   isRegistered: boolean;
+  p256Pubkey?: string | null;
   hasSigned: boolean;
   hasApprovedDissolve: boolean;
   joinedAt: number | null;
@@ -178,6 +199,11 @@ export interface CircleView {
   yieldPct: number;
   payoutHandle: string;
   custodyAccount: string;
+  contractMode: 'escrow' | 'contract';
+  escrowContractId?: string | null;
+  onchainCircleId?: string | null;
+  dissolveInitiatedAt?: number | null;
+  dissolveDeadlineAt?: number | null;
   status: string;
   payoutTxHash?: string | null;
   members: CircleMemberView[];
@@ -328,23 +354,180 @@ export async function createCircle(
     ? normalizeAndValidateHandle(input.payoutHandle, 'Payout handle')
     : creatorHandle;
 
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id);
+  if (custody.custodyMode === 'self') {
+    throw new CircleError(
+      'SELF_CUSTODY_SIGNATURE_REQUIRED',
+      'Use /api/circles/create/prepare to create a Circle with your passkey.',
+      409
+    );
+  }
+
   const allocations = normalizeMemberAllocations(input.members, targetUsdCents);
+  const circleId = generateSecureId('circ');
+  const now = Date.now();
+  const circleContractId = input.mode === 'escrow' ? null : getCircleContractId(env);
+
+  if (circleContractId) {
+    const bindings = await Promise.all(allocations.map((a) => resolveMemberSignerBinding(env, a.handle)));
+    const payoutBinding =
+      bindings.find((b) => b.handle === payoutHandle) ||
+      (await resolveMemberSignerBinding(env, payoutHandle));
+
+    const missingMember = bindings.find((b) => !b.registered || !b.nearAccount || !b.pubkey);
+    const payoutMissing = !payoutBinding.registered || !payoutBinding.nearAccount;
+
+    if ((missingMember || payoutMissing) && input.mode === 'contract') {
+      const who = missingMember ? `@${missingMember.handle}` : `@${payoutHandle}`;
+      throw new CircleError(
+        'MEMBER_NOT_REGISTERED',
+        `${who} must sign in to Uprail (and activate passkey if self-custody) before joining a contract Circle.`,
+        400
+      );
+    }
+
+    if (!missingMember && !payoutMissing) {
+      const seenPubkeys = new Set<string>();
+      const seenAccounts = new Set<string>();
+      const contractMembers: Array<{ account_id: string; pubkey: string; share_bps: number }> = [];
+      let creatorIndex = -1;
+      let duplicateErr = false;
+
+      for (let i = 0; i < bindings.length; i++) {
+        const b = bindings[i];
+        if (seenPubkeys.has(b.pubkey!) || seenAccounts.has(b.nearAccount!)) {
+          duplicateErr = true;
+          break;
+        }
+        seenPubkeys.add(b.pubkey!);
+        seenAccounts.add(b.nearAccount!);
+        if (b.xId === session.x_id) creatorIndex = i;
+        contractMembers.push({
+          account_id: b.nearAccount!,
+          pubkey: b.pubkey!,
+          share_bps: allocations[i].shareBps,
+        });
+      }
+
+      if (!duplicateErr && creatorIndex >= 0) {
+        const creatorAccount = contractMembers[creatorIndex].account_id;
+        const targetSharesAtomic =
+          vault.priceUsd && vault.priceUsd > 0
+            ? BigInt(
+                nearRpc.toBaseUnits(
+                  Math.max(0.000001, targetUsdCents / 100 / vault.priceUsd).toFixed(Math.min(vault.decimals, 8)),
+                  vault.decimals
+                ) || '1'
+              )
+            : BigInt(nearRpc.toBaseUnits('1', vault.decimals) || '1');
+        const targetAtomicStr = (targetSharesAtomic > 0n ? targetSharesAtomic : 1n).toString();
+
+        const payloadStr = canonicalCircleAgreePayload({
+          contractId: circleContractId,
+          circleId,
+          creatorAccountId: creatorAccount,
+          payoutAccountId: payoutBinding.nearAccount!,
+          asset: toIntentsContractAssetSpec(vault.assetId),
+          targetAmountAtomic: targetAtomicStr,
+          members: contractMembers,
+        });
+        const creatorProof = await signContractPayloadWithServerUserKey(env, session.x_id, payloadStr);
+        const createRes = await createCircleOnchain(
+          env,
+          {
+            circle_id: circleId,
+            asset: toIntentsContractAssetSpec(vault.assetId),
+            members: contractMembers,
+            creator_index: creatorIndex,
+            payout_account_id: payoutBinding.nearAccount!,
+            payout_handle_hash: await hashHandleHex(payoutHandle),
+            target_amount: targetAtomicStr,
+            creator_proof: creatorProof,
+          },
+          circleContractId
+        );
+        if (!createRes.success) {
+          throw new CircleError(
+            'CONTRACT_CREATE_FAILED',
+            createRes.error || 'Failed to create Circle on circle.uprail.near.',
+            502
+          );
+        }
+
+        const onchain = await getCircleOnchain(env, circleId, circleContractId).catch(() => null);
+        const initialStatus = onchain?.status || (contractMembers.length === 1 ? 'ACTIVE' : 'PENDING_SIGNATURES');
+
+        await env.DB.prepare(
+          `INSERT INTO circles (
+            id, creator_x_id, creator_handle, name, purpose, note, target_usd_cents,
+            vault_asset_id, vault_symbol, vault_decimals, payout_handle, custody_account,
+            contract_mode, escrow_contract_id, onchain_circle_id, status, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'contract', ?, ?, ?, ?, ?)`
+        )
+          .bind(
+            circleId,
+            session.x_id,
+            creatorHandle,
+            name,
+            storedPurpose,
+            note,
+            targetUsdCents,
+            vault.assetId,
+            vault.symbol,
+            vault.decimals,
+            payoutHandle,
+            circleContractId,
+            circleContractId,
+            circleId,
+            initialStatus,
+            now,
+            now
+          )
+          .run();
+
+        for (let i = 0; i < bindings.length; i++) {
+          const b = bindings[i];
+          const memId = generateSecureId('cmem');
+          const agreedOnchain = Boolean(onchain?.members?.[i]?.agreed ?? i === creatorIndex);
+          await env.DB.prepare(
+            `INSERT INTO circle_members (
+              id, circle_id, x_handle, x_id, share_bps, quota_usd_cents,
+              contributed_usd_cents, shares_atomic, p256_pubkey, terms_signed_at, joined_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, '0', ?, ?, ?, ?)`
+          )
+            .bind(
+              memId,
+              circleId,
+              b.handle,
+              b.xId,
+              allocations[i].shareBps,
+              allocations[i].quotaUsdCents,
+              b.pubkey,
+              agreedOnchain ? now : null,
+              agreedOnchain ? now : null,
+              now
+            )
+            .run();
+        }
+
+        return getCircleDetail(env, session, circleId);
+      }
+    }
+  }
 
   // Only derive the Intents custody account & activate immediately if all members are already signed (e.g. Solo Circle)
   const allSignedAtCreate = allocations.every((a) => a.handle === creatorHandle);
-  const circleId = generateSecureId('circ');
   const custodyAccount = allSignedAtCreate
     ? (await deriveEarnCustodyKey(env, circleId)).accountId
     : '';
   const initialStatus = allSignedAtCreate ? 'ACTIVE' : 'PENDING_SIGNATURES';
-  const now = Date.now();
 
   await env.DB.prepare(
     `INSERT INTO circles (
       id, creator_x_id, creator_handle, name, purpose, note,
       target_usd_cents, vault_asset_id, vault_symbol, vault_decimals,
-      payout_handle, custody_account, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      payout_handle, custody_account, contract_mode, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'escrow', ?, ?, ?)`
   )
     .bind(
       circleId,
@@ -451,14 +634,18 @@ async function buildCircleView(
 
     const rawRefundMarker = String(m.refund_tx_hash || '');
     const hasApprovedDissolve =
-      Boolean(m.refunded_at) || rawRefundMarker.startsWith('DISSOLVE_APPROVED');
+      Boolean(m.dissolve_signed_at) || Boolean(m.refunded_at) || rawRefundMarker.startsWith('DISSOLVE_APPROVED');
 
     return {
       id: m.id,
       handle: m.x_handle,
       xId: m.x_id || null,
       isRegistered: Boolean(m.x_id),
-      hasSigned: Boolean(m.joined_at),
+      p256Pubkey: m.p256_pubkey || null,
+      hasSigned:
+        circleRow.contract_mode === 'contract'
+          ? Boolean(m.terms_signed_at || m.joined_at)
+          : Boolean(m.joined_at),
       hasApprovedDissolve,
       joinedAt: m.joined_at ? Number(m.joined_at) : null,
       shareBps: Number(m.share_bps),
@@ -567,6 +754,11 @@ async function buildCircleView(
     yieldPct: valuation.yieldPct,
     payoutHandle: circleRow.payout_handle,
     custodyAccount: circleRow.custody_account,
+    contractMode: circleRow.contract_mode === 'contract' ? 'contract' : 'escrow',
+    escrowContractId: circleRow.escrow_contract_id || null,
+    onchainCircleId: circleRow.onchain_circle_id || null,
+    dissolveInitiatedAt: circleRow.dissolve_initiated_at ? Number(circleRow.dissolve_initiated_at) : null,
+    dissolveDeadlineAt: circleRow.dissolve_deadline_at ? Number(circleRow.dissolve_deadline_at) : null,
     status: circleRow.status,
     payoutTxHash: circleRow.payout_tx_hash || null,
     members,
@@ -649,6 +841,15 @@ export async function joinCircle(
     throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
   }
 
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id);
+  if (custody.custodyMode === 'self') {
+    throw new CircleError(
+      'SELF_CUSTODY_SIGNATURE_REQUIRED',
+      'Sign Circle terms with your passkey via /api/circles/:id/join/prepare.',
+      409
+    );
+  }
+
   if (
     circleRow.status !== 'PENDING_SIGNATURES' &&
     circleRow.status !== 'ACTIVE' &&
@@ -677,6 +878,68 @@ export async function joinCircle(
   }
 
   const now = Date.now();
+  if (circleRow.contract_mode === 'contract' && circleRow.onchain_circle_id) {
+    const contractId = String(circleRow.escrow_contract_id || getCircleContractId(env)!).toLowerCase();
+    const onchain = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId);
+    if (!onchain) {
+      throw new CircleError('RPC_UNAVAILABLE', 'On-chain Circle state not found right now.', 503);
+    }
+    const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
+    const memberIndex = onchain.members.findIndex(
+      (m) => m.account_id.toLowerCase() === nearAccount.toLowerCase()
+    );
+    if (memberIndex < 0) {
+      throw new CircleError('FORBIDDEN', 'Your account does not match a bound signer slot in this Circle.', 403);
+    }
+
+    if (!onchain.members[memberIndex].agreed) {
+      const payloadStr = canonicalCircleAgreePayload({
+        contractId,
+        circleId: circleRow.onchain_circle_id,
+        creatorAccountId: onchain.creator_account_id,
+        payoutAccountId: onchain.payout_account_id,
+        asset: onchain.asset,
+        targetAmountAtomic: onchain.target_amount,
+        members: onchain.members.map((m) => ({
+          account_id: m.account_id,
+          pubkey: m.pubkey,
+          share_bps: m.share_bps,
+        })),
+      });
+      const proof = await signContractPayloadWithServerUserKey(env, session.x_id, payloadStr);
+      const signRes = await signCircleTermsOnchain(
+        env,
+        {
+          circle_id: circleRow.onchain_circle_id,
+          member_index: memberIndex,
+          proof,
+        },
+        contractId
+      );
+      if (!signRes.success) {
+        throw new CircleError('CONTRACT_SIGN_FAILED', signRes.error || 'Failed to record terms signature on-chain.', 502);
+      }
+    }
+
+    const refreshed = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => null);
+    await env.DB.prepare(
+      `UPDATE circle_members
+       SET x_id = ?,
+           p256_pubkey = COALESCE(p256_pubkey, ?),
+           terms_signed_at = COALESCE(terms_signed_at, ?),
+           joined_at = COALESCE(joined_at, ?)
+       WHERE id = ?`
+    )
+      .bind(session.x_id, onchain.members[memberIndex].pubkey, now, now, memberRow.id)
+      .run();
+
+    await env.DB.prepare('UPDATE circles SET status = ?, updated_at = ? WHERE id = ?')
+      .bind(refreshed?.status || circleRow.status, now, cleanId)
+      .run();
+
+    return getCircleDetail(env, session, cleanId);
+  }
+
   await env.DB.prepare(
     'UPDATE circle_members SET x_id = ?, joined_at = COALESCE(joined_at, ?) WHERE id = ?'
   )
@@ -691,11 +954,11 @@ export async function joinCircle(
   const allSigned = Number(unsignedRow?.cnt || 0) === 0;
 
   if (allSigned && (circleRow.status === 'PENDING_SIGNATURES' || !circleRow.custody_account)) {
-    const custody = await deriveEarnCustodyKey(env, cleanId);
+    const custodyKey = await deriveEarnCustodyKey(env, cleanId);
     await env.DB.prepare(
       "UPDATE circles SET custody_account = ?, status = 'ACTIVE', updated_at = ? WHERE id = ? AND (status = 'PENDING_SIGNATURES' OR custody_account = '')"
     )
-      .bind(custody.accountId, now, cleanId)
+      .bind(custodyKey.accountId, now, cleanId)
       .run();
   } else {
     await env.DB.prepare('UPDATE circles SET updated_at = ? WHERE id = ?')
@@ -730,7 +993,7 @@ export async function listUserCircles(
      LEFT JOIN circle_members m ON m.circle_id = c.id
      WHERE c.creator_x_id = ? OR m.x_id = ? OR LOWER(m.x_handle) = ?
      ORDER BY c.created_at DESC
-     LIMIT 50`
+     LIMIT 250`
   )
     .bind(session.x_id, session.x_id, callerHandle)
     .all<any>();
@@ -781,6 +1044,15 @@ export async function contributeToCircle(
     throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
   }
 
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id);
+  if (custody.custodyMode === 'self') {
+    throw new CircleError(
+      'SELF_CUSTODY_SIGNATURE_REQUIRED',
+      'Sign Circle contribution with your passkey via /api/circles/:id/contribute/prepare.',
+      409
+    );
+  }
+
   if (circleRow.status === 'PENDING_SIGNATURES' || !circleRow.custody_account) {
     throw new CircleError(
       'CIRCLE_PENDING_SIGNATURES',
@@ -797,17 +1069,20 @@ export async function contributeToCircle(
     );
   }
 
-  const unsignedRow = await env.DB.prepare(
-    'SELECT COUNT(*) AS cnt FROM circle_members WHERE circle_id = ? AND joined_at IS NULL'
-  )
-    .bind(cleanId)
-    .first<{ cnt: number }>();
-  if (Number(unsignedRow?.cnt || 0) > 0) {
-    throw new CircleError(
-      'CIRCLE_PENDING_SIGNATURES',
-      'All invited participants must sign with their passkey before funding can start.',
-      400
-    );
+  const isContract = circleRow.contract_mode === 'contract' && Boolean(circleRow.onchain_circle_id);
+  if (!isContract) {
+    const unsignedRow = await env.DB.prepare(
+      'SELECT COUNT(*) AS cnt FROM circle_members WHERE circle_id = ? AND joined_at IS NULL'
+    )
+      .bind(cleanId)
+      .first<{ cnt: number }>();
+    if (Number(unsignedRow?.cnt || 0) > 0) {
+      throw new CircleError(
+        'CIRCLE_PENDING_SIGNATURES',
+        'All invited participants must sign with their passkey before funding can start.',
+        400
+      );
+    }
   }
 
   const callerHandle = (session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
@@ -864,6 +1139,223 @@ export async function contributeToCircle(
   const deadline = new Date(expiresAt).toISOString();
   const senderNearAccount = await nearRpc.resolveUserNearAccount(env, session);
   const fundingMode = input.fundingMode === 'EXTERNAL_DEPOSIT' ? 'EXTERNAL_DEPOSIT' : 'BALANCE';
+
+  if (isContract) {
+    if (fundingMode === 'EXTERNAL_DEPOSIT') {
+      throw new CircleError(
+        'USE_BALANCE_FOR_CONTRACT_CIRCLE',
+        'Non-custodial contract Circles require contributing from your Uprail balance so deposits bind directly on-chain.',
+        400
+      );
+    }
+    const contractId = String(circleRow.escrow_contract_id || getCircleContractId(env)!).toLowerCase();
+    const onchain = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId);
+    if (!onchain) {
+      throw new CircleError('RPC_UNAVAILABLE', 'Could not verify on-chain Circle state.', 503);
+    }
+    if (onchain.status !== 'ACTIVE') {
+      throw new CircleError(
+        onchain.status === 'PENDING_SIGNATURES' ? 'CIRCLE_PENDING_SIGNATURES' : 'CIRCLE_CLOSED',
+        onchain.status === 'PENDING_SIGNATURES'
+          ? 'All members must sign terms before contributing.'
+          : `Circle is ${onchain.status} and no longer accepting contributions.`,
+        409
+      );
+    }
+    const slot = onchain.members.find((m) => m.account_id.toLowerCase() === senderNearAccount.toLowerCase());
+    if (!slot || !slot.agreed) {
+      throw new CircleError('CIRCLE_PENDING_SIGNATURES', 'You must agree to Circle terms first.', 403);
+    }
+
+    try {
+      await nearRpc.depositPlainBalanceToIntents(env, session.x_id, origin.assetId, grossAmountFormatted, senderNearAccount);
+    } catch {}
+
+    const avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    if (avail + 1e-6 < Number(grossAmountFormatted)) {
+      throw new CircleError(
+        'INSUFFICIENT_BALANCE',
+        `Insufficient ${origin.symbol} balance (${avail.toFixed(4)} available, ${grossAmountFormatted} required).`,
+        400
+      );
+    }
+
+    let depositSharesAtomic = grossAtomic;
+    let usdCents = Math.max(100, Math.round((estUsd > 0 ? estUsd : 1) * 100));
+    let swapIntentHash: string | null = null;
+    const sameAsset = origin.assetId.toLowerCase() === vault.assetId.toLowerCase();
+
+    if (!sameAsset) {
+      const beforeSwapBal =
+        (await nearRpc.getIntentAssetBalance(env, vault.assetId, senderNearAccount).catch(() => null))?.balance ?? 0n;
+      let swapQuote;
+      try {
+        swapQuote = await requestQuote(env, {
+          dry: false,
+          swapType: 'EXACT_INPUT',
+          originAsset: origin.assetId,
+          destinationAsset: vault.assetId,
+          amount: grossAtomic.toString(),
+          recipient: senderNearAccount,
+          recipientType: 'INTENTS',
+          refundTo: senderNearAccount,
+          refundType: 'INTENTS',
+          depositType: 'INTENTS',
+          slippageTolerance: 300,
+          deadline,
+        });
+      } catch (err: any) {
+        throw new CircleError('QUOTE_FAILED', `1Click could not quote ${origin.symbol} → ${vault.symbol}: ${err?.message || String(err)}`, 502);
+      }
+      const rawQ = ((swapQuote.raw as any)?.quote || {}) as Record<string, unknown>;
+      const inUsd = Number(rawQ.amountInUsd || estUsd);
+      usdCents = Math.max(100, Math.round((Number.isFinite(inUsd) && inUsd > 0 ? inUsd : estUsd) * 100));
+
+      const swapRes = await nearRpc.executeCrossChainSwapTransfer(env, session.x_id, swapQuote.quote.depositAddress);
+      if (!swapRes.success) {
+        throw new CircleError('CONTRIBUTION_FAILED', swapRes.error || 'Swap transfer rejected.', 502);
+      }
+      swapIntentHash = swapRes.txHash || null;
+
+      let settledShares = 0n;
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const curBal =
+          (await nearRpc.getIntentAssetBalance(env, vault.assetId, senderNearAccount).catch(() => null))?.balance ?? 0n;
+        if (curBal > beforeSwapBal) {
+          settledShares = curBal - beforeSwapBal;
+          break;
+        }
+        const st = await getExecutionStatus(env, swapQuote.quote.depositAddress, swapQuote.quote.depositMemo || undefined)
+          .then((s) => String(s?.status || '').toUpperCase())
+          .catch(() => '');
+        if (st === 'REFUNDED' || st === 'FAILED') {
+          throw new CircleError('CONTRIBUTION_FAILED', '1Click swap was refunded back to your Intents balance.', 502);
+        }
+      }
+      if (settledShares <= 0n) {
+        throw new CircleError(
+          'SWAP_SETTLING_ONCHAIN',
+          `Your ${origin.symbol} -> ${vault.symbol} swap is still settling into your balance (~10s). Retry with ${vault.symbol} once it lands.`,
+          409
+        );
+      }
+      depositSharesAtomic = settledShares;
+    }
+
+    const beforeSlotContributed = BigInt(slot.contributed || '0');
+    const depRes = await nearRpc.executeIntentsActionListForServerUser(
+      env,
+      session.x_id,
+      [
+        {
+          intent: 'transfer',
+          receiver_id: contractId,
+          tokens: { [vault.assetId]: depositSharesAtomic.toString() },
+          msg: buildContributeCircleMsg(circleRow.onchain_circle_id),
+        },
+      ],
+      160_000_000_000_000n
+    );
+    if (!depRes.success) {
+      throw new CircleError('CONTRIBUTION_FAILED', depRes.error || 'Contract contribution transfer failed.', 502);
+    }
+
+    let afterSlotContributed = beforeSlotContributed;
+    for (let retry = 0; retry < 4; retry++) {
+      const afterOnchain = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => null);
+      const afterSlot = afterOnchain?.members.find((m) => m.account_id.toLowerCase() === senderNearAccount.toLowerCase());
+      afterSlotContributed = BigInt(afterSlot?.contributed || '0');
+      if (afterSlotContributed > beforeSlotContributed) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    if (afterSlotContributed <= beforeSlotContributed) {
+      throw new CircleError(
+        'CONTRIBUTION_NOT_CREDITED',
+        'On-chain Circle contribution did not increase your contributed balance.',
+        502
+      );
+    }
+    const actualDelta = afterSlotContributed - beforeSlotContributed;
+    const prevMemberShares = BigInt(String(memberRow.shares_atomic || '0'));
+    const nextMemberShares = prevMemberShares + actualDelta;
+    const nextMemberUsdCents = Number(memberRow.contributed_usd_cents || 0) + usdCents;
+    const confTime = Date.now();
+
+    await env.DB.prepare(
+      `INSERT INTO circle_contributions (
+        id, circle_id, member_id, contributor_x_id,
+        source_asset, source_symbol, source_decimals,
+        gross_atomic, usd_cents,
+        deposit_address, deposit_memo,
+        quoted_shares_atomic, balance_before_atomic, shares_atomic,
+        fee_shares_atomic, fee_status, fee_tx_hash,
+        status, intent_hash,
+        expires_at, created_at, updated_at, confirmed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, '0', 'NONE', NULL, 'CONFIRMED', ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        contribId,
+        cleanId,
+        memberRow.id,
+        session.x_id,
+        origin.assetId,
+        origin.symbol,
+        origin.decimals,
+        grossAtomic.toString(),
+        usdCents,
+        depositSharesAtomic.toString(),
+        beforeSlotContributed.toString(),
+        actualDelta.toString(),
+        depRes.txHash || swapIntentHash || null,
+        expiresAt,
+        confTime,
+        confTime,
+        confTime
+      )
+      .run();
+
+    await env.DB.prepare(
+      `UPDATE circle_members
+       SET x_id = COALESCE(x_id, ?),
+           joined_at = COALESCE(joined_at, ?),
+           contributed_usd_cents = ?,
+           shares_atomic = ?,
+           refund_tx_hash = NULL
+       WHERE id = ?`
+    )
+      .bind(session.x_id, confTime, nextMemberUsdCents, nextMemberShares.toString(), memberRow.id)
+      .run();
+
+    await env.DB.prepare('UPDATE circles SET updated_at = ? WHERE id = ?').bind(confTime, cleanId).run();
+    const updatedCircle = await getCircleDetail(env, session, cleanId);
+    const contribView = updatedCircle.recentContributions.find((c) => c.id === contribId) || {
+      id: contribId,
+      memberId: memberRow.id,
+      contributorXId: session.x_id,
+      sourceSymbol: origin.symbol,
+      grossAmount: grossAmountFormatted,
+      usdCents,
+      sharesAtomic: actualDelta.toString(),
+      sharesFormatted: formatAtomic(actualDelta.toString(), vault.decimals),
+      status: 'CONFIRMED',
+      depositAddress: null,
+      depositMemo: null,
+      intentHash: depRes.txHash || null,
+      createdAt: confTime,
+      confirmedAt: confTime,
+    };
+
+    return {
+      circle: updatedCircle,
+      contribution: contribView,
+      contributionId: contribView.id,
+      status: contribView.status,
+      depositAddress: null,
+      depositMemo: null,
+      sharesAddedFormatted: contribView.sharesFormatted,
+    };
+  }
 
   if (fundingMode === 'BALANCE') {
     try {
@@ -1178,9 +1670,104 @@ export async function settleCircle(
     );
   }
 
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id);
+  if (custody.custodyMode === 'self') {
+    throw new CircleError(
+      'SELF_CUSTODY_SIGNATURE_REQUIRED',
+      'Sign Circle settlement with your passkey via /api/circles/:id/settle/prepare.',
+      409
+    );
+  }
+
   if (circleRow.status === 'SETTLED') {
     throw new CircleError('ALREADY_SETTLED', 'This Circle has already been settled.', 409);
   }
+
+  if (circleRow.contract_mode === 'contract' && circleRow.onchain_circle_id) {
+    const contractId = String(circleRow.escrow_contract_id || getCircleContractId(env)!).toLowerCase();
+    const onchain = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId);
+    if (!onchain) {
+      throw new CircleError('RPC_UNAVAILABLE', 'On-chain Circle state not found right now.', 503);
+    }
+    if (onchain.status === 'SETTLING') {
+      const retryRes = await retryCircleSettlementOnchain(env, circleRow.onchain_circle_id, contractId);
+      if (!retryRes.success) {
+        throw new CircleError('SETTLE_TRANSFER_FAILED', retryRes.error || 'Settlement retry failed.', 502);
+      }
+      const post = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => null);
+      const nowTs = Date.now();
+      const nextStatus = post?.status || 'SETTLING';
+      await env.DB.prepare(
+        `UPDATE circles SET status = ?, payout_tx_hash = COALESCE(payout_tx_hash, ?), closed_at = CASE WHEN ? = 'SETTLED' THEN COALESCE(closed_at, ?) ELSE closed_at END, updated_at = ? WHERE id = ?`
+      )
+        .bind(nextStatus, retryRes.txHash || null, nextStatus, nowTs, nowTs, cleanId)
+        .run();
+      return getCircleDetail(env, session, cleanId);
+    }
+    if (onchain.status !== 'ACTIVE') {
+      throw new CircleError(
+        'INVALID_CIRCLE_STATE',
+        `Circle cannot be settled while in status ${onchain.status}.`,
+        409
+      );
+    }
+    if (BigInt(onchain.total_contributed || '0') <= 0n) {
+      throw new CircleError('EMPTY_CIRCLE_VAULT', 'This Circle holds 0 settled vault shares on-chain to disburse.', 400);
+    }
+
+    const nowTs = Date.now();
+    const lockRes = await env.DB.prepare(
+      "UPDATE circles SET status = 'SETTLING', updated_at = ? WHERE id = ? AND status IN ('ACTIVE', 'GOAL_MET')"
+    )
+      .bind(nowTs, cleanId)
+      .run();
+    if (!lockRes.meta?.changes) {
+      throw new CircleError('SETTLE_IN_PROGRESS', 'Circle settlement is already in progress.', 409);
+    }
+
+    try {
+      const payloadStr = canonicalCircleSettlePayload({
+        contractId,
+        circleId: circleRow.onchain_circle_id,
+        payoutAccountId: onchain.payout_account_id,
+        totalContributedAtomic: onchain.total_contributed,
+      });
+      const proof = await signContractPayloadWithServerUserKey(env, session.x_id, payloadStr);
+      const settleRes = await settleCircleOnchain(
+        env,
+        { circle_id: circleRow.onchain_circle_id, creator_proof: proof },
+        contractId
+      );
+      if (!settleRes.success) {
+        await env.DB.prepare(
+          "UPDATE circles SET status = 'ACTIVE', updated_at = ? WHERE id = ? AND status = 'SETTLING'"
+        )
+          .bind(Date.now(), cleanId)
+          .run();
+        throw new CircleError('SETTLE_TRANSFER_FAILED', settleRes.error || 'On-chain settlement failed.', 502);
+      }
+
+      const post = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => null);
+      const closedAt = Date.now();
+      const nextStatus = post?.status || 'SETTLED';
+      await env.DB.prepare(
+        "UPDATE circles SET status = ?, payout_tx_hash = ?, closed_at = CASE WHEN ? = 'SETTLED' THEN ? ELSE NULL END, updated_at = ? WHERE id = ?"
+      )
+        .bind(nextStatus, settleRes.txHash || null, nextStatus, closedAt, closedAt, cleanId)
+        .run();
+      return getCircleDetail(env, session, cleanId);
+    } catch (err: any) {
+      if (err instanceof CircleError) throw err;
+      await env.DB.prepare(
+        "UPDATE circles SET status = 'ACTIVE', updated_at = ? WHERE id = ? AND status = 'SETTLING'"
+      )
+        .bind(Date.now(), cleanId)
+        .run()
+        .catch(() => {});
+      throw new CircleError('SETTLE_FAILED', err?.message || 'Failed to settle Circle.', 502);
+    }
+  }
+
   if (circleRow.status !== 'ACTIVE' && circleRow.status !== 'GOAL_MET') {
     throw new CircleError(
       'INVALID_CIRCLE_STATE',
@@ -1381,6 +1968,15 @@ export async function dissolveCircle(
     throw new CircleError('NOT_FOUND', 'Circle not found.', 404);
   }
 
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id);
+  if (custody.custodyMode === 'self') {
+    throw new CircleError(
+      'SELF_CUSTODY_SIGNATURE_REQUIRED',
+      'Sign Circle dissolve with your passkey via /api/circles/:id/dissolve/prepare.',
+      409
+    );
+  }
+
   if (circleRow.status === 'DISSOLVED' || circleRow.status === 'SETTLED') {
     throw new CircleError(
       'ALREADY_CLOSED',
@@ -1388,10 +1984,13 @@ export async function dissolveCircle(
       409
     );
   }
+
+  const isContract = circleRow.contract_mode === 'contract' && Boolean(circleRow.onchain_circle_id);
   if (
     circleRow.status !== 'PENDING_SIGNATURES' &&
     circleRow.status !== 'ACTIVE' &&
-    circleRow.status !== 'GOAL_MET'
+    circleRow.status !== 'GOAL_MET' &&
+    !(isContract && circleRow.status === 'DISSOLVING')
   ) {
     throw new CircleError(
       'INVALID_CIRCLE_STATE',
@@ -1407,10 +2006,6 @@ export async function dissolveCircle(
     .all<any>();
 
   const allMembers = memberRows.results || [];
-  const contributors = allMembers.filter(
-    (m) => BigInt(String(m.shares_atomic || '0')) > 0n
-  );
-
   const callerHandle = (session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
   const callerMember =
     allMembers.find(
@@ -1420,6 +2015,137 @@ export async function dissolveCircle(
     ) || null;
 
   const now = Date.now();
+
+  if (isContract) {
+    if (!callerMember) {
+      throw new CircleError('FORBIDDEN', 'Only Circle members may dissolve.', 403);
+    }
+    const contractId = String(circleRow.escrow_contract_id || getCircleContractId(env)!).toLowerCase();
+    const onchain = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId);
+    if (!onchain) {
+      throw new CircleError('RPC_UNAVAILABLE', 'On-chain Circle state not found.', 503);
+    }
+    const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
+    const memberIndex = onchain.members.findIndex(
+      (m) => m.account_id.toLowerCase() === nearAccount.toLowerCase()
+    );
+    if (memberIndex < 0) {
+      throw new CircleError('FORBIDDEN', 'Your account is not bound as a signer in this Circle.', 403);
+    }
+
+    let lastTxHash: string | undefined;
+    if (
+      onchain.status === 'DISSOLVING' &&
+      typeof onchain.dissolve_safeguard_at_ms === 'number' &&
+      now >= onchain.dissolve_safeguard_at_ms
+    ) {
+      const fin = await finalizeDissolveOnchain(env, { circle_id: circleRow.onchain_circle_id, sigs: null }, contractId);
+      if (!fin.success) {
+        throw new CircleError('DISSOLVE_FAILED', fin.error || 'Safeguard finalize dissolve failed.', 502);
+      }
+      lastTxHash = fin.txHash;
+    } else if (onchain.status === 'PENDING_SIGNATURES' || onchain.status === 'ACTIVE') {
+      const payload = canonicalCircleDissolvePayload({
+        contractId,
+        circleId: circleRow.onchain_circle_id,
+      });
+      const proof = await signContractPayloadWithServerUserKey(env, session.x_id, payload);
+      const init = await initiateDissolveOnchain(
+        env,
+        { circle_id: circleRow.onchain_circle_id, member_index: memberIndex, proof },
+        contractId
+      );
+      if (!init.success) {
+        throw new CircleError('DISSOLVE_FAILED', init.error || 'Initiate dissolve failed.', 502);
+      }
+      lastTxHash = init.txHash;
+    } else if (onchain.status === 'DISSOLVING') {
+      const payload = canonicalCircleDissolvePayload({
+        contractId,
+        circleId: circleRow.onchain_circle_id,
+      });
+      const proof = await signContractPayloadWithServerUserKey(env, session.x_id, payload);
+      const sig = await signDissolveOnchain(
+        env,
+        { circle_id: circleRow.onchain_circle_id, member_index: memberIndex, proof },
+        contractId
+      );
+      if (!sig.success) {
+        throw new CircleError('DISSOLVE_FAILED', sig.error || 'Sign dissolve failed.', 502);
+      }
+      lastTxHash = sig.txHash;
+    } else {
+      throw new CircleError('INVALID_CIRCLE_STATE', `Circle cannot dissolve in status ${onchain.status}.`, 409);
+    }
+
+    let refreshed = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => null);
+    if (
+      refreshed &&
+      refreshed.status === 'DISSOLVING' &&
+      refreshed.members.every((m) => BigInt(m.contributed || '0') === 0n || m.dissolve_signed)
+    ) {
+      const fin = await finalizeDissolveOnchain(env, { circle_id: circleRow.onchain_circle_id, sigs: null }, contractId);
+      if (fin.success) {
+        lastTxHash = fin.txHash || lastTxHash;
+        refreshed = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => refreshed);
+      }
+    }
+
+    const finalStatus = refreshed?.status || 'DISSOLVING';
+    const marker = `DISSOLVE_APPROVED:${now}`;
+    await env.DB.prepare(
+      `UPDATE circle_members
+       SET x_id = COALESCE(x_id, ?),
+           joined_at = COALESCE(joined_at, ?),
+           dissolve_signed_at = COALESCE(dissolve_signed_at, ?),
+           refund_tx_hash = CASE WHEN refunded_at IS NULL THEN COALESCE(refund_tx_hash, ?) ELSE refund_tx_hash END
+       WHERE id = ?`
+    )
+      .bind(session.x_id, now, now, marker, callerMember.id)
+      .run();
+
+    if (finalStatus === 'DISSOLVED') {
+      await env.DB.prepare(
+        `UPDATE circle_members
+         SET refunded_at = COALESCE(refunded_at, ?),
+             refund_tx_hash = COALESCE(?, refund_tx_hash)
+         WHERE circle_id = ? AND CAST(COALESCE(shares_atomic, '0') AS TEXT) != '0'`
+      )
+        .bind(now, lastTxHash || null, cleanId)
+        .run();
+    }
+
+    await env.DB.prepare(
+      `UPDATE circles
+       SET status = ?,
+           dissolve_initiated_at = COALESCE(dissolve_initiated_at, ?),
+           dissolve_deadline_at = COALESCE(dissolve_deadline_at, ?),
+           payout_tx_hash = COALESCE(payout_tx_hash, ?),
+           closed_at = CASE WHEN ? = 'DISSOLVED' THEN COALESCE(closed_at, ?) ELSE closed_at END,
+           updated_at = ?
+       WHERE id = ?`
+    )
+      .bind(
+        finalStatus,
+        refreshed?.dissolve_started_at_ms || now,
+        refreshed?.dissolve_safeguard_at_ms || now + 7 * 86400_000,
+        finalStatus === 'DISSOLVED' ? lastTxHash || null : null,
+        finalStatus,
+        now,
+        now,
+        cleanId
+      )
+      .run();
+
+    return getCircleDetail(env, session, cleanId);
+  }
+
+  const contributors = allMembers.filter(
+    (m) => BigInt(String(m.shares_atomic || '0')) > 0n
+  );
+
+  const unusedTimePlaceholder = now;
+  void unusedTimePlaceholder;
 
   if (contributors.length === 0) {
     if (circleRow.creator_x_id !== session.x_id) {
@@ -1800,6 +2526,28 @@ export async function reconcilePendingCircleContributions(
   for (const c of stuckCircles.results || []) {
     checked++;
     try {
+      if (c.contract_mode === 'contract' && c.onchain_circle_id) {
+        const onchain = await getCircleOnchain(
+          env,
+          c.onchain_circle_id,
+          c.escrow_contract_id || undefined
+        ).catch(() => null);
+        if (!onchain) continue;
+        if (onchain.status === 'SETTLED' || onchain.status === 'DISSOLVED' || (c.status === 'SETTLING' && onchain.status === 'ACTIVE')) {
+          const nowTs = Date.now();
+          await env.DB.prepare(
+            `UPDATE circles
+             SET status = ?,
+                 closed_at = CASE WHEN ? IN ('SETTLED', 'DISSOLVED') THEN COALESCE(closed_at, ?) ELSE closed_at END,
+                 updated_at = ?
+             WHERE id = ? AND status = ?`
+          )
+            .bind(onchain.status, onchain.status, nowTs, nowTs, c.id, c.status)
+            .run();
+        }
+        continue;
+      }
+
       const liveBal = await getCustodyVaultBalance(env, c.custody_account, c.vault_asset_id);
       if (liveBal === 0n) {
         const finalStatus = c.status === 'SETTLING' ? 'SETTLED' : 'DISSOLVED';

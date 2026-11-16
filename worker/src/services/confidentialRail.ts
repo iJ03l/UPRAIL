@@ -28,7 +28,7 @@ import {
 } from './oneclickAuth';
 import { resolveWithdrawalAssetPair } from './oneclickWithdraw';
 
-const QUOTE_TTL_MS = 30 * 60 * 1000;
+export const QUOTE_TTL_MS = 30 * 60 * 1000;
 
 export interface ConfidentialBalance {
   assetId: string;
@@ -64,7 +64,7 @@ function resolveTokenForAsset(asset: string, tokens: nearRpc.OnchainToken[]) {
   return byId || null;
 }
 
-async function resolveToken(env: Env, asset: string): Promise<nearRpc.OnchainToken> {
+export async function resolveToken(env: Env, asset: string): Promise<nearRpc.OnchainToken> {
   const tokens = await nearRpc.getSupportedTokens(env);
   let token = resolveTokenForAsset(asset, tokens);
   if (!token) token = await nearRpc.resolveRheaToken(env, asset);
@@ -755,10 +755,18 @@ export async function reconcileConfidentialPayments(
       isClaim || isDirectSend ? row.claim_deposit_address : row.deposit_address;
     if (!depositAddress || (!isClaim && !isDirectSend && !row.sender_x_id)) continue;
     try {
-      const session = isClaim
-        ? await getEscrowSession(env)
-        : await getUserSession(env, row.sender_x_id || '');
-      const status = await getExecutionStatus(env, depositAddress, undefined, session.accessToken);
+      let accessToken: string | undefined;
+      try {
+        const session = isClaim
+          ? await getEscrowSession(env)
+          : await getUserSession(env, row.sender_x_id || '');
+        accessToken = session.accessToken;
+      } catch (sessionErr) {
+        if ((sessionErr as any)?.code !== 'ONE_CLICK_SELF_CUSTODY_AUTH_REQUIRED') {
+          throw sessionErr;
+        }
+      }
+      const status = await getExecutionStatus(env, depositAddress, undefined, accessToken);
       const normalized = status.status.toUpperCase();
       if (normalized === 'SUCCESS') {
         await env.DB.prepare(
@@ -846,8 +854,16 @@ export async function reconcileConfidentialWithdrawals(
   let failed = 0;
   for (const row of rows) {
     try {
-      const session = await getUserSession(env, row.x_id);
-      const status = await getExecutionStatus(env, row.deposit_address, undefined, session.accessToken);
+      let accessToken: string | undefined;
+      try {
+        const session = await getUserSession(env, row.x_id);
+        accessToken = session.accessToken;
+      } catch (sessionErr) {
+        if ((sessionErr as any)?.code !== 'ONE_CLICK_SELF_CUSTODY_AUTH_REQUIRED') {
+          throw sessionErr;
+        }
+      }
+      const status = await getExecutionStatus(env, row.deposit_address, undefined, accessToken);
       const normalized = status.status.toUpperCase();
       if (normalized === 'SUCCESS') {
         await env.DB.prepare(
