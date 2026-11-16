@@ -28,6 +28,7 @@ import {
 } from '../services/stabilize';
 import { handleCustodyActionError } from '../utils/custodyResponse';
 import {
+  prepareSelfCustodyShieldTarget,
   prepareSelfCustodyStabilize,
   submitSelfCustodyStabilize,
 } from '../services/selfCustodyActions';
@@ -121,6 +122,7 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
   try {
+    const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
     let balances: any[] = [];
     try {
       balances = await nearRpc.getIntentBalances(c.env, nearAccount);
@@ -133,30 +135,40 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
       console.warn('[onchain/balances] RPC getIntentBalances error:', rpcErr);
     }
 
+    let plainL1Locked: any[] = [];
     // Direct receives sit as plain balances on the user's pk sub-account —
-    // merge them in so tokens sent straight to the account are visible.
+    // merge them into spendable balances only when the server L1 key is still
+    // authorized on-chain. Once rotated to an offline Recovery Key, keep them
+    // separate so "Max" actions do not trigger an impossible server-signed sweep.
     try {
+      const canSignL1 =
+        custody.custodyMode !== 'self' ||
+        (await nearRpc.canServerSignAccountL1(c.env, session.x_id, nearAccount));
       const plain = await nearRpc.getPlainBalances(c.env, nearAccount);
-      for (const p of plain) {
-        const existing = balances.find(
-          (b) =>
-            (b.defuse_asset_id || '').toLowerCase() === (p.defuse_asset_id || '').toLowerCase() ||
-            (b.symbol || '').toUpperCase() === (p.symbol || '').toUpperCase()
-        );
-        if (existing) {
-          const sum = BigInt(existing.amount || '0') + BigInt(p.amount || '0');
-          existing.amount = sum.toString();
-          existing.amountFormatted = nearRpc.formatAmount(
-            existing.amount,
-            existing.decimals ?? p.decimals
+      if (!canSignL1) {
+        plainL1Locked = plain;
+      } else {
+        for (const p of plain) {
+          const existing = balances.find(
+            (b) =>
+              (b.defuse_asset_id || '').toLowerCase() === (p.defuse_asset_id || '').toLowerCase() ||
+              (b.symbol || '').toUpperCase() === (p.symbol || '').toUpperCase()
           );
-        } else {
-          balances.push({
-            ...p,
-            intentsAmount: '0',
-            intentsAmountFormatted: '0',
-            isPlainOnly: true,
-          });
+          if (existing) {
+            const sum = BigInt(existing.amount || '0') + BigInt(p.amount || '0');
+            existing.amount = sum.toString();
+            existing.amountFormatted = nearRpc.formatAmount(
+              existing.amount,
+              existing.decimals ?? p.decimals
+            );
+          } else {
+            balances.push({
+              ...p,
+              intentsAmount: '0',
+              intentsAmountFormatted: '0',
+              isPlainOnly: true,
+            });
+          }
         }
       }
     } catch (plainErr) {
@@ -211,7 +223,6 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
       console.warn('[onchain/balances] agent pocket balance merge skipped:', pocketErr);
     }
 
-    const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
     let oneClickSessionRequired = false;
 
     // Confidential Intents balances are held off the public ledger. Merge them
@@ -385,6 +396,7 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
     return c.json({
       nearAccount,
       balances,
+      ...(plainL1Locked.length > 0 ? { plainL1Locked } : {}),
       custodyMode: custody?.custodyMode ?? 'server',
       oneClickSessionRequired,
       source: 'onchain_and_virtual',
@@ -1122,6 +1134,30 @@ onchainRouter.post('/stabilize/submit', requireAuth(), async (c) => {
       return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
     }
     return handleCustodyActionError(c, err, 'SELF_CUSTODY_SUBMIT_FAILED', '[onchain/stabilize/submit]');
+  }
+});
+
+onchainRouter.post('/stabilize/shield/prepare', requireAuth(), async (c) => {
+  const session = c.get('session')!;
+  try {
+    const body = await c.req
+      .json<{
+        assetId?: string;
+        expectedAmountAtomic?: string;
+        sourceSwapDepositAddress?: string;
+      }>()
+      .catch(() => null);
+    const prepared = await prepareSelfCustodyShieldTarget({
+      env: c.env,
+      session,
+      assetId: (body?.assetId || 'usdc').trim(),
+      expectedAmountAtomic: body?.expectedAmountAtomic ? BigInt(body.expectedAmountAtomic) : undefined,
+      sourceSwapDepositAddress: body?.sourceSwapDepositAddress?.trim() || undefined,
+      nextStep: 'stabilize',
+    });
+    return c.json(prepared);
+  } catch (err: any) {
+    return handleCustodyActionError(c, err, 'SELF_CUSTODY_SHIELD_PREPARE_FAILED', '[onchain/stabilize/shield/prepare]');
   }
 });
 

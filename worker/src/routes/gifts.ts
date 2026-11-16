@@ -33,9 +33,11 @@ import {
 import {
   checkGiftCreateSwapStatus,
   prepareSelfCustodyGiftClaim,
+  prepareSelfCustodyGiftClaimSwap,
   prepareSelfCustodyGiftCreate,
   prepareSelfCustodyGiftReclaim,
   submitSelfCustodyGiftClaim,
+  submitSelfCustodyGiftClaimSwap,
   submitSelfCustodyGiftCreate,
   submitSelfCustodyGiftReclaim,
 } from '../services/selfCustodyVaultOps';
@@ -204,6 +206,11 @@ giftsRouter.post(
         gift,
         txHash: gift.claimTxHash || '',
         sharesClaimed: gift.sharesFormatted,
+        ...(gift.payoutAsset ? { payoutAsset: gift.payoutAsset } : {}),
+        ...(gift.usdcAmount ? { usdcAmount: gift.usdcAmount } : {}),
+        ...(gift.usdcSwapStatus ? { usdcSwapStatus: gift.usdcSwapStatus } : {}),
+        ...(gift.usdcDepositAddress ? { usdcDepositAddress: gift.usdcDepositAddress } : {}),
+        ...(gift.usdcSwapNote ? { usdcSwapNote: gift.usdcSwapNote } : {}),
       });
     } catch (err: any) {
       if (err instanceof GiftError) {
@@ -377,6 +384,63 @@ giftsRouter.post(
         return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
       }
       return handleCustodyActionError(c, err, 'GIFT_CLAIM_SUBMIT_FAILED', '[gifts/claim/submit]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/:id/claim/swap/prepare',
+  rateLimit({ limit: 20, prefix: 'gift_claim_swap_prep', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const giftId = (c.req.param('id') || '').trim();
+    try {
+      const res = await prepareSelfCustodyGiftClaimSwap({
+        env: c.env,
+        session,
+        giftId,
+      });
+      return c.json(res);
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_CLAIM_SWAP_PREPARE_FAILED', '[gifts/claim/swap/prepare]');
+    }
+  }
+);
+
+giftsRouter.post(
+  '/:id/claim/swap/submit',
+  rateLimit({ limit: 20, prefix: 'gift_claim_swap', strict: true }),
+  requireAuth(),
+  async (c) => {
+    const session = c.get('session')!;
+    const giftId = (c.req.param('id') || '').trim();
+    const body = await c.req.json().catch(() => ({}));
+    const actionId = typeof body?.actionId === 'string' ? body.actionId.trim() : '';
+    const assertion = body?.assertion;
+    if (!actionId || !assertion) {
+      return c.json<ErrorResponse>(
+        { error: 'Missing actionId or WebAuthn assertion.', code: 'MISSING_FIELDS' },
+        400
+      );
+    }
+    try {
+      const res = await submitSelfCustodyGiftClaimSwap({
+        env: c.env,
+        session,
+        giftId,
+        actionId,
+        assertion,
+      });
+      return c.json(res);
+    } catch (err: any) {
+      if (err instanceof GiftError) {
+        return c.json<ErrorResponse>({ error: err.message, code: err.code }, err.httpStatus as any);
+      }
+      return handleCustodyActionError(c, err, 'GIFT_CLAIM_SWAP_FAILED', '[gifts/claim/swap/submit]');
     }
   }
 );

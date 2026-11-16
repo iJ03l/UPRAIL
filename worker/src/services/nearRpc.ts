@@ -3613,6 +3613,38 @@ export async function getAccountIntentsAuthState(
 }
 
 /**
+ * Returns whether Uprail's server-derived Ed25519 L1 key for `xId` can still
+ * sign NEAR L1 transactions on `nearAccount`. Returns false when a Self-Custody
+ * account already holds non-empty L1 access keys without the derived server key
+ * (i.e. L1 FullAccess was rotated to the user's offline Recovery Key).
+ */
+export async function canServerSignAccountL1(
+  env: Env,
+  xId: string,
+  nearAccount: string
+): Promise<boolean> {
+  const custody = await getUserCustodyRecord(env, xId).catch(() => null);
+  if (!custody || custody.custodyMode !== 'self') return true;
+  if (!nearAccount) return false;
+  try {
+    const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+    const [derived, l1KeysRes] = await Promise.all([
+      deriveUserNearKeypair(env, xId),
+      nearRpc(rpcUrl, 'query', {
+        request_type: 'view_access_key_list',
+        finality: 'final',
+        account_id: nearAccount,
+      }).catch(() => null),
+    ]);
+    const keys = Array.isArray((l1KeysRes as any)?.keys) ? (l1KeysRes as any).keys : [];
+    if (keys.length === 0) return true;
+    return keys.some((k: any) => String(k?.public_key || '') === derived.publicKeyB58);
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Atomically adds the user's offline Ed25519 backup key (`backupPubkeyB58`) as a
  * FullAccess key on `subAccount` (`u_<hex>.escrow.uprail.near`) and deletes the
  * server-derived FullAccess key (`serverPubKey`) in a single NEAR L1 transaction.
@@ -5754,6 +5786,13 @@ export async function depositPlainBalanceToIntents(
         })
       ) {
         return { deposited: false, reason: 'SELF_CUSTODY_SIGNATURE_REQUIRED' };
+      }
+      if (!(await canServerSignAccountL1(env, senderXId, custody.nearAccount || creditAddress))) {
+        return {
+          deposited: false,
+          reason:
+            'SELF_CUSTODY_L1_KEY_ROTATED: Your server NEAR L1 key was replaced by your offline Recovery Key during Self-Custody upgrade. Sweep plain L1 balances using your Recovery Key.',
+        };
       }
     }
     const tokens = await getSupportedTokens(env);

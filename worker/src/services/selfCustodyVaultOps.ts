@@ -73,7 +73,7 @@ import {
   createPendingCustodyAction,
   prepareOneClickWebAuthnSession,
 } from './custodyService';
-import { prepareSweepPlainL1ToIntents, submitNativeL1Operation } from './nativeL1Auth';
+import { maybePrepareMatchingPlainL1Sweep, submitNativeL1Operation } from './nativeL1Auth';
 import {
   buildIntentsPayloadString,
   parseNearPublicKey,
@@ -85,14 +85,24 @@ import {
   requestQuote,
   submitSwapIntent,
 } from './oneclickClient';
-import { OneClickSelfCustodyAuthRequiredError, getUserSession } from './oneclickAuth';
-import { computeStabilizeSplit, getOneClickTokens, resolveOriginToken } from './stabilize';
+import {
+  OneClickSelfCustodyAuthRequiredError,
+  getUserSession,
+  validateGeneratedIntentForAccount,
+} from './oneclickAuth';
+import {
+  computeStabilizeSplit,
+  getOneClickTokens,
+  requestExactVaultToUsdcQuote,
+  resolveOriginToken,
+} from './stabilize';
 import {
   formatAtomic,
   getAvailableConfidentialAtomicForAsset,
   isConfidentialRailEnabled,
   waitForSettlement,
 } from './confidentialRail';
+import { prepareSelfCustodyShieldTarget } from './selfCustodyActions';
 import { allowedWebAuthnOrigins } from './webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
 
@@ -286,26 +296,20 @@ async function ensureSelfCustodyUsdcInPublicIntents(params: {
   }
 
   // Check plain NEAR L1 balance on the user's sub-account
-  const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-  const matchingPlain = plain.find(
-    (b) =>
-      nearRpc.assetsMatch(b.defuse_asset_id, origin.assetId) ||
-      nearRpc.assetsMatch(b.nearContractId, origin.nearContractId)
-  );
-  const plainAmt = BigInt(matchingPlain?.amount || '0');
-  if (plainAmt + pubAmt >= grossAtomic && plainAmt > 0n) {
-    const prepareResponse = await prepareSweepPlainL1ToIntents({
-      env,
-      session,
-      nearAccount,
-      asset: origin.assetId,
-      symbol: origin.symbol,
-      amount:
-        matchingPlain?.amountFormatted ||
-        formatAtomic((grossAtomic - pubAmt).toString(), origin.decimals),
-      nextStep,
-    });
-    return { ready: false, prepareResponse };
+  const sweepPrepare = await maybePrepareMatchingPlainL1Sweep({
+    env,
+    session,
+    nearAccount,
+    assetId: origin.assetId,
+    contractId: origin.nearContractId,
+    symbol: origin.symbol,
+    decimals: origin.decimals,
+    publicBalanceAtomic: pubAmt,
+    requiredAtomic: grossAtomic,
+    nextStep,
+  });
+  if (sweepPrepare) {
+    return { ready: false, prepareResponse: sweepPrepare };
   }
 
   // Check Confidential Intents balance and unshield exact shortfall into public intents.near
@@ -409,7 +413,7 @@ async function ensureSelfCustodyUsdcInPublicIntents(params: {
     }
   }
 
-  const totalAvail = pubAmt + plainAmt + confAvailAtomic;
+  const totalAvail = pubAmt + confAvailAtomic;
   const availFmt = formatAtomic(totalAvail.toString(), origin.decimals);
   const reqFmt = formatAtomic(grossAtomic.toString(), origin.decimals);
   throw new CustodyActionError(
@@ -781,32 +785,100 @@ async function resolvePreparedVaultSharesForDeposit(params: {
     }
   }
 
-  const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
-    env,
-    session,
-    nearAccount,
-    origin,
-    grossAtomic,
-    nextStep,
-  });
-  if (!fundsCheck.ready) {
-    return { ready: false, prepareResponse: fundsCheck.prepareResponse };
+  let swapQuote: any = null;
+  let usedOriginAsset = origin.assetId;
+  let isConfidentialSwap = false;
+
+  const initPubBal =
+    (await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null))
+      ?.balance ?? 0n;
+  if (initPubBal < grossAtomic && isConfidentialRailEnabled(env)) {
+    let ocSession: { accessToken: string; accountId: string } | null = null;
+    try {
+      ocSession = await getUserSession(env, session.x_id);
+    } catch (err) {
+      if (err instanceof OneClickSelfCustodyAuthRequiredError) {
+        const oneClickPrepare = await prepareOneClickWebAuthnSession(
+          env,
+          session.x_id,
+          session.x_handle
+        );
+        throw new CustodyActionError(
+          'Passkey signature needed to unlock your private balance.',
+          401,
+          'ONECLICK_AUTH_REQUIRED',
+          { oneClickPrepare }
+        );
+      }
+      throw err;
+    }
+
+    const conf = await getAvailableConfidentialAtomicForAsset(
+      env,
+      session.x_id,
+      origin.assetId,
+      origin.decimals,
+      origin.symbol
+    );
+    if (ocSession && conf.availableAtomic >= grossAtomic) {
+      try {
+        swapQuote = await requestQuote(
+          env,
+          {
+            dry: false,
+            swapType: 'EXACT_INPUT',
+            originAsset: conf.assetId,
+            destinationAsset: vault.assetId,
+            amount: grossAtomic.toString(),
+            recipient: nearAccount,
+            recipientType: 'INTENTS',
+            refundTo: nearAccount,
+            refundType: 'CONFIDENTIAL_INTENTS',
+            depositType: 'CONFIDENTIAL_INTENTS',
+            confidentiality: 'basic',
+            slippageTolerance: 300,
+            deadline: new Date(Date.now() + SWAP_QUOTE_TTL_MS).toISOString(),
+          },
+          { userSession: ocSession.accessToken }
+        );
+        usedOriginAsset = conf.assetId;
+        isConfidentialSwap = true;
+      } catch {
+        swapQuote = null;
+      }
+    }
   }
 
-  const swapQuote = await requestQuote(env, {
-    dry: false,
-    swapType: 'EXACT_INPUT',
-    originAsset: fundsCheck.originAssetId,
-    destinationAsset: vault.assetId,
-    amount: grossAtomic.toString(),
-    recipient: nearAccount,
-    recipientType: 'INTENTS',
-    refundTo: nearAccount,
-    refundType: 'INTENTS',
-    depositType: 'INTENTS',
-    slippageTolerance: 300,
-    deadline: new Date(Date.now() + SWAP_QUOTE_TTL_MS).toISOString(),
-  });
+  if (!swapQuote) {
+    const fundsCheck = await ensureSelfCustodyUsdcInPublicIntents({
+      env,
+      session,
+      nearAccount,
+      origin,
+      grossAtomic,
+      nextStep,
+    });
+    if (!fundsCheck.ready) {
+      return { ready: false, prepareResponse: fundsCheck.prepareResponse };
+    }
+    usedOriginAsset = fundsCheck.originAssetId;
+
+    swapQuote = await requestQuote(env, {
+      dry: false,
+      swapType: 'EXACT_INPUT',
+      originAsset: usedOriginAsset,
+      destinationAsset: vault.assetId,
+      amount: grossAtomic.toString(),
+      recipient: nearAccount,
+      recipientType: 'INTENTS',
+      refundTo: nearAccount,
+      refundType: 'INTENTS',
+      depositType: 'INTENTS',
+      slippageTolerance: 300,
+      deadline: new Date(Date.now() + SWAP_QUOTE_TTL_MS).toISOString(),
+    });
+  }
+
   const depAddr = swapQuote.quote.depositAddress;
   const generated = await generateSwapIntent(env, {
     depositAddress: depAddr,
@@ -831,7 +903,7 @@ async function resolvePreparedVaultSharesForDeposit(params: {
       ...(memberId ? { memberId } : {}),
       nearAccount,
       depositAddress: depAddr,
-      originAsset: fundsCheck.originAssetId,
+      originAsset: usedOriginAsset,
       originSymbol: origin.symbol,
       originDecimals: origin.decimals,
       grossAtomic: grossAtomic.toString(),
@@ -839,6 +911,7 @@ async function resolvePreparedVaultSharesForDeposit(params: {
       vaultSymbol: vault.symbol,
       vaultDecimals: vault.decimals,
       estimatedSharesOutAtomic,
+      isConfidentialSwap,
     },
     requireOnchainPasskey: true,
     ttlMs: VAULT_ACTION_TTL_MS,
@@ -2704,6 +2777,114 @@ export async function prepareSelfCustodyGiftClaim(params: {
   };
 }
 
+async function prepareClaimedGiftUsdcSwap(params: {
+  env: Env;
+  session: Session;
+  nearAccount: string;
+  giftId: string;
+  vaultAssetId: string;
+  claimedAtomic: bigint;
+  userAccessToken?: string | null;
+}) {
+  const { env, session, nearAccount, giftId, vaultAssetId, claimedAtomic, userAccessToken } = params;
+  const quote = await requestExactVaultToUsdcQuote({
+    env,
+    xId: session.x_id,
+    nearAccount,
+    vaultAssetId,
+    amountAtomic: claimedAtomic,
+    userAccessToken,
+  });
+  if (!quote.ok) return null;
+
+  const depositAddress = quote.liveQuote.quote.depositAddress;
+  const generated = await generateSwapIntent(env, {
+    depositAddress,
+    signerId: nearAccount,
+    standard: 'webauthn',
+  });
+  validateGeneratedIntentForAccount(env, generated, nearAccount);
+  const payloadStr = generated.rawPayload || generated.payload.message;
+
+  const pending = await createPendingCustodyAction({
+    env,
+    xId: session.x_id,
+    actionType: 'GIFT_CLAIM_SWAP_USDC',
+    payloadStr,
+    meta: {
+      giftId,
+      nearAccount,
+      depositAddress,
+      isConfidentialSwap: quote.isConfidentialSwap,
+      needsPostSwapShield: quote.needsPostSwapShield,
+      sourceAsset: vaultAssetId,
+      amountInAtomic: claimedAtomic.toString(),
+      targetAsset: quote.targetAssetId,
+      amountOut: quote.amountOutFormatted,
+      amountOutAtomic: quote.amountOutAtomic,
+      timeEstimateSeconds: quote.timeEstimateSeconds,
+    },
+    requireOnchainPasskey: true,
+    ttlMs: VAULT_ACTION_TTL_MS,
+  });
+
+  return {
+    step: 'gift_claim_swap' as const,
+    giftId,
+    depositAddress,
+    expectedUsdcOut: quote.amountOutFormatted,
+    isConfidentialSwap: quote.isConfidentialSwap,
+    needsPostSwapShield: quote.needsPostSwapShield,
+    timeEstimateSeconds: quote.timeEstimateSeconds,
+    ...pending,
+  };
+}
+
+export async function prepareSelfCustodyGiftClaimSwap(params: {
+  env: Env;
+  session: Session;
+  giftId: string;
+}) {
+  const { env, session, giftId } = params;
+  if (!env.DB) throw new CustodyActionError('Database unavailable', 503, 'DB_UNAVAILABLE');
+  if (!isConfidentialRailEnabled(env)) {
+    throw new CustodyActionError('Confidential Intents rail is required.', 503, 'CONFIDENTIAL_RAIL_DISABLED');
+  }
+  const row = await env.DB.prepare('SELECT * FROM gifts WHERE id = ? LIMIT 1')
+    .bind(giftId)
+    .first<any>();
+  if (!row || row.status !== 'CLAIMED' || row.recipient_x_id !== session.x_id) {
+    throw new CustodyActionError('Claimed gift not found for USDC swap.', 404, 'GIFT_NOT_FOUND');
+  }
+  const { nearAccount } = await getCurrentSaltAndAccount(env, session);
+  let ocSession;
+  try {
+    ocSession = await getUserSession(env, session.x_id);
+  } catch (err) {
+    if (err instanceof OneClickSelfCustodyAuthRequiredError) {
+      const oneClickPrepare = await prepareOneClickWebAuthnSession(env, session.x_id, session.x_handle);
+      throw new CustodyActionError(
+        'Passkey signature needed to unlock your 1Click Confidential session.',
+        401,
+        'ONECLICK_AUTH_REQUIRED',
+        { oneClickPrepare }
+      );
+    }
+    throw err;
+  }
+  const claimedAtomic = BigInt(row.shares_atomic || row.quoted_shares_atomic || '0');
+  const prep = await prepareClaimedGiftUsdcSwap({
+    env,
+    session,
+    nearAccount,
+    giftId,
+    vaultAssetId: row.vault_asset_id,
+    claimedAtomic,
+    userAccessToken: ocSession.accessToken,
+  });
+  return prep || { skipped: true };
+}
+
 export async function submitSelfCustodyGiftClaim(params: {
   env: Env;
   session: Session;
@@ -2749,12 +2930,14 @@ export async function submitSelfCustodyGiftClaim(params: {
 
   try {
     let txHash: string | undefined;
+    let claimedAtomic = BigInt(meta.sharesAtomic || '0');
     if (meta.contractMode === 'contract' && meta.onchainGiftId) {
       const contractId = String(meta.escrowContractId || getCircleContractId(env)!).toLowerCase();
       const onchain = await getGiftOnchain(env, meta.onchainGiftId, contractId);
       if (!onchain || onchain.status !== 'LOCKED') {
         throw new CustodyActionError('On-chain Gift is no longer claimable.', 409, 'ONCHAIN_NOT_LOCKED');
       }
+      claimedAtomic = BigInt(onchain.amount || meta.sharesAtomic || '0');
       const deadlineMs = Date.now() + 5 * 60 * 1000;
       const attestPayload = canonicalGiftClaimPayload({
         contractId,
@@ -2791,6 +2974,7 @@ export async function submitSelfCustodyGiftClaim(params: {
       if (sendAtomic <= 0n) {
         throw new CustodyActionError('Gift escrow custody balance is empty.', 409, 'EMPTY_CUSTODY');
       }
+      claimedAtomic = sendAtomic;
       const res = await transferFromEarnCustody(
         env,
         giftId,
@@ -2806,17 +2990,147 @@ export async function submitSelfCustodyGiftClaim(params: {
 
     const finTime = Date.now();
     await env.DB.prepare(
-      "UPDATE gifts SET status = 'CLAIMED', recipient_x_id = COALESCE(recipient_x_id, ?), claim_tx_hash = ?, claimed_at = ?, updated_at = ? WHERE id = ? AND status = 'CLAIMING'"
+      "UPDATE gifts SET status = 'CLAIMED', recipient_x_id = COALESCE(recipient_x_id, ?), shares_atomic = ?, claim_tx_hash = ?, claimed_at = ?, updated_at = ? WHERE id = ? AND status = 'CLAIMING'"
     )
-      .bind(session.x_id, txHash || null, finTime, finTime, giftId)
+      .bind(session.x_id, claimedAtomic.toString(), txHash || null, finTime, finTime, giftId)
       .run();
 
-    return { giftId, status: 'CLAIMED', txHash };
+    // Never swap into public balance silently: ensure Confidential Intents session first,
+    // then prepare the 0%-fee conversion into Confidential USDC (with post-swap shield if intermediate).
+    let usdcSwapPrepare: any = null;
+    let oneClickPrepare: any = null;
+    let needsOneClickAuthForUsdc = false;
+    if (claimedAtomic > 0n && isConfidentialRailEnabled(env)) {
+      const ocSession = await getUserSession(env, session.x_id).catch(() => null);
+      if (ocSession?.accessToken) {
+        usdcSwapPrepare = await prepareClaimedGiftUsdcSwap({
+          env,
+          session,
+          nearAccount: meta.recipientNearAccount,
+          giftId,
+          vaultAssetId: meta.vaultAssetId,
+          claimedAtomic,
+          userAccessToken: ocSession.accessToken,
+        }).catch(() => null);
+      } else {
+        oneClickPrepare = await prepareOneClickWebAuthnSession(
+          env,
+          session.x_id,
+          session.x_handle
+        ).catch(() => null);
+        if (oneClickPrepare) needsOneClickAuthForUsdc = true;
+      }
+    }
+
+    return {
+      giftId,
+      status: 'CLAIMED',
+      txHash,
+      sharesClaimedAtomic: claimedAtomic.toString(),
+      ...(usdcSwapPrepare ? { usdcSwapPrepare } : {}),
+      ...(needsOneClickAuthForUsdc ? { needsOneClickAuthForUsdc, oneClickPrepare } : {}),
+    };
   } catch (err) {
     await releaseLock();
     if (err instanceof CustodyActionError) throw err;
     throw new CustodyActionError(publicErrorMessage(err, 'Failed to claim Gift'), 502, 'CLAIM_FAILED');
   }
+}
+
+export async function submitSelfCustodyGiftClaimSwap(params: {
+  env: Env;
+  session: Session;
+  giftId: string;
+  actionId: string;
+  assertion: unknown;
+}) {
+  const { env, session, giftId, actionId, assertion } = params;
+  if (!env.DB) throw new CustodyActionError('Database unavailable', 503, 'DB_UNAVAILABLE');
+
+  const { signedWebAuthn, meta } = await consumeAndVerifyWebAuthnPendingAction<any>({
+    env,
+    xId: session.x_id,
+    actionId,
+    assertion,
+    expectedActionType: 'GIFT_CLAIM_SWAP_USDC',
+    requireOnchainPasskey: true,
+  });
+  if (meta.giftId !== giftId) {
+    throw new CustodyActionError('Gift mismatch on USDC swap confirmation', 403, 'GIFT_MISMATCH');
+  }
+
+  const isConfidentialSwap = meta.isConfidentialSwap === true;
+  const needsPostSwapShield = meta.needsPostSwapShield === true || !isConfidentialSwap;
+  const submitted = await submitSwapIntent(env, signedWebAuthn);
+  const settlement = await waitForSettlement(env, session.x_id, meta.depositAddress, {
+    timeoutMs: needsPostSwapShield ? 12_000 : 4_000,
+    intervalMs: 1_000,
+    allowPublic: !isConfidentialSwap,
+  }).catch(() => ({ status: 'PENDING' }));
+
+  const swapStatus = String(settlement.status || 'PENDING').toUpperCase();
+  if (swapStatus === 'FAILED' || swapStatus === 'REFUNDED') {
+    throw new CustodyActionError(
+      `1Click reported USDC conversion as ${swapStatus.toLowerCase()}. Your claimed vault shares stay safely in your wallet.`,
+      502,
+      'SWAP_SETTLEMENT_FAILED'
+    );
+  }
+
+  const nowMs = Date.now();
+  const isCompleted = swapStatus === 'SUCCESS';
+  await env.DB.prepare(
+    `INSERT INTO withdrawals (
+      id, x_id, x_handle, asset, amount, destination_address, destination_chain,
+      status, tx_hash, deposit_address, privacy_rail, settlement_status,
+      created_at, updated_at, confirmed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'near', ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      `gstab_${crypto.randomUUID().replace(/-/g, '').slice(0, 14)}`,
+      session.x_id,
+      session.x_handle,
+      meta.sourceAsset,
+      String(meta.amountInAtomic || '0'),
+      `gift_claim:USDC:${meta.amountOut}`,
+      isCompleted ? 'COMPLETED' : 'PENDING',
+      submitted.intentHash || meta.depositAddress,
+      meta.depositAddress,
+      isConfidentialSwap ? 'confidential' : 'public',
+      swapStatus,
+      nowMs,
+      nowMs,
+      isCompleted ? nowMs : null
+    )
+    .run()
+    .catch(() => {});
+
+  const shieldPrepare =
+    needsPostSwapShield && isCompleted && isConfidentialRailEnabled(env)
+      ? await prepareSelfCustodyShieldTarget({
+          env,
+          session,
+          assetId: meta.targetAsset,
+          expectedAmountAtomic: BigInt(meta.amountOutAtomic || '0'),
+          sourceSwapDepositAddress: meta.depositAddress,
+          nextStep: 'stabilize',
+        }).catch(() => null)
+      : null;
+
+  return {
+    giftId,
+    status: isCompleted ? 'SUCCESS' : swapStatus,
+    payoutAsset: 'USDC' as const,
+    targetAsset: meta.targetAsset,
+    usdcAmount: meta.amountOut,
+    usdcAmountAtomic: meta.amountOutAtomic,
+    usdcSwapStatus: swapStatus,
+    depositAddress: meta.depositAddress,
+    intentHash: submitted.intentHash,
+    confidential: isConfidentialSwap,
+    needsPostSwapShield: needsPostSwapShield && isConfidentialRailEnabled(env),
+    ...(shieldPrepare ? { shieldPrepare } : {}),
+  };
 }
 
 export async function prepareSelfCustodyGiftReclaim(params: {

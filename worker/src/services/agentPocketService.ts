@@ -30,7 +30,7 @@ import {
   consumeAndVerifyWebAuthnPendingAction,
   createPendingCustodyAction,
 } from './custodyService';
-import { prepareSweepPlainL1ToIntents, submitNativeL1Operation } from './nativeL1Auth';
+import { maybePrepareMatchingPlainL1Sweep, submitNativeL1Operation } from './nativeL1Auth';
 import {
   getCurrentIntentsSalt,
   getUserSession,
@@ -350,25 +350,20 @@ export async function prepareAgentPocketFund(params: {
   }
 
   // 2. Check NEAR L1 plain balance — trigger two-step L1 sweep into Intents first
-  const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-  const matchingPlain = plain.find(
-    (b) =>
-      nearRpc.assetsMatch(b.defuse_asset_id, core.assetId) ||
-      nearRpc.assetsMatch(b.nearContractId, core.nearContractId)
-  );
-  const plainAmt = BigInt(matchingPlain?.amount || '0');
-  if (matchingPlain && plainAmt > 0n && plainAmt + pubAmt >= amountAtomic) {
-    return await prepareSweepPlainL1ToIntents({
-      env,
-      session,
-      nearAccount,
-      asset: core.assetId,
-      symbol: core.symbol,
-      amount:
-        matchingPlain.amountFormatted ||
-        formatAtomic((amountAtomic - pubAmt).toString(), core.decimals),
-      nextStep: 'agent_pocket_fund',
-    });
+  const sweepPrepare = await maybePrepareMatchingPlainL1Sweep({
+    env,
+    session,
+    nearAccount,
+    assetId: core.assetId,
+    contractId: core.nearContractId,
+    symbol: core.symbol,
+    decimals: core.decimals,
+    publicBalanceAtomic: pubAmt,
+    requiredAtomic: amountAtomic,
+    nextStep: 'agent_pocket_fund',
+  });
+  if (sweepPrepare) {
+    return sweepPrepare;
   }
 
   // 3. Check Confidential Intents balance — unshield 1:1 directly into pocket

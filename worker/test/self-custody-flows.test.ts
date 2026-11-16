@@ -2059,7 +2059,7 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
   const { prepareSelfCustodyStabilize } = await import('../src/services/selfCustodyActions');
 
   let publicUsdcAvailable = '20000'; // $0.02 public USDC
-  confidentialUsdcAvailable = '6000000'; // $6.00 private USDC
+  confidentialUsdcAvailable = '5080000'; // $5.08 private USDC (combined with $0.02 public = $5.10)
   let publicStNearAvailable = '0';
   const expectedStNearOut = '1031258287495697600534552';
   let quotedAmount = '';
@@ -2335,6 +2335,1015 @@ test('webAuthnToContractProof emits web_authn and stNEAR 5.1 USDC Gift auto-unsh
     }
   );
 });
+
+test('Gift claim auto-converts 100% of claimed shares into USDC (self-custody + server-custody) with safe fallback', async () => {
+  const nodeCrypto = await import('node:crypto');
+  const {
+    cosePublicKeyToNearP256,
+    bytesToBase64UrlUnpadded,
+  } = await import('../src/services/selfCustodyCrypto');
+  const {
+    submitSelfCustodyGiftClaim,
+    submitSelfCustodyGiftClaimSwap,
+  } = await import('../src/services/selfCustodyVaultOps');
+  const { CIRCLE_GIFT_USDC_ASSET_ID, deriveEarnCustodyKey } = await import('../src/services/earnVaults');
+  const { claimGift } = await import('../src/services/gifts');
+
+  // Generate real WebAuthn ES256 P-256 keypair for Bob
+  const { privateKey: bobPrivKey, publicKey: bobPubKey } = nodeCrypto.generateKeyPairSync('ec', {
+    namedCurve: 'P-256',
+  });
+  const jwk = bobPubKey.export({ format: 'jwk' }) as { x: string; y: string };
+  const xBytes = Uint8Array.from(Buffer.from(jwk.x, 'base64url'));
+  const yBytes = Uint8Array.from(Buffer.from(jwk.y, 'base64url'));
+  const coseParts = [
+    Uint8Array.of(0xa5),
+    Uint8Array.of(0x01, 0x02),
+    Uint8Array.of(0x03, 0x26),
+    Uint8Array.of(0x20, 0x01),
+    Uint8Array.of(0x21, 0x58, 32, ...xBytes),
+    Uint8Array.of(0x22, 0x58, 32, ...yBytes),
+  ];
+  const coseBytes = new Uint8Array(coseParts.reduce((s, p) => s + p.length, 0));
+  let coseOff = 0;
+  for (const p of coseParts) {
+    coseBytes.set(p, coseOff);
+    coseOff += p.length;
+  }
+  const coseHex = Buffer.from(coseBytes).toString('hex');
+  const bobNearP256 = cosePublicKeyToNearP256(coseHex);
+  const bobCredId = 'cred_bob_p256_usdc_claim';
+
+  let signCount = 1;
+  const signWebAuthn = (challenge: string) => {
+    signCount += 1;
+    const clientDataJson = JSON.stringify({
+      type: 'webauthn.get',
+      challenge,
+      origin: 'https://app.uprail.world',
+    });
+    const rpHash = nodeCrypto.createHash('sha256').update('uprail.world').digest();
+    const counterBuf = Buffer.alloc(4);
+    counterBuf.writeUInt32BE(signCount, 0);
+    const authData = Buffer.concat([rpHash, Buffer.from([0x05]), counterBuf]);
+    const signedBytes = Buffer.concat([
+      authData,
+      nodeCrypto.createHash('sha256').update(clientDataJson).digest(),
+    ]);
+    const derSig = Uint8Array.from(nodeCrypto.sign('sha256', signedBytes, bobPrivKey));
+    return {
+      id: bobCredId,
+      rawId: bobCredId,
+      type: 'public-key',
+      response: {
+        clientDataJSON: bytesToBase64UrlUnpadded(new TextEncoder().encode(clientDataJson)),
+        authenticatorData: bytesToBase64UrlUnpadded(authData),
+        signature: bytesToBase64UrlUnpadded(derSig),
+      },
+    };
+  };
+
+  const now = Date.now();
+  const giftSharesAtomic = '1031258287495697600534552'; // ~1.031258 stNEAR
+  const { deriveUserNearKeypair } = await import('../src/services/nearRpc');
+  const carolKp = await deriveUserNearKeypair(
+    { ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv, ESCROW_ACCOUNT_ID: 'escrow.uprail.near' } as any,
+    'xid_carol'
+  );
+  const USDC_ID = CIRCLE_GIFT_USDC_ASSET_ID;
+  const STNEAR_ID = 'nep141:meta-pool.near';
+  const custodySelf = await deriveEarnCustodyKey({ ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv } as any, 'gft_a111111111111111');
+  const custodyFallback = await deriveEarnCustodyKey({ ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv } as any, 'gft_b222222222222222');
+  const custodyServer = await deriveEarnCustodyKey({ ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv } as any, 'gft_c333333333333333');
+
+  const baseGift = (id: string, recipientXId: string | null, recipientHandle: string, custodyAccount: string) => ({
+    id,
+    sender_x_id: 'xid_alice',
+    sender_handle: 'alice',
+    recipient_handle: recipientHandle,
+    recipient_x_id: recipientXId,
+    occasion: 'BIRTHDAY',
+    message: 'Happy birthday!',
+    show_amount: 1,
+    vault_asset_id: STNEAR_ID,
+    vault_symbol: 'stNEAR',
+    vault_decimals: 24,
+    source_asset: USDC_ID,
+    source_symbol: 'USDC',
+    source_decimals: 6,
+    gross_atomic: '5100000',
+    principal_usd_cents: 500,
+    custody_account: custodyAccount,
+    quoted_shares_atomic: giftSharesAtomic,
+    shares_atomic: giftSharesAtomic,
+    timelock_until: now - 60_000,
+    status: 'LOCKED',
+    contract_mode: 'escrow',
+    created_at: now - 120_000,
+    updated_at: now - 60_000,
+    funded_at: now - 120_000,
+  });
+
+  const withdrawals: any[] = [];
+  const baseDb = createMockDb({
+    identities: [
+      { x_id: 'xid_bob', x_handle: 'bob', near_account: 'u_bob.escrow.uprail.near', custody_mode: 'self' },
+      { x_id: 'xid_carol', x_handle: 'carol', near_account: carolKp.accountId, custody_mode: 'server' },
+    ],
+    passkeys: [
+      {
+        id: 'pk_bob_1',
+        x_id: 'xid_bob',
+        credential_id: bobCredId,
+        public_key: coseHex,
+        counter: 1,
+        near_p256_pubkey: bobNearP256,
+        onchain_added_at: now - 5000,
+      },
+    ],
+    gifts: [
+      baseGift('gft_a111111111111111', 'xid_bob', 'bob', custodySelf.accountId),
+      baseGift('gft_b222222222222222', 'xid_bob', 'bob', custodyFallback.accountId),
+      baseGift('gft_c333333333333333', 'xid_carol', 'carol', custodyServer.accountId),
+    ],
+  });
+
+  const db: any = {
+    prepare(sql: string) {
+      let bindings: any[] = [];
+      const stmt: any = {
+        bind(...args: any[]) {
+          bindings = args;
+          return stmt;
+        },
+        async first() {
+          if (sql.startsWith('SELECT * FROM pending_custody_actions WHERE id = ? AND x_id = ?')) {
+            const [id, xId] = bindings;
+            return baseDb.state.pendingActions.find((a: any) => a.id === id && a.x_id === xId) || null;
+          }
+          if (sql.startsWith('SELECT custody_account FROM gifts WHERE id = ?')) {
+            const [id] = bindings;
+            const g = baseDb.state.gifts.find((r: any) => r.id === id);
+            return g ? { custody_account: g.custody_account } : null;
+          }
+          return baseDb.prepare(sql).bind(...bindings).first();
+        },
+        async all() {
+          return baseDb.prepare(sql).bind(...bindings).all();
+        },
+        async run() {
+          if (sql.startsWith('UPDATE pending_custody_actions SET used_at = ? WHERE id = ? AND used_at IS NULL')) {
+            const [usedAt, id] = bindings;
+            const row = baseDb.state.pendingActions.find((a: any) => a.id === id && a.used_at == null);
+            if (!row) return { success: true, meta: { changes: 0 } };
+            row.used_at = usedAt;
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.startsWith('UPDATE passkeys SET counter = ? WHERE id = ?')) {
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.startsWith("UPDATE gifts SET status = 'CLAIMING'") && sql.includes("AND status = 'LOCKED'")) {
+            const [updatedAt, giftId] = bindings;
+            const g = baseDb.state.gifts.find((r: any) => r.id === giftId && r.status === 'LOCKED');
+            if (!g) return { success: true, meta: { changes: 0 } };
+            g.status = 'CLAIMING';
+            g.updated_at = updatedAt;
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.includes("SET status = 'CLAIMING'") && sql.includes('AND timelock_until <= ?')) {
+            const giftId = bindings.find((b) => typeof b === 'string' && String(b).startsWith('gft_'));
+            const g = baseDb.state.gifts.find((r: any) => r.id === giftId && r.status === 'LOCKED');
+            if (!g) return { success: true, meta: { changes: 0 } };
+            g.status = 'CLAIMING';
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.startsWith("UPDATE gifts SET status = 'CLAIMED'")) {
+            const [recXId, sharesAtomic, txHash, claimedAt, updatedAt, giftId] = bindings;
+            const g = baseDb.state.gifts.find((r: any) => r.id === giftId && r.status === 'CLAIMING');
+            if (!g) return { success: true, meta: { changes: 0 } };
+            g.status = 'CLAIMED';
+            g.recipient_x_id = g.recipient_x_id || recXId;
+            g.shares_atomic = sharesAtomic;
+            g.claim_tx_hash = txHash;
+            g.claimed_at = claimedAt;
+            g.updated_at = updatedAt;
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.includes('SET status = ?,') && sql.includes('WHERE id = ?')) {
+            const [status, sharesAtomic, txHash, claimedAt, updatedAt, giftId] = bindings;
+            const g = baseDb.state.gifts.find((r: any) => r.id === giftId);
+            if (g) {
+              g.status = status;
+              g.shares_atomic = sharesAtomic;
+              g.claim_tx_hash = txHash;
+              g.claimed_at = claimedAt;
+              g.updated_at = updatedAt;
+            }
+            return { success: true, meta: { changes: g ? 1 : 0 } };
+          }
+          if (sql.startsWith('INSERT INTO withdrawals')) {
+            withdrawals.push({
+              id: bindings[0],
+              xId: bindings[1],
+              depositAddress: sql.includes('x_handle') ? bindings[8] : bindings[7],
+              privacyRail: sql.includes('x_handle') ? bindings[9] : bindings[8],
+            });
+            return { success: true, meta: { changes: 1 } };
+          }
+          if (sql.startsWith("UPDATE withdrawals SET privacy_rail = 'confidential'")) {
+            const [, depAddr, xId] = bindings;
+            for (const w of withdrawals) {
+              if (w.depositAddress === depAddr && w.xId === xId) {
+                w.privacyRail = 'confidential';
+              }
+            }
+            return { success: true, meta: { changes: 1 } };
+          }
+          return baseDb.prepare(sql).bind(...bindings).run();
+        },
+      };
+      return stmt;
+    },
+  };
+
+  const { submitConfidentialShieldAction } = await import('../src/services/selfCustodyActions');
+  const { signContractPayloadWithServerUserKey: _unused, ..._ } = await import('../src/services/circleContract');
+  void _unused;
+  const userSessions = new Map<string, string>([
+    [
+      '1click:user-session:xid_bob',
+      JSON.stringify({
+        accessToken: 'bob_oc_token',
+        accountId: 'u_bob.escrow.uprail.near',
+        expiresAt: Date.now() + 600_000,
+      }),
+    ],
+    [
+      '1click:user-session:xid_carol',
+      JSON.stringify({
+        accessToken: 'carol_oc_token',
+        accountId: carolKp.accountId,
+        expiresAt: Date.now() + 600_000,
+      }),
+    ],
+  ]);
+
+  const env: any = {
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    ATTESTOR_PRIVATE_KEY: TEST_ATTESTOR_KP.priv,
+    INTENTS_CONTRACT_ID: 'intents.near',
+    CIRCLE_CONTRACT_ID: 'circle.uprail.near',
+    ONE_CLICK_API_KEY: 'test_1click_key',
+    QUOTE_SIGNING_SECRET: 'test_quote_secret',
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    WEBAUTHN_RP_ID: 'uprail.world',
+    WEBAUTHN_RP_NAME: 'UPRAIL',
+    WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+    DB: db,
+    CACHE: {
+      async get(key: string, type?: string) {
+        const raw = userSessions.get(key) ?? null;
+        return type === 'json' && raw ? JSON.parse(raw) : raw;
+      },
+      async put(key: string, val: string) {
+        userSessions.set(key, val);
+      },
+      async delete(key: string) {
+        userSessions.delete(key);
+      },
+    },
+  };
+
+  let simulateNoLiquidity = false;
+  let lastQuote: any = null;
+  let shieldQuoteCount = 0;
+  let shieldIntentGenerated = false;
+  let confUsdcAvailable = '0';
+  let submittedIntentsCount = 0;
+
+  await withMockFetch(
+    {
+      public_keys_by_account: (args: any) =>
+        args?.account_id === carolKp.accountId ? [carolKp.publicKeyB58] : [bobNearP256],
+      has_public_key: () => true,
+      current_salt: () => '01020304',
+      mt_balance_of: (args: any) => (args?.token_id === USDC_ID ? '5010000' : giftSharesAtomic),
+    },
+    async () => {
+      const baseFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: any, init?: any) => {
+        const url = typeof input === 'string' ? input : input?.url || '';
+        const bodyObj = init?.body ? JSON.parse(String(init.body)) : {};
+
+        if (url.includes('/v0/account/balances')) {
+          return new Response(
+            JSON.stringify([{ tokenId: USDC_ID, available: confUsdcAvailable }]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (bodyObj?.method === 'status') {
+          return new Response(
+            JSON.stringify({ jsonrpc: '2.0', id: bodyObj.id, result: { sync_info: { latest_block_hash: '1'.repeat(32) } } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (bodyObj?.params?.request_type === 'view_access_key') {
+          return new Response(
+            JSON.stringify({ jsonrpc: '2.0', id: bodyObj.id, result: { block_hash: '1'.repeat(32), nonce: 42 } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (bodyObj?.method === 'broadcast_tx_commit' || bodyObj?.method === 'send_tx') {
+          return new Response(
+            JSON.stringify({ jsonrpc: '2.0', id: bodyObj.id, result: { status: { SuccessValue: '' }, transaction: { hash: 'tx_escrow_claim_mock' } } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/quote')) {
+          lastQuote = bodyObj;
+          if (simulateNoLiquidity) {
+            return new Response(
+              JSON.stringify({ message: 'No liquidity available' }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+          // Self/Escrow shield USDC -> CONFIDENTIAL_INTENTS USDC succeeds
+          if (
+            bodyObj.originAsset === USDC_ID &&
+            bodyObj.destinationAsset === USDC_ID &&
+            bodyObj.recipientType === 'CONFIDENTIAL_INTENTS' &&
+            bodyObj.confidentiality === 'basic'
+          ) {
+            shieldQuoteCount++;
+            return new Response(
+              JSON.stringify({
+                quote: {
+                  depositAddress: '1click_shield_usdc_dep',
+                  deadline: new Date(Date.now() + 600_000).toISOString(),
+                  amountIn: bodyObj.amount,
+                  amountOut: bodyObj.amount,
+                },
+                quoteRequest: { confidentiality: 'basic' },
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+          // Reject confidential direct stNEAR -> CONFIDENTIAL_INTENTS so public + auto-shield path is exercised
+          if (bodyObj.originAsset === STNEAR_ID && bodyObj.confidentiality === 'basic') {
+            return new Response(
+              JSON.stringify({ message: 'Confidential unsupported for stNEAR' }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              quote: {
+                depositAddress: '1click_gift_claim_usdc_dep',
+                deadline: new Date(Date.now() + 600_000).toISOString(),
+                amountIn: bodyObj.amount,
+                amountOut: '5010000',
+              },
+              quoteRequest: { confidentiality: 'public' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/generate-intent')) {
+          const { createTimestampedNonceBytes, encodeVersionedNonce, saltFromHex } = await import(
+            '../src/services/intentsNonce'
+          );
+          const isWebauthn = bodyObj.standard === 'webauthn';
+          const isShield = bodyObj.depositAddress === '1click_shield_usdc_dep';
+          if (isShield) shieldIntentGenerated = true;
+          const nonce = encodeVersionedNonce(
+            saltFromHex('01020304'),
+            new Date(Date.now() + 600_000),
+            createTimestampedNonceBytes()
+          );
+          const msgObj = {
+            signer_id: bodyObj.signerId,
+            verifying_contract: 'intents.near',
+            deadline: new Date(Date.now() + 600_000).toISOString(),
+            nonce,
+            intents: [
+              {
+                intent: 'transfer',
+                receiver_id: bodyObj.depositAddress,
+                tokens: { [isShield ? USDC_ID : STNEAR_ID]: isShield ? '5010000' : giftSharesAtomic },
+              },
+            ],
+          };
+          const msgStr = JSON.stringify(msgObj);
+          return new Response(
+            JSON.stringify({
+              intent: isWebauthn
+                ? { standard: 'webauthn', payload: msgStr }
+                : { standard: 'nep413', payload: { message: msgStr, nonce, recipient: 'intents.near' } },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/submit-intent')) {
+          submittedIntentsCount++;
+          if (shieldIntentGenerated) {
+            confUsdcAvailable = '5010000';
+            shieldIntentGenerated = false;
+          }
+          return new Response(
+            JSON.stringify({ intentHash: `intent_claim_usdc_${submittedIntentsCount}` }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/status')) {
+          return new Response(
+            JSON.stringify({ status: 'SUCCESS' }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return await baseFetch(input, init);
+      }) as typeof fetch;
+
+      const bobSession: any = {
+        id: 'sess_bob',
+        x_id: 'xid_bob',
+        x_handle: 'bob',
+        x_name: 'Bob',
+      };
+      const carolSession: any = {
+        id: 'sess_carol',
+        x_id: 'xid_carol',
+        x_handle: 'carol',
+        x_name: 'Carol',
+      };
+
+      // 1. Self-custody claim converts 100% of stNEAR shares -> USDC AND provides shieldPrepare into CONFIDENTIAL_INTENTS
+      const prepBobClaim: any = await prepareSelfCustodyGiftClaim({
+        env,
+        session: bobSession,
+        giftId: 'gft_a111111111111111',
+      });
+      const claimRes: any = await submitSelfCustodyGiftClaim({
+        env,
+        session: bobSession,
+        giftId: 'gft_a111111111111111',
+        actionId: prepBobClaim.actionId,
+        assertion: signWebAuthn(prepBobClaim.challenge),
+      });
+      assert.equal(claimRes.status, 'CLAIMED');
+      assert.equal(claimRes.sharesClaimedAtomic, giftSharesAtomic);
+      assert.ok(claimRes.usdcSwapPrepare, 'must prepare automatic USDC conversion on gift claim');
+      assert.equal(claimRes.usdcSwapPrepare.step, 'gift_claim_swap');
+      assert.equal(claimRes.usdcSwapPrepare.needsPostSwapShield, true);
+      assert.equal(lastQuote.amount, giftSharesAtomic, 'must convert 100% of claimed shares with 0% swap fee');
+
+      // Execute Tap 2 swap submission -> returns immediate shieldPrepare into Confidential Intents
+      const swapRes: any = await submitSelfCustodyGiftClaimSwap({
+        env,
+        session: bobSession,
+        giftId: 'gft_a111111111111111',
+        actionId: claimRes.usdcSwapPrepare.actionId,
+        assertion: signWebAuthn(claimRes.usdcSwapPrepare.challenge),
+      });
+      assert.equal(swapRes.payoutAsset, 'USDC');
+      assert.equal(swapRes.usdcAmount, '5.01');
+      assert.equal(swapRes.needsPostSwapShield, true);
+      assert.ok(swapRes.shieldPrepare, 'must prepare post-swap shield into CONFIDENTIAL_INTENTS');
+      assert.equal(swapRes.shieldPrepare.step, 'shield');
+      assert.equal(shieldQuoteCount, 1);
+
+      // Execute Tap 3 shield submission -> promotes withdrawal row to confidential
+      const shieldRes = await submitConfidentialShieldAction({
+        env,
+        session: bobSession,
+        actionId: swapRes.shieldPrepare.actionId,
+        assertion: signWebAuthn(swapRes.shieldPrepare.challenge),
+      });
+      assert.equal(shieldRes.shielded, true);
+      assert.equal(withdrawals[0].privacyRail, 'confidential');
+
+      // 2. If 1Click has no liquidity, self-custody claim STILL succeeds cleanly with shares in wallet
+      simulateNoLiquidity = true;
+      const prepBobNoLiq: any = await prepareSelfCustodyGiftClaim({
+        env,
+        session: bobSession,
+        giftId: 'gft_b222222222222222',
+      });
+      const claimNoLiqRes: any = await submitSelfCustodyGiftClaim({
+        env,
+        session: bobSession,
+        giftId: 'gft_b222222222222222',
+        actionId: prepBobNoLiq.actionId,
+        assertion: signWebAuthn(prepBobNoLiq.challenge),
+      });
+      assert.equal(claimNoLiqRes.status, 'CLAIMED');
+      assert.equal(claimNoLiqRes.usdcSwapPrepare, undefined);
+
+      // 3. Server-custody claimGift auto-converts 100% of shares to USDC AND shields straight into CONFIDENTIAL_INTENTS
+      confUsdcAvailable = '0';
+      simulateNoLiquidity = false;
+      const serverClaimUsdc = await claimGift(env, carolSession, 'gft_c333333333333333');
+      assert.equal(serverClaimUsdc.status, 'CLAIMED');
+      assert.equal(serverClaimUsdc.payoutAsset, 'USDC');
+      assert.equal(serverClaimUsdc.usdcAmount, '5.01');
+      assert.equal(serverClaimUsdc.usdcSwapStatus, 'SUCCESS');
+      assert.equal(serverClaimUsdc.usdcConfidential, true);
+      assert.equal(shieldQuoteCount, 2);
+      assert.equal(withdrawals[1].privacyRail, 'confidential');
+    }
+  );
+});
+
+test('Self-custody account with rotated L1 key refuses server L1 sweep before burning WebAuthn challenge', async () => {
+  const { canServerSignAccountL1, deriveUserNearKeypair, depositPlainBalanceToIntents } = await import(
+    '../src/services/nearRpc'
+  );
+  const { maybePrepareMatchingPlainL1Sweep, prepareSweepPlainL1ToIntents } = await import(
+    '../src/services/nativeL1Auth'
+  );
+  const { issueNativeL1Grant } = await import('../src/services/nativeL1Grant');
+  const { CustodyActionError } = await import('../src/services/custodyService');
+
+  const xId = 'xid_rotated_l1';
+  const backupPubkey = 'ed25519:3P7ijos7GtNjHe9i31isZ6ERSFUYBG78ZF8byu6m8421';
+  const db = createMockDb({
+    identities: [
+      {
+        x_id: xId,
+        x_handle: 'xy63ry0rx',
+        near_account: 'u_rotated.escrow.uprail.near',
+        custody_mode: 'self',
+        is_activated: 1,
+        backup_pubkey: backupPubkey,
+      },
+    ],
+  });
+  const env: any = {
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    INTENTS_CONTRACT_ID: 'intents.near',
+    NEAR_RPC_URL: 'https://free.rpc.fastnear.com',
+    WEBAUTHN_RP_ID: 'uprail.world',
+    WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+    DB: db,
+  };
+
+  const derived = await deriveUserNearKeypair(env, xId);
+  let l1KeysOnChain = [{ public_key: backupPubkey, access_key: { permission: 'FullAccess' } }];
+  let txBroadcastAttempted = false;
+
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = typeof input === 'string' ? input : input?.url || '';
+    if (url.includes('api.fastnear.com') && url.endsWith('/ft')) {
+      return new Response(
+        JSON.stringify({
+          tokens: [
+            {
+              contract_id: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+              balance: '6727',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (url.includes('/v0/tokens')) {
+      return new Response(JSON.stringify(MOCK_TOKENS), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const bodyObj = init?.body ? JSON.parse(String(init.body)) : {};
+    if (bodyObj?.method === 'broadcast_tx_commit' || bodyObj?.method === 'send_tx') {
+      txBroadcastAttempted = true;
+    }
+    if (bodyObj?.params?.request_type === 'view_access_key_list') {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: bodyObj.id,
+          result: { keys: l1KeysOnChain },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (bodyObj?.params?.request_type === 'view_account') {
+      return new Response(
+        JSON.stringify({ jsonrpc: '2.0', id: bodyObj.id, result: { amount: '44780000000000000000000' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: bodyObj.id, result: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    // 1. Rotated L1 key detected -> canServerSignAccountL1 = false
+    assert.equal(
+      await canServerSignAccountL1(env, xId, 'u_rotated.escrow.uprail.near'),
+      false,
+      'self-custody account with only backup key on L1 must report server L1 signing unavailable'
+    );
+
+    // 2. prepareSweepPlainL1ToIntents & maybePrepareMatchingPlainL1Sweep must reject BEFORE minting pending actions
+    const session: any = { id: 'sess_rot', x_id: xId, x_handle: 'xy63ry0rx', x_name: 'XY' };
+    await assert.rejects(
+      () =>
+        maybePrepareMatchingPlainL1Sweep({
+          env,
+          session,
+          nearAccount: 'u_rotated.escrow.uprail.near',
+          assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+          contractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+          symbol: 'USDC',
+          decimals: 6,
+          publicBalanceAtomic: 363995n,
+          requiredAtomic: 370722n,
+          nextStep: 'send',
+        }),
+      (err: any) => err instanceof CustodyActionError && err.code === 'SELF_CUSTODY_L1_KEY_ROTATED'
+    );
+    await assert.rejects(
+      () =>
+        prepareSweepPlainL1ToIntents({
+          env,
+          session,
+          nearAccount: 'u_rotated.escrow.uprail.near',
+          asset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+          symbol: 'USDC',
+          amount: '0.006727',
+        }),
+      (err: any) => err instanceof CustodyActionError && err.code === 'SELF_CUSTODY_L1_KEY_ROTATED'
+    );
+
+    // 3. depositPlainBalanceToIntents must refuse without broadcasting any L1 tx
+    const grant = issueNativeL1Grant({
+      xId,
+      nearAccount: 'u_rotated.escrow.uprail.near',
+      operation: 'sweep_to_intents',
+      asset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+      target: 'u_rotated.escrow.uprail.near',
+    });
+    const depRes = await depositPlainBalanceToIntents(
+      env,
+      xId,
+      'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+      '0.006727',
+      'u_rotated.escrow.uprail.near',
+      { nativeL1Grant: grant }
+    );
+    assert.equal(depRes.deposited, false);
+    assert.ok(depRes.reason?.includes('SELF_CUSTODY_L1_KEY_ROTATED'));
+    assert.equal(txBroadcastAttempted, false, 'must fail closed before any L1 broadcast');
+
+    // 4. If derived server L1 key IS still on-chain, canServerSignAccountL1 = true
+    l1KeysOnChain = [{ public_key: derived.publicKeyB58, access_key: { permission: 'FullAccess' } }];
+    assert.equal(await canServerSignAccountL1(env, xId, 'u_rotated.escrow.uprail.near'), true);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('Self-custody Confidential Send from public Intents uses 1 passkey tap without pre-shield', async () => {
+  const { prepareSelfCustodySend } = await import('../src/services/selfCustodyActions');
+  const { signQuote } = await import('../src/services/quoteAuth');
+
+  const USDC_ID = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+  const senderXId = 'xid_1tap_send';
+  const baseDb = createMockDb({
+    identities: [
+      {
+        x_id: senderXId,
+        x_handle: 'xy63ry0rx',
+        near_account: 'u_sender.escrow.uprail.near',
+        custody_mode: 'self',
+        is_activated: 1,
+      },
+      {
+        x_id: 'xid_recip_1tap',
+        x_handle: 'uprailworld',
+        near_account: 'u_recip.escrow.uprail.near',
+        custody_mode: 'self',
+        is_activated: 1,
+      },
+    ],
+    passkeys: [
+      {
+        id: 'pk_1tap_1',
+        x_id: senderXId,
+        credential_id: 'cred_1tap',
+        public_key: 'aabb',
+        counter: 1,
+        near_p256_pubkey: 'p256:11111111111111111111111111111111111111111111',
+        onchain_added_at: Date.now() - 10_000,
+      },
+    ],
+  });
+  const db: any = {
+    prepare(sql: string) {
+      const norm = sql.replace(/\s+/g, ' ');
+      if (norm.includes('FROM x_identities WHERE LOWER(x_handle)')) {
+        let handle = '';
+        const stmt: any = {
+          bind(h: string) {
+            handle = String(h || '').toLowerCase();
+            return stmt;
+          },
+          async first() {
+            return (
+              baseDb.state.identities.find(
+                (i: any) => String(i.x_handle || '').toLowerCase() === handle
+              ) ?? null
+            );
+          },
+        };
+        return stmt;
+      }
+      return baseDb.prepare(sql);
+    },
+  };
+
+  const kvStore = new Map<string, string>([
+    [
+      `1click:user-session:${senderXId}`,
+      JSON.stringify({
+        accessToken: 'oc_1tap_token',
+        accountId: 'u_sender.escrow.uprail.near',
+        expiresAt: Date.now() + 600_000,
+      }),
+    ],
+  ]);
+
+  const env: any = {
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    INTENTS_CONTRACT_ID: 'intents.near',
+    NEAR_RPC_URL: 'https://free.rpc.fastnear.com',
+    ONE_CLICK_API_KEY: 'test_key',
+    SESSION_SECRET: 'test_quote_secret',
+    QUOTE_SIGNING_SECRET: 'test_quote_secret',
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    WEBAUTHN_RP_ID: 'uprail.world',
+    WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+    DB: db,
+    CACHE: {
+      async get(key: string, type?: string) {
+        const val = kvStore.get(key) ?? null;
+        return type === 'json' && val ? JSON.parse(val) : val;
+      },
+      async put(key: string, val: string) {
+        kvStore.set(key, val);
+      },
+    },
+  };
+
+  let quotedRequests: any[] = [];
+  await withMockFetch(
+    {
+      current_salt: () => '01020304',
+      mt_balance_of: () => '363995',
+      mt_batch_balance_of: () => ['363995'],
+    },
+    async () => {
+      const baseFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: any, init?: any) => {
+        const url = typeof input === 'string' ? input : input?.url || '';
+        const bodyObj = init?.body ? JSON.parse(String(init.body)) : {};
+
+        if (url.includes('/v0/account/balances')) {
+          return new Response(
+            JSON.stringify([{ tokenId: USDC_ID, available: '0' }]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/quote')) {
+          quotedRequests.push(bodyObj);
+          return new Response(
+            JSON.stringify({
+              quote: {
+                depositAddress: '1click_direct_send_dep',
+                deadline: new Date(Date.now() + 600_000).toISOString(),
+                amountIn: bodyObj.amount,
+                amountOut: bodyObj.amount,
+              },
+              quoteRequest: { confidentiality: 'basic' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/generate-intent')) {
+          const { createTimestampedNonceBytes, encodeVersionedNonce, saltFromHex } = await import(
+            '../src/services/intentsNonce'
+          );
+          const msgStr = JSON.stringify({
+            signer_id: 'u_sender.escrow.uprail.near',
+            verifying_contract: 'intents.near',
+            deadline: new Date(Date.now() + 600_000).toISOString(),
+            nonce: encodeVersionedNonce(
+              saltFromHex('01020304'),
+              new Date(Date.now() + 600_000),
+              createTimestampedNonceBytes()
+            ),
+            intents: [
+              {
+                intent: 'transfer',
+                receiver_id: bodyObj.depositAddress,
+                tokens: { [USDC_ID]: '363995' },
+              },
+            ],
+          });
+          return new Response(
+            JSON.stringify({ intent: { standard: 'webauthn', payload: msgStr } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return await baseFetch(input, init);
+      }) as typeof fetch;
+
+      const quoteSignature = await signQuote(env.QUOTE_SIGNING_SECRET, {
+        quoteId: 'q_1tap_send',
+        asset: USDC_ID,
+        amount: '0.363995',
+        recipient: 'uprailworld',
+        depositAddress: 'escrow.uprail.near',
+        expiresAt: Date.now() + 600_000,
+      });
+
+      const prep: any = await prepareSelfCustodySend(
+        env,
+        { id: 'sess_1tap', x_id: senderXId, x_handle: 'xy63ry0rx', x_name: 'XY' } as any,
+        {
+          recipientHandle: '@uprailworld',
+          asset: USDC_ID,
+          amount: '0.363995',
+          quoteSignature,
+          depositAddress: 'escrow.uprail.near',
+        }
+      );
+
+      assert.equal(prep.step, 'send', 'must go directly to send without intermediate shield step');
+      assert.equal(prep.rail, 'confidential');
+      assert.equal(quotedRequests.length, 1);
+      assert.equal(quotedRequests[0].depositType, 'INTENTS');
+      assert.equal(quotedRequests[0].recipientType, 'CONFIDENTIAL_INTENTS');
+      assert.equal(quotedRequests[0].recipient, 'escrow.uprail.near');
+    }
+  );
+});
+
+test('Self-custody Gift Create from 100% Confidential USDC skips VAULT_UNSHIELD_USDC when direct confidential swap quotes cleanly and falls back safely', async () => {
+  const { prepareSelfCustodyGiftCreate } = await import('../src/services/selfCustodyVaultOps');
+  const { CIRCLE_GIFT_USDC_ASSET_ID } = await import('../src/services/earnVaults');
+
+  const USDC_ID = CIRCLE_GIFT_USDC_ASSET_ID;
+  const senderXId = 'xid_gift_2tap';
+  const db = createMockDb({
+    identities: [
+      {
+        x_id: senderXId,
+        x_handle: 'uprailworld',
+        near_account: 'u_gift2tap.escrow.uprail.near',
+        custody_mode: 'self',
+        is_activated: 1,
+      },
+    ],
+    passkeys: [
+      {
+        id: 'pk_gift_2tap',
+        x_id: senderXId,
+        credential_id: 'cred_gift_2tap',
+        public_key: 'aabb',
+        counter: 1,
+        near_p256_pubkey: 'p256:11111111111111111111111111111111111111111111',
+        onchain_added_at: Date.now() - 10_000,
+      },
+    ],
+  });
+
+  const kvStore = new Map<string, string>([
+    [
+      `1click:user-session:${senderXId}`,
+      JSON.stringify({
+        accessToken: 'oc_gift2tap_tok',
+        accountId: 'u_gift2tap.escrow.uprail.near',
+        expiresAt: Date.now() + 600_000,
+      }),
+    ],
+  ]);
+  const env: any = {
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    ATTESTOR_PRIVATE_KEY: TEST_ATTESTOR_KP.priv,
+    INTENTS_CONTRACT_ID: 'intents.near',
+    CIRCLE_CONTRACT_ID: 'circle.uprail.near',
+    NEAR_RPC_URL: 'https://free.rpc.fastnear.com',
+    ONE_CLICK_API_KEY: 'test_key',
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    WEBAUTHN_RP_ID: 'uprail.world',
+    WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+    DB: db,
+    CACHE: {
+      async get(key: string, type?: string) {
+        const val = kvStore.get(key) ?? null;
+        return type === 'json' && val ? JSON.parse(val) : val;
+      },
+      async put(key: string, val: string) {
+        kvStore.set(key, val);
+      },
+    },
+  };
+
+  let rejectConfSwap = false;
+  await withMockFetch(
+    {
+      current_salt: () => '01020304',
+      mt_balance_of: () => '0',
+      mt_batch_balance_of: () => ['0'],
+    },
+    async () => {
+      const baseFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: any, init?: any) => {
+        const url = typeof input === 'string' ? input : input?.url || '';
+        const bodyObj = init?.body ? JSON.parse(String(init.body)) : {};
+
+        if (url.includes('/v0/account/balances')) {
+          return new Response(
+            JSON.stringify([{ tokenId: USDC_ID, available: '6000000' }]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/quote')) {
+          if (rejectConfSwap && bodyObj.originAsset !== bodyObj.destinationAsset) {
+            return new Response(
+              JSON.stringify({ message: 'Cross-asset confidential unsupported' }),
+              { status: 400, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              quote: {
+                depositAddress:
+                  bodyObj.originAsset === bodyObj.destinationAsset
+                    ? '1click_unshield_dep'
+                    : '1click_conf_vault_swap_dep',
+                deadline: new Date(Date.now() + 600_000).toISOString(),
+                amountIn: bodyObj.amount,
+                amountOut: '1072841862009342978962025',
+              },
+              quoteRequest: { confidentiality: 'basic' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/generate-intent')) {
+          const msgStr = JSON.stringify({
+            signer_id: 'u_gift2tap.escrow.uprail.near',
+            verifying_contract: 'intents.near',
+            deadline: new Date(Date.now() + 600_000).toISOString(),
+            nonce: 'mocknonce',
+            intents: [
+              {
+                intent: 'transfer',
+                receiver_id: bodyObj.depositAddress,
+                tokens: { [USDC_ID]: '5200000' },
+              },
+            ],
+          });
+          return new Response(
+            JSON.stringify({ intent: { standard: 'webauthn', payload: msgStr } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return await baseFetch(input, init);
+      }) as typeof fetch;
+
+      const session: any = { id: 'sess_g2t', x_id: senderXId, x_handle: 'uprailworld', x_name: 'UW' };
+      const input = {
+        recipientHandle: '@xy63ry0rx',
+        vaultAsset: 'stNEAR',
+        sourceAsset: USDC_ID,
+        amount: '5.2',
+        timelockUntil: Date.now() + 86_400_000,
+      };
+
+      // 1. Direct confidential -> vault swap succeeds -> skips VAULT_UNSHIELD_USDC
+      const prepDirect: any = await prepareSelfCustodyGiftCreate({ env, session, input });
+      assert.equal(prepDirect.step, 'swap_to_vault');
+      assert.equal(prepDirect.depositAddress, '1click_conf_vault_swap_dep');
+
+      // 2. If 1Click declines cross-asset confidential swap, falls back cleanly to VAULT_UNSHIELD_USDC
+      rejectConfSwap = true;
+      const prepFallback: any = await prepareSelfCustodyGiftCreate({ env, session, input });
+      assert.equal(prepFallback.step, 'unshield');
+      assert.equal(prepFallback.depositAddress, '1click_unshield_dep');
+    }
+  );
+});
+
+
 
 
 

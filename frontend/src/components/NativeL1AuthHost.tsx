@@ -58,6 +58,7 @@ export const NativeL1AuthHost: React.FC = () => {
 
   const activeRef = useRef<ActiveRequest | null>(null);
   activeRef.current = active;
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
     return registerNativeL1PromptHandler(
@@ -66,6 +67,7 @@ export const NativeL1AuthHost: React.FC = () => {
           if (activeRef.current) {
             activeRef.current.reject(new Error('Superseded by a newer NEAR L1 authorization prompt.'));
           }
+          inFlightRef.current = false;
           setSignedAssertion(null);
           setError(null);
           setPhase('sign');
@@ -85,6 +87,7 @@ export const NativeL1AuthHost: React.FC = () => {
 
   const handleCancel = () => {
     const cur = active;
+    inFlightRef.current = false;
     setActive(null);
     setSignedAssertion(null);
     setError(null);
@@ -93,6 +96,8 @@ export const NativeL1AuthHost: React.FC = () => {
   };
 
   const handleStep1Sign = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setError(null);
     setPhase('signing');
     try {
@@ -102,11 +107,14 @@ export const NativeL1AuthHost: React.FC = () => {
     } catch (err: any) {
       setPhase('sign');
       setError(describePasskeyError(err));
+    } finally {
+      inFlightRef.current = false;
     }
   };
 
   const handleStep2AuthorizeAndUseKey = async () => {
-    if (!signedAssertion) return;
+    if (!signedAssertion || inFlightRef.current) return;
+    inFlightRef.current = true;
     setError(null);
     setPhase('authorizing');
     try {
@@ -117,8 +125,21 @@ export const NativeL1AuthHost: React.FC = () => {
       setPhase('sign');
       cur.resolve(result);
     } catch (err: any) {
-      setPhase('ready');
-      setError(err?.message || 'NEAR L1 key authorization failed.');
+      // Single-use actionId is consumed server-side when step 2 runs; close & propagate
+      // the underlying failure so a retry creates a fresh challenge instead of hitting
+      // "This approval challenge has already been used".
+      const cur = active;
+      setActive(null);
+      setSignedAssertion(null);
+      setError(null);
+      setPhase('sign');
+      cur.reject(
+        err instanceof Error
+          ? err
+          : new Error(err?.message || 'NEAR L1 key authorization failed.')
+      );
+    } finally {
+      inFlightRef.current = false;
     }
   };
 

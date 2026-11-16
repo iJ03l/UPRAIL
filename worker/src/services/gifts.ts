@@ -22,11 +22,24 @@ import * as nearRpc from './nearRpc';
 import {
   computeStabilizeSplit,
   getOneClickTokens,
+  requestExactVaultToUsdcQuote,
   resolveOriginToken,
+  shieldPublicBalanceToConfidentialServer,
   type OneClickToken,
 } from './stabilize';
-import { getExecutionStatus, requestQuote } from './oneclickClient';
-import { formatAtomic, topUpPublicIntentsFromConfidentialIfShort } from './confidentialRail';
+import {
+  generateSwapIntent,
+  getExecutionStatus,
+  requestQuote,
+  submitSwapIntent,
+} from './oneclickClient';
+import { getUserSession, signGeneratedIntent } from './oneclickAuth';
+import {
+  formatAtomic,
+  isConfidentialRailEnabled,
+  topUpPublicIntentsFromConfidentialIfShort,
+  waitForSettlement,
+} from './confidentialRail';
 import {
   CIRCLE_GIFT_USDC_ASSET_ID,
   computeVaultPositionValuation,
@@ -1328,17 +1341,176 @@ export async function listUserGifts(
   return { sent, received };
 }
 
+export interface ClaimedGiftUsdcPayout {
+  payoutAsset?: 'USDC' | 'VAULT_SHARES';
+  usdcAmount?: string;
+  usdcSwapStatus?: string;
+  usdcDepositAddress?: string;
+  usdcConfidential?: boolean;
+  usdcSwapNote?: string;
+}
+
+async function autoSwapClaimedGiftToUsdcServer(params: {
+  env: Env;
+  xId: string;
+  nearAccount: string;
+  vaultAssetId: string;
+  claimedAtomic: bigint;
+}): Promise<ClaimedGiftUsdcPayout> {
+  const { env, xId, nearAccount, vaultAssetId, claimedAtomic } = params;
+  if (!isConfidentialRailEnabled(env)) {
+    return {
+      payoutAsset: 'VAULT_SHARES',
+      usdcSwapNote: 'Vault shares claimed; enable Confidential Intents to convert into confidential USDC.',
+    };
+  }
+  const userSession = await getUserSession(env, xId).catch(() => null);
+  const quote = await requestExactVaultToUsdcQuote({
+    env,
+    xId,
+    nearAccount,
+    vaultAssetId,
+    amountAtomic: claimedAtomic,
+    userAccessToken: userSession?.accessToken ?? null,
+  });
+  if (!quote.ok) {
+    return { payoutAsset: 'VAULT_SHARES', usdcSwapNote: quote.reason };
+  }
+
+  const depositAddress = quote.liveQuote.quote.depositAddress;
+  try {
+    const generated = await generateSwapIntent(env, {
+      depositAddress,
+      signerId: nearAccount,
+      standard: 'nep413',
+    });
+    const signedData = await signGeneratedIntent(env, xId, generated);
+    const submitted = await submitSwapIntent(env, signedData);
+    const settlement = await waitForSettlement(env, xId, depositAddress, {
+      timeoutMs: quote.isConfidentialSwap ? 8_000 : 25_000,
+      intervalMs: 1_000,
+      allowPublic: !quote.isConfidentialSwap,
+    }).catch(() => ({ status: 'PENDING' }));
+
+    const swapStatus = String(settlement.status || 'PENDING').toUpperCase();
+    if (swapStatus === 'FAILED' || swapStatus === 'REFUNDED') {
+      return {
+        payoutAsset: 'VAULT_SHARES',
+        usdcSwapNote: `1Click swap ${swapStatus.toLowerCase()}; your claimed vault shares stay safely in your account.`,
+      };
+    }
+
+    let isConfidentialOut = quote.isConfidentialSwap;
+    if (!quote.isConfidentialSwap) {
+      if (swapStatus === 'SUCCESS') {
+        const shieldedOk = await shieldPublicBalanceToConfidentialServer({
+          env,
+          xId,
+          assetId: quote.targetAssetId,
+          fallbackAtomic: BigInt(quote.amountOutAtomic || '0'),
+          depositAddress,
+        });
+        if (shieldedOk) isConfidentialOut = true;
+      } else {
+        await env.CACHE?.put(
+          `post_swap_shield:${depositAddress}`,
+          JSON.stringify({
+            xId,
+            assetId: quote.targetAssetId,
+            fallbackAtomic: String(quote.amountOutAtomic || '0'),
+          }),
+          { expirationTtl: 3600 }
+        ).catch(() => {});
+      }
+    }
+
+    if (env.DB) {
+      const isCompleted = swapStatus === 'SUCCESS';
+      const nowMs = Date.now();
+      await env.DB.prepare(
+        `INSERT INTO withdrawals (
+          id, x_id, asset, amount, destination_address, destination_chain,
+          status, tx_hash, deposit_address, privacy_rail, settlement_status,
+          created_at, updated_at, confirmed_at
+        ) VALUES (?, ?, ?, ?, ?, 'near', ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          `gstab_${crypto.randomUUID().replace(/-/g, '').slice(0, 14)}`,
+          xId,
+          vaultAssetId,
+          claimedAtomic.toString(),
+          `gift_claim:USDC:${quote.amountOutFormatted}`,
+          isCompleted ? 'COMPLETED' : 'PENDING',
+          submitted.intentHash || depositAddress,
+          depositAddress,
+          isConfidentialOut ? 'confidential' : 'public',
+          swapStatus,
+          nowMs,
+          nowMs,
+          isCompleted ? nowMs : null
+        )
+        .run()
+        .catch(() => {});
+    }
+
+    return {
+      payoutAsset: 'USDC',
+      usdcAmount: quote.amountOutFormatted,
+      usdcSwapStatus: swapStatus,
+      usdcDepositAddress: depositAddress,
+      usdcConfidential: isConfidentialOut,
+    };
+  } catch (err: any) {
+    return {
+      payoutAsset: 'VAULT_SHARES',
+      usdcSwapNote: err?.message || 'Vault shares claimed; stabilize to USDC anytime.',
+    };
+  }
+}
+
+async function finalizeClaimedGiftPayout(params: {
+  env: Env;
+  session: Session;
+  giftRow: any;
+  fallbackRow: any;
+  isSenderReclaim: boolean;
+  nearAccount: string;
+  claimedAtomic: bigint;
+}): Promise<AuthenticatedGiftView & ClaimedGiftUsdcPayout> {
+  const { env, session, giftRow, fallbackRow, isSenderReclaim, nearAccount, claimedAtomic } = params;
+  const view = await formatAuthenticatedGiftView(
+    env,
+    giftRow || fallbackRow,
+    isSenderReclaim ? 'SENDER' : 'RECIPIENT'
+  );
+  if (isSenderReclaim || claimedAtomic <= 0n) {
+    return view;
+  }
+  const payout = await autoSwapClaimedGiftToUsdcServer({
+    env,
+    xId: session.x_id,
+    nearAccount,
+    vaultAssetId: String((giftRow || fallbackRow).vault_asset_id),
+    claimedAtomic,
+  }).catch((): ClaimedGiftUsdcPayout => ({
+    payoutAsset: 'VAULT_SHARES',
+    usdcSwapNote: 'Vault shares claimed; stabilize to USDC anytime.',
+  }));
+  return { ...view, ...payout };
+}
+
 /**
  * Passkey-gated, IDOR-proof, timelock-enforced Gift Claim (`POST /api/gifts/:id/claim`).
  * Transfers 100% of the Earn vault shares (principal + accrued yield) from the
- * gift's custody account to the recipient's UPRAIL Intents account (or allows the
- * sender to reclaim an unclaimed gift 30 days after `timelock_until` has passed).
+ * gift's custody account to the recipient's UPRAIL Intents account and converts
+ * them into USDC (falling back cleanly to vault shares if 1Click liquidity is absent),
+ * or allows the sender to reclaim an unclaimed gift 30 days after `timelock_until`.
  */
 export async function claimGift(
   env: Env,
   session: Session,
   giftId: string
-): Promise<AuthenticatedGiftView> {
+): Promise<AuthenticatedGiftView & ClaimedGiftUsdcPayout> {
   const cleanId = (giftId || '').trim();
   if (!/^gft_[a-f0-9]{16,64}$/.test(cleanId)) {
     throw new GiftError('NOT_FOUND', 'Gift not found.', 404);
@@ -1504,6 +1676,7 @@ export async function claimGift(
 
       const claimedAt = Date.now();
       const finalStatus = isSenderReclaim ? 'RECLAIMED' : 'CLAIMED';
+      const claimedSharesStr = String(onchain.amount || row.shares_atomic || '0');
       await env.DB.prepare(
         `UPDATE gifts
          SET status = ?,
@@ -1515,7 +1688,7 @@ export async function claimGift(
       )
         .bind(
           finalStatus,
-          String(onchain.amount || row.shares_atomic || '0'),
+          claimedSharesStr,
           txHash || null,
           claimedAt,
           claimedAt,
@@ -1527,11 +1700,15 @@ export async function claimGift(
       const updated = await env.DB.prepare('SELECT * FROM gifts WHERE id = ? LIMIT 1')
         .bind(cleanId)
         .first<any>();
-      return formatAuthenticatedGiftView(
+      return await finalizeClaimedGiftPayout({
         env,
-        updated || row,
-        isSenderReclaim ? 'SENDER' : 'RECIPIENT'
-      );
+        session,
+        giftRow: updated,
+        fallbackRow: row,
+        isSenderReclaim,
+        nearAccount: claimantNearAccount,
+        claimedAtomic: BigInt(claimedSharesStr || '0'),
+      });
     } catch (err: any) {
       await env.DB.prepare(
         "UPDATE gifts SET status = 'LOCKED', updated_at = ? WHERE id = ? AND status = ?"
@@ -1679,11 +1856,15 @@ export async function claimGift(
     const updated = await env.DB.prepare('SELECT * FROM gifts WHERE id = ? LIMIT 1')
       .bind(cleanId)
       .first<any>();
-    return formatAuthenticatedGiftView(
+    return await finalizeClaimedGiftPayout({
       env,
-      updated || row,
-      isSenderReclaim ? 'SENDER' : 'RECIPIENT'
-    );
+      session,
+      giftRow: updated,
+      fallbackRow: row,
+      isSenderReclaim,
+      nearAccount: claimantNearAccount,
+      claimedAtomic: sharesToTransfer,
+    });
   } catch (err: any) {
     if (err instanceof GiftError) throw err;
     await env.DB.prepare(

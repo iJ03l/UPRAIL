@@ -138,10 +138,24 @@ export const PublicGiftView: React.FC = () => {
           const res = await api.claimGiftSelfCustody(activeGift.id);
           setAuthGift(res.gift);
           setPublicGift((prev) => (prev ? { ...prev, status: res.gift.status } : prev));
-          toast(
-            `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
-            'success'
-          );
+          if (res.payoutAsset === 'USDC') {
+            toast(
+              res.usdcSwapStatus === 'SUCCESS'
+                ? `Unwrapped & converted gift to ${res.usdcAmount} USDC!`
+                : `Claimed & converting ${res.sharesClaimed} ${res.gift.vaultSymbol} → ~${res.usdcAmount} USDC!`,
+              'success'
+            );
+          } else if (res.usdcSwapNote) {
+            toast(
+              `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} to your wallet. Stabilize to USDC anytime.`,
+              'success'
+            );
+          } else {
+            toast(
+              `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
+              'success'
+            );
+          }
         }
         return;
       }
@@ -149,7 +163,7 @@ export const PublicGiftView: React.FC = () => {
       const assertion = await authorizeWithPasskey(
         mode === 'reclaim'
           ? `Reclaim unclaimed ${activeGift.vaultSymbol} Earn Vault gift`
-          : `Unwrap & claim ${activeGift.vaultSymbol} Earn Vault gift from @${activeGift.senderHandle}`
+          : `Unwrap & claim ${activeGift.vaultSymbol} Earn Vault gift to USDC from @${activeGift.senderHandle}`
       );
       const res =
         mode === 'reclaim'
@@ -163,12 +177,21 @@ export const PublicGiftView: React.FC = () => {
             });
       setAuthGift(res.gift);
       setPublicGift((prev) => (prev ? { ...prev, status: res.gift.status } : prev));
-      toast(
-        mode === 'reclaim'
-          ? `Reclaimed ${res.sharesClaimed} ${res.gift.vaultSymbol} back to your vault!`
-          : `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
-        'success'
-      );
+      if (mode === 'reclaim') {
+        toast(`Reclaimed ${res.sharesClaimed} ${res.gift.vaultSymbol} back to your vault!`, 'success');
+      } else if (res.payoutAsset === 'USDC') {
+        toast(
+          res.usdcSwapStatus === 'SUCCESS'
+            ? `Unwrapped & converted gift to ${res.usdcAmount} USDC!`
+            : `Claimed & converting ${res.sharesClaimed} ${res.gift.vaultSymbol} → ~${res.usdcAmount} USDC!`,
+          'success'
+        );
+      } else {
+        toast(
+          `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
+          'success'
+        );
+      }
     } catch (err: any) {
       toast(
         err?.message ||
@@ -384,7 +407,7 @@ export const PublicGiftView: React.FC = () => {
                     {isClaiming || isAuthorizing
                       ? 'Unwrapping & Settling on NEAR Intents...'
                       : isUnlocked
-                      ? `Unwrap & Claim ${activeGift.vaultSymbol} + Yield with Passkey`
+                      ? `Unwrap & Claim ${activeGift.vaultSymbol} → USDC`
                       : 'Compounding Yield Until Unlock Date'}
                   </span>
                 </button>

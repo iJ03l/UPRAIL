@@ -336,6 +336,8 @@ export interface StabilizeResult extends StabilizeQuote {
   intentHash: string;
   feeIntentHash?: string;
   shieldedAtomic: string;
+  needsPostSwapShield?: boolean;
+  shieldPrepare?: any;
 }
 
 export interface CoffeeChainOption {

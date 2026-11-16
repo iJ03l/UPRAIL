@@ -82,9 +82,9 @@ import {
   prepareOneClickWebAuthnSession,
 } from './custodyService';
 import {
+  maybePrepareMatchingPlainL1Sweep,
   prepareNativeL1Send,
   prepareNativeL1Withdraw,
-  prepareSweepPlainL1ToIntents,
   submitNativeL1Operation,
 } from './nativeL1Auth';
 import {
@@ -156,14 +156,22 @@ async function ensureOrPrepareSelfCustodyConfidentialFunds(params: {
   asset: string;
   requiredAtomic: bigint;
   nextStep: 'send' | 'withdraw' | 'nearcom_withdraw' | 'stabilize';
+  allowDirectPublicDeposit?: boolean;
 }): Promise<
-  | { ready: true; accessToken: string; assetId: string; decimals: number; symbol: string }
+  | {
+      ready: true;
+      accessToken: string;
+      assetId: string;
+      decimals: number;
+      symbol: string;
+      depositType: 'CONFIDENTIAL_INTENTS' | 'INTENTS';
+    }
   | {
       ready: false;
       shieldPrepare: Record<string, unknown>;
     }
 > {
-  const { env, session, nearAccount, asset, requiredAtomic, nextStep } = params;
+  const { env, session, nearAccount, asset, requiredAtomic, nextStep, allowDirectPublicDeposit } = params;
   const { accessToken, accountId } = await getOneClickSessionOrThrowAuth(env, session);
   const bal = await getConfidentialAssetBalance(env, session.x_id, asset);
 
@@ -174,6 +182,7 @@ async function ensureOrPrepareSelfCustodyConfidentialFunds(params: {
       assetId: bal.assetId,
       decimals: bal.decimals,
       symbol: bal.symbol,
+      depositType: 'CONFIDENTIAL_INTENTS',
     };
   }
 
@@ -181,12 +190,13 @@ async function ensureOrPrepareSelfCustodyConfidentialFunds(params: {
   let pubBal = await nearRpc.getIntentAssetBalance(env, asset, nearAccount).catch(() => null);
   if (!pubBal) pubBal = { balance: 0n, decimals: bal.decimals };
 
-  if (pubBal.balance < shortfall) {
+  if (pubBal.balance < requiredAtomic) {
+    const targetPull = allowDirectPublicDeposit && bal.amountAtomic === 0n ? requiredAtomic : shortfall;
     const refreshed = await ensureAgentPocketTopUpForMainAccount(
       env,
       nearAccount,
       bal.assetId,
-      shortfall,
+      targetPull,
       pubBal.balance
     );
     if (refreshed > pubBal.balance) {
@@ -194,28 +204,34 @@ async function ensureOrPrepareSelfCustodyConfidentialFunds(params: {
     }
   }
 
+  // When public Intents alone covers the full send, quote 1Click directly as
+  // INTENTS -> CONFIDENTIAL_INTENTS so the user signs only once instead of shielding first.
+  if (allowDirectPublicDeposit && pubBal.balance >= requiredAtomic) {
+    return {
+      ready: true,
+      accessToken,
+      assetId: bal.assetId,
+      decimals: bal.decimals,
+      symbol: bal.symbol,
+      depositType: 'INTENTS',
+    };
+  }
+
   if (pubBal.balance < shortfall) {
-    // Check if user holds un-swept plain L1 tokens in their sub-account
-    const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-    const matchingPlain = plain.find(
-      (b) =>
-        nearRpc.assetsMatch(b.defuse_asset_id, bal.assetId) ||
-        nearRpc.assetsMatch(b.nearContractId, bal.contractId)
-    );
-    const plainAmt = BigInt(matchingPlain?.amount || '0');
-    if (plainAmt + pubBal.balance >= shortfall && plainAmt > 0n) {
-      return {
-        ready: false as const,
-        shieldPrepare: await prepareSweepPlainL1ToIntents({
-          env,
-          session,
-          nearAccount,
-          asset: bal.assetId,
-          symbol: bal.symbol,
-          amount: matchingPlain?.amountFormatted || formatAtomic(plainAmt.toString(), bal.decimals),
-          nextStep,
-        }),
-      };
+    const sweepPrepare = await maybePrepareMatchingPlainL1Sweep({
+      env,
+      session,
+      nearAccount,
+      assetId: bal.assetId,
+      contractId: bal.contractId,
+      symbol: bal.symbol,
+      decimals: bal.decimals,
+      publicBalanceAtomic: pubBal.balance,
+      requiredAtomic: shortfall,
+      nextStep,
+    });
+    if (sweepPrepare) {
+      return { ready: false as const, shieldPrepare: sweepPrepare };
     }
     throw new CustodyActionError(
       `Insufficient ${bal.symbol} balance.`,
@@ -294,6 +310,7 @@ export async function submitConfidentialShieldAction(params: {
     symbol: string;
     shortfallAtomic: string;
     nextStep: string;
+    sourceSwapDepositAddress?: string;
   }>({
     env,
     xId: session.x_id,
@@ -315,6 +332,15 @@ export async function submitConfidentialShieldAction(params: {
       502,
       'SHIELD_FAILED'
     );
+  }
+
+  if (upperStatus === 'SUCCESS' && meta.sourceSwapDepositAddress && env.DB) {
+    await env.DB.prepare(
+      "UPDATE withdrawals SET privacy_rail = 'confidential', updated_at = ? WHERE deposit_address = ? AND x_id = ?"
+    )
+      .bind(Date.now(), meta.sourceSwapDepositAddress, session.x_id)
+      .run()
+      .catch(() => {});
   }
 
   return {
@@ -447,6 +473,7 @@ export async function prepareSelfCustodySend(
       asset: body.asset,
       requiredAtomic: grossAtomic,
       nextStep: 'send',
+      allowDirectPublicDeposit: true,
     });
     if (!ensured.ready) {
       return ensured.shieldPrepare;
@@ -463,8 +490,8 @@ export async function prepareSelfCustodySend(
         recipient: holdingAccount,
         recipientType: 'CONFIDENTIAL_INTENTS',
         refundTo: nearAccount,
-        refundType: 'CONFIDENTIAL_INTENTS',
-        depositType: 'CONFIDENTIAL_INTENTS',
+        refundType: ensured.depositType,
+        depositType: ensured.depositType,
         confidentiality: 'basic',
         slippageTolerance: 100,
         deadline: new Date(Date.now() + CONF_QUOTE_TTL_MS).toISOString(),
@@ -593,22 +620,20 @@ export async function prepareSelfCustodySend(
     pubSendAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, defuseAssetId, grossAtomic, pubSendAmt);
   }
   if (pubSendAmt < grossAtomic) {
-    const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-    const matchingPlain = plain.find((b) =>
-      nearRpc.assetsMatch(b.defuse_asset_id, defuseAssetId) ||
-      nearRpc.assetsMatch(b.nearContractId, resolvedTok.nearContractId)
-    );
-    const plainAmt = BigInt(matchingPlain?.amount || '0');
-    if (matchingPlain && plainAmt > 0n && plainAmt + pubSendAmt >= grossAtomic) {
-      return await prepareSweepPlainL1ToIntents({
-        env,
-        session,
-        nearAccount,
-        asset: defuseAssetId,
-        symbol: resolvedTok.symbol,
-        amount: matchingPlain.amountFormatted || amountStr,
-        nextStep: 'send',
-      });
+    const sweepPrepare = await maybePrepareMatchingPlainL1Sweep({
+      env,
+      session,
+      nearAccount,
+      assetId: defuseAssetId,
+      contractId: resolvedTok.nearContractId,
+      symbol: resolvedTok.symbol,
+      decimals: resolvedTok.decimals,
+      publicBalanceAtomic: pubSendAmt,
+      requiredAtomic: grossAtomic,
+      nextStep: 'send',
+    });
+    if (sweepPrepare) {
+      return sweepPrepare;
     }
     throw new CustodyActionError(
       `Insufficient ${resolvedTok.symbol} balance inside Intents.`,
@@ -1270,22 +1295,20 @@ export async function prepareSelfCustodyWithdraw(
     pubAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, defuseAssetId, amountAtomic, pubAmt);
   }
   if (pubAmt < amountAtomic) {
-    const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-    const matchingPlain = plain.find((b) =>
-      nearRpc.assetsMatch(b.defuse_asset_id, defuseAssetId) ||
-      nearRpc.assetsMatch(b.nearContractId, tok.nearContractId)
-    );
-    const plainAmt = BigInt(matchingPlain?.amount || '0');
-    if (matchingPlain && plainAmt > 0n && plainAmt + pubAmt >= amountAtomic) {
-      return await prepareSweepPlainL1ToIntents({
-        env,
-        session,
-        nearAccount,
-        asset: defuseAssetId,
-        symbol: tok.symbol,
-        amount: matchingPlain.amountFormatted || amountStr,
-        nextStep: 'withdraw',
-      });
+    const sweepPrepare = await maybePrepareMatchingPlainL1Sweep({
+      env,
+      session,
+      nearAccount,
+      assetId: defuseAssetId,
+      contractId: tok.nearContractId,
+      symbol: tok.symbol,
+      decimals: tok.decimals,
+      publicBalanceAtomic: pubAmt,
+      requiredAtomic: amountAtomic,
+      nextStep: 'withdraw',
+    });
+    if (sweepPrepare) {
+      return sweepPrepare;
     }
     throw new CustodyActionError(`Insufficient ${tok.symbol} balance inside Intents.`, 400, 'INSUFFICIENT_FUNDS');
   }
@@ -1855,6 +1878,7 @@ async function requestStabilizeQuoteWithFallback(params: {
       ready: true;
       liveQuote: Awaited<ReturnType<typeof requestQuote>>;
       isConfidentialSwap: boolean;
+      needsPostSwapShield: boolean;
     }
 > {
   const {
@@ -1867,11 +1891,7 @@ async function requestStabilizeQuoteWithFallback(params: {
     pubOriginBal,
   } = params;
 
-  const deadline = new Date(Date.now() + STAB_QUOTE_TTL_MS).toISOString();
-  const hasPublicFunds = pubOriginBal >= netInputAtomic;
-  const confEnabled = isConfidentialRailEnabled(env);
-
-  if (!confEnabled && !hasPublicFunds) {
+  if (!isConfidentialRailEnabled(env)) {
     throw new CustodyActionError(
       'Confidential Intents rail is required for stabilization.',
       503,
@@ -1879,6 +1899,8 @@ async function requestStabilizeQuoteWithFallback(params: {
     );
   }
 
+  const deadline = new Date(Date.now() + STAB_QUOTE_TTL_MS).toISOString();
+  const hasPublicFunds = pubOriginBal >= netInputAtomic;
   const publicQuoteReq = {
     dry: false,
     swapType: 'EXACT_INPUT' as const,
@@ -1894,32 +1916,19 @@ async function requestStabilizeQuoteWithFallback(params: {
     deadline,
   };
 
-  if (!confEnabled) {
-    const liveQuote = await requestQuote(env, publicQuoteReq);
-    return { ready: true, liveQuote, isConfidentialSwap: false };
-  }
-
   let swapDepositType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
   let swapRefundType: 'CONFIDENTIAL_INTENTS' | 'INTENTS' = 'CONFIDENTIAL_INTENTS';
   let userAccessToken: string;
 
   if (hasPublicFunds) {
-    try {
-      const ocSession = await getOneClickSessionOrThrowAuth(env, session);
-      const confBal = await getConfidentialAssetBalance(env, session.x_id, originAssetId).catch(() => ({
-        amountAtomic: 0n,
-      }));
-      userAccessToken = ocSession.accessToken;
-      if (confBal.amountAtomic < netInputAtomic) {
-        swapDepositType = 'INTENTS';
-        swapRefundType = 'INTENTS';
-      }
-    } catch (err: any) {
-      if (err instanceof OneClickError) {
-        const liveQuote = await requestQuote(env, publicQuoteReq);
-        return { ready: true, liveQuote, isConfidentialSwap: false };
-      }
-      throw err;
+    const ocSession = await getOneClickSessionOrThrowAuth(env, session);
+    const confBal = await getConfidentialAssetBalance(env, session.x_id, originAssetId).catch(() => ({
+      amountAtomic: 0n,
+    }));
+    userAccessToken = ocSession.accessToken;
+    if (confBal.amountAtomic < netInputAtomic) {
+      swapDepositType = 'INTENTS';
+      swapRefundType = 'INTENTS';
     }
   } else {
     const ensured = await ensureOrPrepareSelfCustodyConfidentialFunds({
@@ -1954,16 +1963,93 @@ async function requestStabilizeQuoteWithFallback(params: {
       },
       { userSession: userAccessToken }
     );
-    return { ready: true, liveQuote, isConfidentialSwap: true };
+    return { ready: true, liveQuote, isConfidentialSwap: true, needsPostSwapShield: false };
   } catch (err: any) {
-    // Tokens like stNEAR (nep141:meta-pool.near) are tradeable on 1Click public INTENTS
-    // but rejected on confidential swap quotes; fall back seamlessly when public funds cover it.
+    // Non-confidential assets like stNEAR swap via INTENTS -> INTENTS first and are
+    // immediately shielded into Confidential Intents once USDC settles so no balance stays outside.
     if (hasPublicFunds && err instanceof OneClickError) {
       const liveQuote = await requestQuote(env, publicQuoteReq);
-      return { ready: true, liveQuote, isConfidentialSwap: false };
+      return { ready: true, liveQuote, isConfidentialSwap: false, needsPostSwapShield: true };
     }
     throw err;
   }
+}
+
+export async function prepareSelfCustodyShieldTarget(params: {
+  env: Env;
+  session: Session;
+  assetId: string;
+  expectedAmountAtomic?: bigint;
+  sourceSwapDepositAddress?: string;
+  nextStep?: 'send' | 'withdraw' | 'nearcom_withdraw' | 'stabilize';
+}) {
+  const { env, session, assetId, expectedAmountAtomic, sourceSwapDepositAddress } = params;
+  if (!isConfidentialRailEnabled(env)) {
+    throw new CustodyActionError('Confidential Intents rail is required.', 503, 'CONFIDENTIAL_RAIL_DISABLED');
+  }
+  const { nearAccount } = await requireSelfCustodyAccount(env, session);
+  const { accessToken, accountId } = await getOneClickSessionOrThrowAuth(env, session);
+  const bal = await getConfidentialAssetBalance(env, session.x_id, assetId);
+  const pubBal = (await nearRpc.getIntentAssetBalance(env, bal.assetId, nearAccount).catch(() => null))?.balance ?? 0n;
+  const shieldAtomic = pubBal > 0n ? pubBal : (expectedAmountAtomic ?? 0n);
+  if (shieldAtomic <= 0n) {
+    throw new CustodyActionError(`No public ${bal.symbol} balance available to shield.`, 400, 'INSUFFICIENT_FUNDS');
+  }
+
+  const shieldQuote = await requestQuote(
+    env,
+    {
+      dry: false,
+      swapType: 'EXACT_INPUT',
+      originAsset: bal.assetId,
+      destinationAsset: bal.assetId,
+      amount: shieldAtomic.toString(),
+      recipient: accountId || nearAccount,
+      recipientType: 'CONFIDENTIAL_INTENTS',
+      refundTo: nearAccount,
+      refundType: 'INTENTS',
+      depositType: 'INTENTS',
+      confidentiality: 'basic',
+      slippageTolerance: 100,
+      deadline: new Date(Date.now() + CONF_QUOTE_TTL_MS).toISOString(),
+    },
+    { userSession: accessToken }
+  );
+
+  const generated = await generateSwapIntent(env, {
+    depositAddress: shieldQuote.quote.depositAddress,
+    signerId: nearAccount,
+    standard: 'webauthn',
+  });
+  validateGeneratedIntentForAccount(env, generated, nearAccount);
+  const payloadStr = generated.rawPayload || generated.payload.message;
+
+  const nextStep = params.nextStep || 'stabilize';
+  const pending = await createPendingCustodyAction({
+    env,
+    xId: session.x_id,
+    actionType: 'SHIELD_CONFIDENTIAL_INTENT',
+    payloadStr,
+    meta: {
+      nearAccount,
+      assetId: bal.assetId,
+      symbol: bal.symbol,
+      shortfallAtomic: shieldAtomic.toString(),
+      depositAddress: shieldQuote.quote.depositAddress,
+      nextStep,
+      ...(sourceSwapDepositAddress ? { sourceSwapDepositAddress } : {}),
+    },
+    requireOnchainPasskey: true,
+  });
+
+  return {
+    step: 'shield' as const,
+    nextStep,
+    shieldAmountFormatted: formatAtomic(shieldAtomic.toString(), bal.decimals),
+    symbol: bal.symbol,
+    depositAddress: shieldQuote.quote.depositAddress,
+    ...pending,
+  };
 }
 
 export async function prepareSelfCustodyStabilize(
@@ -2039,7 +2125,7 @@ export async function prepareSelfCustodyStabilize(
     pubOriginBal,
   });
   if (!quoteRes.ready) return quoteRes.shieldPrepare;
-  const { liveQuote, isConfidentialSwap } = quoteRes;
+  const { liveQuote, isConfidentialSwap, needsPostSwapShield } = quoteRes;
 
   const depositAddress = liveQuote.quote?.depositAddress;
   if (!depositAddress) {
@@ -2067,6 +2153,7 @@ export async function prepareSelfCustodyStabilize(
       nearAccount,
       depositAddress,
       isConfidentialSwap,
+      needsPostSwapShield,
       sourceAsset: origin.assetId,
       sourceSymbol: origin.symbol,
       sourceDecimals: origin.decimals,
@@ -2133,10 +2220,11 @@ export async function submitSelfCustodyStabilize(params: {
   });
 
   const isConfidentialSwap = meta.isConfidentialSwap !== false;
+  const needsPostSwapShield = meta.needsPostSwapShield === true || !isConfidentialSwap;
   const submitted = await submitSwapIntent(env, signedWebAuthn);
   const settlement = await waitForSettlement(env, session.x_id, meta.depositAddress, {
-    timeoutMs: 2_500,
-    intervalMs: 800,
+    timeoutMs: needsPostSwapShield ? 12_000 : 2_500,
+    intervalMs: needsPostSwapShield ? 1_000 : 800,
     allowPublic: !isConfidentialSwap,
   }).catch(() => ({ status: 'PENDING' }));
 
@@ -2177,8 +2265,21 @@ export async function submitSelfCustodyStabilize(params: {
     .run()
     .catch(() => {});
 
+  const shieldPrepare =
+    needsPostSwapShield && isCompleted && isConfidentialRailEnabled(env)
+      ? await prepareSelfCustodyShieldTarget({
+          env,
+          session,
+          assetId: meta.targetAsset,
+          expectedAmountAtomic: BigInt(meta.minAmountOutAtomic || meta.amountOutAtomic || '0'),
+          sourceSwapDepositAddress: meta.depositAddress,
+          nextStep: 'stabilize',
+        }).catch(() => null)
+      : null;
+
   return {
     step: 'stabilize' as const,
+    ...(shieldPrepare ? { shieldPrepare } : {}),
     result: {
       id: recordId,
       status: isCompleted ? 'SUCCESS' : settlementStatus,
@@ -2209,6 +2310,8 @@ export async function submitSelfCustodyStabilize(params: {
       slippageBps: STAB_SLIPPAGE_BPS,
       timeEstimateSeconds: meta.timeEstimateSeconds,
       confidential: isConfidentialSwap,
+      needsPostSwapShield: needsPostSwapShield && isConfidentialRailEnabled(env),
+      ...(shieldPrepare ? { shieldPrepare } : {}),
       gasSponsored: true,
     },
   };

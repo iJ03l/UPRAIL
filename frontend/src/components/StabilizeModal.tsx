@@ -335,12 +335,29 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
 
       setIsConfirmOpen(false);
 
+      const finishShieldIfNeeded = async (completedRes: StabilizeResult): Promise<StabilizeResult> => {
+        if (user?.custodyMode === 'self' && completedRes.needsPostSwapShield) {
+          setProgressStep('authorizing');
+          await api.shieldPublicAssetSelfCustody({
+            assetId: completedRes.targetAsset,
+            expectedAmountAtomic: completedRes.minAmountOutAtomic || completedRes.amountOutAtomic,
+            sourceSwapDepositAddress: completedRes.depositAddress,
+            initialShieldPrepare: completedRes.shieldPrepare,
+            onProgress: (stage) =>
+              setProgressStep(stage === 'submitting' || stage === 'polling_swap' ? 'settling' : 'authorizing'),
+          });
+          return { ...completedRes, confidential: true, needsPostSwapShield: false };
+        }
+        return completedRes;
+      };
+
       if (res.status === 'SUCCESS') {
+        const finalRes = await finishShieldIfNeeded(res);
         setProgressStep('success');
-        setResult(res);
+        setResult(finalRes);
         setIsSubmitting(false);
-        toast(`Stabilized ${res.grossAmount} ${res.sourceSymbol} → ${res.amountOut} ${res.targetSymbol}`);
-        onSuccess?.(res);
+        toast(`Stabilized ${finalRes.grossAmount} ${finalRes.sourceSymbol} → ${finalRes.amountOut} ${finalRes.targetSymbol} (Confidential)`);
+        onSuccess?.(finalRes);
         return;
       }
 
@@ -357,11 +374,11 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
           const upper = (statusRes.status || '').toUpperCase();
           if (upper === 'SUCCESS') {
             settled = true;
-            const completedResult = { ...res, status: 'SUCCESS' };
+            const completedResult = await finishShieldIfNeeded({ ...res, status: 'SUCCESS' });
             setProgressStep('success');
             setResult(completedResult);
             setIsSubmitting(false);
-            toast(`Stabilized ${res.grossAmount} ${res.sourceSymbol} → ${res.amountOut} ${res.targetSymbol}`);
+            toast(`Stabilized ${completedResult.grossAmount} ${completedResult.sourceSymbol} → ${completedResult.amountOut} ${completedResult.targetSymbol} (Confidential)`);
             onSuccess?.(completedResult);
             break;
           }

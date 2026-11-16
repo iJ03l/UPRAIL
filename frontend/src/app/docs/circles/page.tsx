@@ -165,6 +165,20 @@ export default function CirclesDocsPage() {
           </li>
         </ol>
 
+        <Callout tone="info">
+          <strong className="text-stone-900">See what a gift looks like:</strong> View a live
+          timelocked <code className="font-mono text-[13px]">stNEAR</code> Earn Vault gift card at{' '}
+          <a
+            href="https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-stone-900 underline font-mono text-[13px] break-all"
+          >
+            https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89
+          </a>
+          .
+        </Callout>
+
         <Callout tone="warn">
           <strong className="text-stone-900">30-day recipient claim window + sender reclaim:</strong>{' '}
           The recipient has an exclusive 30-day window after the unlock date to unwrap the gift. If

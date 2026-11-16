@@ -2177,6 +2177,11 @@ export const api = {
     gift: import('../types').AuthenticatedGiftView;
     txHash: string;
     sharesClaimed: string;
+    payoutAsset?: 'USDC' | 'VAULT_SHARES';
+    usdcAmount?: string;
+    usdcSwapStatus?: string;
+    usdcDepositAddress?: string;
+    usdcSwapNote?: string;
   }> {
     const base = API_BASE
       ? `${API_BASE}/api/gifts/${encodeURIComponent(params.giftId)}/claim`
@@ -2937,6 +2942,67 @@ export const api = {
     return res.gift as AuthenticatedGiftView;
   },
 
+  async shieldPublicAssetSelfCustody(params: {
+    assetId: string;
+    expectedAmountAtomic?: string;
+    sourceSwapDepositAddress?: string;
+    initialShieldPrepare?: any;
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void;
+  }): Promise<{ shielded: boolean; status: string; depositAddress?: string; intentHash?: string }> {
+    let prep = params.initialShieldPrepare;
+    if (!prep?.actionId || !prep?.options) {
+      for (let round = 0; round < 3; round++) {
+        try {
+          prep = await custodyJson<any>('/api/onchain/stabilize/shield/prepare', {
+            method: 'POST',
+            body: JSON.stringify({
+              assetId: params.assetId,
+              ...(params.expectedAmountAtomic ? { expectedAmountAtomic: params.expectedAmountAtomic } : {}),
+              ...(params.sourceSwapDepositAddress
+                ? { sourceSwapDepositAddress: params.sourceSwapDepositAddress }
+                : {}),
+            }),
+          });
+          break;
+        } catch (err: any) {
+          if (
+            err instanceof SelfCustodyApiError &&
+            err.code === 'ONECLICK_AUTH_REQUIRED' &&
+            err.payload?.oneClickPrepare
+          ) {
+            params.onProgress?.('oneclick_auth', 'Confirm with passkey to unlock private 1Click session…');
+            const ocAssertion = await performWebAuthnAssertion(err.payload.oneClickPrepare.options);
+            await api.submitOneClickWebAuthnSession({
+              actionId: err.payload.oneClickPrepare.actionId,
+              assertion: ocAssertion,
+            });
+            continue;
+          }
+          throw err;
+        }
+      }
+    }
+
+    if (!prep?.actionId || !prep?.options) {
+      throw new Error('Could not prepare confidential shield authorization.');
+    }
+
+    params.onProgress?.(
+      'shielding',
+      `Confirm with passkey to shield ${prep.shieldAmountFormatted || ''} ${prep.symbol || 'USDC'} into Confidential Intents…`
+    );
+    const assertion = await performWebAuthnAssertion(prep.options);
+    params.onProgress?.('submitting', 'Shielding balance into Confidential Intents…');
+    return await custodyJson<any>('/api/onchain/stabilize/submit', {
+      method: 'POST',
+      body: JSON.stringify({
+        actionId: prep.actionId,
+        assertion,
+        step: 'shield',
+      }),
+    });
+  },
+
   async claimGiftSelfCustody(
     giftId: string,
     onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
@@ -2944,14 +3010,102 @@ export const api = {
     gift: AuthenticatedGiftView;
     txHash: string;
     sharesClaimed: string;
+    payoutAsset?: 'USDC' | 'VAULT_SHARES';
+    usdcAmount?: string;
+    usdcSwapStatus?: string;
+    usdcDepositAddress?: string;
+    usdcSwapNote?: string;
   }> {
     const id = encodeURIComponent(giftId);
-    return runCustodyFlow(
+    const res = await runCustodyFlow<any>(
       `/api/gifts/${id}/claim/prepare`,
       `/api/gifts/${id}/claim/submit`,
       {},
       { onProgress }
     );
+
+    let prep = res?.usdcSwapPrepare;
+    try {
+      if (!prep && res?.needsOneClickAuthForUsdc && res?.oneClickPrepare?.actionId && res?.oneClickPrepare?.options) {
+        onProgress?.('oneclick_auth', 'Confirm with passkey to unlock Confidential Intents session…');
+        const ocAssertion = await performWebAuthnAssertion(res.oneClickPrepare.options);
+        await api.submitOneClickWebAuthnSession({
+          actionId: res.oneClickPrepare.actionId,
+          assertion: ocAssertion,
+        });
+        prep = await custodyJson<any>(`/api/gifts/${id}/claim/swap/prepare`, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        });
+      }
+
+      if (!prep?.actionId || !prep?.options) {
+        return res;
+      }
+
+      onProgress?.(
+        'authorizing',
+        `Confirm with your passkey to convert ${res.sharesClaimed || ''} ${res.gift?.vaultSymbol || ''} to ~${prep.expectedUsdcOut || ''} Confidential USDC…`
+      );
+      const assertion = await performWebAuthnAssertion(prep.options);
+      onProgress?.('submitting', 'Converting claimed vault shares to USDC…');
+      const swapRes = await custodyJson<any>(`/api/gifts/${id}/claim/swap/submit`, {
+        method: 'POST',
+        body: JSON.stringify({ actionId: prep.actionId, assertion }),
+      });
+
+      let finalStatus = String(swapRes?.usdcSwapStatus || swapRes?.status || 'PENDING').toUpperCase();
+      const depAddr = swapRes?.depositAddress || prep.depositAddress;
+      if (finalStatus !== 'SUCCESS' && finalStatus !== 'FAILED' && finalStatus !== 'REFUNDED' && depAddr) {
+        onProgress?.('polling_swap', 'Finalizing USDC conversion…');
+        for (let i = 0; i < 24; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const st = await api.getStabilizeStatus(depAddr).catch(() => null);
+          const upper = String(st?.status || '').toUpperCase();
+          if (upper === 'SUCCESS' || upper === 'FAILED' || upper === 'REFUNDED') {
+            finalStatus = upper;
+            break;
+          }
+        }
+      }
+
+      if (finalStatus === 'FAILED' || finalStatus === 'REFUNDED') {
+        return {
+          ...res,
+          payoutAsset: 'VAULT_SHARES',
+          usdcSwapNote: '1Click swap refunded; your claimed vault shares remain safely in your wallet.',
+        };
+      }
+
+      if (swapRes?.needsPostSwapShield && finalStatus === 'SUCCESS') {
+        await api.shieldPublicAssetSelfCustody({
+          assetId:
+            swapRes.targetAsset ||
+            'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+          expectedAmountAtomic: swapRes.usdcAmountAtomic,
+          sourceSwapDepositAddress: depAddr,
+          initialShieldPrepare: swapRes.shieldPrepare,
+          onProgress,
+        });
+      }
+
+      return {
+        ...res,
+        payoutAsset: 'USDC',
+        usdcAmount: swapRes?.usdcAmount || prep.expectedUsdcOut,
+        usdcSwapStatus: finalStatus,
+        usdcDepositAddress: depAddr,
+      };
+    } catch (swapErr: any) {
+      // Claim already settled on-chain; never hide success if user cancelled Tap 2/3 or swap declined
+      return {
+        ...res,
+        payoutAsset: 'VAULT_SHARES',
+        usdcSwapNote:
+          swapErr?.message ||
+          'Vault shares are in your wallet — use Stabilize anytime to convert into Confidential USDC.',
+      };
+    }
   },
 
   async reclaimGiftSelfCustody(
@@ -2978,6 +3132,11 @@ export const api = {
     gift: AuthenticatedGiftView;
     txHash: string;
     sharesClaimed: string;
+    payoutAsset?: 'USDC' | 'VAULT_SHARES';
+    usdcAmount?: string;
+    usdcSwapStatus?: string;
+    usdcDepositAddress?: string;
+    usdcSwapNote?: string;
   }> {
     return api.claimGift(params);
   },

@@ -350,6 +350,7 @@ export const CirclesView: React.FC = () => {
   const [contribOriginAsset, setContribOriginAsset] = useState('');
   const [contribAmount, setContribAmount] = useState('');
   const [isSubmittingContrib, setIsSubmittingContrib] = useState(false);
+  const [contribStepMsg, setContribStepMsg] = useState<string | null>(null);
   const [isActionBusyId, setIsActionBusyId] = useState<string | null>(null);
 
   // Create Gift form state
@@ -360,6 +361,7 @@ export const CirclesView: React.FC = () => {
   const [giftVaultSymbol, setGiftVaultSymbol] = useState<EarnVaultSymbol>('TLO');
   const [giftOriginAsset, setGiftOriginAsset] = useState('');
   const [giftAmount, setGiftAmount] = useState('25');
+  const [giftStepMsg, setGiftStepMsg] = useState<string | null>(null);
   const [giftTimelockLocal, setGiftTimelockLocal] = useState(() =>
     defaultTimelockForOccasion('BIRTHDAY')
   );
@@ -879,14 +881,18 @@ export const CirclesView: React.FC = () => {
     e.preventDefault();
     if (!contributeCircle) return;
     setIsSubmittingContrib(true);
+    setContribStepMsg(null);
     try {
       const res =
         user?.custodyMode === 'self'
-          ? await api.contributeToCircleSelfCustody({
-              circleId: contributeCircle.id,
-              originAsset: contribOriginAsset,
-              amount: contribAmount.trim(),
-            })
+          ? await api.contributeToCircleSelfCustody(
+              {
+                circleId: contributeCircle.id,
+                originAsset: contribOriginAsset,
+                amount: contribAmount.trim(),
+              },
+              (_stage, message) => setContribStepMsg(message)
+            )
           : await api.contributeToCircle({
               circleId: contributeCircle.id,
               originAsset: contribOriginAsset,
@@ -912,6 +918,7 @@ export const CirclesView: React.FC = () => {
       toast(err?.message || 'Unable to process Circle contribution.', 'error');
     } finally {
       setIsSubmittingContrib(false);
+      setContribStepMsg(null);
     }
   };
 
@@ -997,22 +1004,26 @@ export const CirclesView: React.FC = () => {
     }
 
     setIsSubmittingGift(true);
+    setGiftStepMsg(null);
     try {
       const created =
         user?.custodyMode === 'self'
-          ? await api.createGiftSelfCustody({
-              recipientHandle: cleanRecip,
-              occasion: giftOccasion,
-              customOccasion:
-                giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
-              message: giftMessage.trim() || undefined,
-              showAmount: false,
-              vaultAsset: giftVaultSymbol,
-              originAsset: giftOriginAsset,
-              amount: giftAmount.trim(),
-              timelockUntil: unlockMs,
-              mode: giftCreateMode,
-            })
+          ? await api.createGiftSelfCustody(
+              {
+                recipientHandle: cleanRecip,
+                occasion: giftOccasion,
+                customOccasion:
+                  giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
+                message: giftMessage.trim() || undefined,
+                showAmount: false,
+                vaultAsset: giftVaultSymbol,
+                originAsset: giftOriginAsset,
+                amount: giftAmount.trim(),
+                timelockUntil: unlockMs,
+                mode: giftCreateMode,
+              },
+              (_stage, message) => setGiftStepMsg(message)
+            )
           : await api.createGift({
               recipientHandle: cleanRecip,
               occasion: giftOccasion,
@@ -1035,6 +1046,7 @@ export const CirclesView: React.FC = () => {
       setGiftRecipient('');
       setGiftCustomOccasion('');
       setGiftMessage('');
+      setGiftAmount('');
       setActiveTab('gifts');
       refreshOnchain();
       toast(
@@ -1045,6 +1057,7 @@ export const CirclesView: React.FC = () => {
       toast(err?.message || 'Could not create gift. Check balance and @handle.', 'error');
     } finally {
       setIsSubmittingGift(false);
+      setGiftStepMsg(null);
     }
   };
 
@@ -1080,10 +1093,24 @@ export const CirclesView: React.FC = () => {
           const res = await api.claimGiftSelfCustody(gift.id);
           applyGiftUpdate(res.gift);
           refreshOnchain();
-          toast(
-            `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) into your vault!`,
-            'success'
-          );
+          if (res.payoutAsset === 'USDC') {
+            toast(
+              res.usdcSwapStatus === 'SUCCESS'
+                ? `Unwrapped & converted gift to ${res.usdcAmount} USDC!`
+                : `Claimed & converting ${res.sharesClaimed} ${res.gift.vaultSymbol} → ~${res.usdcAmount} USDC!`,
+              'success'
+            );
+          } else if (res.usdcSwapNote) {
+            toast(
+              `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} to your wallet. Stabilize to USDC anytime.`,
+              'success'
+            );
+          } else {
+            toast(
+              `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) into your vault!`,
+              'success'
+            );
+          }
         }
         return;
       }
@@ -1091,7 +1118,7 @@ export const CirclesView: React.FC = () => {
       const assertion = await authorizeWithPasskey(
         isSenderReclaim
           ? `Reclaim unclaimed ${gift.sharesFormatted} ${gift.vaultSymbol} gift`
-          : `Unwrap & claim ${gift.sharesFormatted} ${gift.vaultSymbol} gift from @${gift.senderHandle}`
+          : `Unwrap & claim ${gift.sharesFormatted} ${gift.vaultSymbol} gift to USDC from @${gift.senderHandle}`
       );
       const res = isSenderReclaim
         ? await api.reclaimGiftServer({
@@ -1104,12 +1131,21 @@ export const CirclesView: React.FC = () => {
           });
       applyGiftUpdate(res.gift);
       refreshOnchain();
-      toast(
-        isSenderReclaim
-          ? `Reclaimed ${res.sharesClaimed} ${res.gift.vaultSymbol} back to your vault!`
-          : `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) into your vault!`,
-        'success'
-      );
+      if (isSenderReclaim) {
+        toast(`Reclaimed ${res.sharesClaimed} ${res.gift.vaultSymbol} back to your vault!`, 'success');
+      } else if (res.payoutAsset === 'USDC') {
+        toast(
+          res.usdcSwapStatus === 'SUCCESS'
+            ? `Unwrapped & converted gift to ${res.usdcAmount} USDC!`
+            : `Claimed & converting ${res.sharesClaimed} ${res.gift.vaultSymbol} → ~${res.usdcAmount} USDC!`,
+          'success'
+        );
+      } else {
+        toast(
+          `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) into your vault!`,
+          'success'
+        );
+      }
     } catch (err: any) {
       toast(
         err?.message ||
@@ -1728,7 +1764,7 @@ export const CirclesView: React.FC = () => {
                           >
                             <Fingerprint className="w-3.5 h-3.5" />
                             <span>
-                              {unlocked ? 'Unwrap & Claim Vault + Yield' : 'Locked Until Timelock'}
+                              {unlocked ? 'Unwrap & Claim to USDC' : 'Locked Until Timelock'}
                             </span>
                           </button>
                         )}
@@ -1750,14 +1786,24 @@ export const CirclesView: React.FC = () => {
                 <p className="text-xs text-stone-500">
                   Gift a live compounding Earn Vault to any @handle for birthdays, Christmas, anniversaries, or custom occasions.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateGiftOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-950 text-white text-xs font-display font-bold cursor-pointer"
-                >
-                  <Gift className="w-3.5 h-3.5" />
-                  <span>Send an Earn Vault Gift</span>
-                </button>
+                <div className="flex flex-wrap items-center justify-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreateGiftOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-950 text-white text-xs font-display font-bold cursor-pointer"
+                  >
+                    <Gift className="w-3.5 h-3.5" />
+                    <span>Send an Earn Vault Gift</span>
+                  </button>
+                  <a
+                    href="https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-xs font-mono font-semibold transition-colors"
+                  >
+                    <span>See Live Example ↗</span>
+                  </a>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2287,9 +2333,15 @@ export const CirclesView: React.FC = () => {
                   />
                 </div>
 
-                {contribValidation.hint && (
+                {!isSubmittingContrib && contribValidation.hint && (
                   <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
                     {contribValidation.hint}
+                  </div>
+                )}
+
+                {isSubmittingContrib && contribStepMsg && (
+                  <div className="px-3 py-2 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono text-stone-700">
+                    {contribStepMsg}
                   </div>
                 )}
 
@@ -2301,7 +2353,7 @@ export const CirclesView: React.FC = () => {
                   <Fingerprint className="w-4 h-4" />
                   <span>
                     {isSubmittingContrib || isAuthorizing
-                      ? 'Signing & Adding to Vault...'
+                      ? contribStepMsg || 'Signing & Adding to Vault...'
                       : `Sign with Passkey & Add to ${contributeCircle.vaultSymbol}`}
                   </span>
                 </button>
@@ -2321,9 +2373,19 @@ export const CirclesView: React.FC = () => {
                   <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
                     <Gift className="w-5 h-5" />
                   </div>
-                  <h2 className="text-lg font-display font-extrabold text-stone-950">
-                    Gift an Intents Earn Vault
-                  </h2>
+                  <div>
+                    <h2 className="text-lg font-display font-extrabold text-stone-950 leading-tight">
+                      Gift an Intents Earn Vault
+                    </h2>
+                    <a
+                      href="https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-mono text-stone-500 hover:text-stone-900 underline underline-offset-2"
+                    >
+                      Preview what a live gift card looks like ↗
+                    </a>
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -2450,6 +2512,7 @@ export const CirclesView: React.FC = () => {
                       step="any"
                       min="1"
                       required
+                      placeholder="e.g. 5"
                       value={giftAmount}
                       onChange={(e) => setGiftAmount(e.target.value)}
                       className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal"
@@ -2509,9 +2572,15 @@ export const CirclesView: React.FC = () => {
                   kindLabel="timelocked gift"
                 />
 
-                {giftValidation.hint && (
+                {!isSubmittingGift && giftValidation.hint && (
                   <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
                     {giftValidation.hint}
+                  </div>
+                )}
+
+                {isSubmittingGift && giftStepMsg && (
+                  <div className="px-3 py-2 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono text-stone-700">
+                    {giftStepMsg}
                   </div>
                 )}
 
@@ -2523,7 +2592,7 @@ export const CirclesView: React.FC = () => {
                   <Fingerprint className="w-4 h-4" />
                   <span>
                     {isSubmittingGift || isAuthorizing
-                      ? 'Signing & Locking Gift...'
+                      ? giftStepMsg || 'Signing & Locking Gift...'
                       : `Sign with Passkey & Send ${giftVaultSymbol} Gift`}
                   </span>
                 </button>

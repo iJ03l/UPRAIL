@@ -228,6 +228,13 @@ export async function prepareSweepPlainL1ToIntents(params: {
   amount?: string;
   nextStep?: string;
 }) {
+  if (!(await nearRpc.canServerSignAccountL1(params.env, params.session.x_id, params.nearAccount))) {
+    throw new CustodyActionError(
+      'Your server NEAR L1 key was removed when you upgraded to Self-Custody. Sweep plain L1 balances using your offline Recovery Key instead.',
+      400,
+      'SELF_CUSTODY_L1_KEY_ROTATED'
+    );
+  }
   const asset = (params.asset || '*').trim() || '*';
   const symbol = (params.symbol || (asset === '*' ? 'NEAR L1 Assets' : asset)).trim();
   const amount = (params.amount || 'all').trim();
@@ -248,6 +255,49 @@ export async function prepareSweepPlainL1ToIntents(params: {
       asset === '*'
         ? `Confirm with your passkey to use your L1 key (${params.nearAccount}) once to move your plain NEAR / NEP-141 balances into your passkey-controlled Intents wallet.`
         : `Confirm with your passkey to use your L1 key (${params.nearAccount}) once to move ${amount} ${symbol} from NEAR L1 into your passkey-controlled Intents wallet.`,
+  });
+}
+
+/**
+ * Checks if plain NEAR L1 balance on `nearAccount` covers an Intents shortfall
+ * and prepares an interactive two-step L1 sweep when the server L1 key is still
+ * authorized; throws `SELF_CUSTODY_L1_KEY_ROTATED` if rotated to an offline backup key.
+ */
+export async function maybePrepareMatchingPlainL1Sweep(params: {
+  env: Env;
+  session: Session;
+  nearAccount: string;
+  assetId: string;
+  contractId?: string | null;
+  symbol: string;
+  decimals: number;
+  publicBalanceAtomic: bigint;
+  requiredAtomic: bigint;
+  nextStep: string;
+}) {
+  const plain = await nearRpc.getPlainBalances(params.env, params.nearAccount).catch(() => []);
+  const matchingPlain = plain.find(
+    (b) =>
+      nearRpc.assetsMatch(b.defuse_asset_id, params.assetId) ||
+      nearRpc.assetsMatch(b.nearContractId, params.contractId)
+  );
+  const plainAmt = BigInt(matchingPlain?.amount || '0');
+  if (plainAmt <= 0n || plainAmt + params.publicBalanceAtomic < params.requiredAtomic) {
+    return null;
+  }
+  const shortfall = params.requiredAtomic - params.publicBalanceAtomic;
+  const fallbackFormatted = nearRpc.formatAmount(
+    (shortfall > 0n ? shortfall : plainAmt).toString(),
+    params.decimals
+  );
+  return await prepareSweepPlainL1ToIntents({
+    env: params.env,
+    session: params.session,
+    nearAccount: params.nearAccount,
+    asset: params.assetId,
+    symbol: params.symbol,
+    amount: matchingPlain?.amountFormatted || fallbackFormatted,
+    nextStep: params.nextStep,
   });
 }
 
