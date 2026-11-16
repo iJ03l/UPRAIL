@@ -272,7 +272,10 @@ export async function deriveEarnCustodyKey(
   expectedAccountId?: string | null
 ): Promise<EarnCustodyKey> {
   const cleanId = (itemId || '').trim();
-  if (!/^(gft|circ)_[a-f0-9]{16,64}$/.test(cleanId)) {
+  if (
+    !/^(gft|circ)_[a-f0-9]{16,64}$/.test(cleanId) &&
+    !/^agent_pocket:[a-z0-9._-]{2,64}$/.test(cleanId)
+  ) {
     throw new EarnVaultError('INVALID_CUSTODY_ID', 'Invalid gift or circle identifier.', 400);
   }
   const envAny = env as unknown as Record<string, string | undefined>;
@@ -387,18 +390,17 @@ export async function getCustodyVaultBalance(
 }
 
 /**
- * Signs and relays a gas-sponsored NEP-413 `transfer` intent on `intents.near`
- * out of a Gift or Circle's dedicated custody account to one or more recipients.
+ * Signs and relays one or more gas-sponsored NEP-413 intents on `intents.near`
+ * out of a Gift, Circle, or Agent Pocket's dedicated custody account.
  */
-export async function transferBatchFromEarnCustody(
+export async function executeCustodyIntents(
   env: Env,
   itemId: string,
-  transfers: ReadonlyArray<{ recipientAccount: string; assetId: string; amountAtomic: bigint }>,
+  intents: ReadonlyArray<Record<string, unknown>>,
   expectedAccountId?: string | null
 ): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
-  const nonZero = transfers.filter((t) => t.amountAtomic > 0n && t.recipientAccount);
-  if (nonZero.length === 0) {
-    return { success: false, error: 'No positive transfer amounts specified.' };
+  if (intents.length === 0) {
+    return { success: false, error: 'No intents specified.' };
   }
 
   try {
@@ -409,14 +411,6 @@ export async function transferBatchFromEarnCustody(
     nonceB64 = btoa(nonceB64);
 
     const deadline = new Date(Date.now() + 3600_000).toISOString();
-    const intents = nonZero.map((leg) => ({
-      intent: 'transfer',
-      receiver_id: leg.recipientAccount,
-      tokens: {
-        [leg.assetId]: leg.amountAtomic.toString(),
-      },
-    }));
-
     const messageStr = JSON.stringify({
       signer_id: custody.accountId,
       deadline,
@@ -443,6 +437,30 @@ export async function transferBatchFromEarnCustody(
   } catch (err: any) {
     return { success: false, error: err?.message || String(err) };
   }
+}
+
+/**
+ * Signs and relays a gas-sponsored NEP-413 `transfer` intent on `intents.near`
+ * out of a Gift, Circle, or Agent Pocket's dedicated custody account to one or more recipients.
+ */
+export async function transferBatchFromEarnCustody(
+  env: Env,
+  itemId: string,
+  transfers: ReadonlyArray<{ recipientAccount: string; assetId: string; amountAtomic: bigint }>,
+  expectedAccountId?: string | null
+): Promise<{ success: boolean; txHash?: string; error?: string; ambiguous?: boolean }> {
+  const nonZero = transfers.filter((t) => t.amountAtomic > 0n && t.recipientAccount);
+  if (nonZero.length === 0) {
+    return { success: false, error: 'No positive transfer amounts specified.' };
+  }
+  const intents = nonZero.map((leg) => ({
+    intent: 'transfer',
+    receiver_id: leg.recipientAccount,
+    tokens: {
+      [leg.assetId]: leg.amountAtomic.toString(),
+    },
+  }));
+  return executeCustodyIntents(env, itemId, intents, expectedAccountId);
 }
 
 /**
@@ -565,3 +583,297 @@ export function sanitizeUserText(raw: string | undefined | null, maxLength: numb
     .trim()
     .slice(0, maxLength);
 }
+
+/**
+ * Deterministically derives a user's isolated 64-hex implicit `intents.near` Agent Allowance Pocket
+ * from their `nearAccount` (`u_<hex>.escrow.uprail.near`).
+ *
+ * This pocket holds the pre-approved allowance that MCP / AI Agents can spend autonomously
+ * without requiring a passkey prompt on every transaction, while `getIntentBalances` merges
+ * the pocket's balance into the user's UPRAIL dashboard balance seamlessly.
+ */
+export async function deriveUserAgentPocket(
+  env: Env,
+  nearAccount: string
+): Promise<EarnCustodyKey> {
+  const clean = (nearAccount || '').trim().toLowerCase();
+  if (!clean) {
+    throw new EarnVaultError('INVALID_ACCOUNT', 'Missing user NEAR account for agent pocket.', 400);
+  }
+  return deriveEarnCustodyKey(env, `agent_pocket:${clean}`);
+}
+
+/**
+ * Ensures the user's main `nearAccount` on `intents.near` has at least `requiredOnMainAtomic`
+ * of `assetId` by automatically pulling any shortfall from their `agentPocket` on `intents.near`.
+ *
+ * This allows the user's UPRAIL web app (Send, Withdraw, near.com, Stabilize, Circles, Gifts)
+ * to spend their unified balance as if nothing ever moved into the agent pocket.
+ */
+export const AGENT_POCKET_CORE_ASSETS: ReadonlyArray<{
+  assetId: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  nearContractId: string;
+}> = [
+  {
+    assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    symbol: 'USDC',
+    name: 'USD Coin',
+    decimals: 6,
+    nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+  },
+  {
+    assetId: 'nep141:usdt.tether-token.near',
+    symbol: 'USDT',
+    name: 'Tether USD',
+    decimals: 6,
+    nearContractId: 'usdt.tether-token.near',
+  },
+  {
+    assetId: 'nep141:wrap.near',
+    symbol: 'NEAR',
+    name: 'Wrapped NEAR',
+    decimals: 24,
+    nearContractId: 'wrap.near',
+  },
+];
+
+export const CIRCLE_GIFT_USDC_ASSET_ID =
+  'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+
+export function isUsdcOriginAsset(token: {
+  assetId?: string | null;
+  defuse_asset_id?: string | null;
+  nearContractId?: string | null;
+  symbol?: string | null;
+}): boolean {
+  const sym = (token.symbol || '').trim().toUpperCase();
+  const aid = (token.assetId || token.defuse_asset_id || '').trim().toLowerCase();
+  const contract = (token.nearContractId || '').trim().toLowerCase();
+  return (
+    sym === 'USDC' &&
+    (aid === CIRCLE_GIFT_USDC_ASSET_ID ||
+      contract === '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1' ||
+      aid.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'))
+  );
+}
+
+function formatPocketUnits(atomic: bigint, decimals: number): string {
+  if (decimals <= 0) return atomic.toString();
+  const factor = 10n ** BigInt(decimals);
+  const whole = atomic / factor;
+  const frac = atomic % factor;
+  if (frac === 0n) return whole.toString();
+  const fracStr = frac.toString().padStart(decimals, '0').replace(/0+$/, '');
+  return `${whole}.${fracStr}`;
+}
+
+/**
+ * Single-RPC batch query via `intents.near.mt_batch_balance_of`.
+ * Returns `null` if RPC fails so callers never confuse transport errors with zero.
+ */
+export async function getCustodyBatchBalances(
+  env: Env,
+  accountId: string,
+  tokenIds: ReadonlyArray<string>
+): Promise<bigint[] | null> {
+  if (!accountId || tokenIds.length === 0) return null;
+  const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+  const contractId = env.INTENTS_CONTRACT_ID || 'intents.near';
+  const argsBase64 = btoa(
+    JSON.stringify({
+      account_id: accountId,
+      token_ids: tokenIds,
+    })
+  );
+
+  for (const url of rpcUrl === 'https://free.rpc.fastnear.com'
+    ? [rpcUrl]
+    : [rpcUrl, 'https://free.rpc.fastnear.com']) {
+    try {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'query',
+          params: {
+            request_type: 'call_function',
+            finality: 'final',
+            account_id: contractId,
+            method_name: 'mt_batch_balance_of',
+            args_base64: argsBase64,
+          },
+        }),
+      });
+      if (!resp.ok) continue;
+      const data = (await resp.json()) as any;
+      if (data?.result?.result) {
+        const text = new TextDecoder().decode(new Uint8Array(data.result.result));
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          return parsed.map((v) => {
+            try {
+              return BigInt(String(v ?? '0'));
+            } catch {
+              return 0n;
+            }
+          });
+        }
+      }
+    } catch {
+      // try fallback RPC
+    }
+  }
+  return null;
+}
+
+export interface AgentPocketBalanceItem {
+  defuse_asset_id: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  nearContractId: string;
+  amount: string;
+  amountAtomic: bigint;
+  amountFormatted: string;
+}
+
+/**
+ * Reads all non-zero core asset balances held in a user's isolated Agent Pocket
+ * on `intents.near` using a single `mt_batch_balance_of` RPC call (1 subrequest).
+ */
+export async function getAgentPocketBalances(
+  env: Env,
+  nearAccount: string
+): Promise<{
+  pocketAccount: string | null;
+  balances: AgentPocketBalanceItem[];
+  rpcOk: boolean;
+}> {
+  const cleanAccount = (nearAccount || '').trim().toLowerCase();
+  if (!cleanAccount || /^[0-9a-f]{64}$/i.test(cleanAccount)) {
+    return { pocketAccount: null, balances: [], rpcOk: true };
+  }
+  try {
+    const pocket = await deriveUserAgentPocket(env, cleanAccount);
+    const raw = await getCustodyBatchBalances(
+      env,
+      pocket.accountId,
+      AGENT_POCKET_CORE_ASSETS.map((a) => a.assetId)
+    );
+    if (!raw) {
+      return { pocketAccount: pocket.accountId, balances: [], rpcOk: false };
+    }
+    const balances: AgentPocketBalanceItem[] = [];
+    for (let i = 0; i < AGENT_POCKET_CORE_ASSETS.length; i++) {
+      const meta = AGENT_POCKET_CORE_ASSETS[i];
+      const atomic = raw[i] ?? 0n;
+      if (atomic <= 0n) continue;
+      balances.push({
+        defuse_asset_id: meta.assetId,
+        symbol: meta.symbol,
+        name: meta.name,
+        decimals: meta.decimals,
+        nearContractId: meta.nearContractId,
+        amount: atomic.toString(),
+        amountAtomic: atomic,
+        amountFormatted: formatPocketUnits(atomic, meta.decimals),
+      });
+    }
+    return { pocketAccount: pocket.accountId, balances, rpcOk: true };
+  } catch {
+    return { pocketAccount: null, balances: [], rpcOk: false };
+  }
+}
+
+/**
+ * Ensures the user's main `nearAccount` on `intents.near` has at least `requiredOnMainAtomic`
+ * of `assetId` by automatically pulling any shortfall from their `agentPocket` on `intents.near`.
+ *
+ * This allows the user's UPRAIL web app (Send, Withdraw, near.com, Stabilize, Circles, Gifts)
+ * to spend their unified balance as if nothing ever moved into the agent pocket.
+ */
+export async function ensureAgentPocketTopUpForMainAccount(
+  env: Env,
+  nearAccount: string,
+  assetId: string,
+  requiredOnMainAtomic: bigint,
+  knownMainBalAtomic?: bigint
+): Promise<bigint> {
+  if (!nearAccount || !assetId || requiredOnMainAtomic <= 0n) {
+    return knownMainBalAtomic ?? 0n;
+  }
+  const cleanAccount = nearAccount.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/i.test(cleanAccount)) {
+    return knownMainBalAtomic ?? 0n;
+  }
+
+  try {
+    const mainBal =
+      knownMainBalAtomic !== undefined
+        ? knownMainBalAtomic
+        : (await getCustodyVaultBalance(env, cleanAccount, assetId)) ?? 0n;
+    if (mainBal >= requiredOnMainAtomic) return mainBal;
+
+    const shortfall = requiredOnMainAtomic - mainBal;
+    const pocket = await deriveUserAgentPocket(env, cleanAccount);
+    const pocketBal = (await getCustodyVaultBalance(env, pocket.accountId, assetId)) ?? 0n;
+    if (pocketBal <= 0n) return mainBal;
+
+    const pullAmount = pocketBal >= shortfall ? shortfall : pocketBal;
+    const res = await transferFromEarnCustody(
+      env,
+      `agent_pocket:${cleanAccount}`,
+      cleanAccount,
+      assetId,
+      pullAmount,
+      pocket.accountId
+    );
+    return res.success ? mainBal + pullAmount : mainBal;
+  } catch {
+    return knownMainBalAtomic ?? 0n;
+  }
+}
+
+/**
+ * Recalls all positive balances from a user's `agentPocket` back to their main `nearAccount` on `intents.near`
+ * (e.g. when revoking agent keys or on explicit user request).
+ */
+export async function recallAllAgentPocketToMainAccount(
+  env: Env,
+  nearAccount: string
+): Promise<{ recalled: boolean; txHash?: string; recalledAssets?: Array<{ symbol: string; amountFormatted: string }> }> {
+  const cleanAccount = (nearAccount || '').trim().toLowerCase();
+  if (!cleanAccount || /^[0-9a-f]{64}$/i.test(cleanAccount)) {
+    return { recalled: false };
+  }
+  try {
+    const { pocketAccount, balances } = await getAgentPocketBalances(env, cleanAccount);
+    if (!pocketAccount || balances.length === 0) return { recalled: false };
+    const transfers = balances.map((b) => ({
+      recipientAccount: cleanAccount,
+      assetId: b.defuse_asset_id,
+      amountAtomic: b.amountAtomic,
+    }));
+    const res = await transferBatchFromEarnCustody(
+      env,
+      `agent_pocket:${cleanAccount}`,
+      transfers,
+      pocketAccount
+    );
+    return {
+      recalled: res.success,
+      txHash: res.txHash,
+      recalledAssets: res.success
+        ? balances.map((b) => ({ symbol: b.symbol, amountFormatted: b.amountFormatted }))
+        : undefined,
+    };
+  } catch {
+    return { recalled: false };
+  }
+}
+

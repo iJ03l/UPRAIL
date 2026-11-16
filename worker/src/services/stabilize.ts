@@ -32,6 +32,7 @@ import {
   submitPrivateTransfer,
   waitForSettlement,
 } from './confidentialRail';
+import { getAgentPocketBalances } from './earnVaults';
 
 export interface OneClickToken {
   assetId: string;
@@ -394,16 +395,34 @@ export async function getTotalSpendableOriginAtomic(
   nearAccount: string;
 }> {
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
-  const [confBal, pubBal, plainBals] = await Promise.all([
+  const [confBal, pubBal, plainBals, pocketInfo] = await Promise.all([
     isConfidentialRailEnabled(env)
       ? getConfidentialAssetBalance(env, session.x_id, origin.assetId).catch(() => null)
       : Promise.resolve(null),
     nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null),
     nearRpc.getPlainBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[]),
+    getAgentPocketBalances(env, nearAccount).catch(() => ({
+      pocketAccount: null,
+      balances: [],
+      rpcOk: false,
+    })),
   ]);
 
   const confidentialAtomic = confBal?.amountAtomic ?? 0n;
-  const publicIntentsAtomic = pubBal?.balance ?? 0n;
+  const pocketAtomic = pocketInfo.balances
+    .filter((b) => {
+      const bId = b.defuse_asset_id.toLowerCase();
+      const bC = b.nearContractId.toLowerCase();
+      const oId = origin.assetId.toLowerCase();
+      const oC = (origin.nearContractId || '').toLowerCase();
+      return (
+        bId === oId ||
+        (oC && (bC === oC || bId === `nep141:${oC}`)) ||
+        (oId === 'nep141:wrap.near' && b.symbol.toUpperCase() === 'NEAR')
+      );
+    })
+    .reduce((sum, b) => sum + b.amountAtomic, 0n);
+  const publicIntentsAtomic = (pubBal?.balance ?? 0n) + pocketAtomic;
 
   // getPlainBalances() already subtracts PLATFORM_GAS_RESERVE (0.02 NEAR) + storage stake
   // from native NEAR and merges wNEAR, so do not subtract the reserve a second time here.

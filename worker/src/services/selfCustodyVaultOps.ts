@@ -56,9 +56,12 @@ import {
   webAuthnToContractProof,
 } from './circleContract';
 import {
+  CIRCLE_GIFT_USDC_ASSET_ID,
   deriveEarnCustodyKey,
+  ensureAgentPocketTopUpForMainAccount,
   generateSecureId,
   getCustodyVaultBalance,
+  isUsdcOriginAsset,
   normalizeAndValidateHandle,
   resolveEarnVault,
   sanitizeUserText,
@@ -342,9 +345,9 @@ export async function prepareSelfCustodyCircleCreate(params: {
     throw new CustodyActionError('Target amount must be between $1 and $1,000,000.', 400, 'INVALID_TARGET');
   }
 
-  const vault = await resolveEarnVault(env, input.vaultAsset || 'stNEAR').catch(() => null);
+  const vault = await resolveEarnVault(env, input.vaultAsset || 'TLO').catch(() => null);
   if (!vault) {
-    throw new CustodyActionError('Unsupported Circle Earn vault.', 400, 'UNSUPPORTED_VAULT');
+    throw new CustodyActionError('Unsupported USDC Circle Earn vault.', 400, 'UNSUPPORTED_VAULT');
   }
 
   const payoutHandle = normalizeAndValidateHandle(input.payoutHandle || session.x_handle, 'Payout handle');
@@ -956,7 +959,14 @@ export async function prepareSelfCustodyCircleContribute(params: {
   if (!vault) throw new CustodyActionError('Unsupported Circle vault.', 400, 'UNSUPPORTED_VAULT');
 
   const oneClickTokens = await getOneClickTokens(env).catch(() => []);
-  const origin = await resolveOriginToken(env, params.sourceAsset || vault.assetId, oneClickTokens);
+  const origin = await resolveOriginToken(
+    env,
+    params.sourceAsset || CIRCLE_GIFT_USDC_ASSET_ID,
+    oneClickTokens
+  );
+  if (!isUsdcOriginAsset(origin)) {
+    throw new CustodyActionError('Circles only accept USDC deposits.', 400, 'USDC_ONLY');
+  }
   const amountStr = String(params.amount || '').trim();
   if (!/^\d{1,15}(\.\d{1,18})?$/.test(amountStr) || Number(amountStr) <= 0) {
     throw new CustodyActionError('Invalid contribution amount.', 400, 'INVALID_AMOUNT');
@@ -964,9 +974,12 @@ export async function prepareSelfCustodyCircleContribute(params: {
   const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, origin.decimals) || '0');
   if (grossAtomic <= 0n) throw new CustodyActionError('Amount must be greater than zero.', 400, 'INVALID_AMOUNT');
 
-  // Ensure balance exists in Intents; if sitting on NEAR L1, trigger the Sign-to-Authorize L1 sweep first
+  // Ensure balance exists in Intents; auto-pull from Agent Pocket or trigger L1 sweep cleanly
   const pubBal = await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null);
-  const pubAmt = pubBal?.balance ?? 0n;
+  let pubAmt = pubBal?.balance ?? 0n;
+  if (pubAmt < grossAtomic) {
+    pubAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, origin.assetId, grossAtomic, pubAmt);
+  }
   if (pubAmt < grossAtomic) {
     const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
     const matchingPlain = plain.find(
@@ -1689,7 +1702,7 @@ export async function prepareSelfCustodyGiftCreate(params: {
 
   const { nearAccount, saltHex } = await getCurrentSaltAndAccount(env, session);
   const recipientHandle = normalizeAndValidateHandle(input.recipientHandle, 'Recipient handle');
-  const vault = await resolveEarnVault(env, input.vaultAsset || 'stNEAR').catch(() => null);
+  const vault = await resolveEarnVault(env, input.vaultAsset || 'TLO').catch(() => null);
   if (!vault) throw new CustodyActionError('Unsupported Earn vault.', 400, 'UNSUPPORTED_VAULT');
 
   const timelockUntil = Math.round(Number(input.timelockUntil));
@@ -1698,7 +1711,10 @@ export async function prepareSelfCustodyGiftCreate(params: {
   }
 
   const oneClickTokens = await getOneClickTokens(env).catch(() => []);
-  const origin = await resolveOriginToken(env, input.sourceAsset || vault.assetId, oneClickTokens);
+  const origin = await resolveOriginToken(env, input.sourceAsset || CIRCLE_GIFT_USDC_ASSET_ID, oneClickTokens);
+  if (!isUsdcOriginAsset(origin)) {
+    throw new CustodyActionError('Vault Gifts only accept USDC deposits.', 400, 'USDC_ONLY');
+  }
   const amountStr = String(input.amount || '').trim();
   if (!/^\d{1,15}(\.\d{1,18})?$/.test(amountStr) || Number(amountStr) <= 0) {
     throw new CustodyActionError('Invalid gift amount.', 400, 'INVALID_AMOUNT');
@@ -1706,9 +1722,12 @@ export async function prepareSelfCustodyGiftCreate(params: {
   const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, origin.decimals) || '0');
   if (grossAtomic <= 0n) throw new CustodyActionError('Amount must be greater than zero.', 400, 'INVALID_AMOUNT');
 
-  // If balance sits on NEAR L1, trigger the Sign-to-Authorize L1 sweep step cleanly
+  // If balance sits in Agent Pocket or NEAR L1, pull pocket shortfall / trigger L1 sweep cleanly
   const pubBal = await nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null);
-  const pubAmt = pubBal?.balance ?? 0n;
+  let pubAmt = pubBal?.balance ?? 0n;
+  if (pubAmt < grossAtomic) {
+    pubAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, origin.assetId, grossAtomic, pubAmt);
+  }
   if (pubAmt < grossAtomic) {
     const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
     const matchingPlain = plain.find(

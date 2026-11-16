@@ -58,6 +58,10 @@ import {
 } from './oneclickWithdraw';
 import { getNearcomDestination, parseNearcomAddress } from './nearcomWithdraw';
 import {
+  ensureAgentPocketTopUpForMainAccount,
+  getAgentPocketBalances,
+} from './earnVaults';
+import {
   assertStabilizeMinimum,
   computeStabilizeSplit,
   getOneClickTokens,
@@ -175,6 +179,19 @@ async function ensureOrPrepareSelfCustodyConfidentialFunds(params: {
   const shortfall = requiredAtomic - bal.amountAtomic;
   let pubBal = await nearRpc.getIntentAssetBalance(env, asset, nearAccount).catch(() => null);
   if (!pubBal) pubBal = { balance: 0n, decimals: bal.decimals };
+
+  if (pubBal.balance < shortfall) {
+    const refreshed = await ensureAgentPocketTopUpForMainAccount(
+      env,
+      nearAccount,
+      bal.assetId,
+      shortfall,
+      pubBal.balance
+    );
+    if (refreshed > pubBal.balance) {
+      pubBal = { ...pubBal, balance: refreshed };
+    }
+  }
 
   if (pubBal.balance < shortfall) {
     // Check if user holds un-swept plain L1 tokens in their sub-account
@@ -570,14 +587,18 @@ export async function prepareSelfCustodySend(
   }
 
   const publicBal = await nearRpc.getIntentAssetBalance(env, body.asset, nearAccount);
-  if (!publicBal || publicBal.balance < grossAtomic) {
+  let pubSendAmt = publicBal?.balance ?? 0n;
+  if (pubSendAmt < grossAtomic) {
+    pubSendAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, defuseAssetId, grossAtomic, pubSendAmt);
+  }
+  if (pubSendAmt < grossAtomic) {
     const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
     const matchingPlain = plain.find((b) =>
       nearRpc.assetsMatch(b.defuse_asset_id, defuseAssetId) ||
       nearRpc.assetsMatch(b.nearContractId, resolvedTok.nearContractId)
     );
     const plainAmt = BigInt(matchingPlain?.amount || '0');
-    if (matchingPlain && plainAmt > 0n && plainAmt + (publicBal?.balance ?? 0n) >= grossAtomic) {
+    if (matchingPlain && plainAmt > 0n && plainAmt + pubSendAmt >= grossAtomic) {
       return await prepareSweepPlainL1ToIntents({
         env,
         session,
@@ -1242,15 +1263,19 @@ export async function prepareSelfCustodyWithdraw(
     });
   }
 
-  const pubBal = await nearRpc.getIntentAssetBalance(env, asset, nearAccount);
-  if (!pubBal || pubBal.balance < amountAtomic) {
+  let pubBal = await nearRpc.getIntentAssetBalance(env, asset, nearAccount);
+  let pubAmt = pubBal?.balance ?? 0n;
+  if (pubAmt < amountAtomic) {
+    pubAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, defuseAssetId, amountAtomic, pubAmt);
+  }
+  if (pubAmt < amountAtomic) {
     const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
     const matchingPlain = plain.find((b) =>
       nearRpc.assetsMatch(b.defuse_asset_id, defuseAssetId) ||
       nearRpc.assetsMatch(b.nearContractId, tok.nearContractId)
     );
     const plainAmt = BigInt(matchingPlain?.amount || '0');
-    if (matchingPlain && plainAmt > 0n && plainAmt + (pubBal?.balance ?? 0n) >= amountAtomic) {
+    if (matchingPlain && plainAmt > 0n && plainAmt + pubAmt >= amountAtomic) {
       return await prepareSweepPlainL1ToIntents({
         env,
         session,
@@ -1558,7 +1583,20 @@ export async function prepareSelfCustodyNearcomWithdraw(
   const { accessToken, accountId } = await getOneClickSessionOrThrowAuth(env, session);
   const balance = await getConfidentialAssetBalance(env, session.x_id, asset);
   const pubBal = await nearRpc.getIntentAssetBalance(env, asset, nearAccount).catch(() => null);
-  const totalAtomic = balance.amountAtomic + (pubBal?.balance ?? 0n);
+  const pocketInfo = await getAgentPocketBalances(env, nearAccount).catch(() => ({
+    pocketAccount: null,
+    balances: [],
+    rpcOk: false,
+  }));
+  const pocketAtomic = pocketInfo.balances
+    .filter(
+      (b) =>
+        nearRpc.assetsMatch(b.defuse_asset_id, balance.assetId) ||
+        nearRpc.assetsMatch(b.nearContractId, balance.contractId) ||
+        nearRpc.assetsMatch(b.symbol, balance.symbol)
+    )
+    .reduce((sum, b) => sum + b.amountAtomic, 0n);
+  const totalAtomic = balance.amountAtomic + (pubBal?.balance ?? 0n) + pocketAtomic;
 
   let amountStr: string;
   if (input.amount && input.amount !== 'all') {

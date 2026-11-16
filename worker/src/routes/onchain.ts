@@ -33,6 +33,7 @@ import {
 } from '../services/selfCustodyActions';
 import { publicErrorMessage } from '../utils/errors';
 import { cleanMemeSymbol } from '../utils/token';
+import { getAgentPocketBalances } from '../services/earnVaults';
 
 export const onchainRouter = new Hono<AppContext>();
 
@@ -165,6 +166,50 @@ onchainRouter.get('/balances', requireAuth({ passkeyVerified: true }), async (c)
     const tokens = await nearRpc.getSupportedTokens(c.env).catch(
       () => [] as nearRpc.OnchainToken[]
     );
+
+    // Agent Allowance Pocket holds pre-funded spendable Intents tokens for zero-prompt AI chat sends/withdrawals.
+    // Merge them seamlessly into the unified balance list so UPRAIL displays and spends them as normal balance.
+    try {
+      const pocket = await getAgentPocketBalances(c.env, nearAccount);
+      for (const pb of pocket.balances) {
+        const token = nearRpc.resolveTokenForAsset(pb.defuse_asset_id, tokens);
+        const existing = balances.find(
+          (b) =>
+            nearRpc.assetsMatch(b.defuse_asset_id, pb.defuse_asset_id) ||
+            nearRpc.assetsMatch(b.nearContractId, pb.nearContractId) ||
+            nearRpc.assetsMatch(b.symbol, pb.symbol)
+        );
+        if (existing) {
+          const decimals = existing.decimals ?? token?.decimals ?? pb.decimals;
+          const sum = BigInt(existing.amount || '0') + pb.amountAtomic;
+          existing.amount = sum.toString();
+          existing.amountFormatted = nearRpc.formatAmount(existing.amount, decimals);
+          const sumIntents = BigInt(existing.intentsAmount ?? '0') + pb.amountAtomic;
+          existing.intentsAmount = sumIntents.toString();
+          existing.intentsAmountFormatted = nearRpc.formatAmount(existing.intentsAmount, decimals);
+          existing.isPlainOnly = false;
+        } else {
+          const decimals = token?.decimals ?? pb.decimals;
+          const fmt = nearRpc.formatAmount(pb.amount, decimals);
+          const price = nearRpc.tokenUsdPrice(token?.symbol || pb.symbol, token?.priceUsd);
+          balances.push({
+            defuse_asset_id: pb.defuse_asset_id,
+            symbol: pb.symbol,
+            amount: pb.amount,
+            amountFormatted: fmt,
+            intentsAmount: pb.amount,
+            intentsAmountFormatted: fmt,
+            isPlainOnly: false,
+            decimals,
+            nearContractId: token?.nearContractId || pb.nearContractId,
+            ...(token?.icon ? { icon: token.icon } : {}),
+            ...(price !== null ? { priceUsd: price } : {}),
+          });
+        }
+      }
+    } catch (pocketErr) {
+      console.warn('[onchain/balances] agent pocket balance merge skipped:', pocketErr);
+    }
 
     const custody = await nearRpc.getUserCustodyRecord(c.env, session.x_id);
     let oneClickSessionRequired = false;

@@ -48,6 +48,34 @@ const TEST_ATTESTOR_KP = makeTestNearPrivateKey(0x22);
 
 const MOCK_TOKENS = [
   {
+    assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    symbol: 'USDC',
+    decimals: 6,
+    blockchain: 'near',
+    price: 1,
+  },
+  {
+    assetId: 'nep141:wrap.near',
+    symbol: 'NEAR',
+    decimals: 24,
+    blockchain: 'near',
+    price: 3.55,
+  },
+  {
+    assetId: 'nep141:usdt.tether-token.near',
+    symbol: 'USDT',
+    decimals: 6,
+    blockchain: 'near',
+    price: 1,
+  },
+  {
+    assetId: 'nep141:eth.omft.near',
+    symbol: 'ETH',
+    decimals: 18,
+    blockchain: 'eth',
+    price: 3000,
+  },
+  {
     assetId: 'nep141:meta-pool.near',
     symbol: 'stNEAR',
     decimals: 24,
@@ -882,7 +910,7 @@ test('Self-Custody Circles enforce signer bindings, dual contract/escrow creatio
             input: {
               name: 'Unregistered Test',
               targetAmountUsd: 100,
-              vaultAsset: 'stNEAR',
+              vaultAsset: 'TLO',
               mode: 'contract',
               members: [
                 { handle: 'alice', shareBps: 5000 },
@@ -901,7 +929,7 @@ test('Self-Custody Circles enforce signer bindings, dual contract/escrow creatio
             input: {
               name: 'No Passkey Test',
               targetAmountUsd: 100,
-              vaultAsset: 'stNEAR',
+              vaultAsset: 'TLO',
               mode: 'contract',
               members: [
                 { handle: 'alice', shareBps: 5000 },
@@ -919,7 +947,7 @@ test('Self-Custody Circles enforce signer bindings, dual contract/escrow creatio
         input: {
           name: 'Mixed Custody Crew',
           targetAmountUsd: 150,
-          vaultAsset: 'stNEAR',
+          vaultAsset: 'TLO',
           mode: 'contract',
           payoutHandle: 'bob',
           members: [
@@ -940,7 +968,7 @@ test('Self-Custody Circles enforce signer bindings, dual contract/escrow creatio
         input: {
           name: 'Escrow Invite Crew',
           targetAmountUsd: 100,
-          vaultAsset: 'stNEAR',
+          vaultAsset: 'TLO',
           mode: 'escrow',
           members: [
             { handle: 'alice', shareBps: 5000 },
@@ -1409,4 +1437,302 @@ test('Initial non-custodial signup provisions intents.near lock, rotates L1 Full
     globalThis.fetch = originalFetch;
   }
 });
+
+test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls on main actions, and executes zero-prompt sends & withdrawals', async () => {
+  const {
+    CIRCLE_GIFT_USDC_ASSET_ID,
+    deriveUserAgentPocket,
+    ensureAgentPocketTopUpForMainAccount,
+    getAgentPocketBalances,
+    recallAllAgentPocketToMainAccount,
+  } = await import('../src/services/earnVaults');
+  const {
+    executeAgentPocketSingleSend,
+    probeAgentPocketForPayment,
+    tryExecuteAgentPocketWithdraw,
+  } = await import('../src/services/agentPocketService');
+
+  const senderMainAccount = 'u_alpha.escrow.uprail.near';
+  const recipientMainAccount = 'u_beta.escrow.uprail.near';
+  const env: any = {
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    FEE_ACCOUNT_ID: 'escrow.uprail.near',
+    FEE_PERCENT: '0.01',
+    APP_URL: 'https://app.uprail.world',
+    NEAR_RPC_URL: 'https://rpc.testnet.near.org',
+    INTENTS_CONTRACT_ID: 'intents.near',
+  };
+
+  const pocket = await deriveUserAgentPocket(env, senderMainAccount);
+  assert.match(pocket.accountId, /^[0-9a-f]{64}$/);
+  const otherPocket = await deriveUserAgentPocket(env, recipientMainAccount);
+  assert.notEqual(pocket.accountId, otherPocket.accountId);
+
+  // Track live in-memory intents.near token balances per (account -> asset -> atomic)
+  const intentsBalances: Record<string, Record<string, bigint>> = {
+    [senderMainAccount]: { [CIRCLE_GIFT_USDC_ASSET_ID]: 1_000_000n }, // $1.00 on main
+    [pocket.accountId]: { [CIRCLE_GIFT_USDC_ASSET_ID]: 15_000_000n }, // $15.00 in pocket
+    [recipientMainAccount]: {},
+    'escrow.uprail.near': {},
+  };
+  const insertedPayments: any[] = [];
+  const insertedWithdrawals: any[] = [];
+
+  env.DB = {
+    prepare(sql: string) {
+      const s = sql.replace(/\s+/g, ' ').trim();
+      return {
+        bind(...args: any[]) {
+          return {
+            async first<T>() {
+              if (s.includes('FROM x_identities WHERE LOWER(x_handle)')) {
+                const h = String(args[0] || '').toLowerCase();
+                if (h === 'beta') {
+                  return { x_id: 'xid_beta', near_account: recipientMainAccount, is_activated: 1 } as T;
+                }
+              }
+              if (s.includes('FROM x_identities WHERE x_id = ?')) {
+                const id = String(args[0] || '');
+                if (id === 'xid_alpha') {
+                  return {
+                    x_id: 'xid_alpha',
+                    x_handle: 'alpha',
+                    near_account: senderMainAccount,
+                    is_activated: 1,
+                    custody_mode: 'self',
+                  } as T;
+                }
+              }
+              return null as T;
+            },
+            async all() {
+              return { results: [] };
+            },
+            async run() {
+              if (s.startsWith('INSERT INTO payments')) {
+                insertedPayments.push({ id: args[0], recipient: args[3], amount: args[6], status: 'PENDING' });
+              } else if (s.startsWith('UPDATE payments SET status =')) {
+                const row = insertedPayments.find((p) => p.id === args[6] || p.id === args[4]);
+                if (row) row.status = args[0];
+              } else if (s.startsWith('INSERT INTO withdrawals')) {
+                insertedWithdrawals.push({ id: args[0], destination: args[3], amount: args[5], status: 'PENDING' });
+              } else if (s.startsWith('UPDATE withdrawals SET tx_hash =')) {
+                const row = insertedWithdrawals.find((w) => w.id === args[3] || w.id === args[4]);
+                if (row) row.status = s.includes("status = 'COMPLETED'") ? 'COMPLETED' : 'PENDING';
+              }
+              return { meta: { changes: 1 } };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  let lastIntentBroadcast: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = typeof input === 'string' ? input : input?.url || '';
+    if (url.includes('/v0/tokens')) {
+      return new Response(JSON.stringify(MOCK_TOKENS), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes('api.ref.finance/list-token')) {
+      return new Response(
+        JSON.stringify({
+          'eth.omft.near': { symbol: 'ETH', name: 'Ethereum', decimals: 18, icon: '' },
+          '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': {
+            symbol: 'USDC',
+            name: 'USD Coin',
+            decimals: 6,
+            icon: '',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (url.includes('api.fastnear.com/v1/account/')) {
+      return new Response(JSON.stringify({ tokens: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.includes('rpc.testnet.near.org') || url.includes('fastnear.com')) {
+      const rpcReq = JSON.parse(String(init?.body || '{}'));
+      if (rpcReq.method === 'status') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { sync_info: { latest_block_hash: base58Encode(new Uint8Array(32).fill(0x44)) } },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (rpcReq.method === 'broadcast_tx_commit') {
+        // Simulates applying transfer / ft_withdraw intents on our mock ledger
+        lastIntentBroadcast = rpcReq.params?.[0];
+        if (lastIntentBroadcast?.message) {
+          // won't happen for borsh tx, handle below via state tracking
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: {
+              status: { SuccessValue: '' },
+              transaction: { hash: `tx_pocket_${Date.now()}` },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      const p = rpcReq.params || {};
+      if (p.request_type === 'view_account') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { amount: '0' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (p.request_type === 'view_access_key') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { nonce: 1, permission: 'FullAccess' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (p.request_type === 'call_function') {
+        const args = JSON.parse(Buffer.from(p.args_base64 || 'e30=', 'base64').toString('utf8'));
+        let val: any = null;
+        if (p.method_name === 'mt_balance_of') {
+          val = String(intentsBalances[args.account_id]?.[args.token_id] ?? 0n);
+        } else if (p.method_name === 'mt_batch_balance_of') {
+          val = (args.token_ids || []).map((tid: string) =>
+            String(intentsBalances[args.account_id]?.[tid] ?? 0n)
+          );
+        } else if (p.method_name === 'storage_balance_of') {
+          val = { total: '1250000000000000000000', available: '0' };
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { result: Array.from(new TextEncoder().encode(JSON.stringify(val))) },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+    throw new Error(`Unexpected fetch URL in pocket test: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    // 1. Batch pocket reader finds $15.00 USDC in 1 RPC call
+    const summary = await getAgentPocketBalances(env, senderMainAccount);
+    assert.equal(summary.pocketAccount, pocket.accountId);
+    assert.equal(summary.balances.length, 1);
+    assert.equal(summary.balances[0].symbol, 'USDC');
+    assert.equal(summary.balances[0].amountFormatted, '15');
+
+    // 2. Main account only has $1 USDC, user wants $4 on main -> auto-pulls $3 shortfall from pocket!
+    const refreshedMain = await ensureAgentPocketTopUpForMainAccount(
+      env,
+      senderMainAccount,
+      CIRCLE_GIFT_USDC_ASSET_ID,
+      4_000_000n,
+      1_000_000n
+    );
+    assert.equal(refreshedMain, 4_000_000n, 'Auto-pull must return updated main balance covering required amount');
+
+    // 3. Probe autonomous AI payment within pocket balance ($5 USDC <= $15 pocket)
+    const probeCovered = await probeAgentPocketForPayment({
+      env,
+      nearAccount: senderMainAccount,
+      asset: 'USDC',
+      recipients: [{ handle: 'beta', amount: '5', amountNum: 5 }],
+    });
+    assert.equal(probeCovered.covered, true);
+
+    // 4. Probe autonomous AI payment exceeding pocket balance ($25 USDC > $15 pocket) -> fallback to /approve
+    const probeShort = await probeAgentPocketForPayment({
+      env,
+      nearAccount: senderMainAccount,
+      asset: 'USDC',
+      recipients: [{ handle: 'beta', amount: '25', amountNum: 25 }],
+    });
+    assert.equal(probeShort.covered, false);
+    assert.equal(probeShort.reason, 'insufficient_pocket_balance');
+
+    // 5. Execute zero-prompt self-custody @handle payment directly from Agent Pocket
+    const senderSession: any = {
+      session_id: 's_alpha',
+      x_id: 'xid_alpha',
+      x_handle: 'alpha',
+      x_name: 'Alpha',
+      created_at: Date.now(),
+      expires_at: Date.now() + 3600_000,
+    };
+    const sendResult = await executeAgentPocketSingleSend({
+      env,
+      senderSession,
+      senderNearAccount: senderMainAccount,
+      pocketAccount: pocket.accountId,
+      coreAsset: probeCovered.coreAsset!,
+      recipientHandle: 'beta',
+      rawAmount: '5',
+      memo: 'Coffee via MCP',
+    });
+    assert.equal(sendResult.ok, true);
+    assert.equal(sendResult.status, 201);
+    assert.equal(sendResult.body.status, 'CLAIMED');
+    assert.equal(sendResult.body.source, 'agent_pocket');
+    assert.equal(sendResult.body.custodyMode, 'self');
+    assert.ok(sendResult.body.txHash);
+    assert.equal(insertedPayments[0].status, 'CLAIMED');
+
+    // 6. Execute zero-prompt NEAR ft_withdraw directly from Agent Pocket
+    const withdrawResult = await tryExecuteAgentPocketWithdraw({
+      env,
+      session: senderSession,
+      nearAccount: senderMainAccount,
+      destinationAddress: 'treasury.near',
+      destinationChain: 'near',
+      asset: 'USDC',
+      amountStr: '3',
+      parsedAmount: 3,
+    });
+    assert.equal(withdrawResult.handled, true);
+    assert.equal(withdrawResult.responseStatus, 200);
+    assert.equal(withdrawResult.responseBody?.status, 'COMPLETED');
+    assert.equal(withdrawResult.responseBody?.source, 'agent_pocket');
+    assert.equal(insertedWithdrawals[0].status, 'COMPLETED');
+
+    // 7. getAllAgentReadableBalances discovers ALL held tokens across Main Intents, Pocket, and extras (e.g. ETH)
+    intentsBalances[senderMainAccount]['nep141:eth.omft.near'] = 500_000_000_000_000_000n; // 0.5 ETH
+    const { getAllAgentReadableBalances } = await import('../src/services/agentPocketService');
+    const allBals = await getAllAgentReadableBalances(env, senderSession);
+    const ethRow = allBals.balances.find((b) => b.asset === 'ETH');
+    const usdcRow = allBals.balances.find((b) => b.asset === 'USDC');
+    assert.ok(ethRow && ethRow.balance === 0.5, 'Agents must read non-USDC/USDT/NEAR balances like ETH');
+    assert.ok(usdcRow && usdcRow.balance >= 15, 'Agents must see unified USDC (Main + Pocket)');
+    assert.equal(allBals.agentAllowance.balances.length, 1);
+
+    // 8. Reclaim all remaining pocket funds back to main vault
+    const reclaimRes = await recallAllAgentPocketToMainAccount(env, senderMainAccount);
+    assert.equal(reclaimRes.recalled, true);
+    assert.ok(reclaimRes.txHash);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 

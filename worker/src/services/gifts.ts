@@ -28,12 +28,15 @@ import {
 import { getExecutionStatus, requestQuote } from './oneclickClient';
 import { formatAtomic } from './confidentialRail';
 import {
+  CIRCLE_GIFT_USDC_ASSET_ID,
   computeVaultPositionValuation,
   deriveEarnCustodyKey,
   EarnVaultError,
+  ensureAgentPocketTopUpForMainAccount,
   generateSecureId,
   getCustodyVaultBalance,
   getEarnVaults,
+  isUsdcOriginAsset,
   normalizeAndValidateHandle,
   resolveEarnVault,
   sanitizeUserText,
@@ -267,9 +270,16 @@ export async function quoteGift(
     throw err;
   }
 
-  const origin = await resolveOriginToken(env, input.sourceAsset, oneClickTokens).catch((err) => {
+  const origin = await resolveOriginToken(
+    env,
+    input.sourceAsset || CIRCLE_GIFT_USDC_ASSET_ID,
+    oneClickTokens
+  ).catch((err) => {
     throw new GiftError('UNSUPPORTED_SOURCE_ASSET', err?.message || 'Unsupported payment token.', 400);
   });
+  if (!isUsdcOriginAsset(origin)) {
+    throw new GiftError('USDC_ONLY', 'Circles and Vault Gifts only accept USDC deposits.', 400);
+  }
 
   const rawAmt = (input.amount || '').trim();
   if (!rawAmt || !/^\d+(\.\d+)?$/.test(rawAmt) || Number(rawAmt) <= 0) {
@@ -447,9 +457,12 @@ export async function createGift(
     throw new GiftError(err.code || 'UNSUPPORTED_EARN_VAULT', err.message, 400);
   }
 
-  const origin = await resolveOriginToken(env, input.sourceAsset, oneClickTokens).catch((err) => {
+  const origin = await resolveOriginToken(env, input.sourceAsset || CIRCLE_GIFT_USDC_ASSET_ID, oneClickTokens).catch((err) => {
     throw new GiftError('UNSUPPORTED_SOURCE_ASSET', err?.message || 'Unsupported payment token.', 400);
   });
+  if (!isUsdcOriginAsset(origin)) {
+    throw new GiftError('USDC_ONLY', 'Vault Gifts only accept USDC deposits.', 400);
+  }
 
   const rawAmt = (input.amount || '').trim();
   if (!rawAmt || !/^\d+(\.\d+)?$/.test(rawAmt) || Number(rawAmt) <= 0) {
@@ -502,7 +515,11 @@ export async function createGift(
         senderNearAccount
       );
     } catch {}
-    const avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    let avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    if (avail + 1e-6 < Number(split.grossAmountFormatted)) {
+      await ensureAgentPocketTopUpForMainAccount(env, senderNearAccount, origin.assetId, grossAtomic);
+      avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    }
     if (avail + 1e-6 < Number(split.grossAmountFormatted)) {
       throw new GiftError(
         'INSUFFICIENT_BALANCE',
@@ -690,9 +707,13 @@ export async function createGift(
       );
     } catch {}
 
-    // 2. Check user available balance
-    const avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    // 2. Check user available balance (auto-pulling Agent Pocket shortfall if needed)
+    let avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
     const reqNum = Number(split.grossAmountFormatted);
+    if (avail + 1e-6 < reqNum) {
+      await ensureAgentPocketTopUpForMainAccount(env, senderNearAccount, origin.assetId, grossAtomic);
+      avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    }
     if (avail + 1e-6 < reqNum) {
       throw new GiftError(
         'INSUFFICIENT_BALANCE',

@@ -320,51 +320,12 @@ async function callTool(c: Context<AppContext>, name: string, args: any): Promis
         });
       }
 
-      // If no specific asset was requested (or 'all'), return all held assets
-      const assetSet = new Set<string>(['USDC', 'NEAR', 'USDT']);
-      if (isConfidentialRailEnabled(c.env)) {
-        try {
-          const confList = await getConfidentialBalances(c.env, session.x_id);
-          for (const cb of confList) {
-            if (parseFloat(cb.amountFormatted || '0') > 0 && cb.symbol) {
-              assetSet.add(cb.symbol.toUpperCase());
-            }
-          }
-        } catch (err) {
-          console.warn('[mcp] confidential balances lookup skipped:', err);
-        }
-      }
-      if (c.env.DB) {
-        try {
-          const deltas = await nearRpc.getVirtualBalanceDeltas(c.env, session);
-          for (const [sym, amt] of Object.entries(deltas)) {
-            if (amt > 0) assetSet.add(sym.toUpperCase());
-          }
-        } catch {}
-      }
-
-      const balances = await Promise.all(
-        Array.from(assetSet).map(async (asset) => {
-          let balance = 0;
-          try {
-            balance = await nearRpc.getUserAvailableBalance(c.env, session, asset);
-          } catch {}
-          const rounded = Number(balance.toFixed(6));
-          return {
-            asset,
-            balance: rounded,
-            available: rounded,
-          };
-        })
-      );
-
-      const nonZeroOrStandard = balances.filter(
-        (b) => ['USDC', 'NEAR', 'USDT'].includes(b.asset) || b.balance > 0
-      );
-
+      const { getAllAgentReadableBalances } = await import('../services/agentPocketService');
+      const all = await getAllAgentReadableBalances(c.env, session);
       return toolText({
         handle: `@${session.x_handle}`,
-        balances: nonZeroOrStandard,
+        balances: all.balances,
+        agentAllowance: all.agentAllowance,
       });
     }
 

@@ -626,6 +626,18 @@ export async function ensureConfidentialFunds(
   }
 
   if (publicHolding.balance < shortfall) {
+    const { ensureAgentPocketTopUpForMainAccount } = await import('./earnVaults');
+    const refreshedPublic = await ensureAgentPocketTopUpForMainAccount(
+      env,
+      accountId,
+      before.assetId,
+      shortfall,
+      publicHolding.balance
+    );
+    publicHolding = { ...publicHolding, balance: refreshedPublic };
+  }
+
+  if (publicHolding.balance < shortfall) {
     const fromPlain = shortfall - publicHolding.balance;
     const deposit = await nearRpc.depositPlainBalanceToIntents(
       env,

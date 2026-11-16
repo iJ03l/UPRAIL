@@ -7051,6 +7051,25 @@ export async function getUserAvailableBalance(
     console.warn('[getUserAvailableBalance] onchain query error:', err);
   }
 
+  // Agent Allowance Pocket balances on intents.near are spendable by agents
+  // AND automatically pulled back on demand for normal UPRAIL actions, so count
+  // them as part of the user's unified spendable balance.
+  try {
+    const { getAgentPocketBalances } = await import('./earnVaults');
+    const pocket = await getAgentPocketBalances(env, nearAccount);
+    for (const pb of pocket.balances) {
+      if (
+        assetsMatch(pb.defuse_asset_id, targetAsset) ||
+        assetsMatch(pb.symbol, targetAsset) ||
+        assetsMatch(pb.nearContractId, targetAsset)
+      ) {
+        onchainAmount += parseFloat(pb.amountFormatted || '0') || 0;
+      }
+    }
+  } catch (pocketErr) {
+    console.warn('[getUserAvailableBalance] agent pocket query error:', pocketErr);
+  }
+
   // Plain tokens sitting on the user's own pk sub-account (direct receives)
   // are spendable too — send/withdraw deposits them into intents first.
   try {

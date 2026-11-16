@@ -28,12 +28,15 @@ import {
 import { getExecutionStatus, requestQuote } from './oneclickClient';
 import { formatAtomic } from './confidentialRail';
 import {
+  CIRCLE_GIFT_USDC_ASSET_ID,
   computeVaultPositionValuation,
   deriveEarnCustodyKey,
   EarnVaultError,
+  ensureAgentPocketTopUpForMainAccount,
   generateSecureId,
   getCustodyVaultBalance,
   getEarnVaults,
+  isUsdcOriginAsset,
   normalizeAndValidateHandle,
   resolveEarnVault,
   sanitizeUserText,
@@ -1102,9 +1105,12 @@ export async function contributeToCircle(
 
   const oneClickTokens = await getOneClickTokens(env).catch(() => [] as OneClickToken[]);
   const vault = await resolveEarnVault(env, circleRow.vault_asset_id, oneClickTokens);
-  const origin = await resolveOriginToken(env, input.sourceAsset, oneClickTokens).catch((err) => {
+  const origin = await resolveOriginToken(env, input.sourceAsset || CIRCLE_GIFT_USDC_ASSET_ID, oneClickTokens).catch((err) => {
     throw new CircleError('UNSUPPORTED_SOURCE_ASSET', err?.message || 'Unsupported token.', 400);
   });
+  if (!isUsdcOriginAsset(origin)) {
+    throw new CircleError('USDC_ONLY', 'Circles only accept USDC deposits.', 400);
+  }
 
   const rawAmt = (input.amount || '').trim();
   if (!rawAmt || !/^\d+(\.\d+)?$/.test(rawAmt) || Number(rawAmt) <= 0) {
@@ -1171,7 +1177,11 @@ export async function contributeToCircle(
       await nearRpc.depositPlainBalanceToIntents(env, session.x_id, origin.assetId, grossAmountFormatted, senderNearAccount);
     } catch {}
 
-    const avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    let avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    if (avail + 1e-6 < Number(grossAmountFormatted)) {
+      await ensureAgentPocketTopUpForMainAccount(env, senderNearAccount, origin.assetId, grossAtomic);
+      avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    }
     if (avail + 1e-6 < Number(grossAmountFormatted)) {
       throw new CircleError(
         'INSUFFICIENT_BALANCE',
@@ -1368,8 +1378,12 @@ export async function contributeToCircle(
       );
     } catch {}
 
-    const avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    let avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
     const reqNum = Number(grossAmountFormatted);
+    if (avail + 1e-6 < reqNum) {
+      await ensureAgentPocketTopUpForMainAccount(env, senderNearAccount, origin.assetId, grossAtomic);
+      avail = await nearRpc.getUserAvailableBalance(env, session, origin.assetId);
+    }
     if (avail + 1e-6 < reqNum) {
       throw new CircleError(
         'INSUFFICIENT_BALANCE',

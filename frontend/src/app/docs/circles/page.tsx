@@ -33,8 +33,8 @@ export default function CirclesDocsPage() {
           Supported Earn Vaults
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          You can fund any Circle or Gift using USDC, USDT, NEAR, SOL, ETH, or any supported asset
-          in your UPRAIL balance — it converts automatically into your chosen vault:
+          Fund any Circle or Gift with USDC from your UPRAIL balance — it converts automatically
+          into whichever Earn pool you pick:
         </p>
         <div className="grid sm:grid-cols-2 gap-2.5">
           {VAULTS.map((v) => (

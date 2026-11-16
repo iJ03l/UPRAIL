@@ -337,11 +337,25 @@ export async function executeNearcomWithdrawal(
     };
   }
 
-  // Read total spendable balance across Confidential Intents + Public Intents + Plain Vault
+  // Read total spendable balance across Confidential Intents + Public Intents + Agent Pocket + Plain Vault
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
   const publicHolding = await nearRpc
     .getIntentAssetBalance(env, asset, nearAccount)
     .catch(() => null);
+  const { getAgentPocketBalances } = await import('./earnVaults');
+  const pocketInfo = await getAgentPocketBalances(env, nearAccount).catch(() => ({
+    pocketAccount: null,
+    balances: [],
+    rpcOk: false,
+  }));
+  const pocketAtomic = pocketInfo.balances
+    .filter(
+      (b) =>
+        nearRpc.assetsMatch(b.defuse_asset_id, balance.assetId) ||
+        nearRpc.assetsMatch(b.nearContractId, balance.contractId) ||
+        nearRpc.assetsMatch(b.symbol, balance.symbol)
+    )
+    .reduce((sum, b) => sum + b.amountAtomic, 0n);
   const plainBalances = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
   const plainAtomic = plainBalances
     .filter(
@@ -350,7 +364,7 @@ export async function executeNearcomWithdrawal(
         nearRpc.assetsMatch(b.nearContractId, balance.contractId)
     )
     .reduce((sum, b) => sum + BigInt(b.amount || '0'), 0n);
-  const totalAtomic = balance.amountAtomic + (publicHolding?.balance ?? 0n) + plainAtomic;
+  const totalAtomic = balance.amountAtomic + (publicHolding?.balance ?? 0n) + pocketAtomic + plainAtomic;
 
   let amountStr: string;
   if (input.amount && input.amount !== 'all') {

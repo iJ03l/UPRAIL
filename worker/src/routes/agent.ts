@@ -466,7 +466,9 @@ export async function executeAgentPay(
     const approvalUrl = `${appOrigin}/approve?id=${approvalId}`;
     const intro =
       opts.custodyMode === 'self'
-        ? `This account uses passkey self-custody, so the server cannot sign transactions on your behalf. Tap below to authorize and sign with Touch ID / Face ID on your device:`
+        ? opts.reason === 'self_custody'
+          ? `This account uses passkey self-custody and your Agent Allowance Pocket does not hold enough to cover this payment automatically. Pre-load USDC/USDT/NEAR in your Agent Allowance Pocket on /app/agents for instant zero-prompt AI payments, or confirm once with Touch ID / Face ID below:`
+          : `This self-custody payment exceeds your AI chat spend cap (${opts.reason}). Confirm with Touch ID / Face ID on your device:`
         : `${recipientsWithUsd.length > 1 ? `This batch payment (${recipientsWithUsd.length} accounts, ` : 'This payment ('}~$${totalUsd.toFixed(2)}) exceeds your spend guardrail. Tap below to authorize with Touch ID / Face ID on your device:`;
 
     return c.json(
@@ -497,16 +499,165 @@ export async function executeAgentPay(
   const exceedsDaily = dailyLimit > 0 && totalUsd > remainingDaily + 1e-9;
 
   if (custody?.custodyMode === 'self') {
-    await markFailed();
-    const reason = exceedsDaily
-      ? 'daily_limit'
-      : exceedsPerTx
-      ? 'per_tx_limit'
-      : hasUnpriced
-      ? 'unpriced_asset'
-      : 'self_custody';
-    const limitUsd = exceedsDaily ? remainingDaily : perTxLimit;
-    return createAgentApprovalRequest({ reason, limitUsd, custodyMode: 'self' });
+    if (exceedsPerTx || exceedsDaily || hasUnpriced) {
+      await markFailed();
+      const reason = exceedsDaily
+        ? 'daily_limit'
+        : exceedsPerTx
+        ? 'per_tx_limit'
+        : 'unpriced_asset';
+      const limitUsd = exceedsDaily ? remainingDaily : perTxLimit;
+      return createAgentApprovalRequest({ reason, limitUsd, custodyMode: 'self' });
+    }
+
+    const agentSession = c.get('session')!;
+    const senderNearAccount =
+      custody.nearAccount || (await nearRpc.resolveUserNearAccount(c.env, agentSession));
+    const { executeAgentPocketSingleSend, probeAgentPocketForPayment } = await import(
+      '../services/agentPocketService'
+    );
+    const probe = await probeAgentPocketForPayment({
+      env: c.env,
+      nearAccount: senderNearAccount,
+      asset,
+      recipients: recipientsWithUsd,
+    });
+
+    if (!probe.covered || !probe.coreAsset || !probe.pocketAccount) {
+      await markFailed();
+      return createAgentApprovalRequest({
+        reason: 'self_custody',
+        limitUsd: perTxLimit,
+        custodyMode: 'self',
+      });
+    }
+
+    // Covered by pre-funded Agent Allowance Pocket within spend limits -> reserve & execute autonomously
+    const pocketAuth = await reserveAgentBudget(c, agent, totalUsd);
+    if (!pocketAuth.allowed) {
+      await markFailed();
+      return pocketAuth.response;
+    }
+
+    try {
+      if (recipients.length === 1) {
+        const r = recipients[0];
+        const sendRes = await executeAgentPocketSingleSend({
+          env: c.env,
+          senderSession: agentSession,
+          senderNearAccount,
+          pocketAccount: probe.pocketAccount,
+          coreAsset: probe.coreAsset,
+          recipientHandle: r.handle,
+          rawAmount: r.amount,
+          memo,
+          requestId: rawBody?.requestId || null,
+        });
+
+        if (sendRes.ok && sendRes.status === 201) {
+          if (sendRes.body.paymentId) {
+            await markCompleted(sendRes.body.paymentId);
+          }
+          const sanitized = sanitizeAgentPaymentReceipt(
+            {
+              ...sendRes.body,
+              recipientHandle: r.handle,
+              amount: r.amount,
+              asset: probe.coreAsset.symbol,
+            },
+            probe.coreAsset.symbol
+          );
+          sanitized.shareLinks = [sanitized.shareLink].filter(Boolean);
+          return c.json(sanitized, 201);
+        }
+
+        if (sendRes.body.code === 'PAYMENT_AMBIGUOUS' || sendRes.status >= 504) {
+          await markUnknown();
+          return c.json(
+            {
+              ...sendRes.body,
+              retryable: false,
+              instruction:
+                'DO NOT RETRY pay_handle automatically. Settlement outcome is ambiguous — call list_payments first to verify.',
+            },
+            sendRes.status as any
+          );
+        }
+
+        await pocketAuth.release();
+        await markFailed();
+        return c.json(sendRes.body, sendRes.status as any);
+      }
+
+      const results: any[] = [];
+      for (const r of recipients) {
+        const sendRes = await executeAgentPocketSingleSend({
+          env: c.env,
+          senderSession: agentSession,
+          senderNearAccount,
+          pocketAccount: probe.pocketAccount,
+          coreAsset: probe.coreAsset,
+          recipientHandle: r.handle,
+          rawAmount: r.amount,
+          memo,
+          requestId: null,
+        });
+        if (!sendRes.ok || sendRes.status !== 201) {
+          if (results.length === 0) {
+            await pocketAuth.release();
+            await markFailed();
+          } else {
+            await markUnknown();
+          }
+          return c.json(
+            {
+              error: sendRes.body.error || `Payment to @${r.handle} failed.`,
+              code: 'BATCH_SEND_ERROR',
+              retryable: false,
+              completedRecipients: results.map((p) => `@${p.recipientHandle}`),
+              failedRecipient: `@${r.handle}`,
+              partialResults: results,
+            },
+            sendRes.status as any
+          );
+        }
+        const isDirect = Boolean(sendRes.body.isDirect || sendRes.body.status === 'CLAIMED');
+        results.push({
+          recipientHandle: r.handle,
+          amount: r.amount,
+          asset: probe.coreAsset.symbol,
+          paymentId: sendRes.body.paymentId,
+          shareLink: sendRes.body.shareLink,
+          claimLink: isDirect ? undefined : sendRes.body.shareLink,
+          receiptLink: isDirect ? sendRes.body.shareLink : undefined,
+          xShareUrl: sendRes.body.xShareUrl,
+          tweetIntentUrl: sendRes.body.tweetIntentUrl,
+          status: isDirect ? 'CLAIMED' : 'ESCROWED',
+          isRegistered: isDirect,
+        });
+      }
+
+      if (results[0]?.paymentId) {
+        await markCompleted(results[0].paymentId);
+      }
+      const batchResponse = sanitizeAgentPaymentReceipt(
+        {
+          status: 'CLAIMED',
+          success: true,
+          asset: probe.coreAsset.symbol,
+          totalSent: results.length,
+          payments: results,
+          shareLinks: results.map((p) => p.shareLink).filter(Boolean),
+          source: 'agent_pocket',
+          custodyMode: 'self',
+        },
+        probe.coreAsset.symbol
+      );
+      return c.json(batchResponse, 201);
+    } catch (err) {
+      await markUnknown();
+      throw err;
+    }
   }
 
   // Guardrail limits exceeded -> create instant passkey authorization for multiple accounts (or explicit approval)
@@ -923,12 +1074,46 @@ export async function executeAgentWithdraw(
 
   const custody = await nearRpc.getUserCustodyRecord(c.env, agent.x_id);
   if (custody?.custodyMode === 'self') {
+    const agentSession = c.get('session')!;
+    const senderNearAccount =
+      custody.nearAccount || (await nearRpc.resolveUserNearAccount(c.env, agentSession));
+    const { tryExecuteAgentPocketWithdraw } = await import('../services/agentPocketService');
+    const pocketWithdraw = await tryExecuteAgentPocketWithdraw({
+      env: c.env,
+      session: agentSession,
+      nearAccount: senderNearAccount,
+      destinationAddress,
+      destinationChain,
+      asset,
+      amountStr,
+      parsedAmount,
+    });
+    if (pocketWithdraw.handled) {
+      if (
+        pocketWithdraw.responseStatus &&
+        pocketWithdraw.responseStatus >= 200 &&
+        pocketWithdraw.responseStatus < 300
+      ) {
+        if (pocketWithdraw.withdrawalId) {
+          await markCompleted(pocketWithdraw.withdrawalId);
+        } else {
+          await markUnknown();
+        }
+      } else if (pocketWithdraw.ambiguous) {
+        await markUnknown();
+      } else {
+        await auth.release();
+        await markFailed();
+      }
+      return c.json(pocketWithdraw.responseBody || {}, (pocketWithdraw.responseStatus || 200) as any);
+    }
+
     await auth.release();
     await markFailed();
     return c.json(
       {
         error:
-          'Self-custody accounts cannot execute autonomous withdrawals from an agent key. Ask the account owner to withdraw manually using their passkey in the UPRAIL app.',
+          'Your Agent Allowance Pocket does not hold enough for this withdrawal. Top up your Agent Allowance Pocket on /app/agents (USDC/USDT/NEAR) for instant AI withdrawals, or withdraw in the UPRAIL app with your passkey.',
         code: 'SELF_CUSTODY_PASSKEY_REQUIRED',
         custodyMode: 'self',
       },
@@ -1000,6 +1185,105 @@ async function revokeOAuthGrantsForAgentKey(
   }
   return matching.length;
 }
+
+/**
+ * GET /api/agent/pocket
+ * Returns the user's isolated Agent Allowance Pocket balances + USD valuation.
+ */
+agentRouter.get('/pocket', requireAuth({ passkeyVerified: true }), async (c) => {
+  const session = c.get('session')!;
+  try {
+    const { getAgentPocketSummary } = await import('../services/agentPocketService');
+    const [summary, custody] = await Promise.all([
+      getAgentPocketSummary(c.env, session),
+      nearRpc.getUserCustodyRecord(c.env, session.x_id),
+    ]);
+    return c.json({
+      ...summary,
+      custodyMode: custody.custodyMode,
+    });
+  } catch (err) {
+    console.error('[agent/pocket] summary error:', err);
+    return c.json({ error: 'Could not read Agent Allowance Pocket balance.', code: 'POCKET_READ_ERROR' }, 500);
+  }
+});
+
+/**
+ * POST /api/agent/pocket/fund/prepare
+ * Prepares a single-tap passkey WebAuthn signature to fund USDC/USDT/NEAR
+ * from the user's non-custodial vault into their Agent Allowance Pocket.
+ */
+agentRouter.post('/pocket/fund/prepare', requireAuth({ passkeyVerified: true }), async (c) => {
+  const session = c.get('session')!;
+  const body = (await c.req.json().catch(() => ({}))) as { asset?: string; amount?: string };
+  try {
+    const { prepareAgentPocketFund } = await import('../services/agentPocketService');
+    const prep = await prepareAgentPocketFund({
+      env: c.env,
+      session,
+      asset: String(body?.asset || 'USDC'),
+      amount: String(body?.amount || ''),
+    });
+    return c.json(prep);
+  } catch (err) {
+    const { handleCustodyActionError } = await import('../utils/custodyResponse');
+    return handleCustodyActionError(c, err, 'AGENT_POCKET_FUND_PREPARE_ERROR', '[agent/pocket/fund/prepare]');
+  }
+});
+
+/**
+ * POST /api/agent/pocket/fund/submit
+ * Verifies the user's passkey WebAuthn assertion and relays the transfer into
+ * their Agent Allowance Pocket.
+ */
+agentRouter.post('/pocket/fund/submit', requireAuth({ passkeyVerified: true }), async (c) => {
+  const session = c.get('session')!;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    actionId?: string;
+    assertion?: unknown;
+    step?: string;
+  };
+  if (!body?.actionId || !body?.assertion) {
+    return c.json({ error: 'Missing actionId or assertion', code: 'INVALID_REQUEST' }, 400);
+  }
+  try {
+    const { submitAgentPocketFund } = await import('../services/agentPocketService');
+    const result = await submitAgentPocketFund({
+      env: c.env,
+      session,
+      actionId: body.actionId,
+      assertion: body.assertion,
+      step: body.step,
+    });
+    return c.json(result);
+  } catch (err) {
+    const { handleCustodyActionError } = await import('../utils/custodyResponse');
+    return handleCustodyActionError(c, err, 'AGENT_POCKET_FUND_SUBMIT_ERROR', '[agent/pocket/fund/submit]');
+  }
+});
+
+/**
+ * POST /api/agent/pocket/reclaim
+ * Passkey-gated instant recall of all funds from the user's Agent Allowance
+ * Pocket back to their main non-custodial UPRAIL account on intents.near.
+ */
+agentRouter.post('/pocket/reclaim', requireAuth({ passkeyVerified: true }), requirePasskeyAuth(), async (c) => {
+  const session = c.get('session')!;
+  try {
+    const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
+    const { recallAllAgentPocketToMainAccount } = await import('../services/earnVaults');
+    const res = await recallAllAgentPocketToMainAccount(c.env, nearAccount);
+    return c.json({
+      reclaimed: res.recalled,
+      txHash: res.txHash || null,
+      recalledAssets: res.recalledAssets || [],
+      mainAccount: nearAccount,
+    });
+  } catch (err) {
+    console.error('[agent/pocket/reclaim] error:', err);
+    return c.json({ error: 'Failed to recall Agent Allowance Pocket.', code: 'POCKET_RECLAIM_ERROR' }, 500);
+  }
+});
 
 /**
  * POST /api/agent/keys
@@ -1231,7 +1515,34 @@ agentRouter.post('/keys/:id/revoke', requireAuth({ passkeyVerified: true }), req
       console.warn('[agent] OAuth grant revoke failed (D1 key is already revoked):', err);
     }
   }
-  return c.json({ id, revoked: true, oauthGrantsRevoked });
+
+  let pocketReclaimed = false;
+  let pocketRecallTxHash: string | undefined;
+  try {
+    const activeCountRow = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS cnt FROM agent_keys
+        WHERE x_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`
+    )
+      .bind(session.x_id, Date.now())
+      .first<{ cnt: number }>();
+    if (Number(activeCountRow?.cnt || 0) === 0) {
+      const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
+      const { recallAllAgentPocketToMainAccount } = await import('../services/earnVaults');
+      const recalled = await recallAllAgentPocketToMainAccount(c.env, nearAccount);
+      pocketReclaimed = recalled.recalled;
+      pocketRecallTxHash = recalled.txHash;
+    }
+  } catch (recallErr) {
+    console.warn('[agent] auto-reclaim pocket on last key revoke skipped:', recallErr);
+  }
+
+  return c.json({
+    id,
+    revoked: true,
+    oauthGrantsRevoked,
+    pocketReclaimed,
+    ...(pocketRecallTxHash ? { pocketRecallTxHash } : {}),
+  });
 });
 
 /**
@@ -1408,14 +1719,24 @@ agentRouter.get('/receive', requireAgent(), async (c) => {
 });
 
 /**
- * GET /api/agent/balance?asset=USDC
- * Available balance for a specific asset (defaults to NEAR) plus the user's
- * @handle.
+ * GET /api/agent/balance?asset=USDC (or ?asset=all)
+ * Available balance for a specific asset (defaults to NEAR for legacy callers)
+ * or all held balances when `?asset=all` is passed.
  */
 agentRouter.get('/balance', requireAgent(), async (c) => {
   const session = c.get('session')!;
-  const asset = c.req.query('asset') || 'NEAR';
+  const rawAsset = (c.req.query('asset') || '').trim();
   try {
+    if (rawAsset.toLowerCase() === 'all') {
+      const { getAllAgentReadableBalances } = await import('../services/agentPocketService');
+      const all = await getAllAgentReadableBalances(c.env, session);
+      return c.json({
+        handle: `@${session.x_handle}`,
+        balances: all.balances,
+        agentAllowance: all.agentAllowance,
+      });
+    }
+    const asset = rawAsset || 'NEAR';
     const balance = Number(
       (await nearRpc.getUserAvailableBalance(c.env, session, asset)).toFixed(6)
     );
@@ -1429,6 +1750,27 @@ agentRouter.get('/balance', requireAgent(), async (c) => {
   } catch (err) {
     console.error('[agent] balance lookup failed:', err);
     return c.json({ error: 'Could not read balance.', code: 'BALANCE_ERROR' }, 500);
+  }
+});
+
+/**
+ * GET /api/agent/balances
+ * Returns all held UPRAIL token balances across Intents, L1 Plain, Confidential,
+ * Virtual Escrow, and Agent Allowance Pocket.
+ */
+agentRouter.get('/balances', requireAgent(), async (c) => {
+  const session = c.get('session')!;
+  try {
+    const { getAllAgentReadableBalances } = await import('../services/agentPocketService');
+    const all = await getAllAgentReadableBalances(c.env, session);
+    return c.json({
+      handle: `@${session.x_handle}`,
+      balances: all.balances,
+      agentAllowance: all.agentAllowance,
+    });
+  } catch (err) {
+    console.error('[agent] balances lookup failed:', err);
+    return c.json({ error: 'Could not read balances.', code: 'BALANCE_ERROR' }, 500);
   }
 });
 
@@ -1930,21 +2272,21 @@ agentRouter.get('/openapi.json', (c) => {
       '/api/agent/balance': {
         get: {
           operationId: 'getBalance',
-          summary: 'Check available UPRAIL balance for a token',
+          summary: 'Check available UPRAIL balance for a token (or ?asset=all for every token)',
           description:
-            'Returns the unified spendable balance for the requested asset.',
+            'Returns the unified spendable balance across Intents, L1 Plain, Confidential, and Agent Allowance Pocket. Pass ?asset=all to list all held tokens.',
           parameters: [
             {
               name: 'asset',
               in: 'query',
               required: false,
               schema: { type: 'string', default: 'NEAR' },
-              description: 'Token symbol to check (e.g. USDC, USDT, NEAR)',
+              description: 'Token symbol to check (e.g. USDC, USDT, NEAR) or "all" for every held token',
             },
           ],
           responses: {
             '200': {
-              description: 'Available token balance',
+              description: 'Available token balance (or full token balances list when asset=all)',
               content: {
                 'application/json': {
                   schema: {
@@ -1969,6 +2311,15 @@ agentRouter.get('/openapi.json', (c) => {
                 },
               },
             },
+          },
+        },
+      },
+      '/api/agent/balances': {
+        get: {
+          operationId: 'getAllBalances',
+          summary: 'List all available token balances across every UPRAIL rail and Agent Allowance Pocket',
+          responses: {
+            '200': { description: 'Unified list of all held token balances plus Agent Allowance Pocket summary' },
           },
         },
       },

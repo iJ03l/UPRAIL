@@ -39,6 +39,10 @@ import {
 import { publicErrorMessage } from '../utils/errors';
 import { syncAllLaunchpadFees } from '../services/launchpadFees';
 import {
+  ensureAgentPocketTopUpForMainAccount,
+  getAgentPocketBalances,
+} from '../services/earnVaults';
+import {
   ensureConfidentialFunds,
   formatAtomic,
   getConfidentialAssetBalance,
@@ -1183,6 +1187,12 @@ claimRouter.get('/balance', requireAuth({ passkeyVerified: true }), async (c) =>
       addAmount(ob.defuse_asset_id || ob.symbol, parseFloat(ob.amountFormatted) || 0);
     }
     try {
+      const pocket = await getAgentPocketBalances(c.env, nearAccount);
+      for (const pb of pocket.balances) {
+        addAmount(pb.defuse_asset_id || pb.symbol, parseFloat(pb.amountFormatted) || 0);
+      }
+    } catch {}
+    try {
       const plainBalances = await nearRpc.getPlainBalances(c.env, nearAccount);
       for (const pb of plainBalances) {
         addAmount(pb.defuse_asset_id || pb.symbol, parseFloat(pb.amountFormatted) || 0);
@@ -1917,10 +1927,24 @@ export async function handleWithdraw(c: Context<AppContext>): Promise<Response> 
         asset,
         nearAccountForDeposit
       );
-      const coveredByIntents =
-        intentHolding !== null &&
-        intentHolding.balance >=
-          BigInt(nearRpc.toBaseUnits(amountStr, intentHolding.decimals) || '0');
+      const reqWithdrawAtomic = intentHolding
+        ? BigInt(nearRpc.toBaseUnits(amountStr, intentHolding.decimals) || '0')
+        : 0n;
+      let coveredByIntents =
+        intentHolding !== null && intentHolding.balance >= reqWithdrawAtomic;
+
+      if (!coveredByIntents && reqWithdrawAtomic > 0n) {
+        const pulled = await ensureAgentPocketTopUpForMainAccount(
+          c.env,
+          nearAccountForDeposit,
+          asset,
+          reqWithdrawAtomic,
+          intentHolding?.balance ?? 0n
+        );
+        if (pulled >= reqWithdrawAtomic) {
+          coveredByIntents = true;
+        }
+      }
 
       let plainBefore: bigint | null = null;
       if (coveredByIntents) {

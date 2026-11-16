@@ -408,43 +408,27 @@ export const CirclesView: React.FC = () => {
     }
   }, [circleMembers]);
 
-  // Pick default origin asset from user's highest positive balance or USDC
+  // Both Circles and Vault Gifts are strictly USDC-only.
   const availableOriginAssets = useMemo(() => {
-    const held = balances
-      .filter((b) => (parseFloat(b.amountFormatted || '0') || 0) > 0)
-      .map((b) => ({
-        assetId: b.defuse_asset_id || b.nearContractId || b.symbol,
-        symbol: b.symbol,
-        balanceFormatted: b.amountFormatted,
-        priceUsd:
-          typeof b.priceUsd === 'number' && b.priceUsd > 0
-            ? b.priceUsd
-            : ['USDC', 'USDT', 'DAI'].includes((b.symbol || '').toUpperCase())
-            ? 1
-            : undefined,
-        chain: 'near',
-      }));
-    if (held.length > 0) return held;
+    const usdcId = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+    const heldUsdc = balances.find((b) => {
+      const sym = (b.symbol || '').toUpperCase();
+      const id = (b.defuse_asset_id || '').toLowerCase();
+      const cid = (b.nearContractId || '').toLowerCase();
+      return (
+        sym === 'USDC' &&
+        (id === usdcId ||
+          cid === '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1' ||
+          id.includes('17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1'))
+      );
+    });
     return [
       {
-        assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+        assetId: usdcId,
         symbol: 'USDC',
-        balanceFormatted: '0.00',
-        priceUsd: 1,
-        chain: 'near',
-      },
-      {
-        assetId: 'nep141:usdt.tether-token.near',
-        symbol: 'USDT',
-        balanceFormatted: '0.00',
-        priceUsd: 1,
-        chain: 'near',
-      },
-      {
-        assetId: 'nep141:wrap.near',
-        symbol: 'NEAR',
-        balanceFormatted: '0.00',
-        priceUsd: undefined,
+        balanceFormatted: heldUsdc?.amountFormatted || '0.00',
+        priceUsd:
+          typeof heldUsdc?.priceUsd === 'number' && heldUsdc.priceUsd > 0 ? heldUsdc.priceUsd : 1,
         chain: 'near',
       },
     ];
@@ -452,8 +436,9 @@ export const CirclesView: React.FC = () => {
 
   useEffect(() => {
     if (availableOriginAssets.length > 0) {
-      if (!giftOriginAsset) setGiftOriginAsset(availableOriginAssets[0].assetId);
-      if (!contribOriginAsset) setContribOriginAsset(availableOriginAssets[0].assetId);
+      const usdcAssetId = availableOriginAssets[0].assetId;
+      if (giftOriginAsset !== usdcAssetId) setGiftOriginAsset(usdcAssetId);
+      if (contribOriginAsset !== usdcAssetId) setContribOriginAsset(usdcAssetId);
     }
   }, [availableOriginAssets, giftOriginAsset, contribOriginAsset]);
 

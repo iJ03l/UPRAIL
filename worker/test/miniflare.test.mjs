@@ -635,6 +635,7 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.ok(body.paths['/api/agent/withdraw']);
     assert.ok(body.paths['/api/agent/receive']);
     assert.ok(body.paths['/api/agent/balance']);
+    assert.ok(body.paths['/api/agent/balances']);
     assert.ok(body.paths['/api/agent/payments']);
     assert.equal(body.components.securitySchemes.ApiKeyQuery, undefined);
     assert.deepEqual(body.security, [{ BearerAuth: [] }]);

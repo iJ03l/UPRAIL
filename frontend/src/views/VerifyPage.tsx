@@ -135,10 +135,10 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<str
             <div>
               <h2 className="text-base font-display font-extrabold text-stone-950">
                 {isSelfVerified
-                  ? 'Passkey Self-Custody Verified On-Chain'
+                  ? 'Self-Custody Active & Verified On-Chain'
                   : custodyMode === 'self'
                   ? 'Self-Custody Verification Status'
-                  : 'Standard Managed Custody'}
+                  : 'Standard Managed Account'}
               </h2>
               <p className="text-xs font-mono text-stone-600 mt-0.5 break-all">
                 {handle ? `@${handle} • ` : ''}
@@ -169,28 +169,28 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<str
 
       <div className="grid grid-cols-1 gap-2.5">
         <StatusRow
-          label="NEAR Intents Account"
+          label="UPRAIL Account (NEAR)"
           value={nearAccount}
           monoValue={nearAccount}
         />
         <StatusRow
-          label="Custody Mode"
+          label="Control Mode"
           value={
             custodyMode === 'self' || selfCustody
-              ? 'Passkey Self-Custody (Non-Custodial)'
+              ? 'Passkey Self-Custody (Only your keys can sign)'
               : custodyMode === 'server'
-              ? 'Standard Escrow Custody (server)'
+              ? 'Standard Managed Account'
               : 'External NEAR Account'
           }
           ok={custodyMode === 'self' || selfCustody ? true : undefined}
         />
         <StatusRow
-          label="Server Key on intents.near"
+          label="UPRAIL Server Signing Key (Intents)"
           value={
             serverKeyPresent === false
-              ? 'ABSENT — Server Cannot Sign Intents'
+              ? 'REMOVED — UPRAIL cannot move or sign Intents funds'
               : serverKeyPresent === true
-              ? 'PRESENT (Standard Managed / Migration Pending)'
+              ? 'PRESENT (Managed Account / Migration Pending)'
               : 'Unavailable'
           }
           ok={
@@ -203,22 +203,22 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<str
         />
         {serverL1KeyPresent !== undefined && serverL1KeyPresent !== null && (
           <StatusRow
-            label="Server Key on NEAR L1 Sub-Account"
+            label="UPRAIL Server Key (Wallet L1 Sub-Account)"
             value={
               serverL1KeyPresent === false
-                ? 'DELETED — Rotated to User Recovery Key'
-                : 'PRESENT'
+                ? 'REMOVED — Rotated to Your Offline Recovery Key'
+                : 'PRESENT (Sweeps L1 token drops only; Intents stays locked)'
             }
             ok={serverL1KeyPresent === false}
           />
         )}
         <StatusRow
-          label="intents.near auth_by_predecessor_id"
+          label="Account Predecessor Lock (intents.near)"
           value={
             authByPred === false
-              ? 'DISABLED (Strict Public-Key Signature Required)'
+              ? 'LOCKED — Passkey or Offline Recovery Key Required'
               : authByPred === true
-              ? 'ENABLED (Predecessor RPC Call Allowed)'
+              ? 'UNLOCKED — Predecessor Call Allowed'
               : 'Unavailable'
           }
           ok={
@@ -235,19 +235,33 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<str
         <div className="p-4 rounded-2xl border border-stone-200 bg-white space-y-2.5">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-stone-600">
-              Live Keys Registered on intents.near ({onchainPublicKeys.length})
+              Authorized Signing Keys ({onchainPublicKeys.length})
             </h3>
           </div>
           <div className="space-y-1.5">
-            {onchainPublicKeys.map((pk) => (
-              <div
-                key={pk}
-                className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-stone-50 border border-stone-200"
-              >
-                <span className="text-xs font-mono text-stone-800 break-all">{pk}</span>
-                <CopyChip value={pk} label="Public key" />
-              </div>
-            ))}
+            {onchainPublicKeys.map((pk) => {
+              const roleLabel = pk.startsWith('p256:')
+                ? 'Your Passkey'
+                : result.backupPubkey && pk === result.backupPubkey
+                ? 'Offline Recovery Key'
+                : isSelfVerified
+                ? 'Recovery Key'
+                : 'Managed Key';
+              return (
+                <div
+                  key={pk}
+                  className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-stone-50 border border-stone-200"
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="shrink-0 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-white border border-stone-200 text-stone-700">
+                      {roleLabel}
+                    </span>
+                    <span className="text-xs font-mono text-stone-800 break-all">{pk}</span>
+                  </div>
+                  <CopyChip value={pk} label="Public key" />
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -255,7 +269,7 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<str
       {result.registeredPasskeys && result.registeredPasskeys.length > 0 && (
         <div className="p-4 rounded-2xl border border-stone-200 bg-white space-y-2">
           <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-stone-600">
-            Bound WebAuthn P-256 Passkeys ({result.registeredPasskeys.length})
+            Registered Device Passkeys ({result.registeredPasskeys.length})
           </h3>
           <div className="space-y-1.5">
             {result.registeredPasskeys.map((pk, idx) => (
@@ -312,8 +326,8 @@ function ContractVerifyPanel({ result }: { result: ContractVerifyResponse }) {
             <div>
               <h2 className="text-base font-display font-extrabold text-stone-950">
                 {result.foundOnchain
-                  ? `On-Chain ${result.kind.toUpperCase()} Verified on Smart Contract`
-                  : `No On-Chain Record Found on Smart Contract`}
+                  ? `${result.kind === 'send' ? 'Unclaimed Send' : result.kind === 'gift' ? 'Vault Gift' : 'Circle'} Verified On-Chain`
+                  : `No Record Found on ${result.contractId || 'circle.uprail.near'}`}
               </h2>
               <p className="text-xs font-mono text-stone-600 mt-0.5">
                 ID: {result.id}
@@ -581,16 +595,15 @@ export const VerifyPage: React.FC = () => {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold uppercase tracking-wider">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Public Cryptographic Verifier</span>
+              <span>Account &amp; Escrow Check</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950 tracking-tight">
-              Verify Non-Custodial Keys &amp; Escrow Contracts
+              Verify Account Ownership &amp; Escrows
             </h1>
             <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
-              Independently inspect live <code className="font-mono">intents.near</code>{' '}
-              public keys, verify server key absence for Self-Custody accounts, or inspect
-              on-chain Circles, Timelocked Gifts, and Unclaimed Sends on{' '}
-              <code className="font-mono">circle.uprail.near</code>.
+              Check live on NEAR that only your passkey and offline recovery key control your
+              account (<code className="font-mono">intents.near</code>), or inspect any Circle,
+              Vault Gift, or unclaimed transfer on <code className="font-mono">circle.uprail.near</code>.
             </p>
           </div>
 
@@ -607,7 +620,7 @@ export const VerifyPage: React.FC = () => {
                   : 'text-stone-600 hover:text-stone-950'
               }`}
             >
-              Account / @Handle Custody
+              Account Ownership
             </button>
             <button
               type="button"
@@ -621,7 +634,7 @@ export const VerifyPage: React.FC = () => {
                   : 'text-stone-600 hover:text-stone-950'
               }`}
             >
-              Smart Contract Object
+              Circles, Gifts &amp; Sends
             </button>
           </div>
 

@@ -505,3 +505,44 @@ test('Circle anti-IDOR blocks non-members from viewing and non-creators from set
   assert.equal(afterAliceDissolveSign.dissolveApprovalsCount, 1);
   assert.equal(afterAliceDissolveSign.dissolveRequiredCount, 2);
 });
+
+test('Circles & Gifts enforce USDC-only deposits while supporting all 6 Earn vaults', async () => {
+  const { quoteGift } = await import('../src/services/gifts');
+  const { isUsdcOriginAsset } = await import('../src/services/earnVaults');
+
+  assert.equal(
+    isUsdcOriginAsset({
+      symbol: 'USDC',
+      assetId: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+      nearContractId: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    }),
+    true
+  );
+  assert.equal(
+    isUsdcOriginAsset({
+      symbol: 'USDT',
+      assetId: 'nep141:usdt.tether-token.near',
+      nearContractId: 'usdt.tether-token.near',
+    }),
+    false
+  );
+  assert.equal(
+    isUsdcOriginAsset({
+      symbol: 'NEAR',
+      assetId: 'nep141:wrap.near',
+      nearContractId: 'wrap.near',
+    }),
+    false
+  );
+
+  await assert.rejects(
+    () =>
+      quoteGift(TEST_ENV, {
+        vaultAsset: 'stNEAR',
+        sourceAsset: 'nep141:wrap.near',
+        amount: '5',
+      }),
+    (err: any) => err?.code === 'USDC_ONLY' && err?.httpStatus === 400
+  );
+});
+

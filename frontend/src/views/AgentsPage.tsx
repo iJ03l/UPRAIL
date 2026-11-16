@@ -170,6 +170,27 @@ export const AgentsPage: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<AgentKey | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformId>('claude');
 
+  const [pocket, setPocket] = useState<{
+    pocketAccount: string | null;
+    mainAccount: string;
+    balances: Array<{
+      assetId: string;
+      symbol: string;
+      name: string;
+      decimals: number;
+      amount: string;
+      amountFormatted: string;
+      priceUsd: number | null;
+      amountUsd: number | null;
+    }>;
+    totalUsd: number;
+    custodyMode: 'server' | 'self';
+  } | null>(null);
+  const [pocketAsset, setPocketAsset] = useState<'USDC' | 'USDT' | 'NEAR'>('USDC');
+  const [pocketAmount, setPocketAmount] = useState('10');
+  const [pocketBusy, setPocketBusy] = useState<null | 'fund' | 'reclaim'>(null);
+  const [pocketStatusMsg, setPocketStatusMsg] = useState<string | null>(null);
+
   const selectPlatform = (p: ChatPlatform) => {
     setSelectedPlatform(p.id);
   };
@@ -190,8 +211,12 @@ export const AgentsPage: React.FC = () => {
 
   const refresh = useCallback(async () => {
     try {
-      const k = await api.getAgentKeys();
+      const [k, p] = await Promise.all([
+        api.getAgentKeys(),
+        api.getAgentPocket().catch(() => null),
+      ]);
       setKeys(k);
+      if (p) setPocket(p);
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to load AI chat sessions');
@@ -206,6 +231,52 @@ export const AgentsPage: React.FC = () => {
     return () => clearInterval(t);
   }, [refresh]);
 
+  const handleFundPocket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = pocketAmount.trim();
+    if (!amt || Number(amt) <= 0) {
+      setError('Enter a positive amount to load into your Agent Allowance.');
+      return;
+    }
+    setPocketBusy('fund');
+    setPocketStatusMsg('Preparing passkey signature…');
+    setError(null);
+    try {
+      await api.fundAgentPocketSelfCustody(
+        { asset: pocketAsset, amount: amt },
+        (_stage, msg) => setPocketStatusMsg(msg)
+      );
+      toast(`Loaded ${amt} ${pocketAsset} into Agent Allowance`);
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Failed to load Agent Allowance');
+    } finally {
+      setPocketBusy(null);
+      setPocketStatusMsg(null);
+    }
+  };
+
+  const handleReclaimPocket = async () => {
+    setPocketBusy('reclaim');
+    setPocketStatusMsg('Confirm with passkey to return funds…');
+    setError(null);
+    try {
+      const assertion = await authorizeWithPasskey('Return Agent Allowance funds to main vault');
+      const res = await api.reclaimAgentPocket(assertion);
+      if (res.reclaimed) {
+        toast('Returned Agent Allowance funds to your main UPRAIL vault');
+      } else {
+        toast('No balance remaining in Agent Allowance');
+      }
+      await refresh();
+    } catch (err: any) {
+      setError(err.message || 'Failed to return Agent Allowance');
+    } finally {
+      setPocketBusy(null);
+      setPocketStatusMsg(null);
+    }
+  };
+
   const handleRevoke = (k: AgentKey) => {
     setRevokeTarget(k);
   };
@@ -219,8 +290,9 @@ export const AgentsPage: React.FC = () => {
     try {
       const action = k.authMethod === 'oauth' ? 'Disconnect' : 'Revoke';
       const assertion = await authorizeWithPasskey(`${action} “${k.name}”`);
-      await api.revokeAgentKey(k.id, assertion);
-      toast(k.authMethod === 'oauth' ? `“${k.name}” disconnected` : `“${k.name}” revoked`);
+      const res = await api.revokeAgentKey(k.id, assertion);
+      const baseMsg = k.authMethod === 'oauth' ? `“${k.name}” disconnected` : `“${k.name}” revoked`;
+      toast(res?.pocketReclaimed ? `${baseMsg} — Agent Allowance returned to main vault` : baseMsg);
       await refresh();
     } catch (err: any) {
       setError(err.message || 'Failed to revoke key');
@@ -293,6 +365,113 @@ export const AgentsPage: React.FC = () => {
         <div className="flex items-start space-x-2 p-3 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs">
           <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {/* Agent Allowance Pocket (Zero-prompt AI chat spending for Self-Custody) */}
+      {pocket && pocket.custodyMode === 'self' && (
+        <div className="p-5 rounded-3xl bg-white border border-stone-200 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2 text-stone-950">
+                <Zap className="w-4 h-4 text-emerald-600" />
+                <h2 className="text-sm font-display font-bold uppercase tracking-wider">
+                  Agent Allowance Pocket
+                </h2>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  ZERO-PROMPT CHAT
+                </span>
+              </div>
+              <p className="text-xs text-stone-500 max-w-2xl leading-relaxed">
+                Pre-load USDC, USDT, or NEAR here for instant AI chat sends &amp; withdrawals inside
+                your spend caps with no passkey popup. These funds still count in your main UPRAIL
+                balance and pull back automatically when you spend anywhere else.
+              </p>
+            </div>
+            <div className="sm:text-right flex-shrink-0">
+              <span className="block text-[10px] font-mono uppercase tracking-wider text-stone-400">
+                Loaded Allowance
+              </span>
+              <span className="text-xl font-display font-extrabold text-stone-950 tabular-nums">
+                ${(pocket.totalUsd ?? 0).toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {pocket.balances.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {pocket.balances.map((b) => (
+                <span
+                  key={b.assetId}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-800"
+                >
+                  <span className="font-bold tabular-nums">{b.amountFormatted}</span>
+                  <span className="text-stone-500">{b.symbol}</span>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {pocketStatusMsg && (
+            <div className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-700">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-600 flex-shrink-0" />
+              <span>{pocketStatusMsg}</span>
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+            <form onSubmit={handleFundPocket} className="flex flex-wrap items-center gap-2">
+              <select
+                value={pocketAsset}
+                onChange={(e) => setPocketAsset(e.target.value as 'USDC' | 'USDT' | 'NEAR')}
+                disabled={Boolean(pocketBusy)}
+                className="px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono font-bold text-stone-900 focus:outline-none focus:border-stone-900"
+              >
+                <option value="USDC">USDC</option>
+                <option value="USDT">USDT</option>
+                <option value="NEAR">NEAR</option>
+              </select>
+              <input
+                type="number"
+                step="any"
+                min="0.01"
+                required
+                value={pocketAmount}
+                onChange={(e) => setPocketAmount(e.target.value)}
+                disabled={Boolean(pocketBusy)}
+                placeholder="10"
+                className="w-24 px-3 py-2 rounded-xl border border-stone-200 text-xs font-mono font-bold text-stone-900 focus:outline-none focus:border-stone-900"
+              />
+              <button
+                type="submit"
+                disabled={Boolean(pocketBusy) || isAuthorizing}
+                className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {pocketBusy === 'fund' ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Plus className="w-3.5 h-3.5" />
+                )}
+                <span>Load Allowance</span>
+              </button>
+            </form>
+
+            {pocket.balances.length > 0 && (
+              <button
+                type="button"
+                onClick={handleReclaimPocket}
+                disabled={Boolean(pocketBusy) || isAuthorizing}
+                className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 self-start sm:self-auto"
+              >
+                {pocketBusy === 'reclaim' ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                <span>Return to Main Vault</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 

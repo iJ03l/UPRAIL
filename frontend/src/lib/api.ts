@@ -1658,7 +1658,10 @@ export const api = {
     return await res.json();
   },
 
-  async revokeAgentKey(id: string, passkeyAssertion: unknown): Promise<void> {
+  async revokeAgentKey(
+    id: string,
+    passkeyAssertion: unknown
+  ): Promise<{ id?: string; revoked?: boolean; pocketReclaimed?: boolean }> {
     const url = API_BASE
       ? `${API_BASE}/api/agent/keys/${encodeURIComponent(id)}/revoke`
       : `/api/agent/keys/${encodeURIComponent(id)}/revoke`;
@@ -1668,10 +1671,11 @@ export const api = {
       credentials: 'include',
       body: JSON.stringify({ passkeyAssertion }),
     });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to revoke key');
+      throw new Error(data.error || 'Failed to revoke key');
     }
+    return data;
   },
 
   /** Permanently deletes a revoked or expired key. Passkey-gated. */
@@ -2501,6 +2505,57 @@ export const api = {
     return custodyJson<ContractVerifyResponse>(
       `/api/verify/${encodeURIComponent(kind)}/${encodeURIComponent(id.trim())}`
     );
+  },
+
+  async getAgentPocket(): Promise<{
+    pocketAccount: string | null;
+    mainAccount: string;
+    balances: Array<{
+      assetId: string;
+      symbol: string;
+      name: string;
+      decimals: number;
+      amount: string;
+      amountFormatted: string;
+      priceUsd: number | null;
+      amountUsd: number | null;
+    }>;
+    totalUsd: number;
+    rpcOk: boolean;
+    custodyMode: 'server' | 'self';
+  }> {
+    return custodyJson('/api/agent/pocket');
+  },
+
+  async fundAgentPocketSelfCustody(
+    params: { asset: string; amount: string },
+    onProgress?: (stage: SelfCustodyProgressStage, message: string) => void
+  ): Promise<{
+    funded?: boolean;
+    completed?: boolean;
+    txHash?: string;
+    pocketAccount?: string;
+    asset?: string;
+    amount?: string;
+  }> {
+    return runCustodyFlow(
+      '/api/agent/pocket/fund/prepare',
+      '/api/agent/pocket/fund/submit',
+      params,
+      { onProgress }
+    );
+  },
+
+  async reclaimAgentPocket(passkeyAssertion: unknown): Promise<{
+    reclaimed: boolean;
+    txHash?: string;
+    recalledAssets?: Array<{ symbol: string; amountFormatted: string }>;
+    mainAccount: string;
+  }> {
+    return custodyJson('/api/agent/pocket/reclaim', {
+      method: 'POST',
+      body: JSON.stringify({ passkeyAssertion }),
+    });
   },
 
   async sendPaymentSelfCustody(
