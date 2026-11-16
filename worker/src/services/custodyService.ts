@@ -1495,7 +1495,9 @@ export async function verifyPublicCustodyState(env: Env, accountOrHandle: string
   }
 
   let nearAccount: string | null = null;
+  let derivedServerKey: Awaited<ReturnType<typeof nearRpc.deriveUserNearKeypair>> | null = null;
   let dbProfile: {
+    xId: string;
     xHandle: string;
     custodyMode: 'server' | 'self';
     backupPubkey: string | null;
@@ -1529,8 +1531,15 @@ export async function verifyPublicCustodyState(env: Env, accountOrHandle: string
         if (!nearAccount && identity.near_account) {
           nearAccount = identity.near_account;
         }
+        try {
+          derivedServerKey = await nearRpc.deriveUserNearKeypair(env, identity.x_id);
+          if (!nearAccount) {
+            nearAccount = derivedServerKey.accountId;
+          }
+        } catch {}
         const pks = await listAndBackfillUserPasskeys(env, identity.x_id);
         dbProfile = {
+          xId: identity.x_id,
           xHandle: identity.x_handle,
           custodyMode: identity.custody_mode === 'self' ? 'self' : 'server',
           backupPubkey: identity.backup_pubkey ?? null,
@@ -1548,7 +1557,40 @@ export async function verifyPublicCustodyState(env: Env, accountOrHandle: string
     throw new CustodyActionError(`No NEAR account found for '${raw}'`, 404, 'ACCOUNT_NOT_FOUND');
   }
 
-  const onchain = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
+  let onchain = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
+
+  // If this account was upgraded to Self-Custody before native L1 key rotation was introduced,
+  // automatically rotate its L1 FullAccess key to backupPubkey once plain L1 balances are empty.
+  if (
+    dbProfile?.custodyMode === 'self' &&
+    dbProfile.backupPubkey &&
+    derivedServerKey &&
+    onchain.l1AccessKeys.some((k) => k.publicKey === derivedServerKey!.publicKeyB58)
+  ) {
+    try {
+      const plainBalances = await nearRpc.getPlainBalances(env, nearAccount);
+      const hasUnsweptPlain = plainBalances.some(
+        (b) =>
+          b.nearContractId &&
+          (b.symbol.toUpperCase() !== 'NEAR' || Number(b.amountFormatted || '0') > 0.03)
+      );
+      if (!hasUnsweptPlain) {
+        const rot = await nearRpc.rotateSubAccountL1KeyToBackup(
+          env,
+          nearAccount,
+          derivedServerKey.publicKey,
+          derivedServerKey.privateKey,
+          dbProfile.backupPubkey
+        );
+        if (rot.rotated) {
+          onchain = await nearRpc.getAccountIntentsAuthState(env, nearAccount);
+        }
+      }
+    } catch (rotErr) {
+      console.warn('[verify] L1 key auto-rotation notice:', rotErr);
+    }
+  }
+
   const p256Keys = onchain.publicKeys.filter((k) => k.startsWith('p256:'));
   const ed25519Keys = onchain.publicKeys.filter((k) => k.startsWith('ed25519:'));
   const backupMatchedOnchain = dbProfile?.backupPubkey
@@ -1562,11 +1604,32 @@ export async function verifyPublicCustodyState(env: Env, accountOrHandle: string
   //  - no unexpected ed25519 key other than the declared backup_pubkey (if known)
   const onlyKnownBackupEd25519 = dbProfile?.backupPubkey
     ? ed25519Keys.every((k) => k === dbProfile!.backupPubkey)
-    : ed25519Keys.length === 0;
+    : ed25519Keys.length <= 1;
   const selfCustodyVerifiedOnchain =
     p256Keys.length > 0 && !onchain.isAuthByPredecessorEnabled && onlyKnownBackupEd25519;
 
+  const serverKeyPresentOnchain = derivedServerKey
+    ? onchain.publicKeys.includes(derivedServerKey.publicKeyB58)
+    : !selfCustodyVerifiedOnchain && ed25519Keys.length > 0;
+
+  const serverL1KeyPresentOnchain = derivedServerKey
+    ? onchain.l1AccessKeys.some((k) => k.publicKey === derivedServerKey!.publicKeyB58)
+    : null;
+
   return {
+    // Flat fields consumed by VerifyPage.tsx (PublicVerifyState)
+    nearAccount: onchain.accountId,
+    handle: dbProfile?.xHandle || undefined,
+    custodyMode: dbProfile?.custodyMode || (selfCustodyVerifiedOnchain ? 'self' : undefined),
+    selfCustody: selfCustodyVerifiedOnchain,
+    serverKeyPresentOnchain,
+    serverL1KeyPresentOnchain,
+    authByPredecessorId: onchain.isAuthByPredecessorEnabled,
+    backupPubkey: dbProfile?.backupPubkey || null,
+    onchainPublicKeys: onchain.publicKeys,
+    l1AccessKeys: onchain.l1AccessKeys,
+    registeredPasskeys: dbProfile?.registeredPasskeys || [],
+    // Structured fields for CLI / curl evaluators
     accountId: onchain.accountId,
     intentsContractId: onchain.intentsContractId,
     selfCustodyVerifiedOnchain,
@@ -1578,11 +1641,16 @@ export async function verifyPublicCustodyState(env: Env, accountOrHandle: string
       l1AccountExists: onchain.l1AccountExists,
       l1FullAccessKeyCount: l1FullAccessKeys.length,
       l1AccessKeys: onchain.l1AccessKeys,
+      serverL1KeyPresentOnchain,
       contractLocked: onchain.l1AccountExists && l1FullAccessKeys.length === 0,
     },
     uprailRecord: dbProfile
       ? {
-          ...dbProfile,
+          xHandle: dbProfile.xHandle,
+          custodyMode: dbProfile.custodyMode,
+          backupPubkey: dbProfile.backupPubkey,
+          selfCustodyAt: dbProfile.selfCustodyAt,
+          registeredPasskeys: dbProfile.registeredPasskeys,
           backupMatchedOnchain,
         }
       : null,

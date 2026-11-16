@@ -94,19 +94,26 @@ function StatusRow({
   );
 }
 
-function AccountVerifyPanel({ result }: { result: PublicVerifyState }) {
-  const nearBlocksUrl = `https://nearblocks.io/address/${encodeURIComponent(result.nearAccount)}`;
-  const isSelfVerified =
-    result.selfCustody === true && result.serverKeyPresentOnchain === false;
+function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<string, any> }) {
+  const nearAccount = result.nearAccount || result.accountId || '';
+  const handle = result.handle || result.uprailRecord?.xHandle;
+  const custodyMode = result.custodyMode || result.uprailRecord?.custodyMode;
+  const selfCustody = result.selfCustody ?? result.selfCustodyVerifiedOnchain;
+  const authByPred = result.authByPredecessorId ?? result.onchain?.isAuthByPredecessorEnabled;
+  const onchainPublicKeys: string[] = result.onchainPublicKeys || result.onchain?.publicKeys || [];
+  const serverKeyPresent = result.serverKeyPresentOnchain;
+  const serverL1KeyPresent = result.serverL1KeyPresentOnchain ?? result.onchain?.serverL1KeyPresentOnchain;
+  const nearBlocksUrl = `https://nearblocks.io/address/${encodeURIComponent(nearAccount)}`;
+  const isSelfVerified = selfCustody === true && serverKeyPresent === false;
 
   return (
     <div className="space-y-4">
       <div
         className={`p-5 rounded-2xl border ${
           isSelfVerified
-            ? 'bg-emerald-50 border-emerald-200'
+            ? 'bg-emerald-500/10 border-emerald-500/30'
             : result.error
-            ? 'bg-amber-50 border-amber-200'
+            ? 'bg-amber-500/10 border-amber-500/30'
             : 'bg-stone-50 border-stone-200'
         }`}
       >
@@ -129,26 +136,28 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState }) {
               <h2 className="text-base font-display font-extrabold text-stone-950">
                 {isSelfVerified
                   ? 'Passkey Self-Custody Verified On-Chain'
-                  : result.custodyMode === 'self'
+                  : custodyMode === 'self'
                   ? 'Self-Custody Verification Status'
                   : 'Standard Managed Custody'}
               </h2>
-              <p className="text-xs font-mono text-stone-600 mt-0.5">
-                {result.handle ? `@${result.handle} • ` : ''}
-                {result.nearAccount}
+              <p className="text-xs font-mono text-stone-600 mt-0.5 break-all">
+                {handle ? `@${handle} • ` : ''}
+                {nearAccount}
               </p>
             </div>
           </div>
 
-          <a
-            href={nearBlocksUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-stone-200 hover:bg-stone-50 text-xs font-mono font-bold text-stone-800"
-          >
-            <span>Inspect on NearBlocks</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          {nearAccount && (
+            <a
+              href={nearBlocksUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-stone-200 hover:bg-stone-50 text-xs font-mono font-bold text-stone-800"
+            >
+              <span>Inspect on NearBlocks</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
         </div>
 
         {result.error && (
@@ -161,75 +170,76 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState }) {
       <div className="grid grid-cols-1 gap-2.5">
         <StatusRow
           label="NEAR Intents Account"
-          value={result.nearAccount}
-          monoValue={result.nearAccount}
+          value={nearAccount}
+          monoValue={nearAccount}
         />
         <StatusRow
           label="Custody Mode"
           value={
-            result.custodyMode === 'self'
-              ? 'Passkey Self-Custody (self)'
-              : result.custodyMode === 'server'
+            custodyMode === 'self' || selfCustody
+              ? 'Passkey Self-Custody (Non-Custodial)'
+              : custodyMode === 'server'
               ? 'Standard Escrow Custody (server)'
-              : result.selfCustody
-              ? 'Passkey Self-Custody'
-              : 'Unknown / External Account'
+              : 'External NEAR Account'
           }
-          ok={result.custodyMode === 'self' || result.selfCustody ? true : undefined}
+          ok={custodyMode === 'self' || selfCustody ? true : undefined}
         />
         <StatusRow
-          label="Server Escrow Key on intents.near"
+          label="Server Key on intents.near"
           value={
-            result.serverKeyPresentOnchain === false
+            serverKeyPresent === false
               ? 'ABSENT — Server Cannot Sign Intents'
-              : result.serverKeyPresentOnchain === true
+              : serverKeyPresent === true
               ? 'PRESENT (Standard Managed / Migration Pending)'
               : 'Unavailable'
           }
           ok={
-            result.serverKeyPresentOnchain === false
+            serverKeyPresent === false
               ? true
-              : result.serverKeyPresentOnchain === true
+              : serverKeyPresent === true
               ? false
               : undefined
           }
         />
+        {serverL1KeyPresent !== undefined && serverL1KeyPresent !== null && (
+          <StatusRow
+            label="Server Key on NEAR L1 Sub-Account"
+            value={
+              serverL1KeyPresent === false
+                ? 'DELETED — Rotated to User Recovery Key'
+                : 'PRESENT'
+            }
+            ok={serverL1KeyPresent === false}
+          />
+        )}
         <StatusRow
           label="intents.near auth_by_predecessor_id"
           value={
-            result.authByPredecessorId === false
+            authByPred === false
               ? 'DISABLED (Strict Public-Key Signature Required)'
-              : result.authByPredecessorId === true
+              : authByPred === true
               ? 'ENABLED (Predecessor RPC Call Allowed)'
               : 'Unavailable'
           }
           ok={
-            result.authByPredecessorId === false
+            authByPred === false
               ? true
-              : result.authByPredecessorId === true
+              : authByPred === true
               ? false
               : undefined
           }
         />
-        {result.backupPubkey && (
-          <StatusRow
-            label="Offline Recovery Key (Ed25519)"
-            value={result.backupPubkey}
-            monoValue={result.backupPubkey}
-            ok={true}
-          />
-        )}
       </div>
 
-      {result.onchainPublicKeys && result.onchainPublicKeys.length > 0 && (
+      {onchainPublicKeys.length > 0 && (
         <div className="p-4 rounded-2xl border border-stone-200 bg-white space-y-2.5">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-stone-600">
-              Live Keys Registered on intents.near ({result.onchainPublicKeys.length})
+              Live Keys Registered on intents.near ({onchainPublicKeys.length})
             </h3>
           </div>
           <div className="space-y-1.5">
-            {result.onchainPublicKeys.map((pk) => (
+            {onchainPublicKeys.map((pk) => (
               <div
                 key={pk}
                 className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-stone-50 border border-stone-200"
@@ -624,7 +634,7 @@ export const VerifyPage: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. @alice or u_abc123.escrow.uprail.near"
+                  placeholder="e.g. @xy63ry0rx or u_0a7f020b1386a20e.escrow.uprail.near"
                   value={accountQuery}
                   onChange={(e) => setAccountQuery(e.target.value)}
                   className="flex-1 px-4 py-2.5 rounded-xl border border-stone-300 text-sm font-mono focus:outline-none focus:border-stone-900"

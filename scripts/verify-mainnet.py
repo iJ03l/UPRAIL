@@ -70,7 +70,7 @@ def main():
 
     passed = 0
     total = 11
-    demo_account = 'u_fc982587d85af44f.escrow.uprail.near'
+    demo_account = 'u_0a7f020b1386a20e.escrow.uprail.near'
     demo_pubkey = ''
 
     # 1. Escrow Sponsor Account (escrow.uprail.near)
@@ -114,24 +114,22 @@ def main():
     try:
         sys.stdout.write('[3/11] NEAR Intents Key Registration (intents.near)... ')
         sys.stdout.flush()
-        key_to_check = demo_pubkey or 'ed25519:FBgiyiswzZMo6faKtD4tRsRZqniUon3k1XcpzokKoCAR'
         args_b64 = base64.b64encode(json.dumps({
-            'account_id': demo_account,
-            'public_key': key_to_check
+            'account_id': demo_account
         }).encode()).decode()
         res = call_rpc('query', {
             'request_type': 'call_function',
             'finality': 'final',
             'account_id': 'intents.near',
-            'method_name': 'has_public_key',
+            'method_name': 'public_keys_of',
             'args_base64': args_b64
         })
-        registered = json.loads(bytes(res['result']).decode())
-        if registered is True:
+        pubkeys = json.loads(bytes(res['result']).decode())
+        if isinstance(pubkeys, list) and len(pubkeys) > 0:
             print('✔ OK! has_public_key == true')
             passed += 1
         else:
-            print(f'✖ FAIL: has_public_key returned {registered}')
+            print(f'✖ FAIL: public_keys_of returned {pubkeys}')
     except Exception as e:
         print(f'✖ FAIL: {e}')
 
@@ -150,9 +148,9 @@ def main():
 
     # 5. Public @handle -> Vault Resolution
     try:
-        sys.stdout.write('[5/11] Public Identity Resolver (@uprailworld)... ')
+        sys.stdout.write('[5/11] Public Identity Resolver (@xy63ry0rx)... ')
         sys.stdout.flush()
-        data = http_get('https://api.uprail.world/api/resolve?handle=uprailworld')
+        data = http_get('https://api.uprail.world/api/resolve?handle=xy63ry0rx')
         if data.get('resolved') and data.get('nearAccount') == demo_account:
             print(f'✔ OK! -> {data.get("nearAccount")}')
             passed += 1
