@@ -951,3 +951,205 @@ test('Self-Custody Circles enforce signer bindings, dual contract/escrow creatio
     }
   );
 });
+
+test('Migration L1 sweep sponsors missing intents.near NEP-145 storage from escrow and preserves custom token visibility', async () => {
+  const { sweepPlainBalancesBeforeUpgrade } = await import('../src/services/custodyService');
+  const { getIntentBalances } = await import('../src/services/nearRpc');
+
+  const kvStore = new Map<string, string>();
+  const mockCache = {
+    async get(key: string, type?: string) {
+      const val = kvStore.get(key);
+      if (val === undefined) return null;
+      return type === 'json' ? JSON.parse(val) : val;
+    },
+    async put(key: string, val: string) {
+      kvStore.set(key, val);
+    },
+    async delete(key: string) {
+      kvStore.delete(key);
+    },
+  };
+
+  const mockDb = createMockDb({
+    identities: [
+      {
+        x_id: 'xid_charlie',
+        x_handle: 'charlie',
+        near_account: 'u_charlie.escrow.uprail.near',
+        is_activated: 1,
+        custody_mode: 'server',
+      },
+    ],
+  });
+
+  const env: any = {
+    DB: mockDb,
+    CACHE: mockCache,
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv.replace(/^ed25519:/, ''),
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    INTENTS_CONTRACT_ID: 'intents.near',
+    NEAR_RPC_URL: 'https://free.rpc.fastnear.com',
+  };
+
+  let intentsStorageRegistered = false;
+  let storageDepositSponsoredByEscrow = false;
+  let ftTransferCallSweptToIntents = false;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const url = typeof input === 'string' ? input : input?.url || '';
+
+    if (url.includes('api.fastnear.com') && url.endsWith('/ft')) {
+      return new Response(
+        JSON.stringify({
+          tokens: [
+            {
+              contract_id: 'unlisted.meme-cooking.near',
+              balance: '50000000000000000000',
+              last_update_block_height: 123456,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (url.includes('/v0/tokens')) {
+      return new Response(JSON.stringify(MOCK_TOKENS), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (url.includes('ref.finance') || url.includes('rhea')) {
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (init?.body) {
+      const rpcReq = JSON.parse(String(init.body));
+      if (rpcReq.method === 'status') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: {
+              sync_info: {
+                latest_block_hash: base58Encode(new Uint8Array(32).fill(7)),
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (rpcReq.method === 'broadcast_tx_commit') {
+        const txB64 = rpcReq.params?.[0] || '';
+        const rawBytes = Buffer.from(txB64, 'base64').toString('utf8');
+        if (rawBytes.includes('storage_deposit') && rawBytes.includes('escrow.uprail.near')) {
+          storageDepositSponsoredByEscrow = true;
+          intentsStorageRegistered = true;
+        }
+        if (rawBytes.includes('ft_transfer_call') && rawBytes.includes('u_charlie.escrow.uprail.near')) {
+          ftTransferCallSweptToIntents = true;
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: {
+              status: { SuccessValue: '' },
+              transaction: { hash: 'tx_sweep_test_123' },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const params = rpcReq.params || {};
+      if (params.request_type === 'view_access_key') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { nonce: 100, permission: 'FullAccess' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (params.request_type === 'view_account') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: { amount: '20000000000000000000000', storage_usage: 500 },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (params.request_type === 'call_function') {
+        const argsStr = Buffer.from(String(params.args_base64 || ''), 'base64').toString('utf8');
+        const args = argsStr ? JSON.parse(argsStr) : {};
+        let value: any = null;
+
+        if (params.method_name === 'ft_metadata' && params.account_id === 'unlisted.meme-cooking.near') {
+          value = { symbol: 'COOK', name: 'Meme Cooking', decimals: 18 };
+        } else if (params.method_name === 'storage_balance_of' && params.account_id === 'unlisted.meme-cooking.near') {
+          if (args.account_id === 'intents.near') {
+            value = intentsStorageRegistered ? { total: '1250000000000000000000', available: '0' } : null;
+          } else {
+            value = { total: '1250000000000000000000', available: '0' };
+          }
+        } else if (params.method_name === 'storage_balance_bounds') {
+          value = { min: '1250000000000000000000', max: '1250000000000000000000' };
+        } else if (params.method_name === 'ft_balance_of' && params.account_id === 'unlisted.meme-cooking.near') {
+          value = ftTransferCallSweptToIntents ? '0' : '50000000000000000000';
+        } else if (params.method_name === 'has_public_key') {
+          value = true;
+        } else if (params.method_name === 'mt_batch_balance_of' && params.account_id === 'intents.near') {
+          const tokenIds: string[] = args.token_ids || [];
+          value = tokenIds.map((id) =>
+            id === 'nep141:unlisted.meme-cooking.near' && ftTransferCallSweptToIntents
+              ? '50000000000000000000'
+              : '0'
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: rpcReq.id,
+            result: {
+              result: Array.from(new TextEncoder().encode(JSON.stringify(value))),
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    throw new Error(`Unexpected fetch call during sweep test: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const res = await sweepPlainBalancesBeforeUpgrade(env, 'xid_charlie', 'charlie');
+    assert.equal(storageDepositSponsoredByEscrow, true, 'escrow.uprail.near must sponsor storage_deposit for intents.near on unlisted token');
+    assert.equal(ftTransferCallSweptToIntents, true, 'L1 token must be swept into intents.near via ft_transfer_call');
+    assert.equal(res.swept.length, 1);
+    assert.equal(res.swept[0].symbol, 'COOK');
+    assert.equal(res.swept[0].txHash, 'tx_sweep_test_123');
+
+    // Verify getIntentBalances discovers the swept unlisted NEP-141 token inside intents.near!
+    const intentBals = await getIntentBalances(env, 'u_charlie.escrow.uprail.near');
+    const cookBal = intentBals.find((b) => b.symbol === 'COOK');
+    assert.ok(cookBal, 'Swept unlisted NEP-141 token must remain visible in getIntentBalances');
+    assert.equal(Number(cookBal.amountFormatted), 50);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

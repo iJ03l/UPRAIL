@@ -20,7 +20,7 @@ UPRAIL is a **non-custodial social money ecosystem built around NEAR Intents** (
 ## 📑 Index
 
 - **[Live Mainnet Traction](#live-mainnet-traction-real-people-real-money)** — Live NEAR Mainnet user, transaction, and USDC volume metrics
-- **[Judging in 60 Seconds](#-judging-in-60-seconds-do-x--see-y)** — `make check-mainnet`, 199 automated tests (185 Worker + 14 Rust contract), curl checks, and `Do X → See Y`
+- **[Judging in 60 Seconds](#-judging-in-60-seconds-do-x--see-y)** — `make check-mainnet`, 200 automated tests (186 Worker + 14 Rust contract), curl checks, and `Do X → See Y`
 - **[Judging Map (Track-by-Track)](#-judging-map-track-by-track-verification)** — Every hackathon track mapped to verified source files and tests
 - **[Why UPRAIL](#why-uprail-a-social-ecosystem-around-near-intents)** — Non-custodial social money thesis built around NEAR Intents and `@handle` identity
 - **[How It Works (Technical)](#how-it-works-technical)** — Passkey Self-Custody, `UP1-...` Recovery Keys, `circle.uprail.near`, Vaults, Circles, Passkeys, Confidential Intents, `near.com`, and MCP
@@ -77,7 +77,7 @@ make check-mainnet
 🎉 ALL ON-CHAIN SPONSOR, MAINNET & FEATURE CHECKS PASSED!
 ```
 
-### 2. Run Full Automated Test Suite (199 Tests, 0 Failures)
+### 2. Run Full Automated Test Suite (200 Tests, 0 Failures)
 Run the complete Worker unit, Miniflare integration, Self-Custody cryptography/flows, confidential rail, stabilization, coffee, Circles & Earn Vault Gifting, launchpad, and NEAR smart-contract test suites *(requires Node 22+ and Rust/Cargo; `make test` automatically switches via `nvm` when present)*:
 ```bash
 make test
@@ -86,7 +86,7 @@ make test
 ```
 **Expected Output:**
 ```text
-Worker tests   : 120 + 65 = 185 passed, 0 failed (40 suites)
+Worker tests   : 120 + 66 = 186 passed, 0 failed (40 suites)
 Contract tests : 14 passed, 0 failed (uprail-circle-escrow)
 ```
 
@@ -423,7 +423,7 @@ flowchart TD
 │   ├── src/services/                      # nearRpc, custodyService, selfCustodyCrypto, selfCustodyActions, selfCustodyVaultOps, nativeL1Auth, nativeL1Grant,
 │   │                                      # circleContract, confidentialRail, coffee, circles, gifts, earnVaults, stabilize, oneclickClient, oneclickAuth,
 │   │                                      # oneclickWithdraw, intentsNonce, launchpadFees, launchpadIntegrations, refunds
-│   └── test/                              # 20 automated test files (185 tests across 40 suites: Miniflare integration + unit tests)
+│   └── test/                              # 20 automated test files (186 tests across 40 suites: Miniflare integration + unit tests)
 │
 ├── go-near-service/                       # Go 1.25 Settlement Microservice
 │   ├── cmd/server/main.go                 # Chi HTTP server, graceful shutdown, route wiring

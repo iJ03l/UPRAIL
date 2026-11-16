@@ -24,6 +24,7 @@ import {
   Fingerprint,
 } from 'lucide-react';
 import { useXAuth } from '../hooks/useXAuth';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useTheme } from './ThemeProvider';
 import { api, clearAppStorage } from '../lib/api';
 import { webauthn, describePasskeyError } from '../lib/webauthn';
@@ -45,6 +46,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const { user, logout, refreshSession } = useXAuth();
   const { mode, setMode } = useTheme();
   const { toast } = useToast();
+  useBodyScrollLock(isOpen);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showExportConfirm, setShowExportConfirm] = useState(false);

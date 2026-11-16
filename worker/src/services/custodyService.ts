@@ -17,6 +17,7 @@ import {
   completeWebAuthnOneClickSession,
   buildEmptyWebAuthnAuthPayload,
   getCurrentIntentsSalt,
+  getUserSession,
   hasCachedOneClickSession,
 } from './oneclickAuth';
 import {
@@ -404,6 +405,7 @@ export async function getCustodyPreflight(env: Env, xId: string, xHandle: string
   const plainBalancesToSweep = plainBalances
     .map((b) => ({
       asset: b.defuse_asset_id,
+      assetId: b.defuse_asset_id,
       symbol: b.symbol,
       amount: b.amount,
       amountFormatted: b.amountFormatted,
@@ -451,6 +453,9 @@ export async function getCustodyPreflight(env: Env, xId: string, xHandle: string
 /**
  * Sweeps plain L1 Intents-supported balances from `u_*.escrow.uprail.near` into
  * the user's own `intents.near` balance prior to locking self-custody.
+ * For any NEP-141 token whose contract has not yet registered `intents.near`
+ * storage, `escrow.uprail.near` sponsors and pays NEP-145 `storage_deposit`
+ * automatically inside `depositPlainBalanceToIntents`.
  */
 export async function sweepPlainBalancesBeforeUpgrade(
   env: Env,
@@ -473,6 +478,7 @@ export async function sweepPlainBalancesBeforeUpgrade(
     custody_mode: custody.custodyMode,
   });
 
+  await (env as any).CACHE?.delete(`plain_bal:${nearAccount}`).catch(() => {});
   const plainBalances = await nearRpc.getPlainBalances(env, nearAccount);
   const swept: Array<{ symbol: string; amount: string; txHash?: string; skipped?: string }> = [];
 
@@ -617,6 +623,7 @@ export async function prepareUpgradeToSelfCustody(params: {
 export async function submitUpgradeToSelfCustody(params: {
   env: Env;
   xId: string;
+  xHandle?: string;
   actionId: string;
   assertion: any;
   oneClickAuthAssertion?: any;
@@ -665,6 +672,31 @@ export async function submitUpgradeToSelfCustody(params: {
       'SERVER_KEY_NOT_REGISTERED'
     );
   }
+
+  // 1. Preserve Confidential Intents balance visibility: warm/retain the 30-day refreshable
+  //    1Click User-Session (read/quote only; spending still requires passkey WebAuthn intents)
+  //    so the user's Confidential Intents balance never flickers or disappears after upgrading.
+  let oneClickSessionActive = await hasCachedOneClickSession(env, xId).catch(() => false);
+  if (!oneClickSessionActive) {
+    await getUserSession(env, xId)
+      .then(() => {
+        oneClickSessionActive = true;
+      })
+      .catch(() => {});
+  }
+
+  // 2. Automatically sweep all plain NEAR L1 balances on u_*.escrow.uprail.near into
+  //    intents.near as part of migration. For any NEP-141 token whose contract has no
+  //    storage registered for intents.near yet, escrow.uprail.near automatically pays
+  //    and registers NEP-145 storage_deposit on that token contract before transferring.
+  const sweepResult = await sweepPlainBalancesBeforeUpgrade(
+    env,
+    xId,
+    params.xHandle || ''
+  ).catch((sweepErr) => {
+    console.warn('[custody/upgrade] L1 auto-sweep notice:', sweepErr);
+    return { nearAccount: meta.nearAccount, swept: [] };
+  });
 
   const intentsId = env.INTENTS_CONTRACT_ID || 'intents.near';
   const saltHex = await getCurrentIntentsSalt(env);
@@ -759,12 +791,9 @@ export async function submitUpgradeToSelfCustody(params: {
     }
   }
 
-  // Discard server-derived 1Click session so self-custody session uses explicit WebAuthn.
-  await clearUserSession(env, xId);
-
-  let oneClickSessionActive = false;
   if (params.oneClickActionId && params.oneClickAuthAssertion) {
     try {
+      await clearUserSession(env, xId);
       await submitOneClickWebAuthnSession({
         env,
         xId,
@@ -784,6 +813,7 @@ export async function submitUpgradeToSelfCustody(params: {
     nearAccount: meta.nearAccount,
     backupPubkey: meta.backupPubkey,
     oneClickSessionActive,
+    sweptL1: sweepResult.swept,
     verification: {
       signerKeyAuthorized,
       backupKeyAuthorized,

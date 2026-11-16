@@ -2416,6 +2416,7 @@ export const api = {
     txHash: string;
     oneClickSessionActive?: boolean;
     serverKeyPresentOnchain?: boolean;
+    sweptL1?: Array<{ symbol: string; amount: string; txHash?: string; skipped?: string }>;
   }> {
     return custodyJson('/api/custody/upgrade/submit', {
       method: 'POST',

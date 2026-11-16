@@ -321,7 +321,10 @@ export async function resolveRheaToken(
   } catch {
     // fall through to live RPC ft_metadata
   }
-  if (contract.endsWith('.near') && /^[a-z0-9][a-z0-9._-]{1,63}$/.test(contract)) {
+  if (
+    (contract.includes('.') || /^[0-9a-f]{64}$/.test(contract)) &&
+    /^[a-z0-9][a-z0-9._-]{1,63}$/.test(contract)
+  ) {
     try {
       const meta = await getFtContractMetadata(env, contract);
       if (meta && meta.symbol) {
@@ -1557,6 +1560,50 @@ export async function getIntentBalances(
     } catch (rheaErr) {
       console.warn('[nearRpc] rhea expansion for intent balances skipped:', rheaErr);
     }
+
+    // Include any custom / launchpad NEP-141 contracts swept from the user's L1 sub-account
+    // into intents.near that are not in the 1Click or Rhea registries yet.
+    try {
+      const customContracts = new Set<string>();
+      const sweptRaw = await (env as any).CACHE?.get(
+        `swept_intents_contracts:v1:${nearAccount.toLowerCase()}`,
+        'json'
+      );
+      if (Array.isArray(sweptRaw)) {
+        for (const c of sweptRaw) {
+          if (typeof c === 'string' && c.trim()) customContracts.add(c.trim().toLowerCase());
+        }
+      }
+      const plainState = await readPlainFtState(env, nearAccount);
+      if (plainState?.snap) {
+        for (const c of Object.keys(plainState.snap)) {
+          if (c && c !== 'wrap.near') customContracts.add(c.toLowerCase());
+        }
+      }
+      const missingCustom = Array.from(customContracts)
+        .filter((c) => !tokenMap.has(`nep141:${c}`))
+        .slice(0, 8);
+      if (missingCustom.length > 0) {
+        const metas = await Promise.all(
+          missingCustom.map((c) => getFtContractMetadata(env, c))
+        );
+        for (const m of metas) {
+          if (m && m.symbol) {
+            const assetId = `nep141:${m.contractId}`;
+            tokenMap.set(
+              assetId,
+              rheaToOnchainToken({
+                contractId: m.contractId,
+                symbol: m.symbol,
+                name: m.name || m.symbol,
+                decimals: m.decimals,
+                icon: '',
+              })
+            );
+          }
+        }
+      }
+    } catch {}
 
     const tokenIds = Array.from(tokenMap.keys());
     if (tokenIds.length === 0) return [];
@@ -5173,12 +5220,12 @@ export async function getPlainBalances(
           const cl = h.contractId.toLowerCase();
           return (
             cl !== 'wrap.near' &&
-            cl.endsWith('.near') &&
+            (cl.includes('.') || /^[0-9a-f]{64}$/.test(cl)) &&
             !rheaByContract.has(cl) &&
             !regByContract.has(cl)
           );
         })
-        .slice(0, 4);
+        .slice(0, 8);
       if (unknownHeld.length > 0) {
         const metas = await Promise.all(
           unknownHeld.map((h) => getFtContractMetadata(env, h.contractId))
@@ -5670,6 +5717,15 @@ export async function depositPlainBalanceToIntents(
       });
       if (res.ok) {
         await (env as any).CACHE?.delete(`plain_bal:${senderAccountId}`).catch(() => {});
+        try {
+          const kvKey = `swept_intents_contracts:v1:${creditAddress.toLowerCase()}`;
+          const prev = await (env as any).CACHE?.get(kvKey, 'json');
+          const list = Array.isArray(prev) ? prev.filter((x: unknown): x is string => typeof x === 'string') : [];
+          const cl = contractId.toLowerCase();
+          if (cl !== 'wrap.near' && !list.includes(cl)) {
+            await (env as any).CACHE?.put(kvKey, JSON.stringify([cl, ...list].slice(0, 32)));
+          }
+        } catch {}
         return { deposited: true, txHash: res.txHash };
       }
       return { deposited: false, reason: res.error || 'ft_transfer_call failed' };

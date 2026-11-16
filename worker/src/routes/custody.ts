@@ -328,6 +328,7 @@ custodyRouter.post(
       const result = await submitUpgradeToSelfCustody({
         env: c.env,
         xId: session.x_id,
+        xHandle: session.x_handle,
         actionId: body.actionId,
         assertion: body.assertion,
         oneClickActionId: body.oneClickActionId,
