@@ -12,7 +12,7 @@
  */
 import { Hono, type Context } from 'hono';
 import type { AppContext } from '../types';
-import { grossPaymentAmount, plainAmount, resolveShareTicker } from '../services/share';
+import { plainAmount, resolveShareTicker } from '../services/share';
 import { renderOgCard, renderCoffeeOgCard } from '../services/ogCard';
 import {
   creatorFeeCardKeyValid,
@@ -77,7 +77,7 @@ ogRouter.get('/claim/:file', (c) => {
       if (row) {
         sender = row.sender_x_handle || '';
         recipient = row.recipient_handle || '';
-        amount = grossPaymentAmount(row.amount || '', row.fee);
+        amount = row.amount || '';
         asset = row.asset || '';
       }
     } catch {}
@@ -116,7 +116,7 @@ ogRouter.get('/invite/:file', (c) => {
             .bind(inv.payment_id)
             .first<{ amount: string; fee: string | null; asset: string }>();
           if (p) {
-            amount = grossPaymentAmount(p.amount || '', p.fee);
+            amount = p.amount || '';
             asset = p.asset || '';
           }
         }

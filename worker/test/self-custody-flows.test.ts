@@ -1923,8 +1923,8 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     assert.ok(sendResult.body.txHash);
     assert.equal(lastIntentBroadcast, null, 'Agent Pocket send must NEVER broadcast a public intents.near transfer');
     assert.equal(intentsBalances[recipientMainAccount][CIRCLE_GIFT_USDC_ASSET_ID] ?? 0n, 0n, 'Recipient public Intents must receive 0');
-    assert.equal(confidentialBalances[recipientMainAccount], 4_950_000n, 'Recipient Confidential Intents must receive net 4.95 USDC');
-    assert.equal(confidentialBalances['escrow.uprail.near'], 50_000n, '1% protocol fee retained in escrow confidential balance');
+    assert.equal(confidentialBalances[recipientMainAccount], 5_000_000n, 'Recipient Confidential Intents must receive full 5.00 USDC (100% of requested amount)');
+    assert.equal(confidentialBalances['escrow.uprail.near'], 50_000n, '1% protocol fee (0.05 USDC) paid on top and retained in escrow confidential balance');
     assert.equal(oneClickQuotes.length, 2, 'Two confidential 1Click hops: pocket->escrow and escrow->recipient');
     assert.equal(insertedPayments[0].privacy_rail, 'confidential');
     assert.equal(scrubbedPaymentCount, 1, 'Settled confidential leg links must be scrubbed immediately');
@@ -1971,8 +1971,8 @@ test('Agent Allowance Pocket merges into unified balance, auto-pulls shortfalls 
     assert.ok(ethRow && ethRow.balance === 0.5, 'Agents must read non-USDC/USDT/NEAR balances like ETH');
     assert.equal(
       usdcRow?.balance,
-      11,
-      'Agents must see unified USDC (Main + Pocket: 16 initial - 5 spent confidentially)'
+      10.95,
+      'Agents must see unified USDC (Main + Pocket: 16 initial - 5.05 spent confidentially incl. 0.05 fee)'
     );
     assert.equal(allBals.agentAllowance.balances.length, 1);
 
@@ -3104,8 +3104,8 @@ test('Self-custody Confidential Send from public Intents uses 1 passkey tap with
   await withMockFetch(
     {
       current_salt: () => '01020304',
-      mt_balance_of: () => '363995',
-      mt_batch_balance_of: () => ['363995'],
+      mt_balance_of: () => '367635',
+      mt_batch_balance_of: () => ['367635'],
     },
     async () => {
       const baseFetch = globalThis.fetch;
@@ -3151,7 +3151,7 @@ test('Self-custody Confidential Send from public Intents uses 1 passkey tap with
               {
                 intent: 'transfer',
                 receiver_id: bodyObj.depositAddress,
-                tokens: { [USDC_ID]: '363995' },
+                tokens: { [USDC_ID]: '367635' },
               },
             ],
           });
@@ -3190,6 +3190,10 @@ test('Self-custody Confidential Send from public Intents uses 1 passkey tap with
       assert.equal(quotedRequests[0].depositType, 'INTENTS');
       assert.equal(quotedRequests[0].recipientType, 'CONFIDENTIAL_INTENTS');
       assert.equal(quotedRequests[0].recipient, 'escrow.uprail.near');
+      assert.equal(quotedRequests[0].amount, '367635', '1Click quote input must cover 0.363995 recipient + 0.00364 fee');
+      assert.equal(prep.summary.recipientAmount, '0.363995');
+      assert.equal(prep.summary.protocolFee, '0.00364');
+      assert.equal(prep.summary.totalAmount, '0.367635');
     }
   );
 });
@@ -3342,6 +3346,192 @@ test('Self-custody Gift Create from 100% Confidential USDC skips VAULT_UNSHIELD_
     }
   );
 });
+
+test('syncContractCircleFromOnchain heals PENDING_SIGNATURES Circle when contract reports ACTIVE', async () => {
+  const { syncContractCircleFromOnchain } = await import('../src/services/circleContract');
+
+  const circleRow: any = {
+    id: 'circ_2d0592daff52fb0009dd20edc1fda6f2',
+    contract_mode: 'contract',
+    onchain_circle_id: 'circ_2d0592daff52fb0009dd20edc1fda6f2',
+    escrow_contract_id: 'circle.uprail.near',
+    status: 'PENDING_SIGNATURES',
+  };
+  const memberRows: any[] = [
+    {
+      id: 'cmem_1',
+      circle_id: circleRow.id,
+      x_handle: 'xy63ry0rx',
+      p256_pubkey: 'p256:pubkey1',
+      terms_signed_at: 1000,
+      joined_at: 1000,
+    },
+    {
+      id: 'cmem_2',
+      circle_id: circleRow.id,
+      x_handle: 'uprailworld',
+      p256_pubkey: 'p256:pubkey2',
+      terms_signed_at: null,
+      joined_at: 2000,
+    },
+  ];
+
+  let updatedCircleStatus: string | null = null;
+  let updatedMemberIds: string[] = [];
+  const env: any = {
+    CIRCLE_CONTRACT_ID: 'circle.uprail.near',
+    DB: {
+      prepare(sql: string) {
+        let bindings: any[] = [];
+        const stmt: any = {
+          bind(...args: any[]) {
+            bindings = args;
+            return stmt;
+          },
+          async run() {
+            if (sql.includes('UPDATE circle_members SET terms_signed_at')) {
+              updatedMemberIds.push(String(bindings[2]));
+            }
+            if (sql.includes('UPDATE circles') && sql.includes('SET status = ?')) {
+              updatedCircleStatus = String(bindings[0]);
+            }
+            return { success: true, meta: { changes: 1 } };
+          },
+        };
+        return stmt;
+      },
+    },
+  };
+
+  let rpcCalls = 0;
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: any, init?: any) => {
+    const req = init?.body ? JSON.parse(String(init.body)) : {};
+    rpcCalls += 1;
+    // Simulate transient stale RPC read on attempt 1, then ACTIVE on attempt 2
+    const status = rpcCalls === 1 ? 'PENDING_SIGNATURES' : 'ACTIVE';
+    const secondAgreed = rpcCalls > 1;
+    const onchainObj = {
+      id: circleRow.onchain_circle_id,
+      asset: { rail: 'intents', token_id: 'nep141:meta-pool.near' },
+      creator_index: 0,
+      creator_account_id: 'u_1.escrow.uprail.near',
+      payout_account_id: 'u_1.escrow.uprail.near',
+      payout_handle_hash: 'aa',
+      target_amount: '100',
+      total_contributed: '0',
+      status,
+      members: [
+        { account_id: 'u_1.escrow.uprail.near', pubkey: 'p256:pubkey1', share_bps: 5000, agreed: true, contributed: '0', refunded_amount: '0', dissolve_signed: false, refund_pending: false },
+        { account_id: 'u_2.escrow.uprail.near', pubkey: 'p256:pubkey2', share_bps: 5000, agreed: secondAgreed, contributed: '0', refunded_amount: '0', dissolve_signed: false, refund_pending: false },
+      ],
+      created_at_ms: 1000,
+      activated_at_ms: 2000,
+    };
+    return new Response(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req.id,
+        result: { result: Array.from(new TextEncoder().encode(JSON.stringify(onchainObj))) },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  try {
+    await syncContractCircleFromOnchain({
+      env,
+      circleRow,
+      memberRows,
+      maxRetries: 2,
+    });
+    assert.equal(rpcCalls, 2);
+    assert.equal(circleRow.status, 'ACTIVE');
+    assert.equal(updatedCircleStatus, 'ACTIVE');
+    assert.ok(memberRows[1].terms_signed_at);
+    assert.deepEqual(updatedMemberIds, ['cmem_2']);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test('redeemSystemSkipInvite activates account using a valid system code and issues a personal invite', async () => {
+  const { redeemSystemSkipInvite, SKIP_SYSTEM_CODES } = await import('../src/services/inviteService');
+
+  const invites = new Map<string, any>();
+  const identity: any = {
+    x_id: 'xid_skip_user',
+    x_handle: 'newpeer',
+    is_activated: 0,
+    personal_invite_code: null,
+    invited_by_code: null,
+    invited_by_handle: null,
+  };
+
+  const env: any = {
+    DB: {
+      prepare(sql: string) {
+        let b: any[] = [];
+        const stmt: any = {
+          bind(...args: any[]) {
+            b = args;
+            return stmt;
+          },
+          async first() {
+            if (sql.includes('SELECT * FROM invites WHERE code = ?')) {
+              return invites.get(String(b[0])) ?? null;
+            }
+            return null;
+          },
+          async run() {
+            if (sql.includes('INSERT OR IGNORE INTO invites')) {
+              const code = String(b[0]);
+              if (!invites.has(code)) {
+                invites.set(code, {
+                  code,
+                  creator_x_id: null,
+                  creator_x_handle: 'system',
+                  claimed_by_x_id: null,
+                  claimed_by_x_handle: null,
+                  payment_id: null,
+                  status: 'ACTIVE',
+                  created_at: b[1],
+                });
+              }
+            } else if (sql.includes('INSERT INTO invites')) {
+              const code = String(b[0]);
+              if (invites.has(code)) throw new Error('UNIQUE constraint failed');
+              invites.set(code, {
+                code,
+                creator_x_id: b[1],
+                creator_x_handle: b[2],
+                status: 'ACTIVE',
+              });
+            } else if (sql.includes('UPDATE x_identities')) {
+              identity.is_activated = 1;
+              identity.personal_invite_code = b[0];
+              identity.invited_by_code = b[1];
+              identity.invited_by_handle = b[2];
+            }
+            return { success: true, meta: { changes: 1 } };
+          },
+        };
+        return stmt;
+      },
+    },
+  };
+
+  const res = await redeemSystemSkipInvite(env, { x_id: identity.x_id, x_handle: identity.x_handle });
+  assert.equal(res.success, true);
+  assert.equal(res.isActivated, true);
+  assert.match(res.personalInviteCode, /^[A-Z]{6}$/);
+  assert.equal(identity.is_activated, 1);
+  assert.equal(identity.invited_by_handle, 'system');
+  assert.ok((SKIP_SYSTEM_CODES as readonly string[]).includes(identity.invited_by_code));
+  // Ensure the system code itself stays ACTIVE for other users skipping
+  assert.equal(invites.get(identity.invited_by_code)?.status, 'ACTIVE');
+});
+
 
 
 

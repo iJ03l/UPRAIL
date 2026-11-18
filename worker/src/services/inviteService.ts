@@ -38,16 +38,44 @@ export function isValidInviteCodeFormat(code: string): boolean {
   return /^[A-Z]{6}$/.test(code);
 }
 
+export const SYSTEM_GENESIS_CODES = [
+  'UPRAIL',
+  'LAUNCH',
+  'INTENT',
+  'ALPHA1',
+  'VAULTS',
+  'SECRET',
+  'TRENCH',
+] as const;
+
+export const SKIP_SYSTEM_CODES = [
+  'UPRAIL',
+  'LAUNCH',
+  'INTENT',
+  'VAULTS',
+  'SECRET',
+  'TRENCH',
+] as const;
+
+/**
+ * Selects one of the reusable 6-letter system bootstrap codes when a user skips
+ * entering a friend's referral code at signup.
+ */
+export function pickSystemInviteCode(): string {
+  const buf = new Uint8Array(1);
+  crypto.getRandomValues(buf);
+  return SKIP_SYSTEM_CODES[buf[0] % SKIP_SYSTEM_CODES.length];
+}
+
 /**
  * Seeds genesis bootstrap invite codes if not already present.
  */
 export async function ensureGenesisInvites(env: Env): Promise<void> {
-  const genesisCodes = ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET', 'TRENCH'];
   const now = Date.now();
 
   // Schema is owned by worker/src/db/migrations — never CREATE TABLE here.
 
-  for (const code of genesisCodes) {
+  for (const code of SYSTEM_GENESIS_CODES) {
     try {
       await env.DB.prepare(
         `INSERT OR IGNORE INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
@@ -161,7 +189,9 @@ export async function redeemInvite(
   }
 
   // 1. Mark invite as USED (user-generated personal invites are single-use; system bootstrap codes remain active)
-  const isSystemGenesis = check.invite.creator_x_handle === 'system' || ['UPRAIL', 'LAUNCH', 'INTENT', 'ALPHA1', 'VAULTS', 'SECRET', 'TRENCH'].includes(code);
+  const isSystemGenesis =
+    check.invite.creator_x_handle === 'system' ||
+    (SYSTEM_GENESIS_CODES as readonly string[]).includes(code);
   if (!isSystemGenesis) {
     const claimResult = await env.DB.prepare(
       `UPDATE invites
@@ -218,6 +248,17 @@ export async function redeemInvite(
     personalInviteCode: personalCode,
     isActivated: true,
   };
+}
+
+/**
+ * Activates a first-time user who skipped manual ref-code entry by applying one
+ * of the reusable system bootstrap codes under the hood.
+ */
+export async function redeemSystemSkipInvite(
+  env: Env,
+  user: { x_id: string; x_handle: string }
+): Promise<RedeemInviteResponse> {
+  return redeemInvite(env, pickSystemInviteCode(), user);
 }
 
 /**

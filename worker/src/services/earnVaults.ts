@@ -502,8 +502,17 @@ export function computeVaultPositionValuation(params: {
     atomic = 0n;
   }
 
-  const sharesFormatted = formatAtomic(atomic.toString(), params.vaultDecimals);
-  const sharesFloat = Number(sharesFormatted) || 0;
+  const rawSharesFormatted = formatAtomic(atomic.toString(), params.vaultDecimals);
+  const sharesFloat = Number(rawSharesFormatted) || 0;
+  const sharesFormatted = (() => {
+    const dot = rawSharesFormatted.indexOf('.');
+    if (dot === -1) return rawSharesFormatted;
+    const intPart = rawSharesFormatted.slice(0, dot);
+    const fracPart = rawSharesFormatted.slice(dot + 1);
+    if (fracPart.length <= 5) return rawSharesFormatted;
+    const trimmed = fracPart.slice(0, 5).replace(/0+$/, '');
+    return trimmed.length > 0 ? `${intPart}.${trimmed}` : intPart;
+  })();
   const price =
     typeof params.sharePriceUsd === 'number' && Number.isFinite(params.sharePriceUsd) && params.sharePriceUsd > 0
       ? params.sharePriceUsd

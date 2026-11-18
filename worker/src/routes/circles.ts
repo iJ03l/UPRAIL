@@ -37,7 +37,6 @@ import {
 import {
   CircleError,
   contributeToCircle,
-  createCircle,
   dissolveCircle,
   getCircleDetail,
   joinCircle,
@@ -132,38 +131,15 @@ circlesRouter.get('/:id', requireAuth(), async (c) => {
 circlesRouter.post(
   '/',
   rateLimit({ limit: 15, prefix: 'circle_create', strict: true }),
-  requireAuth({ passkeyVerified: true }),
-  requirePasskeyAuth(),
+  requireAuth(),
   async (c) => {
-    const session = c.get('session')!;
-    try {
-      const body = (c.get('parsedBody' as any) ||
-        (await c.req.json().catch(() => null))) as Record<string, any> | null;
-
-      const circle = await createCircle(c.env, session, {
-        name: String(body?.name || ''),
-        purpose: String(body?.purpose || 'SHARED_GOAL'),
-        customPurpose: typeof body?.customPurpose === 'string' ? body.customPurpose : undefined,
-        note: typeof body?.note === 'string' ? body.note : undefined,
-        targetAmountUsd: Number(body?.targetAmountUsd || 0),
-        vaultAsset: String(body?.vaultAsset || ''),
-        payoutHandle: typeof body?.payoutHandle === 'string' ? body.payoutHandle : undefined,
-        members: Array.isArray(body?.members) ? body.members : [],
-      });
-      return c.json({ circle }, 201);
-    } catch (err: any) {
-      if (err instanceof CircleError) {
-        return c.json<ErrorResponse>(
-          { error: err.message, code: err.code },
-          err.httpStatus as any
-        );
-      }
-      console.error('[circles/create] error:', err);
-      return c.json<ErrorResponse>(
-        { error: publicErrorMessage(err), code: 'CIRCLE_CREATE_FAILED' },
-        502
-      );
-    }
+    return c.json<ErrorResponse>(
+      {
+        error: 'Creating Vault Circles requires Passkey Self-Custody. Upgrade in Settings.',
+        code: 'SELF_CUSTODY_REQUIRED',
+      },
+      403
+    );
   }
 );
 
@@ -300,7 +276,20 @@ circlesRouter.post(
     const session = c.get('session')!;
     try {
       const body = await c.req.json();
-      const result = await prepareSelfCustodyCircleCreate({ env: c.env, session, input: body });
+      if (body?.mode === 'escrow') {
+        return c.json<ErrorResponse>(
+          {
+            error: 'Vault Circles support Passkey Self-Custody on-chain contracts only.',
+            code: 'SELF_CUSTODY_ONLY',
+          },
+          400
+        );
+      }
+      const result = await prepareSelfCustodyCircleCreate({
+        env: c.env,
+        session,
+        input: { ...(body && typeof body === 'object' ? body : {}), mode: 'contract' },
+      });
       return c.json(result);
     } catch (err: any) {
       return handleCustodyActionError(c, err, 'CIRCLE_CREATE_PREPARE_FAILED', '[circles/create/prepare]');

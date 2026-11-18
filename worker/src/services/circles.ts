@@ -60,6 +60,7 @@ import {
   signCircleTermsOnchain,
   signContractPayloadWithServerUserKey,
   signDissolveOnchain,
+  syncContractCircleFromOnchain,
   toIntentsContractAssetSpec,
 } from './circleContract';
 import { resolveMemberSignerBinding } from './selfCustodyVaultOps';
@@ -600,7 +601,7 @@ async function buildCircleView(
     vaults.find((v) => v.assetId.toLowerCase() === String(circleRow.vault_asset_id).toLowerCase()) ||
     vaults[0];
 
-  const [memberRows, contribRows] = await Promise.all([
+  const [memberRowsRes, contribRows] = await Promise.all([
     env.DB.prepare('SELECT * FROM circle_members WHERE circle_id = ? ORDER BY share_bps DESC, created_at ASC')
       .bind(circleRow.id)
       .all<any>(),
@@ -609,13 +610,26 @@ async function buildCircleView(
       .all<any>(),
   ]);
 
+  const memberRowsList = memberRowsRes.results || [];
+  if (
+    circleRow.contract_mode === 'contract' &&
+    circleRow.onchain_circle_id &&
+    (circleRow.status === 'PENDING_SIGNATURES' || circleRow.status === 'DISSOLVING')
+  ) {
+    await syncContractCircleFromOnchain({
+      env,
+      circleRow,
+      memberRows: memberRowsList,
+    }).catch(() => {});
+  }
+
   const callerHandle = (session.x_handle || '').trim().replace(/^@+/, '').toLowerCase();
   const vaultDecimals = Number(circleRow.vault_decimals || vault?.decimals || 18);
 
   let totalSharesAtomic = 0n;
   let totalContributedUsdCents = 0;
 
-  const members: CircleMemberView[] = (memberRows.results || []).map((m) => {
+  const members: CircleMemberView[] = memberRowsList.map((m) => {
     const shares = BigInt(String(m.shares_atomic || '0'));
     totalSharesAtomic += shares;
     const contributed = Number(m.contributed_usd_cents || 0);
@@ -924,7 +938,6 @@ export async function joinCircle(
       }
     }
 
-    const refreshed = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => null);
     await env.DB.prepare(
       `UPDATE circle_members
        SET x_id = ?,
@@ -936,9 +949,11 @@ export async function joinCircle(
       .bind(session.x_id, onchain.members[memberIndex].pubkey, now, now, memberRow.id)
       .run();
 
-    await env.DB.prepare('UPDATE circles SET status = ?, updated_at = ? WHERE id = ?')
-      .bind(refreshed?.status || circleRow.status, now, cleanId)
-      .run();
+    await syncContractCircleFromOnchain({
+      env,
+      circleRow,
+      maxRetries: 3,
+    }).catch(() => {});
 
     return getCircleDetail(env, session, cleanId);
   }

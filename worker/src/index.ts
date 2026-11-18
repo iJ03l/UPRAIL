@@ -39,7 +39,7 @@ import { getAuthorizationServer } from './oauth/authorization';
 import { getResourceServer } from './oauth/resource';
 import { issueTxChallenge } from './middleware/passkeyAuth';
 import { publicErrorMessage } from './utils/errors';
-import { grossPaymentAmount, plainAmount, resolveShareTicker } from './services/share';
+import { plainAmount, resolveShareTicker } from './services/share';
 import { refundEscrowedPayment } from './services/refunds';
 import { syncAllLaunchpadFees } from './services/launchpadFees';
 import {
@@ -375,7 +375,7 @@ const COFFEE_HANDLE_RE = /^\/(?:tip\/)?@?([A-Za-z0-9_]{1,15})\/?$/;
 const RESERVED_ROOT_PATHS = new Set([
   'app', 'api', 'auth', 'og', 'docs', 'login', 'parking', 'send', 'request',
   'contacts', 'receive', 'claim', 'fees', 'agents', 'receipt', 'history',
-  'privacy', 'terms', 'invite', 'refer', 'tip', 'health', 'oauth',
+  'privacy', 'terms', 'invite', 'refer', 'tip', 'verify', 'health', 'oauth',
   'robots', 'sitemap', 'favicon', 'llms', 'gift', 'gifts', 'circle', 'circles', 'earn',
 ]);
 
@@ -580,7 +580,7 @@ app.notFound(async (c) => {
               .first<{ sender_x_handle: string | null; amount: string; fee: string | null; asset: string }>();
             if (p) {
               sender = p.sender_x_handle || '';
-              amount = grossPaymentAmount(p.amount, p.fee);
+              amount = p.amount || '';
               asset = p.asset || '';
             }
           } catch {}
@@ -877,7 +877,7 @@ app.notFound(async (c) => {
                   .bind(paymentId)
                   .first<{ amount: string; fee: string | null; asset: string }>();
                 if (p) {
-                  amount = grossPaymentAmount(p.amount, p.fee);
+                  amount = p.amount || '';
                   asset = p.asset || '';
                 }
               }

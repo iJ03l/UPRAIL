@@ -27,6 +27,7 @@ import { createPaymentInvite } from '../services/inviteService';
 import { requireAuth, updateSession } from '../middleware/session';
 import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import { publicErrorMessage } from '../utils/errors';
+import { computeSendFeeBreakdown } from '../utils/sendFee';
 import {
   ensureConfidentialFunds,
   formatAtomic,
@@ -414,14 +415,11 @@ paymentsRouter.post('/quote', async (c) => {
       }
     }
 
-    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.01');
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
-    const numAmount = parseFloat(body.amount) || 0;
-    const protocolFee = (numAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
-    // The fee is carved out of the amount being sent — the recipient gets
-    // amount − fee, never less than promised minus the published rate.
-    const recipientAmount =
-      (numAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
+    const { recipientAmount, protocolFee, totalDebit } = computeSendFeeBreakdown(
+      body.amount,
+      c.env.FEE_PERCENT
+    );
 
     return c.json<QuoteResponse>({
       quoteId: quoteResult.quoteId,
@@ -429,6 +427,7 @@ paymentsRouter.post('/quote', async (c) => {
       asset: body.asset,
       amount: body.amount,
       recipientAmount,
+      totalAmount: totalDebit,
       confidentiality: 'advanced',
       depositAddress: quoteResult.depositAddress || holdingAccount,
       quoteSignature: quoteResult.quoteSignature,
@@ -572,31 +571,30 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
 
     const memo = typeof (body as any).memo === 'string' ? (body as any).memo.trim().slice(0, 280) : null;
 
-    // Protocol fee on every send (FEE_PERCENT, 1%), routed to the escrow
-    // holding account. The fee is carved out of the amount being sent: the
-    // recipient claims amount − fee and the sender is only ever debited
-    // `amount`.
-    const feePercent = parseFloat(c.env.FEE_PERCENT || '0.01');
+    // Protocol fee on every send (FEE_PERCENT, 1%), charged on top of the
+    // requested send amount: the recipient receives 100% of `body.amount`
+    // and the sender's balance is debited `recipientAmount + protocolFee`.
     const feeRecipient = c.env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
-    const grossAmount = parseFloat(body.amount) || 0;
-    const protocolFee = (grossAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
-    const recipientAmount =
-      (grossAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
-    if (parseFloat(recipientAmount) <= 0) {
+    const { recipientAmount, protocolFee, totalDebit } = computeSendFeeBreakdown(
+      body.amount,
+      c.env.FEE_PERCENT
+    );
+    const totalDebitNum = parseFloat(totalDebit) || 0;
+    if (parseFloat(recipientAmount) <= 0 || totalDebitNum <= 0) {
       return c.json<ErrorResponse>(
-        { error: 'Amount too small to cover the protocol fee', code: 'INVALID_AMOUNT' },
+        { error: 'Send amount must be greater than zero', code: 'INVALID_AMOUNT' },
         400
       );
     }
 
-    // Verify sender has sufficient available balance — only the amount being
-    // sent leaves their balance (the fee comes out of it, not on top of it).
+    // Verify sender has sufficient available balance to cover both the
+    // recipient amount and the 1% protocol fee.
     if (session) {
       const available = await nearRpc.getUserAvailableBalance(c.env, session, body.asset);
-      if (grossAmount > available + 0.0001) {
+      if (totalDebitNum > available + 0.0001) {
         return c.json<ErrorResponse>(
           {
-            error: `Insufficient balance. Available: ${available.toFixed(2)}`,
+            error: `Insufficient balance (${totalDebit} required incl. ${protocolFee} fee). Available: ${available.toFixed(2)}`,
             code: 'INSUFFICIENT_FUNDS',
           },
           400
@@ -624,8 +622,8 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       recipient_handle: cleanHandle,
       recipient_x_id: recipientXId,
       asset: body.asset,
-      // The row stores what the recipient can actually claim (amount − fee);
-      // the fee column carries the carved-out protocol fee separately.
+      // Store 100% of the quoted send amount as what the recipient claims;
+      // the fee column carries the 1% fee debited on top from the sender.
       amount: recipientAmount,
       fee: protocolFee,
       fee_recipient: feeRecipient,
@@ -805,12 +803,13 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       if (!privateToken) {
         return await failSend('UNSUPPORTED_ASSET', `Unsupported asset: ${body.asset}`, 400);
       }
-      const grossAtomic = BigInt(nearRpc.toBaseUnits(body.amount, privateToken.decimals));
+      const recipientAtomic = BigInt(nearRpc.toBaseUnits(recipientAmount, privateToken.decimals));
+      const grossAtomic = BigInt(nearRpc.toBaseUnits(totalDebit, privateToken.decimals));
       const isNearAsset =
         (privateToken.symbol || '').toUpperCase() === 'NEAR' ||
         (privateToken.defuse_asset_id || '').toLowerCase() === 'nep141:wrap.near';
       const MIN_NEAR_SEND_ATOMIC = 20000000000000000000000n; // 0.02 NEAR minimum
-      if (isNearAsset && grossAtomic < MIN_NEAR_SEND_ATOMIC) {
+      if (isNearAsset && recipientAtomic < MIN_NEAR_SEND_ATOMIC) {
         return await failSend('AMOUNT_BELOW_MINIMUM', 'Minimum send amount is 0.02 NEAR', 400);
       }
       const feeAtomic = BigInt(nearRpc.toBaseUnits(protocolFee, privateToken.decimals));
@@ -859,8 +858,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
 
         // Always shield into Confidential Intents first. ensureConfidentialFunds
         // verifies that the sender's confidential balance actually increases to
-        // grossAtomic before returning. This prevents escrow from ever fronting
-        // unbacked payouts if a solver drops an on-chain public debit.
+        // totalDebit (recipientAmount + protocolFee) before returning.
         try {
           await ensureConfidentialFunds(c.env, session!.x_id, body.asset, grossAtomic);
           source = 'confidential';
@@ -876,14 +874,12 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       const sendPrivate = source === 'confidential' ? submitPrivateTransfer : submitPrivateSendFromPublic;
 
       try {
-        // ONE transfer, always the full gross, always into the pooled escrow
-        // account. There is deliberately no second "fee" transfer: a fee leg
-        // is an exact 1% of the gross and ties both legs to this sender. The
-        // fee is simply the part of the gross escrow does not pay out, so it
-        // never travels anywhere and nothing is ever owed/unreserved.
+        // ONE transfer of totalDebit (recipientAmount + protocolFee) into the
+        // pooled escrow account. There is deliberately no separate fee transfer:
+        // escrow pays 100% of recipientAmount to the recipient and retains fee.
         const transfer = await sendPrivate(c.env, session!.x_id, {
           asset: body.asset,
-          amount: body.amount,
+          amount: totalDebit,
           recipientAccount: holdingAccount,
         });
         const isAgent = Boolean(c.get('agent'));
@@ -1025,15 +1021,13 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       }
     } else if (rail === 'native') {
       // NEAR-native asset, recipient not registered yet: confidential escrow
-      // until they claim — lock the gross with a plain ft_transfer. The fee
-      // stays in escrow and is retained at claim time (the fee account IS
-      // the escrow holding account). Skip the intents deposit attempt
-      // entirely: its failure is guaranteed and costs a doomed transaction.
+      // until they claim — lock totalDebit (recipientAmount + fee) with a plain
+      // ft_transfer. The fee stays in escrow and is retained at claim time.
       const lock = await nearRpc.depositPlainBalanceToEscrow(
         c.env,
         session!.x_id,
         body.asset,
-        body.amount
+        totalDebit
       );
       if (lock.deposited && lock.txHash) {
         escrowDepositTxHash = lock.txHash;
@@ -1050,12 +1044,11 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
     // sub-account move into intents with ft_transfer_call(msg = credit target)
     // — the recipient's platform account when registered, the escrow holding
     // account otherwise (exactly the targets the signed-intent path uses).
-    // Direct sends deliver amount − fee to the recipient; escrowed sends lock
-    // the gross amount (the fee is carved out of escrow at claim time), so in
-    // every case the sender's vault loses exactly `amount`.
+    // Direct sends deliver 100% of recipientAmount (and fee dispatches separately);
+    // escrowed sends lock totalDebit (recipientAmount + fee) until claim.
     const creditTarget =
       isRecipientRegistered && recipientNearAccount ? recipientNearAccount : holdingAccount;
-    const creditAmount = isRecipientRegistered ? recipientAmount : body.amount;
+    const creditAmount = isRecipientRegistered ? recipientAmount : totalDebit;
     // Snapshot the sender's plain balance before the deposit so a broadcast
     // that times out AFTER landing is not debited a second time by the escrow
     // fallback below — the plain-balance read is authoritative for "did the
@@ -1106,16 +1099,13 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       } else {
       // The rail probe could not answer (RPC outage) and the empirical
       // signal says this asset cannot enter intents — its token contract
-      // refused intents storage. Lock the gross amount into the escrow
-      // holding account with a plain ft_transfer instead; the fee stays in
-      // escrow and is released at claim time, exactly like the escrowed
-      // path already does. Cross-chain destinations still need the 1Click
-      // route and are rejected at claim time.
+      // refused intents storage. Lock totalDebit into escrow with a plain
+      // ft_transfer; the fee stays in escrow and is retained at claim time.
       const lock = await nearRpc.depositPlainBalanceToEscrow(
         c.env,
         session!.x_id,
         body.asset,
-        body.amount
+        totalDebit
       );
       if (lock.deposited && lock.txHash) {
         escrowDepositTxHash = lock.txHash;
@@ -1155,13 +1145,13 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         );
       }
     } else {
-      // Recipient is not registered yet. Debit sender's vault onchain into the escrow holding account.
+      // Recipient is not registered yet. Debit totalDebit into escrow holding account.
       const transferResult = await nearRpc.executeTransferIntent(
         c.env,
         session!.x_id,
         holdingAccount,
         body.asset,
-        body.amount
+        totalDebit
       );
       if (transferResult?.success && transferResult.txHash) {
         escrowDepositTxHash = transferResult.txHash;
@@ -1349,7 +1339,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
       ? ''
       : `${appOrigin}/claim/${paymentId}${inviteCode ? `?invite=${inviteCode}` : ''}`;
     const cleanHandleDisplay = cleanHandle.replace(/^@+/, '');
-    const tweetText = `Hey @${cleanHandleDisplay}, I sent you ${body.amount} ${body.asset} on UPRAIL: ${shareLink}`;
+    const tweetText = `Hey @${cleanHandleDisplay}, I sent you ${recipientAmount} ${body.asset} on UPRAIL: ${shareLink}`;
     const xShareUrl = shareLink ? `https://x.com/intent/post?text=${encodeURIComponent(tweetText)}` : undefined;
     const tweetIntentUrl = shareLink ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}` : undefined;
 
@@ -1366,6 +1356,7 @@ export async function handleSendPayment(c: Context<AppContext>): Promise<Respons
         expiresAt,
         fee: protocolFee,
         recipientAmount,
+        totalAmount: totalDebit,
         feeRecipient,
         inviteCode: inviteCode || undefined,
         isDirect: isRecipientRegistered,

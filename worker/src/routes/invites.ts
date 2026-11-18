@@ -10,6 +10,7 @@ import {
   getUserInvite,
   validateInviteCode,
   redeemInvite,
+  redeemSystemSkipInvite,
   isUserActivated,
 } from '../services/inviteService';
 import { publicErrorMessage } from '../utils/errors';
@@ -102,18 +103,23 @@ invitesRouter.post('/validate', async (c) => {
 invitesRouter.post('/redeem', requireAuth({ passkeyVerified: true }), async (c) => {
   try {
     const session = c.get('session')!;
-    const body = await c.req.json<RedeemInviteRequest>().catch(() => ({ code: '' }));
-    if (!body?.code) {
-      return c.json<ErrorResponse>(
-        { error: 'Please enter a 6-letter invite code', code: 'MISSING_CODE' },
-        400
-      );
-    }
-
-    const result = await redeemInvite(c.env, body.code, {
-      x_id: session.x_id,
-      x_handle: session.x_handle,
-    });
+    const body = await c.req
+      .json<RedeemInviteRequest & { skip?: boolean }>()
+      .catch(() => ({ code: '', skip: false }));
+    const result = body?.skip
+      ? await redeemSystemSkipInvite(c.env, {
+          x_id: session.x_id,
+          x_handle: session.x_handle,
+        })
+      : await (() => {
+          if (!body?.code) {
+            throw new Error('Please enter a 6-letter invite code');
+          }
+          return redeemInvite(c.env, body.code, {
+            x_id: session.x_id,
+            x_handle: session.x_handle,
+          });
+        })();
 
     await updateSession(c, {
       is_activated: true,

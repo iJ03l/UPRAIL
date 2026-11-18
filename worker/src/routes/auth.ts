@@ -540,6 +540,127 @@ authRouter.post('/logout', async (c) => {
 });
 
 /**
+ * POST /auth/browser-handoff
+ * Mints a single-use, 5-minute handoff token for an authenticated X session
+ * so a user stuck inside an iOS embedded webview (e.g. the Google app `GSA/`
+ * or X in-app browser) can jump into Safari or Chrome and immediately set up
+ * or confirm their passkey without repeating X OAuth.
+ * Never transfers `passkey_verified: true`.
+ */
+authRouter.post('/browser-handoff', requireAuth(), async (c) => {
+  try {
+    const session = c.get('session')!;
+    const body = (await c.req.json().catch(() => ({}))) as { returnTo?: string };
+    const returnTo = sanitizeReturnTo(body.returnTo || '/login');
+    const nonce = crypto.randomUUID();
+
+    await storeChallenge(c.env, {
+      key: `browser_handoff:${nonce}`,
+      challenge: nonce,
+      xId: session.x_id,
+      purpose: 'browser_handoff',
+      ttlSeconds: 300,
+    });
+
+    const token = await signPayload(
+      JSON.stringify({
+        nonce,
+        x_id: session.x_id,
+        x_handle: session.x_handle,
+        x_name: session.x_name,
+        near_account: session.near_account || null,
+        custody_mode: session.custody_mode || 'self',
+        is_activated: session.is_activated === true,
+        personal_invite_code: session.personal_invite_code || null,
+        recovery_authorized: session.recovery_authorized === true,
+        recovery_authorized_at: session.recovery_authorized_at || null,
+        returnTo,
+        exp: Date.now() + 300_000,
+      }),
+      requireSessionSecret(c.env)
+    );
+
+    const reqUrl = new URL(c.req.url);
+    const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
+    const appOrigin = isLocal ? reqUrl.origin : 'https://app.uprail.world';
+    const handoffUrl = `${appOrigin}/auth/browser-handoff?token=${encodeURIComponent(token)}`;
+
+    return c.json({ url: handoffUrl, token });
+  } catch (err: any) {
+    console.error('Failed to mint browser handoff token:', err);
+    return c.json<ErrorResponse>(
+      { error: 'Failed to prepare browser handoff link', code: 'HANDOFF_INIT_ERROR' },
+      500
+    );
+  }
+});
+
+/**
+ * GET /auth/browser-handoff?token=...
+ * Consumes the single-use handoff token in Safari / Chrome, establishes the
+ * unverified Step-2 X session cookie, and redirects to /login so the user can
+ * immediately complete Face ID / Touch ID passkey setup.
+ */
+authRouter.get('/browser-handoff', async (c) => {
+  const reqUrl = new URL(c.req.url);
+  const isLocal = reqUrl.hostname === 'localhost' || reqUrl.hostname === '127.0.0.1';
+  const appOrigin = isLocal ? reqUrl.origin : 'https://app.uprail.world';
+  const token = c.req.query('token') || '';
+  const secret = getSessionSecret(c.env);
+
+  if (!token || !secret) {
+    return c.redirect(`${appOrigin}/login`);
+  }
+
+  try {
+    const raw = await verifyAndUnpack(token, secret);
+    if (!raw) {
+      return c.redirect(`${appOrigin}/login`);
+    }
+    const payload = JSON.parse(raw);
+    if (!payload?.nonce || !payload?.x_id || !(payload.exp > Date.now())) {
+      return c.redirect(`${appOrigin}/login`);
+    }
+
+    const consumed = await consumeChallenge(c.env, {
+      key: `browser_handoff:${payload.nonce}`,
+      purpose: 'browser_handoff',
+      expectedChallenge: payload.nonce,
+    });
+    if (!consumed) {
+      return c.redirect(`${appOrigin}/login`);
+    }
+
+    await createSession(c, {
+      x_id: payload.x_id,
+      x_handle: payload.x_handle,
+      x_name: payload.x_name,
+      near_account: payload.near_account || null,
+      custody_mode: payload.custody_mode === 'server' ? 'server' : 'self',
+      is_activated: payload.is_activated === true,
+      personal_invite_code: payload.personal_invite_code || null,
+      passkey_verified: false,
+    });
+
+    if (
+      payload.recovery_authorized === true &&
+      typeof payload.recovery_authorized_at === 'number'
+    ) {
+      await updateSession(c, {
+        recovery_authorized: true,
+        recovery_authorized_at: payload.recovery_authorized_at,
+      });
+    }
+
+    const target = sanitizeReturnTo(payload.returnTo || '/login');
+    return c.redirect(`${appOrigin}${target}`, 302);
+  } catch (err) {
+    console.warn('Browser handoff consume error:', err);
+    return c.redirect(`${appOrigin}/login`);
+  }
+});
+
+/**
  * GET /auth/passkey/login-options
  * Generates WebAuthn authentication options for passkey sign-in
  */

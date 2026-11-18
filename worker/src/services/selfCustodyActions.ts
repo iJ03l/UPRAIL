@@ -21,6 +21,7 @@ import { PaymentStatus } from '../types';
 import * as nearRpc from './nearRpc';
 import { resolveOrigin } from './webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
+import { computeSendFeeBreakdown } from '../utils/sendFee';
 import { requireQuoteSecret } from '../utils/secrets';
 import { verifyQuoteToken } from './quoteAuth';
 import { createPaymentInvite } from './inviteService';
@@ -441,15 +442,14 @@ export async function prepareSelfCustodySend(
     isRecipientRegistered = true;
   }
 
-  const feePercent = parseFloat(env.FEE_PERCENT || '0.01');
   const holdingAccount = env.ESCROW_ACCOUNT_ID || 'escrow.uprail.near';
   const feeRecipient = env.FEE_ACCOUNT_ID || 'escrow.uprail.near';
-  const grossAmount = parseFloat(amountStr) || 0;
-  const protocolFee = (grossAmount * feePercent).toFixed(6).replace(/\.?0+$/, '') || '0';
-  const recipientAmount =
-    (grossAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
+  const { recipientAmount, protocolFee, totalDebit } = computeSendFeeBreakdown(
+    amountStr,
+    env.FEE_PERCENT
+  );
   if (parseFloat(recipientAmount) <= 0) {
-    throw new CustodyActionError('Amount too small to cover the protocol fee', 400, 'INVALID_AMOUNT');
+    throw new CustodyActionError('Send amount must be greater than zero', 400, 'INVALID_AMOUNT');
   }
 
   // Determine confidential vs public Intents rail
@@ -458,11 +458,14 @@ export async function prepareSelfCustodySend(
 
   if (useConfidential) {
     const token = await resolveToken(env, body.asset);
-    const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, token.decimals));
+    const { recipientAmount: confRecipient, protocolFee: confFee, totalDebit: confTotal } =
+      computeSendFeeBreakdown(amountStr, env.FEE_PERCENT, Math.min(token.decimals, 6));
+    const netAtomic = BigInt(nearRpc.toBaseUnits(confRecipient, token.decimals));
+    const totalDebitAtomic = BigInt(nearRpc.toBaseUnits(confTotal, token.decimals));
     const isNearAsset =
       token.symbol.toUpperCase() === 'NEAR' ||
       token.defuse_asset_id.toLowerCase() === 'nep141:wrap.near';
-    if (isNearAsset && grossAtomic < 20000000000000000000000n) {
+    if (isNearAsset && netAtomic < 20000000000000000000000n) {
       throw new CustodyActionError('Minimum send amount is 0.02 NEAR', 400, 'AMOUNT_BELOW_MINIMUM');
     }
 
@@ -471,7 +474,7 @@ export async function prepareSelfCustodySend(
       session,
       nearAccount,
       asset: body.asset,
-      requiredAtomic: grossAtomic,
+      requiredAtomic: totalDebitAtomic,
       nextStep: 'send',
       allowDirectPublicDeposit: true,
     });
@@ -486,7 +489,7 @@ export async function prepareSelfCustodySend(
         swapType: 'EXACT_INPUT',
         originAsset: ensured.assetId,
         destinationAsset: ensured.assetId,
-        amount: grossAtomic.toString(),
+        amount: totalDebitAtomic.toString(),
         recipient: holdingAccount,
         recipientType: 'CONFIDENTIAL_INTENTS',
         refundTo: nearAccount,
@@ -522,8 +525,9 @@ export async function prepareSelfCustodySend(
         isRecipientRegistered,
         asset: body.asset,
         amount: amountStr,
-        recipientAmount,
-        protocolFee,
+        recipientAmount: confRecipient,
+        protocolFee: confFee,
+        totalAmount: confTotal,
         feeRecipient,
         holdingAccount,
         memo: typeof body.memo === 'string' ? body.memo.trim().slice(0, 280) : null,
@@ -542,8 +546,9 @@ export async function prepareSelfCustodySend(
         recipientHandle: cleanHandle,
         amount: amountStr,
         asset: token.symbol,
-        protocolFee,
-        recipientAmount,
+        protocolFee: confFee,
+        recipientAmount: confRecipient,
+        totalAmount: confTotal,
       },
     };
   }
@@ -558,9 +563,14 @@ export async function prepareSelfCustodySend(
   }
   const defuseAssetId = resolvedTok.defuse_asset_id || `nep141:${resolvedTok.nearContractId}`;
   const rawContractId = (resolvedTok.nearContractId || '').trim().toLowerCase();
-  const grossAtomic = BigInt(nearRpc.toBaseUnits(amountStr, resolvedTok.decimals));
-  const netAtomic = BigInt(nearRpc.toBaseUnits(recipientAmount, resolvedTok.decimals));
-  const feeAtomic = grossAtomic > netAtomic ? grossAtomic - netAtomic : 0n;
+  const {
+    recipientAmount: pubRecipient,
+    protocolFee: pubFee,
+    totalDebit: pubTotal,
+  } = computeSendFeeBreakdown(amountStr, env.FEE_PERCENT, Math.min(resolvedTok.decimals, 6));
+  const netAtomic = BigInt(nearRpc.toBaseUnits(pubRecipient, resolvedTok.decimals));
+  const feeAtomic = BigInt(nearRpc.toBaseUnits(pubFee, resolvedTok.decimals) || '0');
+  const totalDebitAtomic = netAtomic + feeAtomic;
 
   // Check if asset lives on `intents.near` or requires NEAR L1 native transfer (`public_native`)
   let assetOnIntents = rawContractId
@@ -573,9 +583,9 @@ export async function prepareSelfCustodySend(
 
   if (assetOnIntents === false) {
     const plainBal = await nearRpc.getPlainAssetBalance(env, body.asset, nearAccount);
-    if ((plainBal ?? 0n) < grossAtomic) {
+    if ((plainBal ?? 0n) < totalDebitAtomic) {
       throw new CustodyActionError(
-        `Insufficient ${resolvedTok.symbol} NEAR L1 balance.`,
+        `Insufficient ${resolvedTok.symbol} NEAR L1 balance (${pubTotal} required incl. ${pubFee} fee).`,
         400,
         'INSUFFICIENT_FUNDS'
       );
@@ -599,9 +609,9 @@ export async function prepareSelfCustodySend(
       nearAccount,
       asset: body.asset,
       symbol: resolvedTok.symbol,
-      amount: amountStr,
-      recipientAmount,
-      protocolFee,
+      amount: pubTotal,
+      recipientAmount: pubRecipient,
+      protocolFee: pubFee,
       cleanHandle,
       isAddress: recipient.isAddress,
       recipientXId,
@@ -616,10 +626,10 @@ export async function prepareSelfCustodySend(
 
   const publicBal = await nearRpc.getIntentAssetBalance(env, body.asset, nearAccount);
   let pubSendAmt = publicBal?.balance ?? 0n;
-  if (pubSendAmt < grossAtomic) {
-    pubSendAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, defuseAssetId, grossAtomic, pubSendAmt);
+  if (pubSendAmt < totalDebitAtomic) {
+    pubSendAmt = await ensureAgentPocketTopUpForMainAccount(env, nearAccount, defuseAssetId, totalDebitAtomic, pubSendAmt);
   }
-  if (pubSendAmt < grossAtomic) {
+  if (pubSendAmt < totalDebitAtomic) {
     const sweepPrepare = await maybePrepareMatchingPlainL1Sweep({
       env,
       session,
@@ -629,14 +639,14 @@ export async function prepareSelfCustodySend(
       symbol: resolvedTok.symbol,
       decimals: resolvedTok.decimals,
       publicBalanceAtomic: pubSendAmt,
-      requiredAtomic: grossAtomic,
+      requiredAtomic: totalDebitAtomic,
       nextStep: 'send',
     });
     if (sweepPrepare) {
       return sweepPrepare;
     }
     throw new CustodyActionError(
-      `Insufficient ${resolvedTok.symbol} balance inside Intents.`,
+      `Insufficient ${resolvedTok.symbol} balance inside Intents (${pubTotal} required incl. ${pubFee} fee).`,
       400,
       'INSUFFICIENT_FUNDS'
     );
@@ -718,7 +728,7 @@ export async function prepareSelfCustodySend(
       {
         intent: 'transfer',
         receiver_id: holdingAccount,
-        tokens: { [defuseAssetId]: grossAtomic.toString() },
+        tokens: { [defuseAssetId]: totalDebitAtomic.toString() },
       },
     ];
   }
@@ -748,8 +758,9 @@ export async function prepareSelfCustodySend(
       isRecipientRegistered,
       asset: body.asset,
       amount: amountStr,
-      recipientAmount,
-      protocolFee,
+      recipientAmount: pubRecipient,
+      protocolFee: pubFee,
+      totalAmount: pubTotal,
       feeRecipient,
       holdingAccount,
       contractMode,
@@ -772,8 +783,9 @@ export async function prepareSelfCustodySend(
       recipientHandle: cleanHandle,
       amount: amountStr,
       asset: resolvedTok.symbol,
-      protocolFee,
-      recipientAmount,
+      protocolFee: pubFee,
+      recipientAmount: pubRecipient,
+      totalAmount: pubTotal,
     },
   };
 }
@@ -817,6 +829,7 @@ export async function submitSelfCustodySend(params: {
     amount: string;
     recipientAmount: string;
     protocolFee: string;
+    totalAmount?: string;
     feeRecipient: string;
     holdingAccount: string;
     contractMode?: 'escrow' | 'contract';
@@ -1032,7 +1045,7 @@ export async function submitSelfCustodySend(params: {
     ? ''
     : `${appOrigin}/claim/${paymentId}${inviteCode ? `?invite=${inviteCode}` : ''}`;
   const cleanDisplay = meta.cleanHandle.replace(/^@+/, '');
-  const tweetText = `Hey @${cleanDisplay}, I sent you ${meta.amount} ${meta.asset} on UPRAIL: ${shareLink}`;
+  const tweetText = `Hey @${cleanDisplay}, I sent you ${meta.recipientAmount || meta.amount} ${meta.asset} on UPRAIL: ${shareLink}`;
   const xShareUrl = shareLink ? `https://x.com/intent/post?text=${encodeURIComponent(tweetText)}` : undefined;
   const tweetIntentUrl = shareLink
     ? `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}`
@@ -1057,6 +1070,7 @@ export async function submitSelfCustodySend(params: {
     depositAddress: meta.depositAddress || meta.quoteDepositAddress,
     fee: meta.protocolFee,
     recipientAmount: meta.recipientAmount,
+    totalAmount: meta.totalAmount || meta.amount,
     feeRecipient: meta.feeRecipient,
     inviteCode: inviteCode || undefined,
     isDirect: meta.isRecipientRegistered,

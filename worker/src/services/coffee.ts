@@ -119,6 +119,10 @@ const CHAIN_DISPLAY_NAMES: Record<string, string> = {
   tron: 'Tron',
   trx: 'Tron',
   sui: 'Sui',
+  hood: 'Robinhood',
+  robinhood: 'Robinhood',
+  prl: 'Pearl',
+  pearl: 'Pearl',
   aptos: 'Aptos',
   xrp: 'XRP Ledger',
   doge: 'Dogecoin',
@@ -127,6 +131,11 @@ const CHAIN_DISPLAY_NAMES: Record<string, string> = {
   gnosis: 'Gnosis',
   bera: 'Berachain',
   monad: 'Monad',
+  hypercore: 'Hyperliquid',
+  xlayer: 'X Layer',
+  abs: 'Abstract',
+  miden: 'Miden',
+  stellar: 'Stellar',
 };
 
 const CHAIN_ALIASES: Record<string, string[]> = {
@@ -148,9 +157,14 @@ const CHAIN_ALIASES: Record<string, string[]> = {
   bitcoin: ['btc', 'bitcoin'],
   tron: ['tron', 'trx'],
   trx: ['tron', 'trx'],
+  sui: ['sui'],
+  hood: ['hood', 'robinhood'],
+  robinhood: ['hood', 'robinhood'],
+  prl: ['prl', 'pearl'],
+  pearl: ['prl', 'pearl'],
 };
 
-const PINNED_TOKENS = ['USDC', 'USDT', 'SOL', 'ETH', 'NEAR', 'BTC', 'BNB', 'POL', 'AVAX', 'TON', 'SUI', 'XRP', 'DOGE'];
+const PINNED_TOKENS = ['USDC', 'USDT', 'SOL', 'ETH', 'NEAR', 'BTC', 'SUI', 'USDG', 'PRL', 'BNB', 'POL', 'AVAX', 'TON', 'XRP', 'DOGE'];
 const TOKEN_NAMES: Record<string, string> = {
   USDC: 'USD Coin',
   USDT: 'Tether USD',
@@ -158,11 +172,13 @@ const TOKEN_NAMES: Record<string, string> = {
   ETH: 'Ethereum',
   NEAR: 'NEAR Protocol',
   BTC: 'Bitcoin',
+  SUI: 'Sui',
+  USDG: 'Global Dollar',
+  PRL: 'Pearl',
   BNB: 'BNB',
   POL: 'Polygon',
   AVAX: 'Avalanche',
   TON: 'Toncoin',
-  SUI: 'Sui',
   XRP: 'XRP',
   DOGE: 'Dogecoin',
 };
@@ -226,7 +242,75 @@ export async function getCoffeeOptions(env: Env): Promise<CoffeeTokenOption[]> {
     }
   }
 
-  const preferredChainOrder = ['base', 'arb', 'arbitrum', 'sol', 'solana', 'eth', 'ethereum', 'pol', 'polygon', 'op', 'optimism', 'near', 'bsc', 'avax', 'tron', 'btc', 'ton', 'sui'];
+  // Bridge live Robinhood stablecoins (USDG/USDe) and Sui stablecoins (USDC/USDT)
+  // under the pinned USDC and USDT stablecoin selectors whenever present in the token list.
+  const hoodStable =
+    bySymbol.get('USDG')?.get('hood') ||
+    (() => {
+      const tok = tokens.find(
+        (t) =>
+          (t.blockchain || '').toLowerCase() === 'hood' &&
+          ['USDG', 'USDC', 'USDT', 'USDE'].includes((t.symbol || '').toUpperCase())
+      );
+      return tok
+        ? {
+            chain: 'hood',
+            chainName: 'Robinhood',
+            assetId: tok.assetId,
+            decimals: tok.decimals,
+            priceUsd: typeof tok.price === 'number' && tok.price > 0 ? tok.price : 1,
+          }
+        : null;
+    })();
+
+  const suiStable =
+    bySymbol.get('USDC')?.get('sui') ||
+    (() => {
+      const tok = tokens.find(
+        (t) =>
+          (t.blockchain || '').toLowerCase() === 'sui' &&
+          ['USDC', 'USDT'].includes((t.symbol || '').toUpperCase())
+      );
+      return tok
+        ? {
+            chain: 'sui',
+            chainName: 'Sui',
+            assetId: tok.assetId,
+            decimals: tok.decimals,
+            priceUsd: typeof tok.price === 'number' && tok.price > 0 ? tok.price : 1,
+          }
+        : null;
+    })();
+
+  for (const stableSym of ['USDC', 'USDT']) {
+    const map = bySymbol.get(stableSym);
+    if (!map) continue;
+    if (hoodStable && !map.has('hood')) map.set('hood', hoodStable);
+    if (suiStable && !map.has('sui')) map.set('sui', suiStable);
+  }
+
+  const preferredChainOrder = [
+    'base',
+    'arb',
+    'arbitrum',
+    'sol',
+    'solana',
+    'sui',
+    'hood',
+    'eth',
+    'ethereum',
+    'near',
+    'pol',
+    'polygon',
+    'op',
+    'optimism',
+    'bsc',
+    'avax',
+    'tron',
+    'btc',
+    'ton',
+    'prl',
+  ];
 
   const result: CoffeeTokenOption[] = [];
   for (const sym of PINNED_TOKENS) {
@@ -243,7 +327,7 @@ export async function getCoffeeOptions(env: Env): Promise<CoffeeTokenOption[]> {
     result.push({
       symbol: sym,
       name: TOKEN_NAMES[sym] || sym,
-      isStable: sym === 'USDC' || sym === 'USDT',
+      isStable: sym === 'USDC' || sym === 'USDT' || sym === 'USDG',
       chains,
     });
   }
@@ -310,9 +394,25 @@ function findOriginToken(
       canonicalCoffeeSymbol(t) === sym &&
       matchesChain(t.blockchain, originChain)
   );
-  const match =
+  let match =
     matches.find((t) => t.assetId.toLowerCase() === 'nep141:wrap.near') ||
     matches[0];
+
+  if (!match && ['USDC', 'USDT', 'USDG', 'USDE'].includes(sym)) {
+    const stableOrder = ['USDC', 'USDT', 'USDG', 'USDE'];
+    for (const alt of stableOrder) {
+      const altMatch = tokens.find(
+        (t) =>
+          canonicalCoffeeSymbol(t) === alt &&
+          matchesChain(t.blockchain, originChain)
+      );
+      if (altMatch) {
+        match = altMatch;
+        break;
+      }
+    }
+  }
+
   if (!match) {
     throw new CoffeeError(
       'UNSUPPORTED_ROUTE',

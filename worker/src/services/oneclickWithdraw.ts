@@ -317,6 +317,18 @@ export interface WithdrawChainInfo {
   family: ChainFamily | null;
 }
 
+function symbolsEquivalent(a: string, b: string): boolean {
+  const x = (a || '').trim().toUpperCase();
+  const y = (b || '').trim().toUpperCase();
+  if (x === y) return true;
+  if ((x === 'NEAR' && y === 'WNEAR') || (x === 'WNEAR' && y === 'NEAR')) return true;
+  if ((x === 'BTC' && y === 'WBTC') || (x === 'WBTC' && y === 'BTC')) return true;
+  if ((x === 'ETH' && y === 'WETH') || (x === 'WETH' && y === 'ETH')) return true;
+  const stables = new Set(['USDC', 'USDT', 'USDG', 'USDE']);
+  if (stables.has(x) && stables.has(y)) return true;
+  return false;
+}
+
 /**
  * Destination networks a given spendable asset can settle to, straight from
  * 1Click. `sourceAsset` may be a full defuse id or a bare symbol.
@@ -330,7 +342,7 @@ export async function getWithdrawChains(env: Env, sourceAsset: string): Promise<
   const chains: WithdrawChainInfo[] = [];
 
   for (const token of tokens) {
-    if (token.symbol.toUpperCase() !== origin.symbol) continue;
+    if (!symbolsEquivalent(token.symbol, origin.symbol)) continue;
     if (seen.has(token.blockchain)) continue;
     seen.add(token.blockchain);
     chains.push({
@@ -423,9 +435,13 @@ export async function resolveWithdrawalAssetPair(
     // Native NEAR settlement uses the same intents asset; no 1Click quote.
     destinationAsset = origin.assetId;
   } else {
-    destinationAsset = tokens.find(
-      (t) => t.blockchain === chain && t.symbol.toUpperCase() === origin.symbol
-    )?.assetId;
+    destinationAsset =
+      tokens.find(
+        (t) => t.blockchain === chain && t.symbol.toUpperCase() === origin.symbol
+      )?.assetId ||
+      tokens.find(
+        (t) => t.blockchain === chain && symbolsEquivalent(t.symbol, origin.symbol)
+      )?.assetId;
   }
 
   if (!destinationAsset) {

@@ -23,7 +23,6 @@ import { publicErrorMessage } from '../utils/errors';
 import { getEarnVaults } from '../services/earnVaults';
 import {
   claimGift,
-  createGift,
   getAuthenticatedGift,
   getPublicGiftCardView,
   GiftError,
@@ -155,40 +154,15 @@ giftsRouter.get('/:id', requireAuth(), async (c) => {
 giftsRouter.post(
   '/',
   rateLimit({ limit: 15, prefix: 'gift_create', strict: true }),
-  requireAuth({ passkeyVerified: true }),
-  requirePasskeyAuth(),
+  requireAuth(),
   async (c) => {
-    const session = c.get('session')!;
-    try {
-      const body = (c.get('parsedBody' as any) ||
-        (await c.req.json().catch(() => null))) as Record<string, any> | null;
-
-      const gift = await createGift(c.env, session, {
-        recipientHandle: String(body?.recipientHandle || ''),
-        occasion: String(body?.occasion || 'JUST_BECAUSE'),
-        customOccasion: typeof body?.customOccasion === 'string' ? body.customOccasion : undefined,
-        message: typeof body?.message === 'string' ? body.message : undefined,
-        showAmount: Boolean(body?.showAmount),
-        vaultAsset: String(body?.vaultAsset || ''),
-        sourceAsset: String(body?.sourceAsset || body?.originAsset || 'USDC'),
-        amount: String(body?.amount ?? ''),
-        timelockUntil: Number(body?.timelockUntil || 0),
-        fundingMode: body?.fundingMode === 'EXTERNAL_DEPOSIT' ? 'EXTERNAL_DEPOSIT' : 'BALANCE',
-      });
-      return c.json({ gift }, 201);
-    } catch (err: any) {
-      if (err instanceof GiftError) {
-        return c.json<ErrorResponse>(
-          { error: err.message, code: err.code },
-          err.httpStatus as any
-        );
-      }
-      console.error('[gifts/create] error:', err);
-      return c.json<ErrorResponse>(
-        { error: publicErrorMessage(err), code: 'GIFT_CREATE_FAILED' },
-        502
-      );
-    }
+    return c.json<ErrorResponse>(
+      {
+        error: 'Creating Earn Gifts requires Passkey Self-Custody. Upgrade in Settings.',
+        code: 'SELF_CUSTODY_REQUIRED',
+      },
+      403
+    );
   }
 );
 
@@ -235,11 +209,20 @@ giftsRouter.post(
   async (c) => {
     const session = c.get('session')!;
     const body = await c.req.json().catch(() => ({}));
+    if (body?.mode === 'escrow') {
+      return c.json<ErrorResponse>(
+        {
+          error: 'Earn Gifts support Passkey Self-Custody on-chain contracts only.',
+          code: 'SELF_CUSTODY_ONLY',
+        },
+        400
+      );
+    }
     try {
       const res = await prepareSelfCustodyGiftCreate({
         env: c.env,
         session,
-        input: body,
+        input: { ...(body && typeof body === 'object' ? body : {}), mode: 'contract' },
       });
       return c.json(res);
     } catch (err: any) {

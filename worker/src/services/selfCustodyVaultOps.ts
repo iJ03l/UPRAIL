@@ -52,6 +52,7 @@ import {
   signCircleTermsOnchain,
   signDissolveOnchain,
   signHandleAttestation,
+  syncContractCircleFromOnchain,
   toIntentsContractAssetSpec,
   webAuthnToContractProof,
 } from './circleContract';
@@ -1042,6 +1043,13 @@ export async function prepareSelfCustodyCircleCreate(params: {
   const normalizedMembers = normalizeMembersWithQuotas(session.x_handle, input.members || [], targetUsdCents);
 
   const circleContractId = input.mode === 'escrow' ? null : getCircleContractId(env);
+  if (input.mode === 'contract' && !circleContractId) {
+    throw new CustodyActionError(
+      'On-chain Circle contract is unavailable in this environment.',
+      503,
+      'CONTRACT_UNAVAILABLE'
+    );
+  }
   if (!circleContractId) {
     // Escrow fallback when CIRCLE_CONTRACT_ID is unset in an environment
     const circleId = generateSecureId('circ');
@@ -1460,7 +1468,12 @@ export async function prepareSelfCustodyCircleJoin(params: {
     )
       .bind(session.x_id, Date.now(), Date.now(), member.id)
       .run();
-    return { alreadySigned: true, status: onchain.status, circleId };
+    await syncContractCircleFromOnchain({
+      env,
+      circleRow: circle,
+      preloadedOnchain: onchain,
+    }).catch(() => {});
+    return { alreadySigned: true, status: circle.status || onchain.status, circleId };
   }
 
   const payloadStr = canonicalCircleAgreePayload({
@@ -1569,7 +1582,6 @@ export async function submitSelfCustodyCircleJoin(params: {
     throw new CustodyActionError(res.error || 'Failed to record terms signature on-chain', 502, 'CONTRACT_SIGN_FAILED');
   }
 
-  const onchain = await getCircleOnchain(env, meta.onchainCircleId, meta.contractId).catch(() => null);
   const now = Date.now();
   await env.DB.prepare(
     'UPDATE circle_members SET x_id = COALESCE(x_id, ?), terms_signed_at = ?, joined_at = COALESCE(joined_at, ?) WHERE id = ?'
@@ -1577,16 +1589,23 @@ export async function submitSelfCustodyCircleJoin(params: {
     .bind(session.x_id, now, now, meta.memberId)
     .run();
 
-  if (onchain?.status) {
-    await env.DB.prepare('UPDATE circles SET status = ?, updated_at = ? WHERE id = ?')
-      .bind(onchain.status, now, circleId)
-      .run();
-  }
+  const syncRow: any = {
+    id: circleId,
+    contract_mode: 'contract',
+    onchain_circle_id: meta.onchainCircleId,
+    escrow_contract_id: meta.contractId,
+    status: 'PENDING_SIGNATURES',
+  };
+  const onchain = await syncContractCircleFromOnchain({
+    env,
+    circleRow: syncRow,
+    maxRetries: 3,
+  }).catch(() => null);
 
   return {
     circleId,
     agreed: true,
-    status: onchain?.status || 'ACTIVE',
+    status: syncRow.status || onchain?.status || 'ACTIVE',
     txHash: res.txHash,
   };
 }
@@ -2374,6 +2393,13 @@ export async function prepareSelfCustodyGiftCreate(params: {
   }
 
   const contractEnabled = isCircleContractEnabled(env) && Boolean(getAttestorPublicKey(env));
+  if (input.mode === 'contract' && !contractEnabled) {
+    throw new CustodyActionError(
+      'On-chain Gift contract is unavailable in this environment.',
+      503,
+      'CONTRACT_UNAVAILABLE'
+    );
+  }
   const useContract = input.mode !== 'escrow' && contractEnabled;
   const giftId = generateSecureId('gft');
   const shareSplit = computeStabilizeSplit(resolved.depositSharesAtomic, vault.decimals, env.FEE_PERCENT);

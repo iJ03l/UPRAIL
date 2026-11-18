@@ -478,7 +478,8 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(body.asset, 'nep141:wrap.near');
     assert.equal(body.amount, '1.5');
     assert.equal(body.protocolFee, '0.015', 'Must calculate the 1% send fee (1.5 * 0.01 = 0.015)');
-    assert.equal(body.recipientAmount, '1.485', 'Fee is carved out of the amount (1.5 - 0.015)');
+    assert.equal(body.recipientAmount, '1.5', 'Recipient receives 100% of quoted amount (fee charged on top)');
+    assert.equal(body.totalAmount, '1.515', 'Sender total debited equals amount + protocolFee (1.5 + 0.015)');
     assert.equal(body.feeRecipient, 'fees.uprail.near', 'Must route send fee to fees.uprail.near');
     assert.ok(body.quoteId, 'Must include quoteId');
     assert.ok(body.depositAddress, 'Must include depositAddress');
@@ -1253,5 +1254,86 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.ok(botHtml.includes('@illia'));
     assert.ok(botHtml.includes('TLO'));
   });
-});
 
+  it('rejects non-self-custody and escrow mode creation on Circle and Gift routes', async () => {
+    const db = await mf.getD1Database('DB');
+    const now = Date.now();
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO x_identities (x_id, x_handle, x_name, near_account, is_activated, created_at, updated_at)
+         VALUES (?, ?, ?, NULL, 1, ?, ?)`
+      )
+      .bind('xid_sc_only_test', 'sc_only_test', 'SC Test', now, now)
+      .run();
+
+    const session = signTestSession({
+      session_id: 'session_sc_only_test',
+      x_id: 'xid_sc_only_test',
+      x_handle: 'sc_only_test',
+      x_name: 'SC Test',
+      near_account: null,
+      passkey_verified: true,
+      passkey_verified_at: now,
+      created_at: now,
+      expires_at: now + 60 * 60 * 1000,
+    });
+    const headers = {
+      'Content-Type': 'application/json',
+      Cookie: `uprail_session=${session}`,
+    };
+
+    const legacyCircleRes = await mf.dispatchFetch('http://localhost/api/circles', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'Legacy Test', vaultAsset: 'TLO', targetAmountUsd: 50 }),
+    });
+    assert.equal(legacyCircleRes.status, 403);
+    assert.equal((await legacyCircleRes.json()).code, 'SELF_CUSTODY_REQUIRED');
+
+    const legacyGiftRes = await mf.dispatchFetch('http://localhost/api/gifts', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ recipientHandle: 'illia', vaultAsset: 'TLO', amount: '10' }),
+    });
+    assert.equal(legacyGiftRes.status, 403);
+    assert.equal((await legacyGiftRes.json()).code, 'SELF_CUSTODY_REQUIRED');
+
+    const escrowCirclePrep = await mf.dispatchFetch('http://localhost/api/circles/create/prepare', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ mode: 'escrow', name: 'Escrow Circle' }),
+    });
+    assert.equal(escrowCirclePrep.status, 400);
+    assert.equal((await escrowCirclePrep.json()).code, 'SELF_CUSTODY_ONLY');
+
+    const escrowGiftPrep = await mf.dispatchFetch('http://localhost/api/gifts/prepare', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ mode: 'escrow', recipientHandle: 'illia', vaultAsset: 'TLO', amount: '10' }),
+    });
+    assert.equal(escrowGiftPrep.status, 400);
+    assert.equal((await escrowGiftPrep.json()).code, 'SELF_CUSTODY_ONLY');
+  });
+
+  it('reserves /verify route and does not treat it as @verify coffee handle', async () => {
+    const postRes = await mf.dispatchFetch('http://localhost/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amountUsd: 5, originSymbol: 'USDC', originChain: 'base' }),
+    });
+    assert.equal(postRes.status, 404);
+    assert.equal((await postRes.json()).code, 'NOT_FOUND');
+
+    const botJsonRes = await mf.dispatchFetch('http://localhost/verify?format=json', {
+      headers: { 'User-Agent': 'Twitterbot/1.0' },
+    });
+    assert.equal(botJsonRes.headers.get('content-type')?.includes('text/html'), true);
+
+    const botRes = await mf.dispatchFetch('http://localhost/verify', {
+      headers: { 'User-Agent': 'Twitterbot/1.0' },
+    });
+    const html = await botRes.text();
+    assert.equal(html.includes('PAY ME HERE — @verify'), false);
+    assert.equal(html.includes('/og/coffee/verify.png'), false);
+  });
+});

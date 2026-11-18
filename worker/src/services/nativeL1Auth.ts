@@ -419,8 +419,8 @@ export async function prepareNativeL1Send(params: {
     },
     title: 'Authorize NEAR L1 Native Send',
     note: isDirect
-      ? `${params.symbol} settles on NEAR L1. Sign with your passkey to authorize your L1 key once for sending ${params.amount} ${params.symbol} to ${params.isAddress ? params.cleanHandle : `@${params.cleanHandle}`}.`
-      : `${params.symbol} settles on NEAR L1. Sign with your passkey to authorize your L1 key once for locking ${params.amount} ${params.symbol} in escrow for @${params.cleanHandle}.`,
+      ? `${params.symbol} settles on NEAR L1. Sign with your passkey to authorize your L1 key once for sending ${params.recipientAmount} ${params.symbol} to ${params.isAddress ? params.cleanHandle : `@${params.cleanHandle}`}${parseFloat(params.protocolFee) > 0 ? ` (+ ${params.protocolFee} ${params.symbol} fee)` : ''}.`
+      : `${params.symbol} settles on NEAR L1. Sign with your passkey to authorize your L1 key once for locking ${params.recipientAmount} ${params.symbol} in escrow for @${params.cleanHandle}${parseFloat(params.protocolFee) > 0 ? ` (+ ${params.protocolFee} ${params.symbol} fee)` : ''}.`,
   });
 }
 
@@ -648,7 +648,7 @@ export async function submitNativeL1Operation(params: {
           : `${shareBase}/claim/${paymentId}${inviteCode ? `?invite=${encodeURIComponent(inviteCode)}` : ''}`;
         const cleanDisplay = (meta.cleanHandle || '').replace(/^@+/, '');
         const recipientAmt = meta.recipientAmount || meta.amount;
-        const tweetText = `Hey @${cleanDisplay}, I sent you ${meta.amount} ${meta.asset} on UPRAIL: ${shareLink}`;
+        const tweetText = `Hey @${cleanDisplay}, I sent you ${recipientAmt} ${meta.asset} on UPRAIL: ${shareLink}`;
         const xShareUrl =
           !meta.isAddress && shareLink
             ? `https://x.com/intent/post?text=${encodeURIComponent(tweetText)}`
@@ -671,6 +671,7 @@ export async function submitNativeL1Operation(params: {
           status: finalStatus,
           fee: meta.protocolFee || '0',
           recipientAmount: recipientAmt,
+          totalAmount: meta.amount,
           feeRecipient,
           inviteCode: inviteCode || undefined,
           isDirect: isRegistered,

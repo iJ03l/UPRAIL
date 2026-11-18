@@ -2079,6 +2079,34 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     symbol: 'USDG',
     decimals: 6,
   },
+  'hood_usdc': {
+    key: 'hood_usdc',
+    chain: 'hood',
+    chainName: 'Robinhood',
+    token: 'USDG',
+    originAsset: 'nep141:hood-0x5fc5360d0400a0fd4f2af552add042d716f1d168.omft.near',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '1000000',
+    minAmountFormatted: '1.00 USDG',
+    minAmountUsd: '$1.00',
+    refundTo: '',
+    symbol: 'USDG',
+    decimals: 6,
+  },
+  'hood_usdt': {
+    key: 'hood_usdt',
+    chain: 'hood',
+    chainName: 'Robinhood',
+    token: 'USDG',
+    originAsset: 'nep141:hood-0x5fc5360d0400a0fd4f2af552add042d716f1d168.omft.near',
+    destinationAsset: 'nep141:usdt.tether-token.near',
+    amount: '1000000',
+    minAmountFormatted: '1.00 USDG',
+    minAmountUsd: '$1.00',
+    refundTo: '',
+    symbol: 'USDG',
+    decimals: 6,
+  },
   'hood_eth': {
     key: 'hood_eth',
     chain: 'hood',
@@ -2092,6 +2120,50 @@ const CHAIN_DEPOSIT_CONFIGS: Record<string, ChainDepositConfig> = {
     refundTo: '',
     symbol: 'ETH',
     decimals: 18,
+  },
+
+  // Sui (sui)
+  'sui_usdc': {
+    key: 'sui_usdc',
+    chain: 'sui',
+    chainName: 'Sui',
+    token: 'USDC',
+    originAsset: 'nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near',
+    destinationAsset: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: '',
+    symbol: 'USDC',
+    decimals: 6,
+  },
+  'sui_usdt': {
+    key: 'sui_usdt',
+    chain: 'sui',
+    chainName: 'Sui',
+    token: 'USDC',
+    originAsset: 'nep141:sui-c1b81ecaf27933252d31a963bc5e9458f13c18ce.omft.near',
+    destinationAsset: 'nep141:usdt.tether-token.near',
+    amount: '100000',
+    minAmountFormatted: '0.10 USDC',
+    minAmountUsd: '$0.10',
+    refundTo: '',
+    symbol: 'USDC',
+    decimals: 6,
+  },
+  'sui_sui': {
+    key: 'sui_sui',
+    chain: 'sui',
+    chainName: 'Sui',
+    token: 'SUI',
+    originAsset: 'nep141:sui.omft.near',
+    destinationAsset: 'nep141:sui.omft.near',
+    amount: '200000000',
+    minAmountFormatted: '0.20 SUI',
+    minAmountUsd: '$0.15',
+    refundTo: '',
+    symbol: 'SUI',
+    decimals: 9,
   },
 
   // Pearl (prl)
@@ -2131,6 +2203,7 @@ CHAIN_DEPOSIT_CONFIGS['bsc'] = CHAIN_DEPOSIT_CONFIGS['bsc_usdt'];
 CHAIN_DEPOSIT_CONFIGS['doge'] = CHAIN_DEPOSIT_CONFIGS['doge_doge'];
 CHAIN_DEPOSIT_CONFIGS['hood'] = CHAIN_DEPOSIT_CONFIGS['hood_usdg'];
 CHAIN_DEPOSIT_CONFIGS['robinhood'] = CHAIN_DEPOSIT_CONFIGS['hood_usdg'];
+CHAIN_DEPOSIT_CONFIGS['sui'] = CHAIN_DEPOSIT_CONFIGS['sui_usdc'];
 CHAIN_DEPOSIT_CONFIGS['prl'] = CHAIN_DEPOSIT_CONFIGS['prl_prl'];
 CHAIN_DEPOSIT_CONFIGS['pearl'] = CHAIN_DEPOSIT_CONFIGS['prl_prl'];
 

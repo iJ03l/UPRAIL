@@ -24,6 +24,7 @@ import { resolveAccount } from './accountResolver';
 import { createPaymentInvite } from './inviteService';
 import { resolveOrigin } from './webauthnConfig';
 import { publicErrorMessage } from '../utils/errors';
+import { computeSendFeeBreakdown } from '../utils/sendFee';
 import { background } from '../utils/background';
 import {
   CustodyActionError,
@@ -572,7 +573,12 @@ export async function probeAgentPocketForPayment(params: {
   let totalGrossAtomic = 0n;
   for (const r of params.recipients) {
     try {
-      const atomic = BigInt(nearRpc.toBaseUnits(r.amount, coreAsset.decimals) || '0');
+      const { totalDebit } = computeSendFeeBreakdown(
+        r.amount,
+        params.env.FEE_PERCENT,
+        Math.min(coreAsset.decimals, 6)
+      );
+      const atomic = BigInt(nearRpc.toBaseUnits(totalDebit, coreAsset.decimals) || '0');
       if (atomic <= 0n) return { covered: false, reason: 'invalid_amount', coreAsset };
       totalGrossAtomic += atomic;
     } catch {
@@ -703,23 +709,19 @@ export async function executeAgentPocketSingleSend(params: {
     publicKeyB58: pocket.publicKeyB58,
   };
 
-  const feePercent = Math.max(0, Math.min(0.1, parseFloat(env.FEE_PERCENT || '0.01') || 0.01));
-  const grossNum = parseFloat(rawAmount) || 0;
-  const protocolFee =
-    (grossNum * feePercent).toFixed(Math.min(coreAsset.decimals, 6)).replace(/\.?0+$/, '') || '0';
-  const recipientAmount =
-    (grossNum - parseFloat(protocolFee))
-      .toFixed(Math.min(coreAsset.decimals, 6))
-      .replace(/\.?0+$/, '') || '0';
-
-  const grossAtomic = BigInt(nearRpc.toBaseUnits(rawAmount, coreAsset.decimals) || '0');
+  const { recipientAmount, protocolFee, totalDebit } = computeSendFeeBreakdown(
+    rawAmount,
+    env.FEE_PERCENT,
+    Math.min(coreAsset.decimals, 6)
+  );
+  const netAtomic = BigInt(nearRpc.toBaseUnits(recipientAmount, coreAsset.decimals) || '0');
   const feeAtomic = BigInt(nearRpc.toBaseUnits(protocolFee, coreAsset.decimals) || '0');
-  const netAtomic = grossAtomic - feeAtomic;
-  if (grossAtomic <= 0n || netAtomic <= 0n) {
+  const totalDebitAtomic = netAtomic + feeAtomic;
+  if (netAtomic <= 0n || totalDebitAtomic <= 0n) {
     return {
       ok: false,
       status: 400,
-      body: { error: 'Amount too small to cover the protocol fee', code: 'INVALID_AMOUNT' },
+      body: { error: 'Send amount must be greater than zero', code: 'INVALID_AMOUNT' },
     };
   }
 
@@ -797,7 +799,7 @@ export async function executeAgentPocketSingleSend(params: {
   try {
     transfer = await submitImplicitAccountPrivateSendFromPublic(env, pocketKey, {
       asset: coreAsset.assetId,
-      amount: rawAmount,
+      amount: totalDebit,
       recipientAccount: holdingAccount,
     });
   } catch (confErr: any) {

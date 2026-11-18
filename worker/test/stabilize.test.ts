@@ -121,3 +121,27 @@ test('getStabilizeQuote rejects dust amounts below 0.05 NEAR or $1.00 USD before
     (err: any) => err instanceof StabilizeError && err.code === 'AMOUNT_TOO_LOW'
   );
 });
+
+test('computeSendFeeBreakdown keeps 100% of amount for recipient and adds 1% fee on top', async () => {
+  const { computeSendFeeBreakdown } = await import('../src/utils/sendFee');
+
+  const hundred = computeSendFeeBreakdown('100', '0.01');
+  assert.equal(hundred.recipientAmount, '100');
+  assert.equal(hundred.protocolFee, '1');
+  assert.equal(hundred.totalDebit, '101');
+
+  const frac = computeSendFeeBreakdown('1.5', '0.01');
+  assert.equal(frac.recipientAmount, '1.5');
+  assert.equal(frac.protocolFee, '0.015');
+  assert.equal(frac.totalDebit, '1.515');
+
+  const usdcMicro = computeSendFeeBreakdown('0.363995', '0.01', 6);
+  assert.equal(usdcMicro.recipientAmount, '0.363995');
+  assert.equal(usdcMicro.protocolFee, '0.00364');
+  assert.equal(usdcMicro.totalDebit, '0.367635');
+
+  const zeroFee = computeSendFeeBreakdown('25', '0');
+  assert.equal(zeroFee.recipientAmount, '25');
+  assert.equal(zeroFee.protocolFee, '0');
+  assert.equal(zeroFee.totalDebit, '25');
+});

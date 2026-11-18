@@ -417,6 +417,96 @@ export async function getCircleOnchain(
   return (res as ContractCircleView | null) ?? null;
 }
 
+/**
+ * Reconciles D1 Circle + member signature state with authoritative on-chain
+ * state on `circle.uprail.near` so brief post-tx RPC lag or interrupted joins
+ * never leave an activated Circle stuck in `PENDING_SIGNATURES`.
+ */
+export async function syncContractCircleFromOnchain(params: {
+  env: Env;
+  circleRow: any;
+  memberRows?: any[];
+  preloadedOnchain?: ContractCircleView | null;
+  maxRetries?: number;
+}): Promise<ContractCircleView | null> {
+  const { env, circleRow, preloadedOnchain, maxRetries = 0 } = params;
+  if (circleRow?.contract_mode !== 'contract' || !circleRow?.onchain_circle_id) {
+    return null;
+  }
+  const contractId = String(circleRow.escrow_contract_id || getCircleContractId(env) || '').toLowerCase();
+  if (!contractId) return null;
+
+  let onchain = preloadedOnchain ?? null;
+  if (!onchain) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      onchain = await getCircleOnchain(env, circleRow.onchain_circle_id, contractId).catch(() => null);
+      const allAgreedOnchain =
+        onchain && onchain.members.length > 0 && onchain.members.every((m) => m.agreed);
+      if (onchain && (!maxRetries || onchain.status !== 'PENDING_SIGNATURES' || allAgreedOnchain)) {
+        break;
+      }
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    }
+  }
+  if (!onchain) return null;
+
+  const memberRows =
+    params.memberRows ??
+    (env.DB
+      ? (
+          await env.DB.prepare('SELECT * FROM circle_members WHERE circle_id = ?')
+            .bind(circleRow.id)
+            .all<any>()
+        ).results || []
+      : []);
+
+  const now = Date.now();
+  const effectiveStatus =
+    onchain.status === 'PENDING_SIGNATURES' &&
+    onchain.members.length > 0 &&
+    onchain.members.every((m) => m.agreed)
+      ? 'ACTIVE'
+      : onchain.status;
+
+  for (const m of memberRows) {
+    const mPubkey = String(m.p256_pubkey || '').trim();
+    const slot = onchain.members.find((om) => mPubkey && om.pubkey === mPubkey);
+    const signedOnchain = Boolean(slot?.agreed || effectiveStatus === 'ACTIVE');
+    if (signedOnchain && (!m.terms_signed_at || !m.joined_at)) {
+      m.terms_signed_at = m.terms_signed_at || now;
+      m.joined_at = m.joined_at || now;
+      if (env.DB) {
+        await env.DB.prepare(
+          'UPDATE circle_members SET terms_signed_at = COALESCE(terms_signed_at, ?), joined_at = COALESCE(joined_at, ?) WHERE id = ?'
+        )
+          .bind(now, now, m.id)
+          .run()
+          .catch(() => {});
+      }
+    }
+  }
+
+  if (effectiveStatus && effectiveStatus !== circleRow.status) {
+    circleRow.status = effectiveStatus;
+    if (env.DB) {
+      await env.DB.prepare(
+        `UPDATE circles
+         SET status = ?,
+             closed_at = CASE WHEN ? IN ('SETTLED', 'DISSOLVED') THEN COALESCE(closed_at, ?) ELSE closed_at END,
+             updated_at = ?
+         WHERE id = ?`
+      )
+        .bind(effectiveStatus, effectiveStatus, now, now, circleRow.id)
+        .run()
+        .catch(() => {});
+    }
+  }
+
+  return onchain;
+}
+
 export async function getGiftOnchain(
   env: Env,
   giftId: string,
