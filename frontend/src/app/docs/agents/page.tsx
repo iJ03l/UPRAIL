@@ -1,4 +1,5 @@
 import React from 'react';
+import { Badge } from '@/components/Badge';
 import { Callout } from '@/components/docs/DocsUI';
 
 const APP_SETUP_URL = 'https://app.uprail.world/app/agents';
@@ -30,9 +31,7 @@ export default function AgentsDocsPage() {
           <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-orange-600">
             AI Agents &amp; MCP
           </span>
-          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-200 uppercase tracking-wider">
-            Post-Frontend Rail
-          </span>
+          <Badge tone="neutral">Post-Frontend Rail</Badge>
         </div>
         <h1 className="text-3xl sm:text-4xl font-display font-extrabold tracking-tight text-stone-950">
           The Value Railway for Autonomous AI Agents
@@ -116,10 +115,23 @@ export default function AgentsDocsPage() {
               4
             </span>
             <span>
+              <strong className="text-stone-900">Agent Allowance Pocket (Passkey Self-Custody):</strong>{' '}
+              In Passkey Self-Custody accounts, your main vault stays 100% locked to your device key.
+              Pre-fund your isolated <strong className="text-stone-900">Agent Allowance Pocket</strong>{' '}
+              with USDC, USDT, or NEAR on <code className="text-xs">/app/agents</code> so your agent
+              can execute zero-prompt confidential sends and withdrawals within your spend caps (while
+              remaining part of your unified balance).
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-stone-900 text-[11px] font-mono font-bold text-white">
+              5
+            </span>
+            <span>
               <strong className="text-stone-900">Human-in-the-Loop Escalation (<code className="text-xs">/approve</code>):</strong> If an
-              agent needs to execute a high-value batch payout exceeding policy thresholds, it generates an
-              instant authorization ticket link. You confirm the batch with your passkey, and the full intent
-              settles atomically.
+              agent needs to execute a batch payout, spend beyond policy thresholds, or send when the
+              Agent Allowance Pocket does not cover the amount, it generates an instant authorization
+              ticket link. You confirm with your passkey, and the intent settles cleanly.
             </span>
           </li>
         </ol>
@@ -127,9 +139,9 @@ export default function AgentsDocsPage() {
 
       {/* Available MCP Tools */}
       <section className="space-y-4">
-        <h2 className="text-xl font-display font-extrabold text-stone-950">7 Autonomous MCP Tools</h2>
+        <h2 className="text-xl font-display font-extrabold text-stone-950">13 Autonomous MCP Tools</h2>
         <p className="text-sm text-stone-600 leading-relaxed">
-          Every connected AI client receives access to these standard MCP tools to perform autonomous financial
+          Every connected AI client receives access to all 13 live MCP tools to perform autonomous financial
           operations within its authorized limits:
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -140,7 +152,7 @@ export default function AgentsDocsPage() {
             ],
             [
               'check_approval',
-              'Query the resolution status of batch payouts or high-value passkey escalation tickets.',
+              'Query the resolution status of batch payouts or passkey escalation tickets.',
             ],
             [
               'withdraw_to_wallet',
@@ -148,19 +160,43 @@ export default function AgentsDocsPage() {
             ],
             [
               'receive_payment',
-              'Show your persistent X deposit address, pending incoming transfers, or shareable payment links.',
+              'Show your persistent deposit address, pending incoming transfers, or shareable payment instructions.',
             ],
             [
               'get_balance',
-              'Check public, confidential, and total balances for any supported asset (USDC, USDT, NEAR, ETH, SOL, BTC).',
+              'Check public, confidential, pocket, and total balances for any supported asset (USDC, USDT, NEAR, ETH, SOL, BTC).',
             ],
             [
               'list_payments',
-              'Audit recent sent and received payments with full transaction IDs, timestamps, and fees.',
+              'Audit recent sent and received payments with transaction IDs, timestamps, and settlement status.',
             ],
             [
               'resolve_handle',
-              'Inspect whether an X handle has an activated UPRAIL vault or routes through confidential escrow.',
+              'Inspect whether an X handle has an activated UPRAIL account or routes through confidential escrow.',
+            ],
+            [
+              'list_contacts',
+              'Retrieve saved contacts ("People you pay") and frequent transfer recipients with nicknames and pinned state.',
+            ],
+            [
+              'save_contact',
+              'Save, update, or pin a trusted @handle contact with optional nickname and preferred asset/amount.',
+            ],
+            [
+              'request_payment',
+              'Create a shareable payment request asking any X @handle for funds with an optional note and expiry.',
+            ],
+            [
+              'list_requests',
+              'List incoming, outgoing, or all pending and completed payment requests.',
+            ],
+            [
+              'accept_request',
+              'Accept and settle an incoming payment request within agent spend caps.',
+            ],
+            [
+              'decline_request',
+              'Decline an incoming payment request with an optional reason.',
             ],
           ].map(([tool, detail]) => (
             <div key={tool} className="rounded-xl border border-stone-200 p-3.5 space-y-1 bg-white">
@@ -171,8 +207,9 @@ export default function AgentsDocsPage() {
         </div>
         <Callout tone="warn">
           <strong className="text-stone-900">Withdrawals are irreversible:</strong> The AI agent must specify
-          an exact amount and supported network. Spending limits apply identically to payments and withdrawals,
-          and ambiguous requests like &ldquo;withdraw all&rdquo; are rejected.
+          an explicit positive amount and destination address (optional chain slug defaults safely when inferred).
+          Spending limits apply identically to payments and withdrawals, and ambiguous requests like
+          &ldquo;withdraw all&rdquo; are rejected.
         </Callout>
       </section>
 
@@ -361,7 +398,7 @@ export default function AgentsDocsPage() {
         <ol className="list-decimal space-y-2 pl-5 text-sm text-stone-600 leading-relaxed">
           <li>Start with a conservative limit ($10–$50) and test with $1 first.</li>
           <li>Ask a read-only query like &ldquo;What is my UPRAIL balance?&rdquo; to verify tool discovery.</li>
-          <li>Send $1 to an X handle you control to test intent signing and fee deduction.</li>
+          <li>Send $1 to an X handle you control to test intent signing and the 1% protocol fee (added on top from your balance so the recipient receives the full $1).</li>
           <li>Check the transaction in UPRAIL dashboard history before increasing limits.</li>
           <li>
             To disconnect, go to <strong>Connected AI Chats</strong> in the app, click <strong>Disconnect</strong>,

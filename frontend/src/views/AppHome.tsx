@@ -5,24 +5,28 @@ import { Link, useNavigate } from '../lib/router';
 import { PeopleYouPay } from '../components/PeopleYouPay';
 import {
   ArrowDownLeft,
-  ArrowLeftRight,
+  ArrowsLeftRight,
   ArrowUpRight,
   Fingerprint,
   Eye,
-  EyeOff,
+  EyeSlash,
   Copy,
   Check,
   Shield,
-  RefreshCw,
+  ArrowsClockwise,
   ArrowRight,
-  AlertCircle,
-  ExternalLink,
+  WarningCircle,
+  ArrowSquareOut,
   Clock,
-  CircleDot,
+  Record as RecordIcon,
+  PaperPlaneTilt,
+  ArrowFatDown,
+  ArrowFatUp,
+  CurrencyCircleDollar,
   Leaf,
   ShieldCheck,
   X,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
 import { useXAuth } from '../hooks/useXAuth';
@@ -45,6 +49,7 @@ import { CoffeeModal, CoinPouchIcon } from '../components/CoffeeModal';
 import { SelfCustodyUpgradeModal } from '../components/SelfCustodyUpgradeModal';
 import { RollingNumber } from '../components/RollingNumber';
 import { Skeleton } from '../components/Skeleton';
+import { Badge } from '../components/Badge';
 import { useToast } from '../components/Toast';
 import { activityStatusMeta, cancellationReason } from '../lib/statusLabels';
 
@@ -421,7 +426,7 @@ export const AppHome: React.FC = () => {
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.08] px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start sm:items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-4 h-4 text-emerald-700" />
+              <ShieldCheck weight="fill" className="w-4 h-4 text-emerald-700" />
             </div>
             <div className="min-w-0">
               <div className="text-xs font-display font-bold text-stone-900">
@@ -452,7 +457,7 @@ export const AppHome: React.FC = () => {
               aria-label="Dismiss Self-Custody banner"
               title="Dismiss"
             >
-              <X className="w-4 h-4" />
+              <X weight="bold" className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -468,19 +473,9 @@ export const AppHome: React.FC = () => {
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0 flex-wrap">
                 <span className="text-xs font-mono uppercase tracking-wider text-stone-500 font-bold flex items-center space-x-1.5 min-w-0">
-                  <Shield className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+                  <Shield weight="fill" className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
                   <span className="truncate">UPRAIL Account</span>
                 </span>
-                {user?.custodyMode === 'self' && user.nearAccount && (
-                  <Link
-                    to={`/verify?q=${encodeURIComponent(user.nearAccount)}`}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-bold text-emerald-700 hover:bg-emerald-500/25 transition-colors"
-                    title="Verify Self-Custody Keys On-Chain"
-                  >
-                    <ShieldCheck className="w-3 h-3" />
-                    <span>Self-Custody</span>
-                  </Link>
-                )}
               </div>
               <div className="flex items-center space-x-1 flex-shrink-0">
                 <button
@@ -490,7 +485,7 @@ export const AppHome: React.FC = () => {
                   className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-50 transition-colors cursor-pointer"
                   title="Refresh live balance & activity"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${(isRefreshing || isLoadingBalances) ? 'animate-spin text-stone-900' : ''}`} />
+                  <ArrowsClockwise weight="bold" className={`w-3.5 h-3.5 ${(isRefreshing || isLoadingBalances) ? 'animate-spin text-stone-900' : ''}`} />
                 </button>
                 <button
                   type="button"
@@ -498,7 +493,7 @@ export const AppHome: React.FC = () => {
                   className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-50 transition-colors cursor-pointer"
                   title={hideBalance ? 'Show balance' : 'Hide balance'}
                 >
-                  {hideBalance ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {hideBalance ? <EyeSlash weight="fill" className="w-4 h-4" /> : <Eye weight="fill" className="w-4 h-4" />}
                 </button>
               </div>
             </div>
@@ -527,9 +522,9 @@ export const AppHome: React.FC = () => {
                     title="Circles & Timelocked Earn Vault Gifting"
                     className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-2xl border border-stone-200 bg-white hover:bg-stone-50 hover:border-stone-300 text-stone-900 text-xs font-display font-bold tracking-wide shadow-2xs transition-all group cursor-pointer"
                   >
-                    <Leaf className="w-3.5 h-3.5 text-emerald-600 fill-emerald-500/20 transition-transform group-hover:scale-110 group-hover:-rotate-6" />
+                    <Leaf weight="fill" className="w-3.5 h-3.5 text-[#00D68F] dark:text-[#00EC97] drop-shadow-[0_0_5px_rgba(0,236,151,0.45)] transition-transform group-hover:scale-110 group-hover:-rotate-6" />
                     <span>Circles</span>
-                    <ArrowUpRight className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-900 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+                    <ArrowUpRight weight="bold" className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-900 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
                   </Link>
 
                   {(() => {
@@ -578,7 +573,7 @@ export const AppHome: React.FC = () => {
                             <span>░▒▓█╬─┼─1CLICK─┼─╬█▓▒░▒▓█</span>
                           </span>
                         )}
-                        <ArrowLeftRight
+                        <ArrowsLeftRight weight="bold"
                           className={`relative z-10 w-3.5 h-3.5 transition-colors drop-shadow-xs ${
                             stabilizeDisabled ? 'text-stone-400' : 'text-emerald-100 group-hover:text-white'
                           }`}
@@ -707,7 +702,7 @@ export const AppHome: React.FC = () => {
                 </div>
               ) : balancesError || onchainError ? (
                 <span className="text-xs font-mono text-red-500 flex items-center space-x-1">
-                  <AlertCircle className="w-3 h-3" />
+                  <WarningCircle weight="fill" className="w-3 h-3" />
                   <span>{balancesError || onchainError}</span>
                   <button
                     type="button"
@@ -733,7 +728,7 @@ export const AppHome: React.FC = () => {
             >
               <div className="flex items-center space-x-3 sm:space-x-3.5 min-w-0">
                 <div className="w-10 h-10 rounded-2xl bg-white text-orange-600 flex items-center justify-center font-bold flex-shrink-0">
-                  <ArrowDownLeft className="w-5 h-5" />
+                  <ArrowDownLeft weight="bold" className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
                   <div className="text-xs font-bold font-display flex items-center space-x-2">
@@ -749,7 +744,7 @@ export const AppHome: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <ArrowRight className="w-4 h-4 text-orange-200 group-hover:text-white group-hover:translate-x-1 transition-all flex-shrink-0" />
+              <ArrowRight weight="bold" className="w-4 h-4 text-orange-200 group-hover:text-white group-hover:translate-x-1 transition-all flex-shrink-0" />
             </Link>
           )}
 
@@ -761,7 +756,7 @@ export const AppHome: React.FC = () => {
             >
               <div className="flex items-center space-x-3 sm:space-x-3.5 min-w-0">
                 <div className="w-10 h-10 rounded-2xl bg-white text-stone-900 flex items-center justify-center font-bold flex-shrink-0">
-                  <Fingerprint className="w-5 h-5" />
+                  <Fingerprint weight="bold" className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
                   <div className="text-xs font-bold font-display flex items-center space-x-2">
@@ -773,7 +768,7 @@ export const AppHome: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-1 transition-all flex-shrink-0" />
+              <ArrowRight weight="bold" className="w-4 h-4 text-stone-400 group-hover:text-white group-hover:translate-x-1 transition-all flex-shrink-0" />
             </Link>
           )}
 
@@ -786,7 +781,7 @@ export const AppHome: React.FC = () => {
                 className="flex items-center space-x-3.5 min-w-0 group"
               >
                 <div className="w-10 h-10 rounded-2xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-600 flex items-center justify-center font-bold flex-shrink-0">
-                  <ArrowDownLeft className="w-5 h-5" />
+                  <ArrowDownLeft weight="bold" className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
                   <div className="text-xs font-bold font-display text-stone-950 truncate">
@@ -810,53 +805,53 @@ export const AppHome: React.FC = () => {
           )}
 
           {/* Quick Action Buttons */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5">
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-2.5">
             <Link
               to="/app/send"
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="min-w-0 py-2.5 sm:py-4 px-1.5 sm:px-3 rounded-xl sm:rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 sm:space-y-1.5 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!text-orange-500 flex items-center justify-center group-hover:scale-105 transition-all">
-                <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5" />
+              <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 dark:group-hover:!bg-orange-500 dark:group-hover:!text-white flex items-center justify-center group-hover:scale-105 transition-all shadow-2xs">
+                <PaperPlaneTilt weight="fill" className="w-4 h-4 sm:w-[22px] sm:h-[22px]" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors">
+              <span className="text-[10px] sm:text-xs font-display font-bold uppercase tracking-wider leading-tight text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors truncate max-w-full">
                 Send
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
-                𝕏 & Wallets
+              <span className="text-[8.5px] sm:text-[10px] font-mono leading-tight text-stone-500 dark:group-hover:!text-orange-400/90 transition-colors truncate max-w-full">
+                𝕏 &amp; Wallets
               </span>
             </Link>
 
             <Link
               to="/app/request"
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer relative"
+              className="min-w-0 py-2.5 sm:py-4 px-1.5 sm:px-3 rounded-xl sm:rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 sm:space-y-1.5 shadow-xs hover:shadow-sm group cursor-pointer relative"
             >
               {pendingIncomingRequests.length > 0 && (
-                <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded-full bg-orange-600 text-white text-[9px] font-mono font-bold animate-pulse">
+                <Badge tone="warn" className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2">
                   {pendingIncomingRequests.length}
-                </span>
+                </Badge>
               )}
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!text-orange-500 flex items-center justify-center group-hover:scale-105 transition-all">
-                <ArrowDownLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 dark:group-hover:!bg-orange-500 dark:group-hover:!text-white flex items-center justify-center group-hover:scale-105 transition-all shadow-2xs">
+                <ArrowFatDown weight="fill" className="w-4 h-4 sm:w-[22px] sm:h-[22px]" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors">
+              <span className="text-[10px] sm:text-xs font-display font-bold uppercase tracking-wider leading-tight text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors truncate max-w-full">
                 Request
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
+              <span className="text-[8.5px] sm:text-[10px] font-mono leading-tight text-stone-500 dark:group-hover:!text-orange-400/90 transition-colors truncate max-w-full">
                 From 𝕏
               </span>
             </Link>
 
             <Link
               to="/app/receive"
-              className="py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="min-w-0 py-2.5 sm:py-4 px-1.5 sm:px-3 rounded-xl sm:rounded-2xl border border-stone-200 bg-white hover:border-black dark:hover:!border-orange-500 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 sm:space-y-1.5 shadow-xs hover:shadow-sm group cursor-pointer"
             >
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-stone-100 text-stone-900 dark:group-hover:!text-orange-500 flex items-center justify-center group-hover:scale-105 transition-all">
-                <ArrowDownLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-950 dark:group-hover:!bg-orange-500 dark:group-hover:!text-white flex items-center justify-center group-hover:scale-105 transition-all shadow-2xs">
+                <CurrencyCircleDollar weight="fill" className="w-4 h-4 sm:w-[22px] sm:h-[22px]" />
               </div>
-              <span className="text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors">
+              <span className="text-[10px] sm:text-xs font-display font-bold uppercase tracking-wider leading-tight text-stone-900 group-hover:text-black dark:group-hover:!text-orange-500 transition-colors truncate max-w-full">
                 Deposit
               </span>
-              <span className="text-[9px] sm:text-[10px] font-mono text-stone-400 dark:group-hover:!text-orange-400/90 transition-colors">
+              <span className="text-[8.5px] sm:text-[10px] font-mono leading-tight text-stone-500 dark:group-hover:!text-orange-400/90 transition-colors truncate max-w-full">
                 Any Chain
               </span>
             </Link>
@@ -864,7 +859,7 @@ export const AppHome: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsWithdrawModalOpen(true)}
-              className="relative overflow-hidden py-3.5 sm:py-4 px-2 sm:px-3 rounded-2xl border border-emerald-700/80 bg-emerald-600 hover:bg-emerald-700 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 shadow-xs hover:shadow-sm group cursor-pointer"
+              className="relative overflow-hidden min-w-0 py-2.5 sm:py-4 px-1.5 sm:px-3 rounded-xl sm:rounded-2xl border border-emerald-700/80 bg-emerald-600 hover:bg-emerald-700 text-center transition-all duration-150 flex flex-col items-center justify-center space-y-1 sm:space-y-1.5 shadow-xs hover:shadow-sm group cursor-pointer"
             >
               <span
                 aria-hidden="true"
@@ -880,13 +875,13 @@ export const AppHome: React.FC = () => {
                 <span>║▒░╬──┼─0.00 GAS─┼──╬█▓▒░║</span>
                 <span>╚══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═╝</span>
               </span>
-              <div className="relative z-10 w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white/15 backdrop-blur-[1px] border border-white/20 text-white flex items-center justify-center group-hover:scale-105 transition-all">
-                <ArrowUpRight className="w-4 h-4 sm:w-5 sm:h-5 drop-shadow-xs" />
+              <div className="relative z-10 w-8 h-8 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-white text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-all shadow-2xs">
+                <ArrowFatUp weight="fill" className="w-4 h-4 sm:w-[22px] sm:h-[22px]" />
               </div>
-              <span className="relative z-10 text-[11px] sm:text-xs font-display font-bold uppercase tracking-wider text-white transition-colors drop-shadow-xs">
+              <span className="relative z-10 text-[10px] sm:text-xs font-display font-bold uppercase tracking-wider leading-tight text-white transition-colors drop-shadow-xs truncate max-w-full">
                 Withdraw
               </span>
-              <span className="relative z-10 text-[9px] sm:text-[10px] font-mono text-emerald-100 transition-colors drop-shadow-xs">
+              <span className="relative z-10 text-[8.5px] sm:text-[10px] font-mono leading-tight text-emerald-100 transition-colors drop-shadow-xs truncate max-w-full">
                 near.com
               </span>
             </button>
@@ -901,9 +896,7 @@ export const AppHome: React.FC = () => {
                 <h3 className="font-display font-extrabold text-stone-950 text-base">
                   Transactions
                 </h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 font-bold">
-                  {Math.min(recentActivity.length, 4)}
-                </span>
+                <Badge tone="neutral">{Math.min(recentActivity.length, 4)}</Badge>
               </div>
               <button
                 type="button"
@@ -912,7 +905,7 @@ export const AppHome: React.FC = () => {
                 className="text-stone-400 hover:text-stone-700 p-1 rounded-lg hover:bg-stone-50 transition-colors cursor-pointer"
                 title="Refresh transactions"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${(isRefreshing || isLoadingHistory || isLoadingOnchainHistory) ? 'animate-spin text-stone-900' : ''}`} />
+                <ArrowsClockwise weight="bold" className={`w-3.5 h-3.5 ${(isRefreshing || isLoadingHistory || isLoadingOnchainHistory) ? 'animate-spin text-stone-900' : ''}`} />
               </button>
             </div>
 
@@ -956,11 +949,11 @@ export const AppHome: React.FC = () => {
                             : 'bg-stone-100 text-stone-700 border border-stone-200 dark:bg-stone-800 dark:border-stone-700'
                         }`}>
                           {tx.balanceEffect === 'debit' ? (
-                            <ArrowUpRight className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                            <ArrowUpRight weight="bold" className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
                           ) : tx.balanceEffect === 'incoming' ? (
-                            <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <ArrowDownLeft weight="bold" className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                           ) : (
-                            <Clock className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
+                            <Clock weight="fill" className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400" />
                           )}
                         </div>
                         <div className="min-w-0">
@@ -975,7 +968,7 @@ export const AppHome: React.FC = () => {
                               className="text-[10px] text-amber-700 dark:text-amber-400 font-mono flex items-start gap-1 leading-snug mt-0.5 max-w-[220px] sm:max-w-xs"
                               title={tx.reason}
                             >
-                              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                              <WarningCircle weight="fill" className="w-3 h-3 mt-0.5 flex-shrink-0" />
                               <span className="line-clamp-2 break-words">{tx.reason}</span>
                             </div>
                           )}
@@ -1018,9 +1011,9 @@ export const AppHome: React.FC = () => {
                             title={tx.copyTitle || "Copy link"}
                           >
                             {copiedTxId === tx.id ? (
-                              <Check className="w-3.5 h-3.5 text-stone-900" />
+                              <Check weight="bold" className="w-3.5 h-3.5 text-stone-900" />
                             ) : (
-                              <Copy className="w-3.5 h-3.5" />
+                              <Copy weight="fill" className="w-3.5 h-3.5" />
                             )}
                           </button>
                         )}
@@ -1032,7 +1025,7 @@ export const AppHome: React.FC = () => {
                             className="p-1 rounded-lg text-stone-300 hover:text-black hover:bg-stone-100 transition-colors"
                             title="View on Explorer"
                           >
-                            <ExternalLink className="w-3.5 h-3.5" />
+                            <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
                           </a>
                         )}
                       </div>
@@ -1048,7 +1041,7 @@ export const AppHome: React.FC = () => {
                 className="inline-flex items-center space-x-1 text-xs font-mono font-bold text-stone-900 hover:text-black transition-colors"
               >
                 <span>Full Ledger ({recentActivity.length})</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <ArrowRight weight="bold" className="w-3.5 h-3.5" />
               </Link>
             </div>
           </div>

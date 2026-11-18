@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, ShieldAlert } from 'lucide-react';
+import { ArrowRight, ShieldWarning } from '@phosphor-icons/react';
+import { Badge } from './Badge';
 
 type GateMode = 'render' | 'redirect' | 'forbidden';
 
@@ -12,10 +13,9 @@ type GateMode = 'render' | 'redirect' | 'forbidden';
 const ForbiddenOnApex: React.FC = () => (
   <div className="min-h-screen bg-stone-950 text-white flex flex-col items-center justify-center p-6 text-center select-none font-sans">
     <div className="max-w-md w-full bg-stone-900 border border-stone-800 rounded-3xl p-8 sm:p-10 shadow-2xl space-y-6">
-      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono font-bold uppercase tracking-wider">
-        <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-        <span>403 Forbidden</span>
-      </div>
+      <Badge tone="danger" icon={<ShieldWarning weight="fill" className="w-3 h-3" />}>
+        403 Forbidden
+      </Badge>
 
       <div className="space-y-2">
         <h1 className="text-2xl sm:text-3xl font-display font-extrabold tracking-tight text-white">
@@ -38,7 +38,7 @@ const ForbiddenOnApex: React.FC = () => (
           className="w-full inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-white hover:bg-stone-200 text-black font-display font-bold text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer"
         >
           <span>Launch app.uprail.world</span>
-          <ArrowRight className="w-4 h-4" />
+          <ArrowRight weight="bold" className="w-4 h-4" />
         </a>
       </div>
     </div>

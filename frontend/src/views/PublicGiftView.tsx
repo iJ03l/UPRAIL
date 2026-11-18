@@ -5,23 +5,24 @@ import { Link } from '../lib/router';
 import {
   Gift,
   Lock,
-  Unlock,
+  LockOpen,
   Fingerprint,
-  TrendingUp,
+  TrendUp,
   Copy,
   Check,
-  Share2,
+  ShareNetwork,
   ArrowRight,
-  Sparkles,
-  ExternalLink,
+  Sparkle,
+  ArrowSquareOut,
   Shield,
   ShieldCheck,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 import { api, formatUsd } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useToast } from '../components/Toast';
 import { GlitchLogo } from '../components/GlitchLogo';
+import { Badge } from '../components/Badge';
 import type { PublicGiftCardView, AuthenticatedGiftView } from '../types';
 
 function extractGiftIdFromLocation(): string {
@@ -59,7 +60,8 @@ export const PublicGiftView: React.FC = () => {
       const prefersDark =
         typeof window.matchMedia === 'function' &&
         window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const isDark = savedTheme ? savedTheme === 'dark' : prefersDark;
+      const isDark =
+        savedTheme === 'dark' || ((!savedTheme || savedTheme === 'system') && prefersDark);
       document.documentElement.classList.toggle('dark', isDark);
     } catch {}
   }, []);
@@ -226,7 +228,7 @@ export const PublicGiftView: React.FC = () => {
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-stone-200 bg-white hover:bg-stone-100 text-xs font-mono font-bold text-stone-800 transition-colors"
         >
           <span>Open Circles & Gifting</span>
-          <ArrowRight className="w-3.5 h-3.5" />
+          <ArrowRight weight="bold" className="w-3.5 h-3.5" />
         </Link>
       </header>
 
@@ -235,7 +237,7 @@ export const PublicGiftView: React.FC = () => {
         {isLoading ? (
           <div className="bg-white border border-stone-200 rounded-3xl p-8 text-center space-y-3 shadow-sm">
             <div className="w-12 h-12 rounded-2xl bg-stone-950 text-amber-400 flex items-center justify-center mx-auto animate-pulse">
-              <Gift className="w-6 h-6" />
+              <Gift weight="fill" className="w-6 h-6" />
             </div>
             <p className="text-xs font-mono text-stone-500">Loading Earn Vault Gift...</p>
           </div>
@@ -259,15 +261,10 @@ export const PublicGiftView: React.FC = () => {
             {/* Dark Hero Header */}
             <div className="bg-stone-950 text-white p-6 sm:p-8 space-y-4 relative overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="px-3 py-1 rounded-full bg-amber-400/15 border border-amber-400/40 text-amber-300 font-mono text-xs font-bold uppercase tracking-wider">
-                  {activeGift.occasionLabel}
-                </span>
-                <span className="px-3 py-1 rounded-full bg-emerald-400/15 border border-emerald-400/40 text-emerald-300 font-mono text-xs font-bold flex items-center gap-1.5">
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  <span>
-                    {activeGift.vaultSymbol} • {activeGift.estimatedApyPct}% APY
-                  </span>
-                </span>
+                <Badge tone="warn">{activeGift.occasionLabel}</Badge>
+                <Badge tone="ok" icon={<TrendUp weight="fill" className="w-3 h-3" />}>
+                  {activeGift.vaultSymbol} • {activeGift.estimatedApyPct}% APY
+                </Badge>
               </div>
 
               <div className="space-y-1">
@@ -331,9 +328,9 @@ export const PublicGiftView: React.FC = () => {
                 <div className="flex items-center justify-between text-xs font-mono text-stone-500">
                   <span className="flex items-center gap-1.5">
                     {isUnlocked ? (
-                      <Unlock className="w-3.5 h-3.5 text-emerald-600" />
+                      <LockOpen weight="fill" className="w-3.5 h-3.5 text-emerald-600" />
                     ) : (
-                      <Lock className="w-3.5 h-3.5 text-amber-600" />
+                      <Lock weight="fill" className="w-3.5 h-3.5 text-amber-600" />
                     )}
                     <span>
                       {activeGift.status === 'CLAIMED'
@@ -386,7 +383,7 @@ export const PublicGiftView: React.FC = () => {
                   onClick={() => api.loginWithX()}
                   className="w-full py-3.5 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
                 >
-                  <Fingerprint className="w-4 h-4 text-emerald-400" />
+                  <Fingerprint weight="bold" className="w-4 h-4 text-emerald-400" />
                   <span>
                     Sign in as @{activeGift.recipientHandle} to View Live Yield & Unwrap
                   </span>
@@ -402,7 +399,7 @@ export const PublicGiftView: React.FC = () => {
                       : 'bg-stone-200 text-stone-500 cursor-not-allowed'
                   }`}
                 >
-                  <Fingerprint className="w-4 h-4" />
+                  <Fingerprint weight="bold" className="w-4 h-4" />
                   <span>
                     {isClaiming || isAuthorizing
                       ? 'Unwrapping & Settling on NEAR Intents...'
@@ -418,7 +415,7 @@ export const PublicGiftView: React.FC = () => {
                   onClick={handleReclaim}
                   className="w-full py-3.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
                 >
-                  <Fingerprint className="w-4 h-4" />
+                  <Fingerprint weight="bold" className="w-4 h-4" />
                   <span>
                     {isClaiming || isAuthorizing
                       ? 'Reclaiming Gift & Yield to Your Vault...'
@@ -440,9 +437,9 @@ export const PublicGiftView: React.FC = () => {
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-mono text-stone-700 cursor-pointer"
                   >
                     {copied ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                     ) : (
-                      <Copy className="w-3.5 h-3.5" />
+                      <Copy weight="fill" className="w-3.5 h-3.5" />
                     )}
                     <span>Copy Gift Link</span>
                   </button>
@@ -454,7 +451,7 @@ export const PublicGiftView: React.FC = () => {
                       )}`}
                       className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-xs font-mono font-bold text-emerald-700"
                     >
-                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <ShieldCheck weight="fill" className="w-3.5 h-3.5" />
                       <span>Verify On-Chain</span>
                     </Link>
                   )}
@@ -468,7 +465,7 @@ export const PublicGiftView: React.FC = () => {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold"
                 >
-                  <Share2 className="w-3.5 h-3.5" />
+                  <ShareNetwork weight="fill" className="w-3.5 h-3.5" />
                   <span>Share Card on 𝕏</span>
                 </a>
               </div>
@@ -477,8 +474,8 @@ export const PublicGiftView: React.FC = () => {
         )}
       </main>
 
-      <footer className="text-center text-[11px] font-mono text-stone-400">
-        Powered by UPRAIL & Intents Earn • Passkey-Secured Custody
+      <footer className="text-center text-[11px] font-mono text-stone-500">
+        Powered by UPRAIL &amp; Intents Earn • Passkey-Secured Custody
       </footer>
     </div>
   );

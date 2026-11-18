@@ -175,7 +175,14 @@ try {
         if (owner && parsed.owner && parsed.owner !== owner) {
           localStorage.removeItem(CACHE_KEY);
         } else {
-          globalCache = { ...globalCache, ...parsed };
+          globalCache = {
+            ...globalCache,
+            ...parsed,
+            tokens: Array.isArray(parsed.tokens) ? parsed.tokens : [],
+            balances: Array.isArray(parsed.balances) ? parsed.balances : [],
+            depositAddresses: Array.isArray(parsed.depositAddresses) ? parsed.depositAddresses : [],
+            transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+          };
         }
       }
     }
@@ -203,7 +210,15 @@ export function persistCache(patch: Partial<OnchainCache>) {
   } else if (!globalCache.owner && owner) {
     globalCache = { ...globalCache, owner };
   }
-  globalCache = { ...globalCache, ...patch, owner };
+  globalCache = {
+    ...globalCache,
+    ...patch,
+    owner,
+    tokens: Array.isArray(patch.tokens ?? globalCache.tokens) ? (patch.tokens ?? globalCache.tokens) : [],
+    balances: Array.isArray(patch.balances ?? globalCache.balances) ? (patch.balances ?? globalCache.balances) : [],
+    depositAddresses: Array.isArray(patch.depositAddresses ?? globalCache.depositAddresses) ? (patch.depositAddresses ?? globalCache.depositAddresses) : [],
+    transactions: Array.isArray(patch.transactions ?? globalCache.transactions) ? (patch.transactions ?? globalCache.transactions) : [],
+  };
   try {
     if (typeof window !== 'undefined') {
       localStorage.setItem(CACHE_KEY, JSON.stringify(globalCache));
@@ -383,12 +398,13 @@ export function useOnchainData(): UseOnchainDataResult {
     }
     const task = (async () => {
       try {
-        if (globalCache.transactions.length === 0) {
+        if (!Array.isArray(globalCache.transactions) || globalCache.transactions.length === 0) {
           setIsLoadingHistory(true);
         }
         const response = await fetchOnchainHistory(50);
-        setTransactions(response.transactions);
-        persistCache({ transactions: response.transactions });
+        const nextTx = Array.isArray(response?.transactions) ? response.transactions : [];
+        setTransactions(nextTx);
+        persistCache({ transactions: nextTx });
       } catch (err: any) {
         console.warn('[useOnchainData] history:', err);
       } finally {

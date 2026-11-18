@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Check, X, AlertTriangle, Info } from 'lucide-react';
+import { CheckCircle, X, Warning, Info } from '@phosphor-icons/react';
 
 type ToastTone = 'success' | 'error' | 'info';
 
@@ -26,8 +26,8 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 const ICONS: Record<ToastTone, React.ComponentType<{ className?: string }>> = {
-  success: Check,
-  error: AlertTriangle,
+  success: CheckCircle,
+  error: Warning,
   info: Info,
 };
 
@@ -99,7 +99,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 className="p-1 rounded-lg text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer"
                 aria-label="Dismiss"
               >
-                <X className="w-3.5 h-3.5" />
+                <X weight="bold" className="w-3.5 h-3.5" />
               </button>
             </div>
           );

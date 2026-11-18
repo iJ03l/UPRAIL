@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Lock, ArrowRight, Sparkles } from 'lucide-react';
+import { Lock, ArrowRight, Sparkle } from '@phosphor-icons/react';
+import { Badge } from './Badge';
 
 /**
  * Temporary access gate for a not-yet-public feature.
@@ -53,12 +54,11 @@ export const FeatureGate: React.FC<{
     <div className="min-h-[60vh] flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-md bg-white border border-stone-200 rounded-3xl p-8 shadow-sm space-y-6">
         <div className="space-y-3 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-stone-100 border border-stone-200 text-stone-600 text-[10px] font-mono font-bold uppercase tracking-wider">
-            <Sparkles className="w-3 h-3" />
-            <span>Coming soon</span>
-          </div>
+          <Badge tone="neutral" icon={<Sparkle weight="fill" className="w-3 h-3" />}>
+            Coming soon
+          </Badge>
           <div className="w-12 h-12 mx-auto rounded-2xl bg-stone-950 text-white flex items-center justify-center">
-            <Lock className="w-5 h-5" />
+            <Lock weight="fill" className="w-5 h-5" />
           </div>
           <div className="space-y-1">
             <h1 className="text-xl font-display font-extrabold tracking-tight text-stone-950">
@@ -90,7 +90,7 @@ export const FeatureGate: React.FC<{
             className="w-full px-4 py-3 rounded-xl bg-stone-950 hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
           >
             <span>Unlock preview</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight weight="bold" className="w-3.5 h-3.5" />
           </button>
         </form>
 

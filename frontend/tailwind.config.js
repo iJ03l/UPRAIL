@@ -98,13 +98,6 @@ export default {
           'monospace',
         ],
       },
-      boxShadow: {
-        'glow-burnt': '0 0 35px -5px rgba(224, 83, 38, 0.45)',
-        'glow-flame': '0 0 60px 0px rgba(255, 107, 53, 0.35)',
-        'glow-white': '0 0 30px -5px rgba(255, 255, 255, 0.3)',
-        'glow-subtle': '0 8px 32px 0 rgba(0, 0, 0, 0.7)',
-        'inner-burnt': 'inset 0 0 20px 0 rgba(224, 83, 38, 0.2)',
-      },
       animation: {
         'pulse-slow': 'pulse 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'rail-flow': 'railFlow 20s linear infinite',

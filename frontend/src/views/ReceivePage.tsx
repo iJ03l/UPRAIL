@@ -7,14 +7,14 @@ import {
   Check,
   QrCode,
   Shield,
-  RefreshCw,
-  Loader2,
-  AlertTriangle,
-  Zap,
-  CheckCircle2,
-  ChevronDown,
-  Search,
-} from 'lucide-react';
+  ArrowsClockwise,
+  CircleNotch,
+  Warning,
+  Lightning,
+  CheckCircle,
+  CaretDown,
+  MagnifyingGlass,
+} from '@phosphor-icons/react';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { fetchDepositAddress, fetchDepositStatus, DepositAddress, DepositStatusResponse } from '../lib/onchainApi';
 import { api, formatUsd } from '../lib/api';
@@ -23,6 +23,7 @@ import { ChainLogo } from '../components/ChainLogo';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { BackBar } from '../components/BackBar';
 import { AssetPicker } from '../components/AssetPicker';
+import { Badge } from '../components/Badge';
 import { useToast } from '../components/Toast';
 import { Token } from '../types';
 
@@ -45,12 +46,13 @@ export interface ChainOption {
 }
 
 const TOKEN_OPTIONS: TokenOption[] = [
-  { symbol: 'USDC', name: 'USD Coin', badge: 'Most Popular', chains: ['base', 'arbitrum', 'sol', 'near', 'pol', 'bsc', 'op', 'avax', 'eth'] },
-  { symbol: 'USDT', name: 'Tether USD', badge: 'Stablecoin', chains: ['arbitrum', 'sol', 'near', 'pol', 'bsc', 'op', 'avax', 'eth', 'tron'] },
+  { symbol: 'USDC', name: 'USD Coin', badge: 'Most Popular', chains: ['base', 'arbitrum', 'sol', 'near', 'sui', 'hood', 'pol', 'bsc', 'op', 'avax', 'eth'] },
+  { symbol: 'USDT', name: 'Tether USD', badge: 'Stablecoin', chains: ['arbitrum', 'sol', 'near', 'sui', 'hood', 'pol', 'bsc', 'op', 'avax', 'eth', 'tron'] },
   { symbol: 'NEAR', name: 'NEAR Protocol', badge: 'Native Shield', chains: ['near', 'bsc', 'sol', 'arbitrum'] },
   { symbol: 'ETH', name: 'Ethereum', badge: 'Cross-chain', chains: ['base', 'arbitrum', 'eth', 'op', 'scroll', 'hood'] },
   { symbol: 'SOL', name: 'Solana', badge: 'Ultra-Fast', chains: ['sol', 'near'] },
   { symbol: 'BTC', name: 'Bitcoin', badge: 'Native SegWit', chains: ['btc', 'near'] },
+  { symbol: 'SUI', name: 'Sui', badge: 'Move L1', chains: ['sui', 'near'] },
   { symbol: 'USDG', name: 'Global Dollar', badge: 'Robinhood', chains: ['hood'] },
   { symbol: 'PRL', name: 'Pearl', badge: 'Pearl L1', chains: ['prl'] },
   { symbol: 'DOGE', name: 'Dogecoin', badge: 'Meme L1', chains: ['doge', 'near'] },
@@ -64,8 +66,10 @@ const TOKEN_OPTIONS: TokenOption[] = [
 const CHAIN_DEFINITIONS: Record<string, ChainOption> = {
   base: { id: 'base', name: 'Base', icon: '🔵', badge: 'L2 Sub-Cent', time: '~15s', recommended: true },
   arbitrum: { id: 'arbitrum', name: 'Arbitrum', icon: '🔷', badge: 'L2 Rollup', time: '~15s', recommended: true },
+  arb: { id: 'arb', name: 'Arbitrum', icon: '🔷', badge: 'L2 Rollup', time: '~15s', recommended: true },
   sol: { id: 'sol', name: 'Solana', icon: '◎', badge: 'SPL Fast', time: '~15s', recommended: true },
   near: { id: 'near', name: 'NEAR', icon: 'Ⓝ', badge: 'Instant Finality', time: '~2s', recommended: true },
+  sui: { id: 'sui', name: 'Sui', icon: '💧', badge: 'Move L1', time: '~5s', recommended: true },
   hood: { id: 'hood', name: 'Robinhood', icon: '🏹', badge: 'Robinhood EVM', time: '~15s', recommended: true },
   prl: { id: 'prl', name: 'Pearl', icon: '⚪', badge: 'Pearl L1', time: '~15s' },
   pol: { id: 'pol', name: 'Polygon', icon: '🟣', badge: 'PoS Sub-Cent', time: '~20s', recommended: true },
@@ -252,11 +256,19 @@ export const ReceivePage: React.FC = () => {
       const map = new Map<string, TokenOption>();
       // Seed with curated options
       for (const t of TOKEN_OPTIONS) {
-        map.set(t.symbol.toUpperCase(), { ...t });
+        map.set(t.symbol.toUpperCase(), { ...t, chains: [...t.chains] });
       }
       for (const t of toks) {
         const sym = t.symbol.toUpperCase();
-        const chain = (t.chain || 'near').toLowerCase();
+        const rawChain = (t.chain || 'near').toLowerCase();
+        const chain =
+          rawChain === 'arb'
+            ? 'arbitrum'
+            : rawChain === 'robinhood'
+            ? 'hood'
+            : rawChain === 'pearl'
+            ? 'prl'
+            : rawChain;
         if (map.has(sym)) {
           const existing = map.get(sym)!;
           if (!existing.chains.includes(chain)) {
@@ -615,8 +627,8 @@ export const ReceivePage: React.FC = () => {
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
             }`}
           >
-            <Zap className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">Cross-Chain Assets</span>
+            <Lightning weight="fill" className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="truncate">Any chain</span>
           </button>
 
           <button
@@ -628,8 +640,8 @@ export const ReceivePage: React.FC = () => {
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
             }`}
           >
-            <Shield className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">NEAR Native &amp; Memes</span>
+            <Shield weight="fill" className="w-3.5 h-3.5 flex-shrink-0" />
+            <span className="truncate">NEAR &amp; memes</span>
           </button>
         </div>
       </div>
@@ -671,9 +683,7 @@ export const ReceivePage: React.FC = () => {
                       <span className="font-mono text-sm font-extrabold text-stone-950">
                         {activeTokenObj.symbol}
                       </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-200/80 text-stone-800 font-mono font-bold">
-                        {activeTokenObj.badge}
-                      </span>
+                      <Badge tone="neutral">{activeTokenObj.badge}</Badge>
                     </div>
                     <div className="text-xs text-stone-500 font-sans">
                       {activeTokenObj.name} · {availableChains.length} networks
@@ -689,7 +699,7 @@ export const ReceivePage: React.FC = () => {
                     <span className="font-mono text-sm font-bold text-stone-900 block">
                       Select an Asset to Deposit...
                     </span>
-                    <span className="text-xs text-stone-400 font-sans">
+                    <span className="text-xs text-stone-500 font-sans">
                       {tokens.length} cross-chain intent assets supported
                     </span>
                   </div>
@@ -702,7 +712,7 @@ export const ReceivePage: React.FC = () => {
                     {formatUsd(activeTokenObj.priceUsd ?? null)}
                   </span>
                 )}
-                <ChevronDown className={`w-4 h-4 text-stone-400 transition-transform duration-200 ${isTokenDropdownOpen ? 'rotate-180 text-stone-900' : ''}`} />
+                <CaretDown weight="fill" className={`w-4 h-4 text-stone-400 transition-transform duration-200 ${isTokenDropdownOpen ? 'rotate-180 text-stone-900' : ''}`} />
               </div>
             </button>
 
@@ -711,7 +721,7 @@ export const ReceivePage: React.FC = () => {
               <div className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl border border-stone-200 shadow-xl z-50 p-2 space-y-2 animate-fade-in font-sans">
                 {/* Search Bar */}
                 <div className="relative px-1 pt-1">
-                  <Search className="w-3.5 h-3.5 absolute left-3.5 top-3.5 text-stone-400" />
+                  <MagnifyingGlass weight="bold" className="w-3.5 h-3.5 absolute left-3.5 top-3.5 text-stone-400" />
                   <input
                     type="text"
                     value={tokenSearch}
@@ -725,7 +735,7 @@ export const ReceivePage: React.FC = () => {
                 {/* Tokens List */}
                 <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
                   {filteredTokens.length === 0 ? (
-                    <p className="text-xs text-stone-400 text-center py-6 font-mono">
+                    <p className="text-xs text-stone-500 text-center py-6 font-mono">
                       No assets match "{tokenSearch}"
                     </p>
                   ) : (
@@ -749,11 +759,11 @@ export const ReceivePage: React.FC = () => {
                                 <span className={isSelected ? 'text-white font-bold' : 'text-stone-950 font-bold'}>
                                   {token.symbol}
                                 </span>
-                                <span className={`text-[9px] px-1.5 py-0.2 rounded ${isSelected ? 'bg-white/20 text-white' : 'bg-stone-100 text-stone-600'}`}>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${isSelected ? 'bg-white/20 text-white' : 'bg-stone-100 text-stone-600'}`}>
                                   {token.badge}
                                 </span>
                               </div>
-                              <div className={`text-[10px] ${isSelected ? 'text-stone-300' : 'text-stone-400'}`}>
+                              <div className={`text-[11px] ${isSelected ? 'text-stone-300' : 'text-stone-500'}`}>
                                 {token.name} · {token.chains.length} routes
                               </div>
                             </div>
@@ -763,7 +773,7 @@ export const ReceivePage: React.FC = () => {
                             <span className={`text-xs ${isSelected ? 'text-white' : 'text-stone-900'}`}>
                               {formatUsd(token.priceUsd ?? null)}
                             </span>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-white flex-shrink-0" />}
+                            {isSelected && <Check weight="bold" className="w-3.5 h-3.5 text-white flex-shrink-0" />}
                           </div>
                         </button>
                       );
@@ -782,7 +792,7 @@ export const ReceivePage: React.FC = () => {
               <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold flex-shrink-0">2</span>
               <span>Select Source Blockchain</span>
             </label>
-            <span className="text-[11px] font-mono text-stone-400">
+            <span className="text-[11px] font-mono text-stone-500">
               {activeTokenObj ? `${availableChains.length} route${availableChains.length > 1 ? 's' : ''} for ${activeTokenObj.symbol}` : 'Pick an asset first'}
             </span>
           </div>
@@ -814,9 +824,7 @@ export const ReceivePage: React.FC = () => {
                       <span className="font-mono text-sm font-extrabold text-stone-950">
                         {activeChainDef.name}
                       </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-200/80 text-stone-800 font-mono font-bold">
-                        {activeChainDef.badge}
-                      </span>
+                      <Badge tone="neutral">{activeChainDef.badge}</Badge>
                     </div>
                     <div className="text-xs text-stone-500 font-sans">
                       Finality: <strong className="font-mono text-stone-700">{activeChainDef.time}</strong>
@@ -845,7 +853,7 @@ export const ReceivePage: React.FC = () => {
                     {activeChainDef.time}
                   </span>
                 )}
-                <ChevronDown className={`w-4 h-4 text-stone-400 transition-transform duration-200 ${isChainDropdownOpen ? 'rotate-180 text-stone-900' : ''}`} />
+                <CaretDown weight="fill" className={`w-4 h-4 text-stone-400 transition-transform duration-200 ${isChainDropdownOpen ? 'rotate-180 text-stone-900' : ''}`} />
               </div>
             </button>
 
@@ -854,7 +862,7 @@ export const ReceivePage: React.FC = () => {
               <div className="absolute left-0 right-0 top-full mt-2 bg-white rounded-2xl border border-stone-200 shadow-xl z-50 p-2 space-y-2 animate-fade-in font-sans">
                 {/* Search Bar */}
                 <div className="relative px-1 pt-1">
-                  <Search className="w-3.5 h-3.5 absolute left-3.5 top-3.5 text-stone-400" />
+                  <MagnifyingGlass weight="bold" className="w-3.5 h-3.5 absolute left-3.5 top-3.5 text-stone-400" />
                   <input
                     type="text"
                     value={chainSearch}
@@ -906,7 +914,7 @@ export const ReceivePage: React.FC = () => {
                             <span className={`text-xs ${isSelected ? 'text-stone-300' : 'text-stone-500'}`}>
                               {chain.time}
                             </span>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-white flex-shrink-0" />}
+                            {isSelected && <Check weight="bold" className="w-3.5 h-3.5 text-white flex-shrink-0" />}
                           </div>
                         </button>
                       );
@@ -939,7 +947,7 @@ export const ReceivePage: React.FC = () => {
               disabled={!selectedToken || !selectedChain}
               value={depositAmount}
               onChange={(e) => setDepositAmount(e.target.value)}
-              placeholder={selectedToken ? `Enter exact ${selectedToken} amount to send...` : 'Select asset & network first'}
+              placeholder={selectedToken ? `Enter ${selectedToken} amount` : 'Amount'}
               className={`w-full p-3.5 pr-20 rounded-2xl border font-mono text-base font-bold transition-all focus:outline-none focus:border-black ${
                 !selectedToken || !selectedChain
                   ? 'bg-stone-50/50 border-stone-200/70 text-stone-400 cursor-not-allowed opacity-75'
@@ -985,7 +993,7 @@ export const ReceivePage: React.FC = () => {
           {/* Critical Exact Input Notice */}
           <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-700/50 text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed space-y-1">
             <div className="flex items-center space-x-1.5 font-bold">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 flex-shrink-0" />
+              <Warning weight="fill" className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 flex-shrink-0" />
               <span>Exact-Amount Intent Routing</span>
             </div>
             <p className="text-amber-800 dark:text-amber-200/90">
@@ -1002,12 +1010,12 @@ export const ReceivePage: React.FC = () => {
             >
               {isDeriving ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
                   <span>Generating Address...</span>
                 </>
               ) : (
                 <>
-                  <QrCode className="w-4 h-4" />
+                  <QrCode weight="fill" className="w-4 h-4" />
                   <span>Show Address</span>
                 </>
               )}
@@ -1030,7 +1038,7 @@ export const ReceivePage: React.FC = () => {
           {/* Ephemeral Gateway Explainer */}
           <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-600 space-y-1.5 leading-relaxed font-sans">
             <div className="flex items-center space-x-1.5 font-bold text-stone-900 font-mono">
-              <Shield className="w-3.5 h-3.5 text-stone-900" />
+              <Shield weight="fill" className="w-3.5 h-3.5 text-stone-900" />
               <span>One-time deposit address</span>
             </div>
             <p>
@@ -1053,9 +1061,7 @@ export const ReceivePage: React.FC = () => {
                       {selectedToken} ({activeChainDef?.name || selectedChain})
                     </span>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold flex-shrink-0">
-                    Active
-                  </span>
+                  <Badge tone="ok">Active</Badge>
                 </div>
 
                 {/* Send Exactly Box with 1-Click Copy Amount */}
@@ -1075,12 +1081,12 @@ export const ReceivePage: React.FC = () => {
                   >
                     {copiedAmount ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <Check weight="bold" className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Copied!</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="w-3.5 h-3.5" />
+                        <Copy weight="fill" className="w-3.5 h-3.5" />
                         <span>Copy Amount</span>
                       </>
                     )}
@@ -1096,7 +1102,7 @@ export const ReceivePage: React.FC = () => {
                 {settledSuccess ? (
                   <div className="w-full p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-2.5 animate-fade-in shadow-xs text-left">
                     <div className="flex items-center space-x-2 font-bold text-emerald-900 text-xs">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                      <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                       <span>Deposit Received &amp; Shielded!</span>
                     </div>
                     <p className="text-[11px] text-emerald-800 leading-relaxed font-sans">
@@ -1130,7 +1136,7 @@ export const ReceivePage: React.FC = () => {
                 ) : depositStatus?.status === 'PROCESSING' || parseFloat(depositStatus?.depositedAmountFormatted || '0') > 0 ? (
                   <div className="w-full p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2 animate-fade-in text-left">
                     <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
-                      <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
+                      <CircleNotch weight="bold" className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
                       <span>Deposit Detected Onchain! Routing via Intents...</span>
                     </div>
                     <p className="text-[11px] text-blue-800 leading-relaxed font-sans">
@@ -1176,12 +1182,12 @@ export const ReceivePage: React.FC = () => {
                   >
                     {copiedAddress ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <Check weight="bold" className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Address Copied!</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="w-3.5 h-3.5" />
+                        <Copy weight="fill" className="w-3.5 h-3.5" />
                         <span>Copy Address</span>
                       </>
                     )}
@@ -1209,20 +1215,20 @@ export const ReceivePage: React.FC = () => {
                     disabled={isDeriving}
                     className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
                   >
-                    <RefreshCw className={`w-3 h-3 ${isDeriving ? 'animate-spin' : ''}`} />
+                    <ArrowsClockwise weight="bold" className={`w-3 h-3 ${isDeriving ? 'animate-spin' : ''}`} />
                     <span>New Address</span>
                   </button>
                 </div>
               </>
             ) : isDeriving ? (
               <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
-                <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
+                <CircleNotch weight="bold" className="w-8 h-8 animate-spin text-stone-900" />
                 <span>Creating your deposit address &amp; QR for {depositAmount || 'exact'} {selectedToken}...</span>
               </div>
             ) : (
               <div className="py-12 px-4 flex flex-col items-center justify-center space-y-3 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-stone-50 border border-dashed border-stone-300 flex items-center justify-center text-stone-400">
-                  <QrCode className="w-8 h-8" />
+                  <QrCode weight="fill" className="w-8 h-8" />
                 </div>
                 <div className="space-y-1">
                   <h4 className="text-sm font-mono font-bold text-stone-900 uppercase tracking-wider">
@@ -1245,14 +1251,13 @@ export const ReceivePage: React.FC = () => {
                     disabled={isDeriving}
                     className="px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center space-x-1.5 cursor-pointer"
                   >
-                    <QrCode className="w-3.5 h-3.5" />
+                    <QrCode weight="fill" className="w-3.5 h-3.5" />
                     <span>Show Address</span>
                   </button>
                 )}
-                <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 text-[10px] font-mono text-stone-500">
-                  <Zap className="w-3 h-3 text-stone-500" />
-                  <span>Protected by your passkey</span>
-                </div>
+                <Badge tone="neutral" icon={<Lightning weight="fill" className="w-3 h-3" />}>
+                  Protected by your passkey
+                </Badge>
               </div>
             )}
           </div>
@@ -1266,10 +1271,9 @@ export const ReceivePage: React.FC = () => {
             <div className="rounded-3xl p-6 sm:p-8 bg-white border border-stone-200 shadow-sm space-y-6">
               {/* Badge & Title */}
               <div className="space-y-2">
-                <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-mono font-bold">
-                  <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>NEAR Protocol Direct Ingress</span>
-                </div>
+                <Badge tone="ok" icon={<Shield weight="fill" className="w-3 h-3" />}>
+                  NEAR Protocol Direct Ingress
+                </Badge>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-stone-950">
                   Deposit any NEAR token
                 </h2>
@@ -1282,7 +1286,7 @@ export const ReceivePage: React.FC = () => {
                     <span className="w-4 h-4 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">1</span>
                     <span>Select Token to Deposit</span>
                   </label>
-                  <span className="text-[11px] font-mono text-stone-400">All NEAR tokens</span>
+                  <span className="text-[11px] font-mono text-stone-500">All NEAR tokens</span>
                 </div>
 
                 <AssetPicker
@@ -1312,15 +1316,13 @@ export const ReceivePage: React.FC = () => {
                     {nearAsset.symbol} (NEAR Network)
                   </span>
                 </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold flex-shrink-0">
-                  Active
-                </span>
+                <Badge tone="ok">Active</Badge>
               </div>
 
               {/* Wrong-asset guardrail: the quote only settles the selected token. */}
               <div className="w-full p-3 rounded-2xl bg-amber-50 border border-amber-200 text-left space-y-1">
                 <div className="flex items-center space-x-1.5 text-[11px] font-bold text-amber-900">
-                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <Warning weight="fill" className="w-3.5 h-3.5 flex-shrink-0" />
                   <span>Send only {nearAsset.symbol} on NEAR to this address</span>
                 </div>
                 <p className="text-[11px] text-amber-800 font-sans leading-relaxed">
@@ -1334,12 +1336,12 @@ export const ReceivePage: React.FC = () => {
 
               {isNearDeriving ? (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
-                  <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
+                  <CircleNotch weight="bold" className="w-8 h-8 animate-spin text-stone-900" />
                   <span>Deriving shielded deposit address for {nearAsset.symbol}...</span>
                 </div>
               ) : nearDepositError ? (
                 <div className="w-full py-10 flex flex-col items-center justify-center space-y-3 text-center px-2">
-                  <AlertTriangle className="w-8 h-8 text-amber-600" />
+                  <Warning weight="fill" className="w-8 h-8 text-amber-600" />
                   <p className="text-xs text-stone-600 font-sans leading-relaxed">{nearDepositError}</p>
                   <button
                     type="button"
@@ -1369,7 +1371,7 @@ export const ReceivePage: React.FC = () => {
                       onClick={() => setNearAddressConfirmed(true)}
                       className="w-full py-3 px-4 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold font-mono transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-xs"
                     >
-                      <QrCode className="w-4 h-4" />
+                      <QrCode weight="fill" className="w-4 h-4" />
                       <span>Show {nearAsset.symbol} address</span>
                     </button>
                     <p className="text-[10px] text-amber-700 font-mono">
@@ -1387,7 +1389,7 @@ export const ReceivePage: React.FC = () => {
                   {nearSettledSuccess ? (
                     <div className="w-full p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-2.5 animate-fade-in shadow-xs text-left">
                       <div className="flex items-center space-x-2 font-bold text-emerald-900 text-xs">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                        <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                         <span>Deposit Received &amp; Shielded!</span>
                       </div>
                       <p className="text-[11px] text-emerald-800 leading-relaxed font-sans">
@@ -1412,7 +1414,7 @@ export const ReceivePage: React.FC = () => {
                   ) : nearDepositStatus?.status === 'PROCESSING' ? (
                     <div className="w-full p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-950 space-y-2 animate-fade-in text-left">
                       <div className="flex items-center space-x-2 text-xs font-bold text-blue-900">
-                        <Loader2 className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
+                        <CircleNotch weight="bold" className="w-4 h-4 animate-spin text-blue-600 flex-shrink-0" />
                         <span>Deposit Detected on NEAR! Settling...</span>
                       </div>
                     </div>
@@ -1450,12 +1452,12 @@ export const ReceivePage: React.FC = () => {
                     >
                       {nearCopiedAddress ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <Check weight="bold" className="w-3.5 h-3.5 text-emerald-400" />
                           <span>Address Copied!</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy weight="fill" className="w-3.5 h-3.5" />
                           <span>Copy Shielded Address</span>
                         </>
                       )}
@@ -1470,7 +1472,7 @@ export const ReceivePage: React.FC = () => {
                       disabled={isNearDeriving}
                       className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
                     >
-                      <RefreshCw className={`w-3 h-3 ${isNearDeriving ? 'animate-spin' : ''}`} />
+                      <ArrowsClockwise weight="bold" className={`w-3 h-3 ${isNearDeriving ? 'animate-spin' : ''}`} />
                       <span>{nearIsOneTime ? 'New Address' : 'Refresh'}</span>
                     </button>
                   </div>
@@ -1515,7 +1517,7 @@ export const ReceivePage: React.FC = () => {
                 )
               ) : !hasIntentAccount ? (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
-                  <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
+                  <CircleNotch weight="bold" className="w-8 h-8 animate-spin text-stone-900" />
                   <span>Setting up your UPRAIL account…</span>
                   <span className="text-stone-400 max-w-[240px] leading-relaxed">
                     Deposit addresses appear once setup finishes — usually a few seconds after your first sign-in.
@@ -1542,14 +1544,14 @@ export const ReceivePage: React.FC = () => {
                       onClick={handleNearCopyAddress}
                       className="w-full py-2.5 px-4 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold font-mono transition-colors cursor-pointer flex items-center justify-center space-x-2 shadow-xs"
                     >
-                      <Copy className="w-3.5 h-3.5" />
+                      <Copy weight="fill" className="w-3.5 h-3.5" />
                       <span>Copy Address</span>
                     </button>
                   </div>
                 </>
               ) : (
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
-                  <Loader2 className="w-8 h-8 animate-spin text-stone-900" />
+                  <CircleNotch weight="bold" className="w-8 h-8 animate-spin text-stone-900" />
                   <span>Loading your UPRAIL account...</span>
                 </div>
               )}

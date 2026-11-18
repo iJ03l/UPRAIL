@@ -52,18 +52,23 @@ export const TokenIcon: React.FC<TokenIconProps> = ({
   }
 
   // Dimension mapping
+  const isNumericSize = typeof size === 'number' && Number.isFinite(size) && size > 0;
   let dimClasses = 'w-5 h-5 text-[9px]';
-  if (size === 'sm') dimClasses = 'w-4 h-4 text-[8px]';
-  else if (size === 'md') dimClasses = 'w-5 h-5 text-[9px]';
-  else if (size === 'lg') dimClasses = 'w-7 h-7 text-xs';
-  else if (size === 'xl') dimClasses = 'w-9 h-9 text-xs';
+  if (!isNumericSize) {
+    if (size === 'sm') dimClasses = 'w-4 h-4 text-[8px]';
+    else if (size === 'md') dimClasses = 'w-5 h-5 text-[9px]';
+    else if (size === 'lg') dimClasses = 'w-7 h-7 text-xs';
+    else if (size === 'xl') dimClasses = 'w-9 h-9 text-xs';
+  }
+  const numericStyle = isNumericSize ? { width: size, height: size, fontSize: Math.max(8, Math.round(size * 0.42)) } : undefined;
 
   if (!resolvedUrl || hasError) {
     const badgeColor = getBadgeColor(cleanSymbol);
     const displayAbbr = cleanSymbol.slice(0, 3).toUpperCase();
     return (
       <div
-        className={`rounded-full flex items-center justify-center font-mono font-bold border flex-shrink-0 select-none ${dimClasses} ${badgeColor} ${className}`}
+        style={numericStyle}
+        className={`rounded-full flex items-center justify-center font-mono font-bold border flex-shrink-0 select-none ${isNumericSize ? '' : dimClasses} ${badgeColor} ${className}`}
         title={cleanSymbol}
       >
         <span>{displayAbbr}</span>
@@ -76,7 +81,8 @@ export const TokenIcon: React.FC<TokenIconProps> = ({
       src={resolvedUrl}
       alt={cleanSymbol}
       onError={() => setHasError(true)}
-      className={`rounded-full object-cover flex-shrink-0 bg-stone-100 border border-stone-200 select-none ${dimClasses} ${className}`}
+      style={numericStyle}
+      className={`rounded-full object-cover flex-shrink-0 bg-stone-100 select-none ${isNumericSize ? '' : dimClasses} ${className}`}
       loading="lazy"
     />
   );

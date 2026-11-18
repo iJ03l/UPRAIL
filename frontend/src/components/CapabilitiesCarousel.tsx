@@ -9,7 +9,7 @@ import {
   useScroll,
   useTransform,
 } from 'framer-motion';
-import { ArrowDownLeft, ArrowLeft, ArrowRight, ExternalLink, Gift, Leaf } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeft, ArrowRight, ArrowSquareOut, Gift, Leaf } from '@phosphor-icons/react';
 import { SolidCoffeeIcon } from './CoffeeModal';
 
 interface CapabilitiesCarouselProps {
@@ -243,10 +243,10 @@ const ArcCard: React.FC<ArcCardProps> = ({
         >
           {card.isCoffee && <SolidCoffeeIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#E05326]" />}
           {card.icon === 'leaf' && (
-            <Leaf className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 fill-emerald-500/20" />
+            <Leaf weight="fill" className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 fill-emerald-500/20" />
           )}
           {card.icon === 'gift' && (
-            <Gift className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+            <Gift weight="fill" className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
           )}
           <span>RCPT // {card.eyebrow}</span>
         </span>
@@ -318,7 +318,7 @@ const ArcCard: React.FC<ArcCardProps> = ({
             className={`text-xs font-mono transition-colors inline-flex items-center gap-1 ${docsLinkClass}`}
           >
             <span>Docs</span>
-            <ExternalLink className="w-3 h-3" />
+            <ArrowSquareOut weight="fill" className="w-3 h-3" />
           </a>
         </div>
 
@@ -333,13 +333,13 @@ const ArcCard: React.FC<ArcCardProps> = ({
           className={`px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl font-display font-extrabold text-[11px] sm:text-xs uppercase tracking-wider inline-flex items-center gap-1.5 transition-all ${ctaClass}`}
         >
           {card.isCoffee && <SolidCoffeeIcon className="w-3.5 h-3.5 text-[#E05326]" />}
-          {card.icon === 'leaf' && <Leaf className="w-3.5 h-3.5 text-emerald-500" />}
-          {card.icon === 'gift' && <Gift className="w-3.5 h-3.5 text-amber-500" />}
+          {card.icon === 'leaf' && <Leaf weight="fill" className="w-3.5 h-3.5 text-emerald-500" />}
+          {card.icon === 'gift' && <Gift weight="fill" className="w-3.5 h-3.5 text-amber-500" />}
           <span>{card.ctaLabel}</span>
           {card.isRequestArrow ? (
-            <ArrowDownLeft className="w-3.5 h-3.5 text-[#E05326]" />
+            <ArrowDownLeft weight="bold" className="w-3.5 h-3.5 text-[#E05326]" />
           ) : !card.isCoffee ? (
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight weight="bold" className="w-3.5 h-3.5" />
           ) : null}
         </a>
       </div>
@@ -418,7 +418,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
               onClick={() => scrollToStep(activeIndex - 1)}
               className="w-9 h-9 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-950 text-stone-700 dark:text-stone-200 disabled:opacity-35 flex items-center justify-center hover:border-stone-400 transition-colors cursor-pointer"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft weight="bold" className="w-4 h-4" />
             </button>
             <button
               type="button"
@@ -427,7 +427,7 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
               onClick={() => scrollToStep(activeIndex + 1)}
               className="w-9 h-9 rounded-full border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-950 text-stone-700 dark:text-stone-200 disabled:opacity-35 flex items-center justify-center hover:border-stone-400 transition-colors cursor-pointer"
             >
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight weight="bold" className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -435,12 +435,6 @@ export const CapabilitiesCarousel: React.FC<CapabilitiesCarouselProps> = ({
         {/* Continuous Scroll-Driven Right-to-Left Arc Stage */}
         <div
           className="relative w-full h-[420px] sm:h-[585px] flex items-start justify-center overflow-x-clip overflow-y-visible"
-          style={{
-            WebkitMaskImage:
-              'linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)',
-            maskImage:
-              'linear-gradient(to right, transparent 0%, black 10%, black 90%, transparent 100%)',
-          }}
         >
           {CARDS.map((card, index) => (
             <ArcCard

@@ -369,9 +369,9 @@ export const QuantusInteractiveCanvas: React.FC<QuantusInteractiveCanvasProps> =
       }
 
       // -------------------------------------------------------------
-      // 2. The Figure Sprite (Restricted to blank space on hero, moving on scroll)
+      // 2. The Figure Sprite (Only drawn on >= 640px so narrow mobile columns stay unobstructed)
       // -------------------------------------------------------------
-      if (spriteReady) {
+      if (spriteReady && width >= 640) {
         const isMobile = width < 768;
         // Target scale:
         // Desktop hero (scrollY < 80): 5.5 (large and heroic in open space)

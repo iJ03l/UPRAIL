@@ -2,16 +2,15 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  CheckCircle2,
+  CheckCircle,
   Fingerprint,
-  KeyRound,
-  Loader2,
-  ShieldAlert,
+  Key,
+  CircleNotch,
+  ShieldWarning,
   ArrowRight,
-  X,
-} from 'lucide-react';
-import { Portal } from './Portal';
-import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+} from '@phosphor-icons/react';
+import { ModalSheet } from './ModalSheet';
+import { Badge } from './Badge';
 import {
   performWebAuthnAssertion,
   registerNativeL1PromptHandler,
@@ -54,8 +53,6 @@ export const NativeL1AuthHost: React.FC = () => {
   const [signedAssertion, setSignedAssertion] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useBodyScrollLock(Boolean(active));
-
   const activeRef = useRef<ActiveRequest | null>(null);
   activeRef.current = active;
   const inFlightRef = useRef(false);
@@ -76,27 +73,28 @@ export const NativeL1AuthHost: React.FC = () => {
     );
   }, []);
 
-  if (!active) return null;
-
-  const { prepared, submitAuthorized } = active.req;
-  const meta = OPERATION_LABELS[prepared.operation] || {
-    title: 'Authorize NEAR L1 Key Operation',
-    cta: 'Use L1 Key & Authorize',
-    badge: 'NEAR L1 Key',
-  };
+  const prepared = active?.req.prepared;
+  const submitAuthorized = active?.req.submitAuthorized;
+  const meta = prepared
+    ? OPERATION_LABELS[prepared.operation] || {
+        title: 'Authorize NEAR L1 Key Operation',
+        cta: 'Use L1 Key & Authorize',
+        badge: 'NEAR L1 Key',
+      }
+    : null;
 
   const handleCancel = () => {
-    const cur = active;
+    const cur = activeRef.current;
     inFlightRef.current = false;
     setActive(null);
     setSignedAssertion(null);
     setError(null);
     setPhase('sign');
-    cur.reject(new Error('NEAR L1 key authorization cancelled'));
+    cur?.reject(new Error('NEAR L1 key authorization cancelled'));
   };
 
   const handleStep1Sign = async () => {
-    if (inFlightRef.current) return;
+    if (!prepared || inFlightRef.current) return;
     inFlightRef.current = true;
     setError(null);
     setPhase('signing');
@@ -113,7 +111,7 @@ export const NativeL1AuthHost: React.FC = () => {
   };
 
   const handleStep2AuthorizeAndUseKey = async () => {
-    if (!signedAssertion || inFlightRef.current) return;
+    if (!active || !submitAuthorized || !signedAssertion || inFlightRef.current) return;
     inFlightRef.current = true;
     setError(null);
     setPhase('authorizing');
@@ -144,30 +142,24 @@ export const NativeL1AuthHost: React.FC = () => {
   };
 
   return (
-    <Portal>
-      <div
-        className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-xs animate-fade-in"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="native-l1-auth-title"
-      >
-        <div className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl p-6 sm:p-7 space-y-5 text-stone-950 animate-scale-in">
-          <button
-            type="button"
-            onClick={handleCancel}
-            disabled={phase === 'signing' || phase === 'authorizing'}
-            className="absolute top-5 right-5 p-1.5 rounded-xl text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer disabled:opacity-40"
-            aria-label="Cancel NEAR L1 key authorization"
-          >
-            <X className="w-4 h-4" />
-          </button>
-
+    <ModalSheet
+      isOpen={Boolean(active)}
+      onClose={handleCancel}
+      canClose={phase !== 'signing' && phase !== 'authorizing'}
+      zIndexClass="z-[140]"
+      maxWidthClass="sm:max-w-md"
+      panelClassName="px-6 sm:p-7 pt-2 sm:pt-6 pb-6 space-y-5 text-stone-950"
+      showCloseButton
+      closeLabel="Cancel NEAR L1 key authorization"
+      ariaLabelledBy="native-l1-auth-title"
+    >
+      {prepared && meta && (
+        <>
           {/* Header */}
-          <div className="space-y-2 pr-8">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-800 text-[10px] font-mono font-bold uppercase tracking-wider">
-              <KeyRound className="w-3 h-3" />
-              <span>{meta.badge}</span>
-            </div>
+          <div className="space-y-2 pr-11">
+            <Badge tone="warn" icon={<Key weight="fill" className="w-3 h-3" />}>
+              {meta.badge}
+            </Badge>
             <h3 id="native-l1-auth-title" className="text-lg font-display font-extrabold tracking-tight text-stone-950">
               {meta.title}
             </h3>
@@ -186,7 +178,7 @@ export const NativeL1AuthHost: React.FC = () => {
               }`}
             >
               {phase === 'ready' || phase === 'authorizing' ? (
-                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                <CheckCircle weight="fill" className="w-3.5 h-3.5 flex-shrink-0" />
               ) : (
                 <span className="w-4 h-4 rounded-full border border-current flex items-center justify-center text-[10px] font-bold flex-shrink-0">
                   1
@@ -240,14 +232,14 @@ export const NativeL1AuthHost: React.FC = () => {
 
           {phase === 'ready' || phase === 'authorizing' ? (
             <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-[11px] font-mono text-stone-800 flex items-start gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
               <span>
                 Passkey signature verified locally. Tap below to authorize your NEAR L1 key for this exact action.
               </span>
             </div>
           ) : (
             <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-mono text-stone-800 flex items-start gap-2">
-              <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <ShieldWarning weight="fill" className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
               <span>
                 Separates NEAR L1 Ed25519 actions from your Intents Passkey vault — like revealing a key.
               </span>
@@ -266,7 +258,7 @@ export const NativeL1AuthHost: React.FC = () => {
               type="button"
               onClick={handleCancel}
               disabled={phase === 'signing' || phase === 'authorizing'}
-              className="btn-secondary px-4 py-3 rounded-2xl text-xs font-mono font-bold cursor-pointer"
+              className="btn-secondary px-4 py-3 rounded-2xl text-xs font-mono font-bold cursor-pointer min-h-11"
             >
               Cancel
             </button>
@@ -276,16 +268,16 @@ export const NativeL1AuthHost: React.FC = () => {
                 type="button"
                 onClick={handleStep1Sign}
                 disabled={phase === 'signing'}
-                className="btn-primary flex-1 py-3 px-4 rounded-2xl text-xs font-display font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                className="btn-primary flex-1 py-3 px-4 rounded-2xl text-xs font-display font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-md min-h-11"
               >
                 {phase === 'signing' ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
                     <span>Waiting for Passkey…</span>
                   </>
                 ) : (
                   <>
-                    <Fingerprint className="w-4 h-4" />
+                    <Fingerprint weight="bold" className="w-4 h-4" />
                     <span>Step 1: Sign with Passkey</span>
                   </>
                 )}
@@ -295,25 +287,25 @@ export const NativeL1AuthHost: React.FC = () => {
                 type="button"
                 onClick={handleStep2AuthorizeAndUseKey}
                 disabled={phase === 'authorizing'}
-                className="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 shadow-md transition-all"
+                className="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 shadow-md transition-all min-h-11"
               >
                 {phase === 'authorizing' ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
                     <span>Using L1 Key…</span>
                   </>
                 ) : (
                   <>
-                    <KeyRound className="w-4 h-4" />
+                    <Key weight="fill" className="w-4 h-4" />
                     <span>Step 2: {meta.cta}</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <ArrowRight weight="bold" className="w-3.5 h-3.5" />
                   </>
                 )}
               </button>
             )}
           </div>
-        </div>
-      </div>
-    </Portal>
+        </>
+      )}
+    </ModalSheet>
   );
 };

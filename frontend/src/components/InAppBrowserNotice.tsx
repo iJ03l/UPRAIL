@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ArrowSquareOut } from '@phosphor-icons/react';
 import {
   detectInAppBrowser,
   inAppBrowserLabel,
@@ -31,7 +31,7 @@ export const InAppBrowserNotice: React.FC<{ className?: string }> = ({ className
         className || ''
       }`}
     >
-      <ExternalLink className="w-4 h-4 text-amber-700 flex-shrink-0" />
+      <ArrowSquareOut weight="fill" className="w-4 h-4 text-amber-700 flex-shrink-0" />
       <div className="flex-1 space-y-1">
         <div className="font-bold text-amber-900">Passkey sign-in doesn&apos;t work in-app</div>
         <div className="text-amber-800 leading-relaxed">

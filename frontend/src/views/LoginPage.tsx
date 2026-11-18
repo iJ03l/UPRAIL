@@ -4,16 +4,16 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from '../lib/router';
 import {
   Fingerprint,
-  CheckCircle2,
-  AlertCircle,
+  CheckCircle,
+  WarningCircle,
   ArrowRight,
   ShieldCheck,
-  Loader2,
-  KeyRound,
+  CircleNotch,
+  Key,
   Copy,
-  Download,
+  DownloadSimple,
   Check,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 import { useXAuth } from '../hooks/useXAuth';
 import { webauthn, describePasskeyError, WebAuthnSupportStatus } from '../lib/webauthn';
 import { clearInvite, currentInvite, sanitizeReturnPath, stripInvite, withInvite } from '../lib/invite';
@@ -23,6 +23,7 @@ import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas
 import { LegalModal, LegalTab } from '../components/LegalModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { GlitchLogo } from '../components/GlitchLogo';
+import { Badge } from '../components/Badge';
 import { InAppBrowserNotice } from '../components/InAppBrowserNotice';
 import { AuthLoadingScreen } from '../components/AuthLoadingScreen';
 
@@ -182,6 +183,54 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
     const safe = sanitizeReturnPath(raw);
     return safe && safe !== '/login' && safe !== '/parking' ? safe : null;
   };
+
+  const [isClaimReturn, setIsClaimReturn] = useState(false);
+  const [isIosEnv, setIsIosEnv] = useState(false);
+  const [isGoogleAppIos, setIsGoogleAppIos] = useState(false);
+  const [handoffUrl, setHandoffUrl] = useState<string | null>(null);
+  const [copiedHandoff, setCopiedHandoff] = useState(false);
+
+  useEffect(() => {
+    setIsClaimReturn(Boolean(pendingReturnPath()?.startsWith('/claim/')));
+    if (typeof navigator !== 'undefined') {
+      const ua = navigator.userAgent || '';
+      const ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && /Mobile/i.test(ua));
+      setIsIosEnv(ios);
+      setIsGoogleAppIos(ios && /GSA\//i.test(ua));
+    }
+  }, []);
+
+  // Pre-fetch WebAuthn options so `navigator.credentials.create()` / `.get()`
+  // runs synchronously inside the user's tap gesture (WebKit on iOS expires
+  // transient user activation if we await a network fetch inside onClick).
+  useEffect(() => {
+    if (needsPasskeyCreation && user?.handle) {
+      void webauthn.prefetchRegisterOptions(user.handle);
+    } else if (needsPasskeyConfirmation) {
+      void webauthn.prefetchTxAuthOptions();
+    } else if (isStep1 && loginMethod === 'passkey') {
+      void webauthn.prefetchLoginOptions(lastHandle || undefined);
+    }
+  }, [needsPasskeyCreation, needsPasskeyConfirmation, isStep1, loginMethod, user?.handle, lastHandle]);
+
+  // Pre-mint a 1-time browser handoff link on iOS when signed in with X on
+  // Step 2 so tapping "Continue in Safari" / "Continue in Chrome" transfers
+  // the @handle session directly without repeating X OAuth.
+  useEffect(() => {
+    let cancelled = false;
+    if (isIosEnv && user && !user.passkeyVerified && (isGoogleAppIos || error)) {
+      const ret = typeof window !== 'undefined' ? `/login${window.location.search || ''}` : '/login';
+      api
+        .createBrowserHandoff(ret)
+        .then((res) => {
+          if (!cancelled && res?.url) setHandoffUrl(res.url);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [isIosEnv, isGoogleAppIos, user, error]);
 
   // If already complete, forward immediately to destination
   useEffect(() => {
@@ -451,63 +500,71 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
             <GlitchLogo href="/" size="lg" />
 
             <div className="space-y-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-muted border border-line text-[11px] font-mono font-semibold uppercase tracking-wider text-muted">
-                {isPasskeyHero ? (
+              {(() => {
+                const showClaimContext = isStep1 && isClaimReturn;
+                return (
                   <>
-                    <Fingerprint className="w-3.5 h-3.5" />
-                    <span>Passkey sign-in</span>
-                  </>
-                ) : isStep1 ? (
-                  <span>Step 1 of 2</span>
-                ) : showRecovery ? (
-                  <>
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>Recovery</span>
-                  </>
-                ) : needsPasskeyConfirmation ? (
-                  <>
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Confirm sign-in</span>
-                  </>
-                ) : needsPasskeyCreation ? (
-                  <span>Step 2 of 2</span>
-                ) : (
-                  <span>Signing in</span>
-                )}
-              </span>
+                    {isPasskeyHero ? (
+                      <Badge tone="neutral" icon={<Fingerprint weight="bold" className="w-3 h-3" />}>
+                        Passkey sign-in
+                      </Badge>
+                    ) : showClaimContext ? (
+                      <Badge tone="ok">You&apos;ve been paid</Badge>
+                    ) : isStep1 ? (
+                      <Badge tone="neutral">Step 1 of 2</Badge>
+                    ) : showRecovery ? (
+                      <Badge tone="neutral" icon={<Key weight="fill" className="w-3 h-3" />}>
+                        Recovery
+                      </Badge>
+                    ) : needsPasskeyConfirmation ? (
+                      <Badge tone="neutral" icon={<ShieldCheck weight="fill" className="w-3 h-3" />}>
+                        Confirm sign-in
+                      </Badge>
+                    ) : needsPasskeyCreation ? (
+                      <Badge tone="neutral">Step 2 of 2</Badge>
+                    ) : (
+                      <Badge tone="neutral">Signing in</Badge>
+                    )}
 
-              <h1 className="text-2xl sm:text-[1.75rem] font-display font-extrabold text-ink tracking-tight">
-                {isPasskeyHero
-                  ? 'Welcome back'
-                  : isStep1
-                  ? 'Sign in to UPRAIL'
-                  : showRecovery
-                  ? user?.custodyMode === 'self'
-                    ? 'Use Offline Recovery Key'
-                    : 'Use a recovery code'
-                  : needsPasskeyConfirmation
-                  ? 'Confirm it\'s you'
-                  : needsPasskeyCreation
-                  ? 'Secure this device'
-                  : 'Signing you in'}
-              </h1>
-              <p className="text-sm text-muted leading-relaxed max-w-sm mx-auto">
-                {isPasskeyHero
-                  ? 'Use your passkey — Face ID, fingerprint, or your PIN — to sign in.'
-                  : isStep1
-                  ? 'Use your 𝕏 account to get a payment handle. No crypto wallet or password to remember.'
-                  : showRecovery
-                  ? user?.custodyMode === 'self'
-                    ? 'Paste your offline UP1-… Recovery Key to authorize a replacement passkey directly on-chain.'
-                    : 'Enter one of the single-use codes you saved. It lets you replace a lost passkey.'
-                  : needsPasskeyConfirmation
-                  ? 'Your 𝕏 account is connected. Confirm this sign-in with the passkey on this device.'
-                  : needsPasskeyCreation
+                    <h1 className="text-2xl sm:text-[1.75rem] font-display font-extrabold text-ink tracking-tight">
+                      {isPasskeyHero
+                        ? 'Welcome back'
+                        : showClaimContext
+                        ? 'Someone sent you money'
+                        : isStep1
+                        ? 'Sign in to UPRAIL'
+                        : showRecovery
+                        ? user?.custodyMode === 'self'
+                          ? 'Use Offline Recovery Key'
+                          : 'Use a recovery code'
+                        : needsPasskeyConfirmation
+                        ? 'Confirm it\'s you'
+                        : needsPasskeyCreation
+                        ? 'Secure this device'
+                        : 'Signing you in'}
+                    </h1>
+                    <p className="text-sm text-muted leading-relaxed max-w-sm mx-auto">
+                      {isPasskeyHero
+                        ? 'Use your passkey — Face ID, fingerprint, or your PIN — to sign in.'
+                        : showClaimContext
+                        ? 'Sign in with 𝕏 to receive it. No wallet needed.'
+                        : isStep1
+                        ? 'Use your 𝕏 account to get a payment handle. No crypto wallet or password to remember.'
+                        : showRecovery
+                        ? user?.custodyMode === 'self'
+                          ? 'Paste your offline UP1-… Recovery Key to authorize a replacement passkey directly on-chain.'
+                          : 'Enter one of the single-use codes you saved. It lets you replace a lost passkey.'
+                        : needsPasskeyConfirmation
+                        ? 'Your 𝕏 account is connected. Confirm this sign-in with the passkey on this device.'
+                        : needsPasskeyCreation
                   ? recoveryAuthorized
                     ? 'Recovery code accepted. Create a new passkey to secure this device again.'
                     : 'Set up a passkey so you can use this device without 𝕏 next time.'
-                  : 'Your session is verified. Taking you to your account.'}
-              </p>
+                      : 'Your session is verified. Taking you to your account.'}
+                  </p>
+                </>
+                );
+              })()}
             </div>
           </header>
 
@@ -524,15 +581,97 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
           {/* Error / Success Feedback */}
           {error && (
-            <div className="flex items-start gap-2.5 rounded-2xl bg-red-50 border border-red-200 px-4 py-3.5 text-xs text-red-700 animate-fade-in">
-              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-              <span className="flex-1 leading-relaxed font-mono">{error}</span>
+            <div className="rounded-2xl bg-red-50 border border-red-200 px-4 py-3.5 text-xs text-red-700 animate-fade-in space-y-3">
+              <div className="flex items-start gap-2.5">
+                <WarningCircle weight="fill" className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                <span className="flex-1 leading-relaxed font-mono">{error}</span>
+              </div>
+              {isIosEnv && (
+                <div className="pt-1 border-t border-red-200/70 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <a
+                      href={(
+                        handoffUrl ||
+                        (typeof window !== 'undefined' ? window.location.href : 'https://app.uprail.world/login')
+                      ).replace(/^https?:\/\//i, 'x-safari-https://')}
+                      className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-red-900 hover:bg-red-800 text-white font-display font-bold text-[11px] uppercase tracking-wider transition-colors text-center"
+                    >
+                      Continue in Safari
+                    </a>
+                    <a
+                      href={(
+                        handoffUrl ||
+                        (typeof window !== 'undefined' ? window.location.href : 'https://app.uprail.world/login')
+                      )
+                        .replace(/^https:\/\//i, 'googlechromes://')
+                        .replace(/^http:\/\//i, 'googlechrome://')}
+                      className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-white hover:bg-red-100/60 text-red-950 border border-red-300 font-display font-bold text-[11px] uppercase tracking-wider transition-colors text-center"
+                    >
+                      Continue in Chrome
+                    </a>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const target =
+                        handoffUrl ||
+                        (typeof window !== 'undefined' ? window.location.href : 'https://app.uprail.world/login');
+                      await navigator.clipboard.writeText(target);
+                      setCopiedHandoff(true);
+                      setTimeout(() => setCopiedHandoff(false), 3000);
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-white/80 hover:bg-white text-red-900 border border-red-200 font-mono text-[11px] font-semibold transition-colors cursor-pointer"
+                  >
+                    {copiedHandoff ? (
+                      <>
+                        <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Copied sign-in link — paste in Safari or Chrome</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy weight="fill" className="w-3.5 h-3.5" />
+                        <span>Copy sign-in link for Safari / Chrome</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!error && isGoogleAppIos && (needsPasskeyCreation || needsPasskeyConfirmation) && (
+            <div className="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3.5 text-xs text-amber-900 animate-fade-in space-y-2.5">
+              <div className="font-mono leading-relaxed">
+                Inside the Google app on iPhone? If the passkey sheet does not appear below, continue in Safari or Chrome (you&apos;ll stay signed in as @{user?.handle}):
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <a
+                  href={(
+                    handoffUrl ||
+                    (typeof window !== 'undefined' ? window.location.href : 'https://app.uprail.world/login')
+                  ).replace(/^https?:\/\//i, 'x-safari-https://')}
+                  className="flex items-center justify-center py-2 px-3 rounded-xl bg-amber-900 hover:bg-amber-800 text-white font-display font-bold text-[11px] uppercase tracking-wider transition-colors text-center"
+                >
+                  Open in Safari
+                </a>
+                <a
+                  href={(
+                    handoffUrl ||
+                    (typeof window !== 'undefined' ? window.location.href : 'https://app.uprail.world/login')
+                  )
+                    .replace(/^https:\/\//i, 'googlechromes://')
+                    .replace(/^http:\/\//i, 'googlechrome://')}
+                  className="flex items-center justify-center py-2 px-3 rounded-xl bg-white hover:bg-amber-100/60 text-amber-950 border border-amber-300 font-display font-bold text-[11px] uppercase tracking-wider transition-colors text-center"
+                >
+                  Open in Chrome
+                </a>
+              </div>
             </div>
           )}
 
           {isSuccess && (
             <div className="flex items-center gap-2.5 rounded-2xl bg-surface-muted border border-line-strong px-4 py-3.5 text-xs text-ink animate-fade-in">
-              <CheckCircle2 className="w-4 h-4 text-ink flex-shrink-0" />
+              <CheckCircle weight="fill" className="w-4 h-4 text-ink flex-shrink-0" />
               <span className="font-medium">{successStepMessage}</span>
             </div>
           )}
@@ -561,10 +700,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                           <div className="text-xs font-mono text-muted">@{lastHandle}</div>
                         </div>
                       </div>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Ready</span>
-                      </span>
+                      <Badge tone="ok" icon={<ShieldCheck weight="fill" className="w-3 h-3" />}>
+                        Ready
+                      </Badge>
                     </div>
                   )}
 
@@ -583,10 +721,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     ) : (
                       <>
                         <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
-                          <Fingerprint className="w-4 h-4" />
+                          <Fingerprint weight="bold" className="w-4 h-4" />
                         </span>
                         <span className="flex-1 text-center pr-2">Sign in with passkey</span>
-                        <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+                        <ArrowRight weight="bold" className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                       </>
                     )}
                   </button>
@@ -623,7 +761,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                           <XGlyph className="w-4 h-4" />
                         </span>
                         <span className="flex-1 text-center pr-2">Continue with 𝕏</span>
-                        <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+                        <ArrowRight weight="bold" className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                       </>
                     )}
                   </button>
@@ -635,7 +773,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                       onClick={() => setLoginMethod('passkey')}
                       className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer"
                     >
-                      <Fingerprint className="w-3.5 h-3.5" />
+                      <Fingerprint weight="bold" className="w-3.5 h-3.5" />
                       <span>{hasSignedUp ? 'Sign in with passkey' : 'Already set up on this device?'}</span>
                     </button>
                   </div>
@@ -681,7 +819,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 <form onSubmit={handleRecoverySubmit} className="space-y-3">
                   <div className="space-y-1.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 px-4 py-3.5 text-amber-900">
                     <div className="flex items-center gap-1.5 font-bold text-amber-950">
-                      <KeyRound className="w-4 h-4 text-amber-700" />
+                      <Key weight="fill" className="w-4 h-4 text-amber-700" />
                       <span className="text-sm">Lost your passkey?</span>
                     </div>
                     <p className="text-xs leading-relaxed text-amber-800/90">
@@ -757,7 +895,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 <>
                   <div className="space-y-1.5 rounded-2xl bg-surface-subtle border border-line px-4 py-3.5">
                     <div className="flex items-center gap-1.5 font-bold text-ink">
-                      <ShieldCheck className="w-4 h-4" />
+                      <ShieldCheck weight="fill" className="w-4 h-4" />
                       <span className="text-sm">Second factor required</span>
                     </div>
                     <p className="text-xs leading-relaxed text-muted">
@@ -779,10 +917,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     ) : (
                       <>
                         <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
-                          <Fingerprint className="w-4 h-4" />
+                          <Fingerprint weight="bold" className="w-4 h-4" />
                         </span>
                         <span className="flex-1 text-center pr-2">Confirm with passkey</span>
-                        <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+                        <ArrowRight weight="bold" className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                       </>
                     )}
                   </button>
@@ -797,7 +935,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                       disabled={isInteracting}
                       className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-50"
                     >
-                      <KeyRound className="w-3.5 h-3.5" />
+                      <Key weight="fill" className="w-3.5 h-3.5" />
                       <span>
                         {user?.custodyMode === 'self'
                           ? 'Use your Offline Recovery Key'
@@ -849,7 +987,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
               {/* Explanation */}
               <div className="space-y-1.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 px-4 py-3.5 text-amber-900">
                 <div className="flex items-center gap-1.5 font-bold text-amber-950">
-                  <ShieldCheck className="w-4 h-4 text-amber-700" />
+                  <ShieldCheck weight="fill" className="w-4 h-4 text-amber-700" />
                   <span className="text-sm">One-time setup</span>
                 </div>
                 <p className="text-xs leading-relaxed text-amber-800/90">
@@ -858,19 +996,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     : 'This device saves a passkey — a secure sign-in built into your phone or laptop. Use Face ID, fingerprint, or your PIN. No password to remember.'}
                 </p>
               </div>
-
-              {/* No platform authenticator: device lock missing or wrong provider */}
-              {support && support.supported && !support.platformAuthenticator && (
-                <div className="flex items-start gap-2.5 rounded-2xl bg-red-50 border border-red-200 px-4 py-3.5 text-xs text-red-700">
-                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">
-                    This device can&apos;t save a passkey. Set a screen lock (PIN, pattern, fingerprint,
-                    or face) in your device settings, and make sure Google Password Manager is your
-                    passkey provider — then tap <strong>Set up passkey</strong>. You can also use a
-                    security key or another device.
-                  </span>
-                </div>
-              )}
 
               {/* Primary Action: Create Passkey */}
               <button
@@ -887,10 +1012,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 ) : (
                   <>
                     <span className="w-9 h-9 rounded-xl bg-white/10 dark:bg-black/10 flex items-center justify-center flex-shrink-0">
-                      <Fingerprint className="w-4 h-4" />
+                      <Fingerprint weight="bold" className="w-4 h-4" />
                     </span>
                     <span className="flex-1 text-center pr-2">Set up passkey</span>
-                    <ArrowRight className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
+                    <ArrowRight weight="bold" className="w-4 h-4 opacity-60 group-hover:translate-x-0.5 transition-transform flex-shrink-0" />
                   </>
                 )}
               </button>
@@ -916,7 +1041,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
             <div className="space-y-4 animate-fade-in">
               <div className="space-y-1.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3.5">
                 <div className="flex items-center gap-1.5 font-bold text-emerald-700">
-                  <ShieldCheck className="w-4 h-4" />
+                  <ShieldCheck weight="fill" className="w-4 h-4" />
                   <span className="text-sm">Non-Custodial Vault Locked to Your Passkey</span>
                 </div>
                 <p className="text-xs leading-relaxed text-stone-600">
@@ -942,12 +1067,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   >
                     {copiedRecoveryKey ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                         <span>Copied</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="w-3.5 h-3.5" />
+                        <Copy weight="fill" className="w-3.5 h-3.5" />
                         <span>Copy Key</span>
                       </>
                     )}
@@ -986,12 +1111,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   >
                     {downloadedRecoveryKey ? (
                       <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                         <span>Saved .txt</span>
                       </>
                     ) : (
                       <>
-                        <Download className="w-3.5 h-3.5" />
+                        <DownloadSimple weight="fill" className="w-3.5 h-3.5" />
                         <span>Download .txt</span>
                       </>
                     )}
@@ -1022,7 +1147,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 className="btn-primary w-full h-12 rounded-2xl px-5 font-display font-bold text-sm tracking-tight flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 <span>Continue to UPRAIL</span>
-                <ArrowRight className="w-4 h-4" />
+                <ArrowRight weight="bold" className="w-4 h-4" />
               </button>
             </div>
           )}

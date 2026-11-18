@@ -2,18 +2,17 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  AlertTriangle,
+  Warning,
   Check,
-  CheckCircle2,
+  CheckCircle,
   Copy,
-  Download,
+  DownloadSimple,
   Fingerprint,
-  Loader2,
+  CircleNotch,
   Shield,
   ShieldCheck,
-  X,
-} from 'lucide-react';
-import { Portal } from './Portal';
+} from '@phosphor-icons/react';
+import { ModalSheet } from './ModalSheet';
 import { api } from '../lib/api';
 import {
   deriveBackupEd25519Keypair,
@@ -22,7 +21,6 @@ import {
 } from '../lib/selfCustody';
 import { describePasskeyError } from '../lib/webauthn';
 import { useXAuth } from '../hooks/useXAuth';
-import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from './Toast';
 import { Link } from '../lib/router';
 import type { CustodyPreflight } from '../types';
@@ -42,7 +40,6 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
 }) => {
   const { user, refreshSession } = useXAuth();
   const { toast: showToast } = useToast();
-  useBodyScrollLock(isOpen);
 
   const [stage, setStage] = useState<ModalStage>('setup');
   const [preflight, setPreflight] = useState<CustodyPreflight | null>(null);
@@ -222,53 +219,41 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
     !isSubmitting;
 
   return (
-    <Portal>
-      <div
-        className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-xs animate-fade-in"
-        onClick={() => {
-          if (!isSubmitting) onClose();
-        }}
-      >
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="sc-upgrade-title"
-          className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 text-stone-950 shadow-2xl max-h-[92vh] overflow-hidden flex flex-col animate-scale-in"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="px-5 sm:px-6 py-4 border-b border-stone-100 flex items-center justify-between gap-3 shrink-0">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <Shield className="w-4 h-4 text-emerald-600" />
-              </div>
-              <div className="min-w-0">
-                <h2 id="sc-upgrade-title" className="text-base font-display font-extrabold text-stone-950 truncate">
-                  {stage === 'setup' ? 'Enable Passkey Self-Custody' : 'Self-Custody Active'}
-                </h2>
-                {resolvedNearAccount && (
-                  <p className="text-[11px] font-mono text-stone-500 truncate">
-                    {resolvedNearAccount}
-                  </p>
-                )}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="p-2 rounded-full text-stone-400 hover:text-stone-800 hover:bg-stone-100 transition-colors cursor-pointer disabled:opacity-40"
-              aria-label="Close"
-            >
-              <X className="w-4 h-4" />
-            </button>
+    <ModalSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      canClose={!isSubmitting}
+      zIndexClass="z-[120]"
+      maxWidthClass="sm:max-w-md"
+      panelClassName="p-0 flex flex-col overflow-hidden text-stone-950"
+      showCloseButton
+      closeLabel="Close Self-Custody upgrade modal"
+      ariaLabelledBy="sc-upgrade-title"
+    >
+      {/* Header */}
+      <div className="px-5 sm:px-6 pt-2 sm:pt-4 pb-4 pr-14 border-b border-stone-100 flex items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+            <Shield weight="fill" className="w-4 h-4 text-emerald-600" />
           </div>
+          <div className="min-w-0">
+            <h2 id="sc-upgrade-title" className="text-base font-display font-extrabold text-stone-950 truncate">
+              {stage === 'setup' ? 'Enable Passkey Self-Custody' : 'Self-Custody Active'}
+            </h2>
+            {resolvedNearAccount && (
+              <p className="text-[11px] font-mono text-stone-500 truncate">
+                {resolvedNearAccount}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
 
           {/* Body */}
           <div className="p-5 sm:p-6 space-y-4 overflow-y-auto overscroll-contain flex-1">
             {error && (
               <div className="rounded-2xl bg-red-500/10 border border-red-500/30 px-3.5 py-2.5 text-xs text-red-700 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <Warning weight="fill" className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                 <span className="leading-relaxed">{error}</span>
               </div>
             )}
@@ -278,13 +263,13 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                 {/* Concise Guarantees */}
                 <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3.5 space-y-2 text-xs text-stone-700">
                   <div className="flex items-start gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                    <CheckCircle weight="fill" className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                     <span>
                       <strong>Confidential &amp; Intents balances stay intact</strong> on your vault — only your device passkey can sign.
                     </span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                    <CheckCircle weight="fill" className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                     <span>
                       <strong>L1 tokens auto-sweep into Intents</strong> during migration (escrow sponsors token storage on <code className="font-mono text-[11px]">intents.near</code> automatically).
                     </span>
@@ -293,7 +278,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
 
                 {loadingPreflight && !preflight ? (
                   <div className="py-2 flex items-center gap-2 text-xs font-mono text-stone-500">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                     <span>Checking vault &amp; L1 balances…</span>
                   </div>
                 ) : null}
@@ -341,7 +326,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                       onClick={handleCopyRecoveryKey}
                       className="btn-secondary py-2 px-3 rounded-xl text-xs font-mono font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      {copiedKey ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedKey ? <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" /> : <Copy weight="fill" className="w-3.5 h-3.5" />}
                       <span>{copiedKey ? 'Copied' : 'Copy Key'}</span>
                     </button>
                     <button
@@ -349,7 +334,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                       onClick={handleDownloadRecoveryKey}
                       className="btn-secondary py-2 px-3 rounded-xl text-xs font-mono font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      {downloadedKey ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Download className="w-3.5 h-3.5" />}
+                      {downloadedKey ? <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" /> : <DownloadSimple weight="fill" className="w-3.5 h-3.5" />}
                       <span>{downloadedKey ? 'Saved .txt' : 'Save .txt'}</span>
                     </button>
                   </div>
@@ -375,12 +360,12 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
                       <span>{submitStatus || 'Activating Self-Custody…'}</span>
                     </>
                   ) : (
                     <>
-                      <Fingerprint className="w-4 h-4" />
+                      <Fingerprint weight="bold" className="w-4 h-4" />
                       <span>Sign with Passkey &amp; Enable Self-Custody</span>
                     </>
                   )}
@@ -392,7 +377,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
               <div className="space-y-4">
                 <div className="rounded-2xl border border-emerald-500/35 bg-emerald-500/10 p-4 space-y-2 text-xs">
                   <div className="flex items-center gap-2 font-bold text-emerald-700">
-                    <ShieldCheck className="w-4 h-4" />
+                    <ShieldCheck weight="fill" className="w-4 h-4" />
                     <span>Your passkey now controls 100% of your keys on-chain.</span>
                   </div>
                   <div className="font-mono text-[11px] text-stone-700 break-all">
@@ -433,8 +418,6 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
               </div>
             )}
           </div>
-        </div>
-      </div>
-    </Portal>
+    </ModalSheet>
   );
 };

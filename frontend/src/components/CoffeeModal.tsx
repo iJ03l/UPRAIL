@@ -2,18 +2,17 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  X,
   Copy,
   Check,
-  ExternalLink,
-  Loader2,
+  ArrowSquareOut,
+  CircleNotch,
   Fingerprint,
-  Sparkles,
-} from 'lucide-react';
+  Sparkle,
+} from '@phosphor-icons/react';
 import { api } from '../lib/api';
-import { Portal } from './Portal';
+import { ModalSheet } from './ModalSheet';
+import { Badge } from './Badge';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
-import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from './Toast';
 import type { CoffeeSettingsResponse } from '../types';
 
@@ -114,7 +113,6 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
 }) => {
   const { toast } = useToast();
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
-  useBodyScrollLock(isOpen);
   const [settings, setSettings] = useState<CoffeeSettingsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
@@ -147,17 +145,6 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
       cancelled = true;
     };
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
 
   const isEnabled = settings?.enabled ?? false;
   const busy = isToggling || isAuthorizing;
@@ -200,81 +187,65 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
   };
 
   return (
-    <Portal>
-      <div
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-stone-950/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
-        onClick={onClose}
-      >
-        <div
-          className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl border border-stone-200 shadow-2xl max-h-[92vh] overflow-y-auto overscroll-contain animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="px-6 pt-5 pb-4 border-b border-stone-100 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex items-center justify-center text-amber-700 dark:text-amber-300">
-                <SolidCoffeeIcon className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-base font-display font-extrabold text-stone-950 tracking-tight">
-                  Buy Me a Coffee
-                </h2>
-                <p className="text-[11px] font-mono text-stone-500">
-                  Receive from 35+ chains · No login for senders
+    <ModalSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      zIndexClass="z-50"
+      maxWidthClass="sm:max-w-md"
+      showCloseButton
+      closeLabel="Close Buy Me a Coffee settings"
+      ariaLabel="Buy Me a Coffee settings"
+    >
+      {/* Header */}
+      <div className="px-6 pt-2 sm:pt-5 pb-4 pr-14 border-b border-stone-100 flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 flex items-center justify-center text-amber-700 dark:text-amber-300 flex-shrink-0">
+          <SolidCoffeeIcon className="w-4 h-4" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-base font-display font-extrabold text-stone-950 tracking-tight">
+            Buy Me a Coffee
+          </h2>
+          <p className="text-[11px] font-mono text-stone-500">
+            Receive from 35+ chains · No login for senders
+          </p>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="p-6 space-y-5">
+        {error && (
+          <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs font-mono text-red-700 dark:text-red-300">
+            {error}
+          </div>
+        )}
+
+        {isLoading && !settings ? (
+          <div className="py-8 flex items-center justify-center text-stone-400 gap-2 text-xs font-mono">
+            <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
+            <span>Loading link status…</span>
+          </div>
+        ) : (
+          <>
+            {/* Passkey-gated Toggle Row */}
+            <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/80 flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-display font-bold text-stone-950">
+                    Public Pay Link
+                  </span>
+                  <Badge tone={isEnabled ? 'ok' : 'neutral'}>
+                    {isEnabled ? 'Active' : 'Off'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-stone-500 leading-relaxed flex items-center gap-1.5">
+                  <Fingerprint weight="bold" className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
+                  <span>
+                    {isAuthorizing
+                      ? 'Confirm with Face ID or passkey…'
+                      : 'Passkey confirmation required to change'}
+                  </span>
                 </p>
               </div>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="p-2 rounded-full text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Body */}
-          <div className="p-6 space-y-5">
-            {error && (
-              <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs font-mono text-red-700 dark:text-red-300">
-                {error}
-              </div>
-            )}
-
-            {isLoading && !settings ? (
-              <div className="py-8 flex items-center justify-center text-stone-400 gap-2 text-xs font-mono">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Loading link status…</span>
-              </div>
-            ) : (
-              <>
-                {/* Passkey-gated Toggle Row */}
-                <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/80 flex items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-display font-bold text-stone-950">
-                        Public Pay Link
-                      </span>
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${
-                          isEnabled
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                            : 'bg-stone-200 text-stone-600'
-                        }`}
-                      >
-                        {isEnabled ? 'Active' : 'Off'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-stone-500 leading-relaxed flex items-center gap-1.5">
-                      <Fingerprint className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
-                      <span>
-                        {isAuthorizing
-                          ? 'Confirm with Face ID or passkey…'
-                          : 'Passkey confirmation required to change'}
-                      </span>
-                    </p>
-                  </div>
 
                   <button
                     type="button"
@@ -317,7 +288,7 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
                       title="Preview public page"
                       className="p-2 rounded-xl text-stone-400 hover:text-white hover:bg-stone-800 transition-colors flex-shrink-0"
                     >
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
                     </a>
 
                     <button
@@ -328,12 +299,12 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
                     >
                       {copied ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                           <span>Copied</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy weight="fill" className="w-3.5 h-3.5" />
                           <span>Copy</span>
                         </>
                       )}
@@ -349,7 +320,7 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
                 {settings?.recentDonations && settings.recentDonations.length > 0 && (
                   <div className="pt-2 border-t border-stone-100 space-y-2.5">
                     <div className="flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-stone-500">
-                      <Sparkles className="w-3 h-3 text-amber-600" />
+                      <Sparkle weight="fill" className="w-3 h-3 text-amber-600" />
                       <span>Recent Coffees</span>
                     </div>
                     <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
@@ -374,9 +345,7 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
                 )}
               </>
             )}
-          </div>
-        </div>
       </div>
-    </Portal>
+    </ModalSheet>
   );
 };

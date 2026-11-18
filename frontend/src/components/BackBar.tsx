@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Link } from '../lib/router';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from '@phosphor-icons/react';
 
 /**
  * Page back navigation shown at the top of every inner page (Send, Receive,
@@ -31,7 +31,7 @@ export const BackBar: React.FC<{
         aria-label={label}
         className="sm:hidden fixed left-4 top-[4.75rem] z-40 w-11 h-11 rounded-full bg-black text-white shadow-lg border border-stone-900 flex items-center justify-center transition-transform active:scale-95"
       >
-        <ArrowLeft className="w-5 h-5" />
+        <ArrowLeft weight="bold" className="w-5 h-5" />
       </Link>
 
       {/* Desktop: wide back bar occupying the former header space */}
@@ -39,7 +39,7 @@ export const BackBar: React.FC<{
         to={to}
         className="hidden sm:flex w-full items-center space-x-2.5 px-5 py-4 rounded-2xl bg-stone-50 hover:bg-stone-100 border border-stone-200 hover:border-stone-950 transition-colors active:scale-[0.99]"
       >
-        <ArrowLeft className="w-4 h-4 text-stone-700" />
+        <ArrowLeft weight="bold" className="w-4 h-4 text-stone-700" />
         <span className="text-sm font-mono font-bold text-stone-900">{label}</span>
         <span className="ml-auto text-[11px] font-mono text-stone-400">
           {to === '/app' ? 'Dashboard' : to}

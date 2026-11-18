@@ -4,24 +4,25 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Copy,
   Check,
-  Loader2,
-  Unlock,
+  CircleNotch,
+  LockOpen,
   ArrowLeft,
-  CheckCircle2,
+  CheckCircle,
   Clock,
-  ChevronDown,
-  AlertCircle,
-  ExternalLink,
+  CaretDown,
+  WarningCircle,
+  ArrowSquareOut,
   Sun,
   Moon,
-  Bot,
-} from 'lucide-react';
+  Robot,
+} from '@phosphor-icons/react';
 import { api } from '../lib/api';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { useTheme } from '../components/ThemeProvider';
 import { SolidCoffeeIcon } from '../components/CoffeeModal';
 import { TokenIcon } from '../components/TokenIcon';
 import { ChainLogo } from '../components/ChainLogo';
+import { Badge } from '../components/Badge';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { useToast } from '../components/Toast';
 import type {
@@ -33,6 +34,7 @@ import type {
 const TOKEN_PRESETS: Record<string, number[]> = {
   USDC: [2, 5, 10, 25],
   USDT: [2, 5, 10, 25],
+  USDG: [2, 5, 10, 25],
   NEAR: [0.5, 1, 2, 5],
   SOL: [0.02, 0.05, 0.1, 0.25],
   ETH: [0.001, 0.005, 0.01, 0.05],
@@ -41,6 +43,7 @@ const TOKEN_PRESETS: Record<string, number[]> = {
   POL: [5, 10, 25, 50],
   AVAX: [0.1, 0.25, 0.5, 1],
   SUI: [1, 2, 5, 10],
+  PRL: [1, 2, 5, 10],
   XRP: [1, 2, 5, 10],
   DOGE: [10, 25, 50, 100],
 };
@@ -109,6 +112,7 @@ export const PublicCoffeeView: React.FC = () => {
   const [selectedSymbol, setSelectedSymbol] = useState<string>('USDC');
   const [selectedChain, setSelectedChain] = useState<string>('base');
   const [showMoreTokens, setShowMoreTokens] = useState(false);
+  const [showMoreChains, setShowMoreChains] = useState(false);
 
   // Ephemeral deposit & standby state
   const [isCreating, setIsCreating] = useState(false);
@@ -388,19 +392,18 @@ export const PublicCoffeeView: React.FC = () => {
           <GlitchLogo href="/" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-white border border-stone-200/80 text-[10px] sm:text-[11px] font-mono text-stone-600 shadow-2xs">
-              <Unlock className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-              <span>No login needed</span>
-            </span>
+            <Badge tone="neutral" icon={<LockOpen weight="fill" className="w-3 h-3" />}>
+              No login needed
+            </Badge>
 
             <button
               type="button"
               onClick={() => setMode(isDark ? 'light' : 'dark')}
               aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white hover:bg-stone-100 border border-stone-200/80 flex items-center justify-center text-stone-600 hover:text-stone-950 transition-colors cursor-pointer"
+              className="w-11 h-11 rounded-full bg-white hover:bg-stone-100 border border-stone-200/80 flex items-center justify-center text-stone-600 hover:text-stone-950 transition-colors cursor-pointer"
             >
-              {isDark ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+              {isDark ? <Sun weight="fill" className="w-3.5 h-3.5" /> : <Moon weight="fill" className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>
@@ -411,12 +414,12 @@ export const PublicCoffeeView: React.FC = () => {
         <div className="w-full max-w-md space-y-3">
           {isLoading ? (
             <div className="bg-white rounded-3xl border border-stone-200/90 shadow-sm p-10 flex flex-col items-center justify-center gap-3">
-              <Loader2 className="w-6 h-6 animate-spin text-stone-400" />
+              <CircleNotch weight="bold" className="w-6 h-6 animate-spin text-stone-400" />
               <p className="text-xs font-mono text-stone-500">Loading creator page…</p>
             </div>
           ) : loadError ? (
             <div className="bg-white rounded-3xl border border-stone-200/90 shadow-sm p-8 text-center space-y-4">
-              <AlertCircle className="w-8 h-8 text-red-500 mx-auto" />
+              <WarningCircle weight="fill" className="w-8 h-8 text-red-500 mx-auto" />
               <p className="text-sm text-stone-700">{loadError}</p>
             </div>
           ) : !profile?.found ? (
@@ -437,7 +440,7 @@ export const PublicCoffeeView: React.FC = () => {
                 className="inline-flex items-center justify-center gap-2 w-full py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-colors"
               >
                 <span>Open app.uprail.world</span>
-                <ExternalLink className="w-3.5 h-3.5" />
+                <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
               </a>
             </div>
           ) : !profile.enabled ? (
@@ -474,7 +477,7 @@ export const PublicCoffeeView: React.FC = () => {
                   onClick={() => setDonation(null)}
                   className="inline-flex items-center gap-1.5 text-xs font-mono text-stone-500 hover:text-stone-950 transition-colors cursor-pointer"
                 >
-                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <ArrowLeft weight="bold" className="w-3.5 h-3.5" />
                   <span>Back</span>
                 </button>
                 <div className="flex items-center gap-2">
@@ -496,11 +499,9 @@ export const PublicCoffeeView: React.FC = () => {
                 <div className="p-6 sm:p-7 space-y-6">
                   <div className="text-center space-y-2.5">
                     <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center mx-auto text-emerald-600">
-                      <CheckCircle2 className="w-7 h-7" />
+                      <CheckCircle weight="fill" className="w-7 h-7" />
                     </div>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-700">
-                      Receipt · Delivered
-                    </span>
+                    <Badge tone="ok">Receipt · Delivered</Badge>
                     <div className="text-3xl font-display font-extrabold text-stone-950 tracking-tight tabular-nums font-mono">
                       {donation.estimatedNetOut} {donation.targetSymbol}
                     </div>
@@ -534,9 +535,9 @@ export const PublicCoffeeView: React.FC = () => {
                       >
                         <span>{shortenId(donation.id)}</span>
                         {copiedReceiptId ? (
-                          <Check className="w-3 h-3 text-emerald-600" />
+                          <Check weight="bold" className="w-3 h-3 text-emerald-600" />
                         ) : (
-                          <Copy className="w-3 h-3 text-stone-400" />
+                          <Copy weight="fill" className="w-3 h-3 text-stone-400" />
                         )}
                       </button>
                     </div>
@@ -550,7 +551,7 @@ export const PublicCoffeeView: React.FC = () => {
                           className="inline-flex items-center gap-1 font-semibold text-stone-900 hover:underline"
                         >
                           <span>{shortenId(donation.payoutTxHash)}</span>
-                          <ExternalLink className="w-3 h-3 text-stone-400" />
+                          <ArrowSquareOut weight="fill" className="w-3 h-3 text-stone-400" />
                         </a>
                       </div>
                     )}
@@ -566,7 +567,7 @@ export const PublicCoffeeView: React.FC = () => {
                 </div>
               ) : donation.status === 'FAILED' || donation.status === 'EXPIRED' ? (
                 <div className="p-7 text-center space-y-4">
-                  <AlertCircle className="w-10 h-10 text-amber-500 mx-auto" />
+                  <WarningCircle weight="fill" className="w-10 h-10 text-amber-500 mx-auto" />
                   <div className="space-y-1">
                     <h2 className="text-lg font-display font-extrabold text-stone-950">
                       {donation.status === 'EXPIRED' ? 'Quote Expired' : 'Deposit Failed'}
@@ -590,12 +591,12 @@ export const PublicCoffeeView: React.FC = () => {
                     <div className="flex items-center gap-2 text-xs font-mono font-semibold">
                       {donation.status === 'INCOMPLETE_DEPOSIT' ? (
                         <>
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
+                          <WarningCircle weight="fill" className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
                           <span>Partial deposit detected · Waiting for remainder or refund…</span>
                         </>
                       ) : donation.status === 'PROCESSING' || donation.status === 'SETTLING' ? (
                         <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700 dark:text-amber-300" />
+                          <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin text-amber-700 dark:text-amber-300" />
                           <span>Deposit detected · Delivering…</span>
                         </>
                       ) : (
@@ -606,7 +607,7 @@ export const PublicCoffeeView: React.FC = () => {
                       )}
                     </div>
                     <div className="flex items-center gap-1 text-[11px] font-mono text-amber-700 dark:text-amber-300">
-                      <Clock className="w-3 h-3" />
+                      <Clock weight="fill" className="w-3 h-3" />
                       <span>{formatCountdown(donation.expiresAt, nowMs)}</span>
                     </div>
                   </div>
@@ -647,9 +648,9 @@ export const PublicCoffeeView: React.FC = () => {
                         title="Copy address"
                       >
                         {copiedAddr ? (
-                          <Check className="w-4 h-4 text-emerald-600" />
+                          <Check weight="bold" className="w-4 h-4 text-emerald-600" />
                         ) : (
-                          <Copy className="w-4 h-4" />
+                          <Copy weight="fill" className="w-4 h-4" />
                         )}
                       </button>
                     </div>
@@ -670,9 +671,9 @@ export const PublicCoffeeView: React.FC = () => {
                           className="p-1.5 rounded-lg bg-white border border-amber-200 text-stone-700 cursor-pointer"
                         >
                           {copiedMemo ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                           ) : (
-                            <Copy className="w-3.5 h-3.5" />
+                            <Copy weight="fill" className="w-3.5 h-3.5" />
                           )}
                         </button>
                       </div>
@@ -707,10 +708,9 @@ export const PublicCoffeeView: React.FC = () => {
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 text-[10px] font-mono font-bold uppercase tracking-wider mb-1">
-                      <SolidCoffeeIcon className="w-3 h-3" />
-                      <span>Buy a coffee</span>
-                    </div>
+                    <Badge tone="neutral" icon={<SolidCoffeeIcon className="w-3 h-3" />} className="mb-1">
+                      Buy a coffee
+                    </Badge>
                     <h1 className="text-lg sm:text-xl font-display font-extrabold text-stone-950 tracking-tight truncate">
                       @{profile.handle}
                     </h1>
@@ -727,10 +727,10 @@ export const PublicCoffeeView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowMoreTokens((v) => !v)}
-                        className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
+                        className="inline-flex items-center gap-1 min-h-9 px-2 -mr-2 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
                       >
                         <span>{showMoreTokens ? 'Hide others' : 'More tokens'}</span>
-                        <ChevronDown
+                        <CaretDown weight="fill"
                           className={`w-3 h-3 transition-transform ${
                             showMoreTokens ? 'rotate-180' : ''
                           }`}
@@ -747,13 +747,16 @@ export const PublicCoffeeView: React.FC = () => {
                           key={t.symbol}
                           type="button"
                           onClick={() => handleSelectToken(t.symbol)}
-                          className={`flex items-center gap-2.5 p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                          aria-pressed={active}
+                          className={`min-h-11 flex items-center gap-2.5 p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                             active
                               ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
                               : 'bg-stone-50 hover:bg-stone-100 text-stone-900 border-stone-200/80'
                           }`}
                         >
-                          <TokenIcon symbol={t.symbol} size="sm" />
+                          <span className="w-[22px] h-[22px] rounded-full bg-[#ffffff] ring-1 ring-[#e7e5e4] flex items-center justify-center flex-shrink-0">
+                            <TokenIcon symbol={t.symbol} size={18} />
+                          </span>
                           <div className="min-w-0">
                             <div className="text-xs font-display font-extrabold leading-tight">
                               {t.symbol}
@@ -782,13 +785,16 @@ export const PublicCoffeeView: React.FC = () => {
                               key={t.symbol}
                               type="button"
                               onClick={() => handleSelectToken(t.symbol)}
-                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-semibold transition-all cursor-pointer ${
+                              aria-pressed={active}
+                              className={`min-h-11 inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-mono font-semibold transition-all cursor-pointer ${
                                 active
                                   ? 'bg-stone-950 text-white border-stone-950'
                                   : 'bg-white hover:bg-stone-50 text-stone-700 border-stone-200'
                               }`}
                             >
-                              <TokenIcon symbol={t.symbol} size={14} />
+                              <span className="w-[22px] h-[22px] rounded-full bg-[#ffffff] ring-1 ring-[#e7e5e4] flex items-center justify-center flex-shrink-0">
+                                <TokenIcon symbol={t.symbol} size={18} />
+                              </span>
                               <span>{t.symbol}</span>
                             </button>
                           );
@@ -821,9 +827,10 @@ export const PublicCoffeeView: React.FC = () => {
                           key={amt}
                           type="button"
                           onClick={() => setSelectedPreset(amt)}
-                          className={`py-2.5 rounded-2xl text-xs sm:text-sm font-display font-bold transition-all cursor-pointer border ${
+                          aria-pressed={active}
+                          className={`min-h-11 py-2.5 rounded-2xl text-sm font-display font-bold transition-all cursor-pointer border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--fg)] ${
                             active
-                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs outline outline-2 outline-offset-2 outline-[var(--fg)]'
                               : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
                           }`}
                         >
@@ -839,9 +846,10 @@ export const PublicCoffeeView: React.FC = () => {
                           setCustomAmount(String(tokenPresets[1] ?? tokenPresets[0] ?? '1'));
                         }
                       }}
-                      className={`py-2.5 rounded-2xl text-xs font-display font-bold transition-all cursor-pointer border ${
+                      aria-pressed={selectedPreset === 'custom'}
+                      className={`min-h-11 py-2.5 rounded-2xl text-sm font-display font-bold transition-all cursor-pointer border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--fg)] ${
                         selectedPreset === 'custom'
-                          ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                          ? 'bg-stone-950 text-white border-stone-950 shadow-xs outline outline-2 outline-offset-2 outline-[var(--fg)]'
                           : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200/80'
                       }`}
                     >
@@ -882,34 +890,99 @@ export const PublicCoffeeView: React.FC = () => {
                   )}
                 </div>
 
-                {/* 3. Chain Picker */}
-                <div className="space-y-2">
-                  <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
-                    Sending From Chain
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-0.5">
-                    {availableChains.map((c) => {
-                      const active = activeChainObj?.chain === c.chain;
-                      return (
-                        <button
-                          key={c.chain}
-                          type="button"
-                          onClick={() => setSelectedChain(c.chain)}
-                          className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                            active
-                              ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
-                              : 'bg-stone-50 hover:bg-stone-100 text-stone-800 border-stone-200/80'
-                          }`}
-                        >
-                          <ChainLogo chainId={c.chain} className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-xs font-display font-bold truncate">
-                            {c.chainName}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* 3. Chain Picker (first 5 networks + Show more chains toggle) */}
+                {(() => {
+                  const INITIAL_CHAIN_LIMIT = 5;
+                  const hasExtraChains = availableChains.length > INITIAL_CHAIN_LIMIT;
+                  const hiddenCount = Math.max(0, availableChains.length - INITIAL_CHAIN_LIMIT);
+                  let visibleChains = availableChains;
+                  if (hasExtraChains && !showMoreChains) {
+                    const topFive = availableChains.slice(0, INITIAL_CHAIN_LIMIT);
+                    if (
+                      activeChainObj &&
+                      !topFive.some((c) => c.chain === activeChainObj.chain)
+                    ) {
+                      visibleChains = [...topFive.slice(0, INITIAL_CHAIN_LIMIT - 1), activeChainObj];
+                    } else {
+                      visibleChains = topFive;
+                    }
+                  }
+                  const hiddenPreviewChains = availableChains
+                    .filter((c) => !visibleChains.some((v) => v.chain === c.chain))
+                    .slice(0, 3);
+
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-[11px] font-mono uppercase tracking-wider text-stone-500">
+                          Sending From Chain
+                        </label>
+                        {hasExtraChains && showMoreChains && (
+                          <button
+                            type="button"
+                            onClick={() => setShowMoreChains(false)}
+                            className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
+                          >
+                            <span>Show less</span>
+                            <CaretDown weight="fill" className="w-3 h-3 rotate-180 transition-transform" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {visibleChains.map((c) => {
+                          const active = activeChainObj?.chain === c.chain;
+                          return (
+                            <button
+                              key={c.chain}
+                              type="button"
+                              onClick={() => setSelectedChain(c.chain)}
+                              aria-pressed={active}
+                              className={`min-h-11 flex items-center gap-2 px-3 py-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                                active
+                                  ? 'bg-stone-950 text-white border-stone-950 shadow-xs'
+                                  : 'bg-stone-50 hover:bg-stone-100 text-stone-800 border-stone-200/80'
+                              }`}
+                            >
+                              <span className="w-[22px] h-[22px] rounded-full bg-[#ffffff] ring-1 ring-[#e7e5e4] flex items-center justify-center flex-shrink-0">
+                                <ChainLogo chainId={c.chain} className="w-4 h-4" />
+                              </span>
+                              <span className="text-xs font-display font-bold truncate">
+                                {c.chainName}
+                              </span>
+                            </button>
+                          );
+                        })}
+
+                        {hasExtraChains && !showMoreChains && (
+                          <button
+                            type="button"
+                            onClick={() => setShowMoreChains(true)}
+                            className="min-h-11 flex items-center justify-between gap-1.5 px-3 py-2.5 rounded-2xl border border-dashed border-stone-300 bg-white hover:bg-stone-50 hover:border-stone-400 text-stone-700 hover:text-stone-950 text-left transition-all cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              {hiddenPreviewChains.length > 0 && (
+                                <div className="flex items-center -space-x-1.5 flex-shrink-0">
+                                  {hiddenPreviewChains.map((hc) => (
+                                    <span
+                                      key={hc.chain}
+                                      className="w-[18px] h-[18px] rounded-full bg-[#ffffff] ring-1 ring-[#e7e5e4] flex items-center justify-center"
+                                    >
+                                      <ChainLogo chainId={hc.chain} className="w-3.5 h-3.5" />
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <span className="text-[11px] font-mono font-bold truncate">
+                                Show {hiddenCount} more {hiddenCount === 1 ? 'chain' : 'chains'}
+                              </span>
+                            </div>
+                            <CaretDown weight="fill" className="w-3.5 h-3.5 text-stone-400 group-hover:text-stone-900 flex-shrink-0 transition-transform group-hover:translate-y-0.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {donateError && (
                   <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs font-mono text-red-700 dark:text-red-300">
@@ -923,26 +996,24 @@ export const PublicCoffeeView: React.FC = () => {
                     type="button"
                     onClick={() => void handleConfirm()}
                     disabled={isCreating || belowMinimumUsd || !activeChainObj}
-                    className="w-full py-3.5 px-5 rounded-2xl bg-stone-950 hover:bg-stone-800 disabled:bg-stone-300 text-white font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full min-h-12 py-3.5 px-5 rounded-2xl bg-stone-950 hover:bg-stone-800 disabled:bg-[var(--bg-muted)] disabled:text-[var(--fg-muted)] text-white font-display font-extrabold text-sm tracking-wide shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {isCreating ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
                         <span>Preparing deposit address…</span>
                       </>
                     ) : (
                       <>
                         <SolidCoffeeIcon className="w-4 h-4" />
                         <span>
-                          {isStableSelected
-                            ? `Confirm · $${effectiveTokenAmount > 0 ? effectiveTokenAmountStr : '0'} ${activeToken?.symbol || 'USDC'}`
-                            : `Confirm · ${effectiveTokenAmount > 0 ? effectiveTokenAmountStr : '0'} ${activeToken?.symbol || 'USDC'}`}
+                          {`Pay ${effectiveTokenAmount > 0 ? effectiveTokenAmountStr : '0'} ${activeToken?.symbol || 'USDC'}`}
                         </span>
                       </>
                     )}
                   </button>
-                  <p className="text-center text-[11px] font-mono text-stone-400">
-                    Reveals a one-time deposit address · Settled privately to @{profile.handle}
+                  <p className="text-center text-xs font-mono text-[var(--fg-muted)]">
+                    One-time address · arrives privately
                   </p>
                 </div>
               </div>
@@ -952,11 +1023,11 @@ export const PublicCoffeeView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowAgentInfo((v) => !v)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono text-stone-500 hover:text-stone-900 border border-stone-200/70 bg-white/80 hover:bg-white transition-colors cursor-pointer"
+                  className="inline-flex items-center gap-1.5 min-h-9 px-3 py-1 rounded-full text-[11px] font-mono text-[var(--fg-muted)] hover:text-stone-900 border border-stone-200/70 bg-white/80 hover:bg-white transition-colors cursor-pointer"
                 >
-                  <Bot className="w-3 h-3" />
+                  <Robot weight="fill" className="w-3 h-3" />
                   <span>Agent Pay API</span>
-                  <ChevronDown
+                  <CaretDown weight="fill"
                     className={`w-3 h-3 transition-transform ${showAgentInfo ? 'rotate-180' : ''}`}
                   />
                 </button>
@@ -969,7 +1040,7 @@ export const PublicCoffeeView: React.FC = () => {
                         onClick={() => void copyText(agentCurlSnippet, 'agent')}
                         className="inline-flex items-center gap-1 text-stone-700 hover:text-stone-950 font-bold cursor-pointer"
                       >
-                        <Copy className="w-3 h-3" />
+                        <Copy weight="fill" className="w-3 h-3" />
                         <span>Copy</span>
                       </button>
                     </div>
@@ -985,15 +1056,14 @@ export const PublicCoffeeView: React.FC = () => {
       </main>
 
       {/* Minimal Footer */}
-      <footer className="w-full max-w-3xl mx-auto px-4 pb-6 pt-2 text-center text-[11px] font-mono text-stone-400">
+      <footer className="w-full max-w-3xl mx-auto px-4 pb-6 pt-2 text-center text-xs font-mono text-[var(--fg-muted)]">
         Powered by{' '}
         <a
           href="https://uprail.world"
-          className="text-stone-600 hover:text-stone-950 underline underline-offset-2"
+          className="text-[var(--fg)] hover:underline underline-offset-2"
         >
           UPRAIL
-        </a>{' '}
-        · Private value rails on NEAR Intents
+        </a>
       </footer>
     </div>
   );

@@ -64,8 +64,9 @@ export default function CirclesDocsPage() {
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
           A Circle is a shared (or solo) Earn vault pool for rent, trips, group gifts, project
-          treasuries, or personal savings goals. Every Circle gets its own isolated vault account on
-          NEAR Intents.
+          treasuries, or personal savings goals. Circles run in <strong>Passkey Self-Custody</strong>{' '}
+          through the on-chain <code className="font-mono text-[13px]">circle.uprail.near</code>{' '}
+          smart contract with signer-bound quotas.
         </p>
 
         <ol className="space-y-2.5 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
@@ -81,20 +82,22 @@ export default function CirclesDocsPage() {
             <strong className="text-stone-900">Create your Circle:</strong> Tap{' '}
             <strong>Create Circle</strong>, enter a name (e.g. <em>Rent &amp; Housing</em> or{' '}
             <em>Tokyo Trip</em>), pick a purpose, choose an Earn Vault, and set your USD target
-            goal.
+            goal. (Requires Passkey Self-Custody.)
           </li>
           <li>
             <strong className="text-stone-900">Choose payout &amp; contributors:</strong> Enter the{' '}
             <code className="font-mono text-[13px]">@handle</code> that will receive the payout when
             settled. Keep yourself at <strong>100%</strong> for a solo savings goal, or add friends
-            with percentage splits adding up to <strong>100%</strong> and share the invite link.
+            with percentage splits adding up to <strong>100%</strong> and share the invite link so
+            co-members sign with their passkeys to activate the Circle.
           </li>
           <li>
-            <strong className="text-stone-900">Add funds anytime:</strong> Tap{' '}
-            <strong>Add Funds</strong> on your Circle ticket, select any asset in your UPRAIL
-            balance, enter an amount at or above the vault&apos;s USD minimum, and confirm with your
-            passkey. You can top up as many times as you like — shares go into the same Circle vault
-            and compound automatically.
+            <strong className="text-stone-900">Add funds anytime (USDC, 0% entry fee):</strong>{' '}
+            Tap <strong>Add Funds</strong> on your Circle ticket, choose{' '}
+            <strong>USDC</strong> from your UPRAIL balance, enter an amount at or above the
+            vault&apos;s USD minimum, and confirm with your passkey. If your USDC sits in
+            Confidential Intents, UPRAIL swaps/unshields automatically into the Circle vault and
+            compounds yield.
           </li>
           <li>
             <strong className="text-stone-900">Settle &amp; Payout (when ready):</strong> Only the
@@ -127,7 +130,8 @@ export default function CirclesDocsPage() {
         <p className="text-sm text-stone-600 leading-relaxed">
           Send a birthday, Christmas, anniversary, or thank-you gift that grows with real DeFi
           yield until the day it unlocks — even if your recipient doesn&apos;t have a crypto wallet
-          or UPRAIL account yet.
+          or UPRAIL account yet. Creating a Gift requires Passkey Self-Custody and locks on{' '}
+          <code className="font-mono text-[13px]">circle.uprail.near</code>.
         </p>
 
         <ol className="space-y-2.5 text-sm text-stone-600 leading-relaxed list-decimal pl-5">
@@ -147,9 +151,11 @@ export default function CirclesDocsPage() {
             Earn Vault they&apos;ll receive and set the exact date and time the gift unlocks.
           </li>
           <li>
-            <strong className="text-stone-900">Fund &amp; lock (0% fee):</strong> Pick any asset in
-            your UPRAIL balance (meeting the vault minimum) and confirm with your passkey. Your gift
-            starts earning live yield inside its own dedicated custody vault immediately.
+            <strong className="text-stone-900">Fund &amp; lock with USDC (1% protocol fee):</strong>{' '}
+            Enter a <strong>USDC</strong> amount from your UPRAIL balance (meeting the vault minimum)
+            and confirm with your passkey. <strong>99%</strong> enters the compounding Earn vault on{' '}
+            <code className="font-mono text-[13px]">circle.uprail.near</code> immediately after the
+            1% creation fee.
           </li>
           <li>
             <strong className="text-stone-900">Share the gift link:</strong> Copy the gift link (
@@ -159,25 +165,12 @@ export default function CirclesDocsPage() {
           <li>
             <strong className="text-stone-900">How the recipient unwraps it:</strong> Once the unlock
             date arrives, the recipient signs into UPRAIL with their matching 𝕏 handle + Passkey and
-            clicks <strong>Unwrap &amp; Claim Vault + Yield</strong>. They receive{' '}
-            <strong>100%</strong> of the vault shares and compounded yield straight into their
-            account.
+            clicks <strong>Unwrap &amp; Claim to USDC</strong>. By default, UPRAIL automatically
+            converts <strong>100%</strong> of the claimed vault shares and compounded yield into{' '}
+            <strong>Confidential USDC</strong> straight in their account (falling back to vault
+            shares only if conversion liquidity is unavailable).
           </li>
         </ol>
-
-        <Callout tone="info">
-          <strong className="text-stone-900">See what a gift looks like:</strong> View a live
-          timelocked <code className="font-mono text-[13px]">stNEAR</code> Earn Vault gift card at{' '}
-          <a
-            href="https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-stone-900 underline font-mono text-[13px] break-all"
-          >
-            https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89
-          </a>
-          .
-        </Callout>
 
         <Callout tone="warn">
           <strong className="text-stone-900">30-day recipient claim window + sender reclaim:</strong>{' '}

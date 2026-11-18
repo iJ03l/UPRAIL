@@ -1,24 +1,25 @@
 import React from 'react';
+import { Badge } from '@/components/Badge';
 import { Callout, Code, Method, Endpoint, Field } from '@/components/docs/DocsUI';
 import {
-  Bot,
+  Robot,
   Key,
   ShieldCheck,
   ArrowRight,
-  Zap,
+  Lightning,
   Coins,
   Users,
   Lock,
-  CheckCircle2,
-  Terminal,
-  ExternalLink,
+  CheckCircle,
+  TerminalWindow,
+  ArrowSquareOut,
   ArrowDownLeft,
   ArrowUpRight,
   Cpu,
-  Layers,
-  Sparkles,
-  Radio,
-} from 'lucide-react';
+  Stack,
+  Sparkle,
+  Broadcast,
+} from '@phosphor-icons/react/dist/ssr';
 
 export default function DocsOverviewPage() {
   return (
@@ -26,12 +27,8 @@ export default function DocsOverviewPage() {
       {/* ── 1. Hero & Spec Header ────────────────────────────────────────── */}
       <header className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-orange-600 bg-orange-50 dark:bg-orange-950/40 px-2.5 py-1 rounded-full border border-orange-200 dark:border-orange-800">
-            System Specification &amp; Developer Guide
-          </span>
-          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 border border-stone-200 dark:border-stone-700 uppercase tracking-wider">
-            v2.4 Confidential Rail
-          </span>
+          <Badge tone="warn">System Specification &amp; Developer Guide</Badge>
+          <Badge tone="neutral">v1.1.0 Confidential Rail</Badge>
         </div>
 
         <h1 className="text-3xl sm:text-5xl font-display font-black tracking-tight text-stone-950 leading-[1.08]">
@@ -70,7 +67,7 @@ export default function DocsOverviewPage() {
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-display font-extrabold text-stone-950 flex items-center space-x-2">
-            <Layers className="w-5 h-5 text-orange-600" />
+            <Stack weight="fill" className="w-5 h-5 text-orange-600" />
             <span>Architecture Blueprint</span>
           </h2>
           <span className="text-[11px] font-mono text-stone-400">Zero-Link Topology</span>
@@ -82,7 +79,7 @@ export default function DocsOverviewPage() {
             <div className="p-4 rounded-2xl bg-stone-900 border border-stone-800 space-y-2">
               <div className="flex items-center justify-between text-orange-400 font-bold text-[10px] uppercase tracking-wider">
                 <span>01. Ingress</span>
-                <Radio className="w-3.5 h-3.5 text-orange-400 animate-pulse" />
+                <Broadcast weight="fill" className="w-3.5 h-3.5 text-orange-400 animate-pulse" />
               </div>
               <div className="text-sm font-bold text-white font-display">Client Surfaces</div>
               <ul className="text-stone-400 space-y-1 text-[11px]">
@@ -97,7 +94,7 @@ export default function DocsOverviewPage() {
             <div className="p-4 rounded-2xl bg-stone-900 border border-stone-800 space-y-2">
               <div className="flex items-center justify-between text-emerald-400 font-bold text-[10px] uppercase tracking-wider">
                 <span>02. Blinded Layer</span>
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <ShieldCheck weight="fill" className="w-3.5 h-3.5 text-emerald-400" />
               </div>
               <div className="text-sm font-bold text-white font-display">Confidential Rail</div>
               <ul className="text-stone-400 space-y-1 text-[11px]">
@@ -112,7 +109,7 @@ export default function DocsOverviewPage() {
             <div className="p-4 rounded-2xl bg-stone-900 border border-stone-800 space-y-2">
               <div className="flex items-center justify-between text-blue-400 font-bold text-[10px] uppercase tracking-wider">
                 <span>03. Settlement</span>
-                <Lock className="w-3.5 h-3.5 text-blue-400" />
+                <Lock weight="fill" className="w-3.5 h-3.5 text-blue-400" />
               </div>
               <div className="text-sm font-bold text-white font-display">Egress &amp; Custody</div>
               <ul className="text-stone-400 space-y-1 text-[11px]">
@@ -141,10 +138,8 @@ export default function DocsOverviewPage() {
             className="group block p-6 rounded-3xl border border-stone-200 hover:border-stone-900 transition-all space-y-3 bg-white shadow-xs hover:shadow-md"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-800 border border-orange-200 uppercase tracking-wider">
-                Post-Frontend Rail
-              </span>
-              <Bot className="w-4 h-4 text-stone-400 group-hover:text-orange-600 transition-colors" />
+              <Badge tone="warn">Post-Frontend Rail</Badge>
+              <Robot weight="fill" className="w-4 h-4 text-stone-400 group-hover:text-orange-600 transition-colors" />
             </div>
             <h3 className="text-lg font-display font-extrabold text-stone-950 group-hover:text-black">
               AI Agents &amp; Model Context Protocol (MCP)
@@ -156,7 +151,7 @@ export default function DocsOverviewPage() {
             </p>
             <div className="text-[11px] font-mono font-bold text-stone-500 group-hover:text-stone-900 flex items-center space-x-1 pt-1">
               <span>Explore MCP &amp; Agent guides</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight weight="bold" className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
             </div>
           </a>
 
@@ -166,10 +161,8 @@ export default function DocsOverviewPage() {
             className="group block p-6 rounded-3xl border border-stone-200 hover:border-stone-900 transition-all space-y-3 bg-white shadow-xs hover:shadow-md"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase tracking-wider">
-                Confidential P2P
-              </span>
-              <ArrowDownLeft className="w-4 h-4 text-stone-400 group-hover:text-emerald-600 transition-colors" />
+              <Badge tone="ok">Confidential P2P</Badge>
+              <ArrowDownLeft weight="bold" className="w-4 h-4 text-stone-400 group-hover:text-emerald-600 transition-colors" />
             </div>
             <h3 className="text-lg font-display font-extrabold text-stone-950 group-hover:text-black">
               UPRAIL Payment Requests
@@ -181,7 +174,7 @@ export default function DocsOverviewPage() {
             </p>
             <div className="text-[11px] font-mono font-bold text-stone-500 group-hover:text-stone-900 flex items-center space-x-1 pt-1">
               <span>View request workflow &amp; specs</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight weight="bold" className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
             </div>
           </a>
 
@@ -191,10 +184,8 @@ export default function DocsOverviewPage() {
             className="group block p-6 rounded-3xl border border-stone-200 hover:border-stone-900 transition-all space-y-3 bg-white shadow-xs hover:shadow-md"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-800 border border-purple-200 uppercase tracking-wider">
-                Sovereign Gateway
-              </span>
-              <Coins className="w-4 h-4 text-stone-400 group-hover:text-purple-600 transition-colors" />
+              <Badge tone="neutral">Sovereign Gateway</Badge>
+              <Coins weight="fill" className="w-4 h-4 text-stone-400 group-hover:text-purple-600 transition-colors" />
             </div>
             <h3 className="text-lg font-display font-extrabold text-stone-950 group-hover:text-black">
               near.com Sovereign Rail
@@ -206,7 +197,7 @@ export default function DocsOverviewPage() {
             </p>
             <div className="text-[11px] font-mono font-bold text-stone-500 group-hover:text-stone-900 flex items-center space-x-1 pt-1">
               <span>Read near.com setup guide</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight weight="bold" className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
             </div>
           </a>
 
@@ -216,10 +207,8 @@ export default function DocsOverviewPage() {
             className="group block p-6 rounded-3xl border border-stone-200 hover:border-stone-900 transition-all space-y-3 bg-white shadow-xs hover:shadow-md"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 uppercase tracking-wider">
-                Auto RPC Royalties
-              </span>
-              <Zap className="w-4 h-4 text-stone-400 group-hover:text-blue-600 transition-colors" />
+              <Badge tone="neutral">Auto RPC Royalties</Badge>
+              <Lightning weight="fill" className="w-4 h-4 text-stone-400 group-hover:text-blue-600 transition-colors" />
             </div>
             <h3 className="text-lg font-display font-extrabold text-stone-950 group-hover:text-black">
               Launchpad Creator Fees
@@ -231,7 +220,7 @@ export default function DocsOverviewPage() {
             </p>
             <div className="text-[11px] font-mono font-bold text-stone-500 group-hover:text-stone-900 flex items-center space-x-1 pt-1">
               <span>Read launchpad integration specs</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight weight="bold" className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
             </div>
           </a>
         </div>
@@ -300,12 +289,12 @@ export default function DocsOverviewPage() {
 
             <Endpoint verb="POST" path="/api/requests/:id/accept" auth="Passkey Auth Required" />
             <div className="py-2 text-xs text-stone-600">
-              Verifies the recipient's biometric passkey, transfers the requested amount on NEAR Intents, and marks the request completed.
+              Verifies the recipient&apos;s passkey assertion, validates an optional already-settled <code className="font-mono text-[11px]">paymentId</code>, and marks the request <code className="font-mono text-[11px]">COMPLETED</code> (peer settlement runs via <code className="font-mono text-[11px]">/api/send</code> or <code className="font-mono text-[11px]">/api/payments/send/prepare</code> where 100% reaches the requester and 1% fee is paid on top).
             </div>
 
-            <Endpoint verb="POST" path="/api/requests/:id/decline" auth="Session Required" />
+            <Endpoint verb="POST" path="/api/requests/:id/decline" auth="Verified Passkey Session Required" />
             <div className="py-2 text-xs text-stone-600">
-              Allows the recipient to decline the request with an optional memo.
+              Allows the requested recipient to decline the request with an optional memo (requires a passkey-verified session).
             </div>
           </div>
         </div>
@@ -315,7 +304,7 @@ export default function DocsOverviewPage() {
       <section className="space-y-4 pt-4 border-t border-stone-200">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-display font-extrabold text-stone-950 flex items-center space-x-2">
-            <Terminal className="w-5 h-5 text-stone-900" />
+            <TerminalWindow weight="fill" className="w-5 h-5 text-stone-900" />
             <span>Developer Quickstart Snippets</span>
           </h2>
           <span className="text-[11px] font-mono text-stone-400">cURL &amp; MCP Spec</span>
@@ -323,24 +312,21 @@ export default function DocsOverviewPage() {
 
         <div className="space-y-4">
           {/* Snippet 1: AI Agent MCP Tool */}
-          <Code title="1. MCP Agent Configuration (Claude / Cursor / Grok)">
-{`// claude_desktop_config.json
+          <Code title="1. Streamable HTTP MCP Agent Configuration (Claude / Cursor / Grok)">
+{`// Cursor (.cursor/mcp.json) or Streamable HTTP MCP Client
 {
   "mcpServers": {
     "uprail": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-fetch", "https://api.uprail.world/api/mcp"]
+      "url": "https://api.uprail.world/api/mcp"
     }
   }
 }
 
-// Available MCP Tools include:
-// - uprail_request_payment: Request money from any 𝕏 handle
-// - uprail_send_payment: Send confidential payment within spend limit
-// - uprail_list_incoming_requests: Review pending payment requests
-// - uprail_accept_payment_request: Settle a request
-// - uprail_decline_payment_request: Decline an unwanted request
-// - uprail_list_contacts: Retrieve "People You Pay" address book`}
+// All 13 Live MCP Tools:
+// - pay_handle, check_approval, withdraw_to_wallet, receive_payment
+// - get_balance, list_payments, resolve_handle
+// - list_contacts, save_contact
+// - request_payment, list_requests, accept_request, decline_request`}
           </Code>
 
           {/* Snippet 2: cURL Payment Request Creation */}
@@ -368,7 +354,7 @@ export default function DocsOverviewPage() {
         <div className="grid sm:grid-cols-2 gap-4 text-xs font-sans">
           <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-1.5">
             <div className="font-display font-bold text-stone-900 flex items-center space-x-1.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <span>Zero Calldata Linkage</span>
             </div>
             <p className="text-stone-600 leading-relaxed">
@@ -379,7 +365,7 @@ export default function DocsOverviewPage() {
 
           <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-1.5">
             <div className="font-display font-bold text-stone-900 flex items-center space-x-1.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <span>Hardware-Backed Nonces</span>
             </div>
             <p className="text-stone-600 leading-relaxed">
@@ -390,7 +376,7 @@ export default function DocsOverviewPage() {
 
           <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-1.5">
             <div className="font-display font-bold text-stone-900 flex items-center space-x-1.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <span>Agentic Spend Caps</span>
             </div>
             <p className="text-stone-600 leading-relaxed">
@@ -401,7 +387,7 @@ export default function DocsOverviewPage() {
 
           <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 space-y-1.5">
             <div className="font-display font-bold text-stone-900 flex items-center space-x-1.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <span>Deterministic Solvers</span>
             </div>
             <p className="text-stone-600 leading-relaxed">

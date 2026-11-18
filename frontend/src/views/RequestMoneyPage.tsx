@@ -11,7 +11,7 @@ import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { api, tokenUsdPrice, formatUsd } from '../lib/api';
 import { useSearchParams, useNavigate } from '../lib/router';
 import type { PaymentRequest, Token } from '../types';
-import { ArrowDownLeft, AlertCircle, Clock, ShieldCheck, Fingerprint } from 'lucide-react';
+import { ArrowDownLeft, WarningCircle, Clock, ShieldCheck, Fingerprint } from '@phosphor-icons/react';
 
 export const RequestMoneyPage: React.FC = () => {
   const navigate = useNavigate();
@@ -141,7 +141,7 @@ export const RequestMoneyPage: React.FC = () => {
         <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
           {error && (
             <div className="p-3 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400 flex items-start space-x-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <WarningCircle weight="fill" className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
@@ -218,7 +218,7 @@ export const RequestMoneyPage: React.FC = () => {
           {/* Expiry Selector */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400 flex items-center space-x-1">
-              <Clock className="w-3.5 h-3.5" />
+              <Clock weight="fill" className="w-3.5 h-3.5" />
               <span>Expires In</span>
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -245,7 +245,7 @@ export const RequestMoneyPage: React.FC = () => {
 
           {/* Trust Banner */}
           <div className="p-3 rounded-2xl bg-stone-50 dark:bg-stone-950/60 border border-stone-200 dark:border-stone-800 text-[11px] font-sans text-stone-500 dark:text-stone-400 flex items-start space-x-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+            <ShieldCheck weight="fill" className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
             <span>
               The payer will receive a secure UPRAIL request link. They can accept or decline anytime voluntarily.
             </span>
@@ -258,9 +258,9 @@ export const RequestMoneyPage: React.FC = () => {
             className="w-full py-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {isAuthorizing ? (
-              <Fingerprint className="w-4 h-4 animate-pulse text-white" />
+              <Fingerprint weight="bold" className="w-4 h-4 animate-pulse text-white" />
             ) : (
-              <ArrowDownLeft className="w-4 h-4" />
+              <ArrowDownLeft weight="bold" className="w-4 h-4" />
             )}
             <span>
               {isAuthorizing

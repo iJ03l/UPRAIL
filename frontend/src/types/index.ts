@@ -96,7 +96,7 @@ export interface PaymentQuote {
   token: Token;
   amount: string;
   amountUsd: number | null;
-  /** amount − protocolFee: what the recipient actually receives. */
+  /** Full quoted amount received by the recipient (100%). */
   recipientAmount: string;
   recipientAmountUsd: number | null;
   networkFee: string;

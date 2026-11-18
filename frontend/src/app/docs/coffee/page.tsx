@@ -27,7 +27,7 @@ export default function CoffeeDocsPage() {
             <a className="text-stone-900 underline" href="https://app.uprail.world">
               app.uprail.world
             </a>{' '}
-            and open the Buy Me a Coffee modal from your Home bar.
+            and open the Buy Me a Coffee modal from the coin-pouch button in your Home Balance card.
           </li>
           <li>
             Toggle your public link on with one passkey verification (
@@ -181,8 +181,7 @@ curl -sS https://api.uprail.world/api/coffee/status/<donation_id>`}
               <code className="font-mono text-[12px]">SETTLING</code>,{' '}
               <code className="font-mono text-[12px]">COMPLETED</code>,{' '}
               <code className="font-mono text-[12px]">EXPIRED</code>,{' '}
-              <code className="font-mono text-[12px]">FAILED</code>,{' '}
-              <code className="font-mono text-[12px]">REFUNDED</code>) and settles 99% to the creator privately once swap confirms.
+              <code className="font-mono text-[12px]">FAILED</code> — covering failed or refunded upstream swaps) and settles 99% to the creator privately once swap confirms.
             </p>
           </div>
           <div className="py-2">

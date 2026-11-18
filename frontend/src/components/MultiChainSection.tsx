@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Layers, Shield, Zap, CheckCircle2, ArrowUpRight } from 'lucide-react';
+import { Stack, Shield, Lightning, CheckCircle, ArrowUpRight } from '@phosphor-icons/react';
 
 const NETWORKS = [
   { name: 'Bitcoin', symbol: 'BTC', arch: 'UTXO' },
@@ -63,7 +63,7 @@ export const MultiChainSection: React.FC = () => {
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-400 group-hover:text-[#E05326] transition-colors">
               Connected Networks
             </span>
-            <Layers className="w-3.5 h-3.5 text-[#E05326]" />
+            <Stack weight="fill" className="w-3.5 h-3.5 text-[#E05326]" />
           </div>
           <div className="text-3xl sm:text-5xl font-display font-black text-stone-950 dark:text-white tracking-tight">
             35+
@@ -84,7 +84,7 @@ export const MultiChainSection: React.FC = () => {
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-400 group-hover:text-emerald-500 transition-colors">
               Supported Assets
             </span>
-            <Shield className="w-3.5 h-3.5 text-emerald-500" />
+            <Shield weight="fill" className="w-3.5 h-3.5 text-emerald-500" />
           </div>
           <div className="text-3xl sm:text-5xl font-display font-black text-stone-950 dark:text-white tracking-tight">
             450+
@@ -105,7 +105,7 @@ export const MultiChainSection: React.FC = () => {
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-400 group-hover:text-amber-500 transition-colors">
               Intent Finality
             </span>
-            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            <Lightning weight="fill" className="w-3.5 h-3.5 text-amber-500" />
           </div>
           <div className="text-3xl sm:text-5xl font-display font-black text-stone-950 dark:text-white tracking-tight">
             &lt; 2.1s
@@ -126,7 +126,7 @@ export const MultiChainSection: React.FC = () => {
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-400 group-hover:text-[#00EC97] transition-colors">
               Sponsored Gas
             </span>
-            <CheckCircle2 className="w-3.5 h-3.5 text-[#00EC97]" />
+            <CheckCircle weight="fill" className="w-3.5 h-3.5 text-[#00EC97]" />
           </div>
           <div className="text-3xl sm:text-5xl font-display font-black text-stone-950 dark:text-white tracking-tight">
             100%
@@ -140,10 +140,6 @@ export const MultiChainSection: React.FC = () => {
 
       {/* Kinetic Hardware Rail Matrix (Infinite Hardware-Accelerated Stream via Framer Motion) */}
       <div className="rounded-3xl border border-stone-200 dark:border-stone-800/80 bg-stone-50/50 dark:bg-[#0A0807] p-4 sm:p-6 space-y-3 overflow-hidden relative shadow-sm">
-        {/* Fading Edge Mask Gradients */}
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-12 sm:w-24 bg-gradient-to-r from-stone-50 dark:from-[#0A0807] to-transparent z-10" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-12 sm:w-24 bg-gradient-to-l from-stone-50 dark:from-[#0A0807] to-transparent z-10" />
-
         {/* Track 1: Connected Blockchains Marquee */}
         <div className="flex overflow-hidden select-none">
           <motion.div

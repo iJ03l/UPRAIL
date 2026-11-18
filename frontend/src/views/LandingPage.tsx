@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ArrowDownLeft, ArrowRight, ExternalLink, Moon, Sun } from 'lucide-react';
+import { ArrowDownLeft, ArrowRight, ArrowSquareOut, Moon, Sun } from '@phosphor-icons/react';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { TextReveal } from '../components/TextReveal';
 import { InteractiveRailSimulator } from '../components/InteractiveRailSimulator';
@@ -11,6 +11,7 @@ import { MultiChainSection } from '../components/MultiChainSection';
 import { NearcomSection } from '../components/NearcomSection';
 import { SituationReportBanner } from '../components/SituationReportBanner';
 import { CapabilitiesCarousel } from '../components/CapabilitiesCarousel';
+import { Badge } from '../components/Badge';
 
 const getAppSubdomainUrl = () => {
   if (typeof window !== 'undefined') {
@@ -56,7 +57,7 @@ export const LandingPage: React.FC = () => {
       <SituationReportBanner />
 
       {/* Clean Header */}
-      <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-surface-glass backdrop-blur-md">
+      <header className="sticky top-0 z-40 w-full border-b border-stone-200/80 bg-surface-glass backdrop-blur-md pt-[env(safe-area-inset-top,0px)]">
         <div className="w-full px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between">
           {/* Brand with Cinematic Glitch — icon-only on mobile, full wordmark on sm+ */}
           <GlitchLogo href="/" size="md" hideWordmarkOnMobile className="flex-shrink-0" />
@@ -84,7 +85,7 @@ export const LandingPage: React.FC = () => {
               className="flex-shrink-0 px-4 py-2 sm:px-6 sm:py-2.5 rounded-xl bg-black text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-stone-800 transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95"
             >
               <span>Launch App</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight weight="bold" className="w-3.5 h-3.5" />
             </a>
           </nav>
         </div>
@@ -215,7 +216,7 @@ export const LandingPage: React.FC = () => {
               className="px-7 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-sm uppercase tracking-wider shadow-sm hover:shadow-md hover:scale-105 active:scale-95 transition-all flex items-center space-x-2 cursor-pointer group"
             >
               <span>Launch App</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight weight="bold" className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </a>
 
             <div
@@ -301,9 +302,7 @@ export const LandingPage: React.FC = () => {
           <div className="relative rounded-3xl border border-stone-200 bg-stone-950 text-white p-6 sm:p-10 lg:p-12 overflow-hidden shadow-xl">
             <div className="relative z-10 max-w-2xl space-y-5 text-left">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-stone-800 border border-stone-700 text-stone-300 text-xs sm:text-[10px] font-mono font-bold uppercase tracking-wider inline-block">
-                  Gateway
-                </span>
+                <Badge tone="neutral">Gateway</Badge>
                 <div className="inline-flex p-0.5 rounded-xl bg-stone-900 border border-stone-800 gap-1">
                   <button
                     type="button"
@@ -362,9 +361,9 @@ export const LandingPage: React.FC = () => {
                 >
                   <span>{gatewayMode === 'send' ? 'Launch Send' : 'Launch Request'}</span>
                   {gatewayMode === 'send' ? (
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <ArrowRight weight="bold" className="w-3.5 h-3.5" />
                   ) : (
-                    <ArrowDownLeft className="w-3.5 h-3.5 text-[#E05326]" />
+                    <ArrowDownLeft weight="bold" className="w-3.5 h-3.5 text-[#E05326]" />
                   )}
                 </button>
               </form>
@@ -390,7 +389,7 @@ export const LandingPage: React.FC = () => {
               title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border border-stone-200 hover:border-stone-300 hover:bg-stone-50 text-stone-500 hover:text-black transition-colors cursor-pointer"
             >
-              {isDark ? <Sun className="w-3 h-3" /> : <Moon className="w-3 h-3" />}
+              {isDark ? <Sun weight="fill" className="w-3 h-3" /> : <Moon weight="fill" className="w-3 h-3" />}
               <span>{isDark ? 'Light' : 'Dark'}</span>
             </button>
             <a
@@ -400,7 +399,7 @@ export const LandingPage: React.FC = () => {
               className="hover:text-black transition-colors flex items-center"
             >
               <span>Docs</span>
-              <ExternalLink className="w-3 h-3 ml-1" />
+              <ArrowSquareOut weight="fill" className="w-3 h-3 ml-1" />
             </a>
             <a
               href={appSubdomainUrl}

@@ -12,6 +12,8 @@ interface AmountInputProps {
   selectedToken: Token;
   onSelectToken: (token: Token) => void;
   disabled?: boolean;
+  /** Optional fee rate added on top (e.g. 0.01) so quick % / MAX leaves room for fees. */
+  feeRate?: number;
 }
 
 export const AmountInput: React.FC<AmountInputProps> = ({
@@ -21,21 +23,33 @@ export const AmountInput: React.FC<AmountInputProps> = ({
   selectedToken,
   onSelectToken,
   disabled = false,
+  feeRate = 0,
 }) => {
   const numericAmount = parseFloat(amount) || 0;
   const price = tokenUsdPrice(selectedToken);
   const estimatedUsd = price === null ? null : numericAmount * price;
 
   const handleQuickPercent = (pct: number) => {
-    if (pct === 100) {
-      // MAX must send the exact balance, not a display-rounded copy.
+    const precision = Math.min(selectedToken.decimals ?? 6, 6);
+    if (pct === 100 && feeRate <= 0) {
+      // Fee-free flows (e.g. wallet withdrawal) send the exact balance.
       onChangeAmount(selectedToken.balance || '0');
       return;
     }
     const totalBalance = parseFloat(selectedToken.balance || '0') || 0;
-    const fixed = ((totalBalance * pct) / 100).toFixed(
-      Math.min(selectedToken.decimals ?? 18, 18)
-    );
+    const rawTarget = (totalBalance * pct) / 100;
+    const adjusted = feeRate > 0 ? rawTarget / (1 + feeRate) : rawTarget;
+    const scale = 10 ** precision;
+    let units = Math.floor((adjusted + 1e-12) * scale);
+    if (feeRate > 0) {
+      while (units > 0) {
+        const candidate = units / scale;
+        const fee = Number((candidate * feeRate).toFixed(precision));
+        if (candidate + fee <= rawTarget + 1e-12) break;
+        units -= 1;
+      }
+    }
+    const fixed = (units / scale).toFixed(precision);
     const calc = fixed.includes('.')
       ? fixed.replace(/0+$/, '').replace(/\.$/, '')
       : fixed;
@@ -54,7 +68,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
   return (
     <div className="w-full space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-bold uppercase tracking-wider text-stone-600">
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--fg-muted)]">
           Amount
         </label>
         {selectedToken.balance && (
@@ -68,7 +82,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
       </div>
 
       {/* Input container */}
-      <div className="rounded-2xl bg-stone-50 border border-stone-200 p-4 transition-colors shadow-xs">
+      <div className="rounded-2xl bg-stone-50 border border-stone-200 focus-within:border-[var(--fg)] focus-within:ring-1 focus-within:ring-[var(--fg)] p-4 transition-all shadow-xs">
         <div className="flex items-center justify-between gap-3">
           <input
             type="text"
@@ -77,8 +91,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
             onChange={handleInputChange}
             disabled={disabled}
             placeholder="0.00"
-            style={{ outline: 'none', boxShadow: 'none' }}
-            className="w-full min-w-0 border-0 bg-transparent p-0 text-2xl sm:text-3xl font-extrabold text-stone-950 placeholder-stone-300 focus:outline-none focus-visible:outline-none focus:ring-0 outline-none"
+            className="w-full min-w-0 border-0 bg-transparent p-0 text-2xl sm:text-3xl font-extrabold text-stone-950 placeholder-stone-300 focus:outline-none focus-visible:outline-none focus:ring-0"
           />
 
           <AssetPicker
@@ -90,19 +103,19 @@ export const AmountInput: React.FC<AmountInputProps> = ({
         </div>
 
         {/* Sub-row: USD value and Quick % buttons */}
-        <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-stone-200/80">
+        <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-stone-200/80">
           <span className="text-xs font-mono text-stone-500">
             ≈ {formatUsd(estimatedUsd)} USD
           </span>
 
-          <div className="flex items-center space-x-1.5">
+          <div className="flex items-center gap-1.5">
             {[25, 50, 100].map((pct) => (
               <button
                 key={pct}
                 type="button"
                 onClick={() => handleQuickPercent(pct)}
                 disabled={disabled}
-                className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-lg bg-stone-200/70 hover:bg-stone-300 text-stone-700 transition-colors disabled:opacity-40"
+                className="min-h-8 min-w-12 px-2.5 py-2 -my-1.5 rounded-[10px] text-xs font-mono font-bold bg-stone-200/70 hover:bg-stone-300 text-stone-800 transition-colors cursor-pointer disabled:opacity-40"
               >
                 {pct === 100 ? 'MAX' : `${pct}%`}
               </button>

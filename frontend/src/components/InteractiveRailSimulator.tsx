@@ -3,16 +3,17 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Zap,
+  Lightning,
   ArrowRight,
   ShieldCheck,
-  CheckCircle2,
+  CheckCircle,
   Lock,
-  ExternalLink,
-  Radio,
+  ArrowSquareOut,
+  Broadcast,
   Fingerprint,
   Wallet,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
+import { Badge } from './Badge';
 
 const PRESETS = [
   { handle: 'satoshi', asset: 'BTC', amount: '1,000' },
@@ -50,10 +51,9 @@ export const InteractiveRailSimulator: React.FC = () => {
       <div className="max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 space-y-8">
         {/* Minimal Header */}
         <div className="space-y-2 text-left border-b border-stone-200 dark:border-stone-800 pb-5">
-          <div className="inline-flex items-center space-x-2 px-2.5 py-0.5 rounded-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 text-xs sm:text-[10px] font-mono text-stone-600 dark:text-stone-300 font-bold">
-            <Radio className="w-3.5 h-3.5 text-[#E05326] animate-pulse" />
-            <span>INTERACTIVE TACTILE BEAM</span>
-          </div>
+          <Badge tone="neutral" icon={<Broadcast weight="fill" className="w-3 h-3 text-[#E05326] animate-pulse" />}>
+            Interactive Tactile Beam
+          </Badge>
           <h3 className="text-3xl sm:text-4xl md:text-5xl font-display font-black text-stone-950 dark:text-white tracking-tight">
             Beam Value to an 𝕏 Handle
           </h3>
@@ -543,9 +543,9 @@ export const InteractiveRailSimulator: React.FC = () => {
               whileTap={{ scale: 0.96 }}
               className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-black dark:bg-white text-white dark:text-black font-display font-extrabold text-xs uppercase tracking-wider shadow-sm hover:scale-105 active:scale-95 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
             >
-              <Zap className={`w-4 h-4 text-[#E05326] ${isTransmitting ? 'animate-bounce' : ''}`} />
+              <Lightning weight="fill" className={`w-4 h-4 text-[#E05326] ${isTransmitting ? 'animate-bounce' : ''}`} />
               <span>{isTransmitting ? 'Beaming Value...' : 'Beam to @' + cleanHandle}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight weight="bold" className="w-3.5 h-3.5" />
             </motion.button>
           </div>
         </div>

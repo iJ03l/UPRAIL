@@ -1,16 +1,17 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from '../lib/router';
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Shield,
-  Send,
+  PaperPlaneTilt,
   Lock,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 import { useXAuth } from '../hooks/useXAuth';
 import { formatUsd } from '../lib/api';
+import { Badge } from './Badge';
 import type { PaymentIntent, Token } from '../types';
 
 interface FlowPulseWidgetProps {
@@ -24,6 +25,175 @@ interface FlowPulseWidgetProps {
    */
   tokens?: Token[];
 }
+
+interface DayBucket {
+  start: number;
+  label: string;
+  isToday: boolean;
+  inVal: number;
+  outVal: number;
+  inHits: number;
+  outHits: number;
+}
+
+const WavyFlowChart: React.FC<{
+  days: DayBucket[];
+  maxMetric: number;
+  direction: 'in' | 'out';
+  ariaLabel: string;
+}> = ({ days, maxMetric, direction, ariaLabel }) => {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+
+  const strokeColor = direction === 'in' ? '#059669' : '#e05326';
+  const fillGradientId = direction === 'in' ? 'inflowWaveFill' : 'egressWaveFill';
+  const phaseOffset = direction === 'in' ? 0.4 : 1.7;
+
+  const w = 240;
+  const h = 44;
+  const padX = 8;
+  const padTop = 8;
+  const padBot = 6;
+  const plotW = w - padX * 2;
+  const plotH = h - padTop - padBot;
+
+  const pts = days.map((day, idx) => {
+    const hits = direction === 'in' ? day.inHits : day.outHits;
+    const val = direction === 'in' ? day.inVal : day.outVal;
+    const metric = val > 0 ? val : hits;
+    const ratio = maxMetric > 0 && metric > 0 ? Math.min(1, metric / maxMetric) : 0;
+    const x = padX + (idx / Math.max(1, days.length - 1)) * plotW;
+    // Gentle organic baseline wave when a day has 0 volume, real height when active
+    const waveIdle = (Math.sin(idx * 1.35 + phaseOffset) + 1) * 0.5 * 5.5;
+    const y =
+      metric > 0
+        ? padTop + plotH - Math.max(0.18, ratio) * plotH
+        : padTop + plotH - 2 - waveIdle;
+    return { x, y, day, hits, val };
+  });
+
+  // Smooth horizontal-tangent cubic bezier wave through all 7 points
+  const linePath = pts.reduce((acc, p, i) => {
+    if (i === 0) return `M ${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    const prev = pts[i - 1];
+    const cpX1 = prev.x + (p.x - prev.x) * 0.45;
+    const cpY1 = prev.y;
+    const cpX2 = prev.x + (p.x - prev.x) * 0.55;
+    const cpY2 = p.y;
+    return `${acc} C ${cpX1.toFixed(1)},${cpY1.toFixed(1)} ${cpX2.toFixed(1)},${cpY2.toFixed(1)} ${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+  }, '');
+
+  const areaPath =
+    pts.length > 0
+      ? `${linePath} L ${pts[pts.length - 1].x.toFixed(1)},${(padTop + plotH).toFixed(1)} L ${pts[0].x.toFixed(1)},${(padTop + plotH).toFixed(1)} Z`
+      : '';
+
+  const hovered = hoveredIdx !== null ? pts[hoveredIdx] : null;
+  const hoveredDayLabel = hovered
+    ? hovered.day.isToday
+      ? 'Today'
+      : new Date(hovered.day.start).toLocaleDateString(undefined, {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        })
+    : '';
+
+  return (
+    <div
+      className="relative pt-1 space-y-1.5 select-none"
+      aria-label={ariaLabel}
+      onMouseLeave={() => setHoveredIdx(null)}
+    >
+      {/* Hover transaction count pill */}
+      <div className="h-4 flex items-center justify-between text-[10px] font-mono">
+        {hovered ? (
+          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-stone-900 text-white shadow-2xs animate-fade-in">
+            <span className="text-stone-300">{hoveredDayLabel}</span>
+            <span>·</span>
+            <span className="font-bold">
+              {hovered.hits} {hovered.hits === 1 ? 'tx' : 'txs'}
+            </span>
+            {hovered.val > 0 && (
+              <>
+                <span className="text-stone-400">·</span>
+                <span className="text-emerald-300">{formatUsd(hovered.val)}</span>
+              </>
+            )}
+          </div>
+        ) : (
+          <span className="text-[10px] font-mono text-[var(--fg-muted)] opacity-75">
+            Hover wave to inspect daily txs
+          </span>
+        )}
+      </div>
+
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="w-full h-11 overflow-visible cursor-crosshair"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id={fillGradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={strokeColor} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={strokeColor} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+
+        {areaPath && <path d={areaPath} fill={`url(#${fillGradientId})`} />}
+        {linePath && (
+          <path
+            d={linePath}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        )}
+
+        {/* Active hover guide + single point only while hovering */}
+        {hovered && (
+          <>
+            <line
+              x1={hovered.x}
+              y1={padTop}
+              x2={hovered.x}
+              y2={padTop + plotH}
+              stroke="var(--line)"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+            />
+            <circle
+              cx={hovered.x}
+              cy={hovered.y}
+              r="3.2"
+              fill={strokeColor}
+              stroke="#ffffff"
+              strokeWidth="1.5"
+            />
+          </>
+        )}
+
+        {/* 7 invisible hover columns for effortless day scrubbing */}
+        {pts.map((p, idx) => {
+          const colW = w / pts.length;
+          return (
+            <rect
+              key={`${p.day.start}-hit-${idx}`}
+              x={idx * colW}
+              y={0}
+              width={colW}
+              height={h}
+              fill="transparent"
+              onMouseEnter={() => setHoveredIdx(idx)}
+              onTouchStart={() => setHoveredIdx(idx)}
+            />
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
 
 const STABLE_SYMBOLS = new Set([
   'USDC', 'USDT', 'DAI', 'FRAX', 'USDD', 'USDE', 'USDG', 'FDUSD',
@@ -67,7 +237,24 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
   const stats = useMemo(() => {
     const userHandle = user?.handle?.trim().toLowerCase();
     const nearAccount = user?.nearAccount?.trim().toLowerCase();
-    const weekAgo = Date.now() - WEEK_MS;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const nowDate = new Date();
+    const todayStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+    const weekAgo = nowDate.getTime() - WEEK_MS;
+    const WEEKDAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const start = todayStart - (6 - i) * dayMs;
+      return {
+        start,
+        label: WEEKDAY_LETTERS[new Date(start).getDay()],
+        isToday: i === 6,
+        inVal: 0,
+        outVal: 0,
+        inHits: 0,
+        outHits: 0,
+      };
+    });
 
     const priceById = new Map<string, number>();
     const priceBySymbol = new Map<string, number>();
@@ -134,15 +321,30 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
     let egressPriced = 0;
     let egressUnpriced = 0;
 
-    const add = (dir: 'in' | 'out', usd: number | null): void => {
+    const bucketForTs = (ts: number | null) => {
+      if (ts === null) return null;
+      const idx = Math.floor((ts - days[0].start) / dayMs);
+      return idx >= 0 && idx < 7 ? days[idx] : null;
+    };
+
+    const add = (dir: 'in' | 'out', usd: number | null, ts: number | null): void => {
+      const bucket = bucketForTs(ts);
       if (dir === 'in') {
         inflowCount++;
         if (usd === null) inflowUnpriced++;
         else inflowPriced += usd;
+        if (bucket) {
+          bucket.inHits++;
+          if (usd !== null && usd > 0) bucket.inVal += usd;
+        }
       } else {
         egressCount++;
         if (usd === null) egressUnpriced++;
         else egressPriced += usd;
+        if (bucket) {
+          bucket.outHits++;
+          if (usd !== null && usd > 0) bucket.outVal += usd;
+        }
       }
     };
 
@@ -174,12 +376,12 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
           item.senderHandle.toLowerCase() === userHandle;
 
         if (isRecipient) {
-          add('in', usd);
+          add('in', usd, settledAt);
         } else if (isSender) {
-          add('out', usd);
+          add('out', usd, settledAt);
         } else if (!userHandle) {
           // If session is still hydrating, default to outflow if item exists
-          add('out', usd);
+          add('out', usd, settledAt);
         }
       }
     }
@@ -226,17 +428,20 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
           tx.sender_id.toLowerCase() === nearAccount;
 
         if (isDeposit || isReceiver) {
-          add('in', usd);
+          add('in', usd, ts);
         } else if (
           isSender ||
           tx.type === 'send' ||
           tx.type === 'withdraw' ||
           tx.intent_type === 'transfer'
         ) {
-          add('out', usd);
+          add('out', usd, ts);
         }
       }
     }
+
+    const maxIn = Math.max(1, ...days.map((d) => (d.inVal > 0 ? d.inVal : d.inHits)));
+    const maxOut = Math.max(1, ...days.map((d) => (d.outVal > 0 ? d.outVal : d.outHits)));
 
     return {
       inflowCount,
@@ -246,6 +451,9 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
       egressCount,
       egressUsd: egressUnpriced > 0 && egressPriced === 0 ? null : egressPriced,
       egressUnpriced,
+      days,
+      maxIn,
+      maxOut,
     };
   }, [history, transactions, tokens, user]);
 
@@ -255,15 +463,15 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
       <div className="relative rounded-3xl bg-white border border-stone-200/90 shadow-xs hover:shadow-sm transition-all p-6 sm:p-7 flex flex-col justify-between overflow-hidden group">
         <div className="space-y-4">
           {/* Header Row */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-3">
               <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
-                <ArrowDownLeft className="w-5 h-5 text-emerald-600" />
+                <ArrowDownLeft weight="bold" className="w-5 h-5 text-emerald-600" />
               </div>
               <div>
                 <h4 className="text-sm font-display font-bold text-stone-950 flex items-center space-x-1.5">
                   <span>Received this week</span>
-                  <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                  <Shield weight="fill" className="w-3.5 h-3.5 text-emerald-600" />
                 </h4>
                 <p className="text-[11px] font-mono text-stone-400">
                   Money in · Last 7 days
@@ -271,26 +479,34 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
               </div>
             </div>
 
-            {/* Real TX Count Badge */}
-            <span className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-mono font-bold tracking-tight">
+            <Badge tone="neutral">
               {stats.inflowCount} {stats.inflowCount === 1 ? 'tx' : 'txs'}
-            </span>
+            </Badge>
           </div>
 
-          {/* Big Dollar Amount */}
-          <div className="space-y-1 pt-1">
-            <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
-              {formatUsd(stats.inflowUsd)}
-            </div>
-            <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>Deposits and payments you received</span>
-            </div>
-            {stats.inflowUnpriced > 0 && (
-              <div className="text-[11px] font-mono text-amber-600">
-                Subtotal · {stats.inflowUnpriced} of {stats.inflowCount} txs unpriced
+          {/* Big Dollar Amount + 7-day Mini Bars */}
+          <div className="space-y-3 pt-1">
+            <div className="space-y-1">
+              <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
+                {formatUsd(stats.inflowUsd)}
               </div>
-            )}
+              <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>Deposits and payments you received</span>
+              </div>
+              {stats.inflowUnpriced > 0 && (
+                <div className="text-[11px] font-mono text-amber-600">
+                  Subtotal · {stats.inflowUnpriced} of {stats.inflowCount} txs unpriced
+                </div>
+              )}
+            </div>
+
+            <WavyFlowChart
+              days={stats.days}
+              maxMetric={stats.maxIn}
+              direction="in"
+              ariaLabel="Daily received volume over last 7 days"
+            />
           </div>
         </div>
 
@@ -304,7 +520,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             className="px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95 flex-shrink-0"
           >
             <span>Deposit</span>
-            <ArrowDownLeft className="w-3.5 h-3.5" />
+            <ArrowDownLeft weight="bold" className="w-3.5 h-3.5" />
           </Link>
         </div>
       </div>
@@ -313,15 +529,15 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
       <div className="relative rounded-3xl bg-white border border-stone-200/90 shadow-xs hover:shadow-sm transition-all p-6 sm:p-7 flex flex-col justify-between overflow-hidden group">
         <div className="space-y-4">
           {/* Header Row */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center space-x-3">
               <div className="w-11 h-11 rounded-2xl bg-orange-50 text-orange-700 border border-orange-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
-                <ArrowUpRight className="w-5 h-5 text-orange-600" />
+                <ArrowUpRight weight="bold" className="w-5 h-5 text-orange-600" />
               </div>
               <div>
                 <h4 className="text-sm font-display font-bold text-stone-950 flex items-center space-x-1.5">
                   <span>Sent this week</span>
-                  <Lock className="w-3.5 h-3.5 text-orange-600" />
+                  <Lock weight="fill" className="w-3.5 h-3.5 text-orange-600" />
                 </h4>
                 <p className="text-[11px] font-mono text-stone-400">
                   Money out · Last 7 days
@@ -329,26 +545,34 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
               </div>
             </div>
 
-            {/* Real TX Count Badge */}
-            <span className="px-2.5 py-1 rounded-full bg-orange-50 border border-orange-200/80 text-orange-800 text-xs font-mono font-bold tracking-tight">
+            <Badge tone="neutral">
               {stats.egressCount} {stats.egressCount === 1 ? 'tx' : 'txs'}
-            </span>
+            </Badge>
           </div>
 
-          {/* Big Dollar Amount */}
-          <div className="space-y-1 pt-1">
-            <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
-              {formatUsd(stats.egressUsd)}
-            </div>
-            <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-              <span>Sends and withdrawals you made</span>
-            </div>
-            {stats.egressUnpriced > 0 && (
-              <div className="text-[11px] font-mono text-amber-600">
-                Subtotal · {stats.egressUnpriced} of {stats.egressCount} txs unpriced
+          {/* Big Dollar Amount + 7-day Wavy Line Chart */}
+          <div className="space-y-3 pt-1">
+            <div className="space-y-1">
+              <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
+                {formatUsd(stats.egressUsd)}
               </div>
-            )}
+              <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                <span>Sends and withdrawals you made</span>
+              </div>
+              {stats.egressUnpriced > 0 && (
+                <div className="text-[11px] font-mono text-amber-600">
+                  Subtotal · {stats.egressUnpriced} of {stats.egressCount} txs unpriced
+                </div>
+              )}
+            </div>
+
+            <WavyFlowChart
+              days={stats.days}
+              maxMetric={stats.maxOut}
+              direction="out"
+              ariaLabel="Daily sent volume over last 7 days"
+            />
           </div>
         </div>
 
@@ -362,7 +586,7 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
             className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95 flex-shrink-0"
           >
             <span>Send</span>
-            <ArrowUpRight className="w-3.5 h-3.5" />
+            <ArrowUpRight weight="bold" className="w-3.5 h-3.5" />
           </Link>
         </div>
       </div>

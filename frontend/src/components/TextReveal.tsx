@@ -46,7 +46,7 @@ export const TextReveal: React.FC<TextRevealProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`w-full block text-justify [text-align-last:left] ${className}`}
+      className={`w-full block text-left sm:text-justify sm:[text-align-last:left] ${className}`}
     >
       {words.map((word, index) => {
         // Individual word threshold

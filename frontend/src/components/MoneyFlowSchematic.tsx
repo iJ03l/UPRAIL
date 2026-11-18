@@ -2,17 +2,17 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Eye, ShieldCheck, Radio } from 'lucide-react';
+import { Eye, ShieldCheck, Broadcast } from '@phosphor-icons/react';
+import { Badge } from './Badge';
 
 export const MoneyFlowSchematic: React.FC = () => {
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6 text-stone-900 dark:text-white">
       {/* Minimal Header */}
       <div className="space-y-2 text-left border-b border-stone-200 dark:border-stone-800 pb-5">
-        <div className="inline-flex items-center space-x-2 px-2.5 py-0.5 rounded-full bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 text-xs sm:text-[10px] font-mono text-stone-600 dark:text-stone-300 font-bold">
-          <Radio className="w-3.5 h-3.5 text-[#E05326] animate-pulse" />
-          <span>ARCHITECTURE COMPARISON</span>
-        </div>
+        <Badge tone="neutral" icon={<Broadcast weight="fill" className="w-3 h-3 text-[#E05326] animate-pulse" />}>
+          Architecture Comparison
+        </Badge>
         <h2 className="text-3xl sm:text-4xl md:text-5xl font-display font-black text-stone-950 dark:text-white tracking-tight leading-[1.06]">
           How Money Moves
         </h2>
@@ -29,14 +29,13 @@ export const MoneyFlowSchematic: React.FC = () => {
         <div className="rounded-3xl border border-red-500/40 bg-[#140D0D] p-5 sm:p-7 space-y-6 shadow-sm relative overflow-hidden flex flex-col justify-between">
           <div className="space-y-5">
             {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-red-500/20">
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-red-500/20">
               <span className="font-display font-extrabold text-base sm:text-lg text-white">
                 Public Blockchains
               </span>
-              <span className="text-[10px] sm:text-xs font-mono font-bold text-red-400 bg-stone-900 border border-red-500/50 px-2.5 py-0.5 rounded-full flex items-center space-x-1.5">
-                <Eye className="w-3.5 h-3.5 text-red-500" />
-                <span>RADICAL EXPOSURE</span>
-              </span>
+              <Badge tone="danger" icon={<Eye weight="fill" className="w-3 h-3" />}>
+                Radical Exposure
+              </Badge>
             </div>
 
             {/* Solid Minimal SVG Topology */}
@@ -147,14 +146,13 @@ export const MoneyFlowSchematic: React.FC = () => {
         <div className="rounded-3xl border border-[#00EC97]/40 bg-[#0B1410] p-5 sm:p-7 space-y-6 shadow-sm relative overflow-hidden flex flex-col justify-between">
           <div className="space-y-5">
             {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-[#00EC97]/20">
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#00EC97]/20">
               <span className="font-display font-extrabold text-base sm:text-lg text-white">
                 UPRAIL
               </span>
-              <span className="text-[10px] sm:text-xs font-mono font-bold text-[#00EC97] bg-stone-900 border border-[#00EC97]/50 px-2.5 py-0.5 rounded-full flex items-center space-x-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-[#00EC97]" />
-                <span>CONFIDENTIAL INTENTS</span>
-              </span>
+              <Badge tone="ok" icon={<ShieldCheck weight="fill" className="w-3 h-3" />}>
+                Confidential Intents
+              </Badge>
             </div>
 
             {/* Solid Minimal SVG Topology */}

@@ -2,31 +2,32 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Bot,
+  Robot,
   Plus,
-  KeyRound,
-  Trash2,
-  Ban,
-  Loader2,
+  Key,
+  Trash,
+  Prohibit,
+  CircleNotch,
   Copy,
   Check,
   X,
-  Code2,
-  AlertTriangle,
-  RefreshCw,
-  MessageSquare,
-  Sparkles,
-  Terminal,
+  Code,
+  Warning,
+  ArrowsClockwise,
+  ChatText,
+  Sparkle,
+  TerminalWindow,
   Globe,
-  Zap,
+  Lightning,
   Compass,
   BookOpen,
-  ExternalLink,
-} from 'lucide-react';
+  ArrowSquareOut,
+} from '@phosphor-icons/react';
 import { api } from '../lib/api';
 import { useSearchParams } from '../lib/router';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { SkeletonList } from '../components/Skeleton';
+import { Badge } from '../components/Badge';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
 import type { AgentKey } from '../types';
@@ -53,40 +54,81 @@ interface ChatPlatform {
   defaultName: string;
 }
 
+/** Authentic Anthropic Claude starburst mark */
+const ClaudeLogo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+    <path
+      d="M4.71 15.96L9.43 13.31L9.51 13.08L9.43 12.95H9.2L8.41 12.9L5.71 12.83L3.38 12.73L1.11 12.61L0.54 12.49L0 11.78L0.06 11.43L0.54 11.11L1.23 11.17L2.75 11.27L5.03 11.43L6.68 11.53L9.13 11.79H9.52L9.58 11.63L9.44 11.53L9.34 11.43L6.99 9.84L4.43 8.15L3.09 7.18L2.37 6.69L2 6.23L1.84 5.22L2.5 4.5L3.38 4.56L3.61 4.62L4.5 5.31L6.41 6.79L8.9 8.62L9.27 8.92L9.42 8.82L9.44 8.75L9.27 8.48L7.92 6.03L6.47 3.54L5.83 2.51L5.66 1.89C5.6 1.63 5.56 1.42 5.56 1.16L6.31 0.14L6.72 0L7.72 0.14L8.14 0.5L8.76 1.92L9.77 4.15L11.33 7.18L11.79 8.08L12.03 8.91L12.12 9.17H12.28V9.02L12.41 7.31L12.65 5.22L12.88 2.52L12.96 1.76L13.34 0.85L14.09 0.36L14.67 0.64L15.15 1.33L15.08 1.77L14.79 3.63L14.23 6.54L13.87 8.48H14.08L14.32 8.24L15.31 6.93L16.96 4.86L17.69 4.04L18.54 3.14L19.09 2.71H20.12L20.88 3.84L20.54 5.01L19.48 6.36L18.6 7.5L17.33 9.2L16.54 10.56L16.61 10.67L16.8 10.65L19.66 10.04L21.2 9.76L23.04 9.45L23.87 9.84L23.96 10.23L23.63 11.04L21.66 11.53L19.35 12L15.91 12.81L15.87 12.84L15.92 12.9L17.47 13.05L18.13 13.09H19.75L22.77 13.32L23.56 13.84L24 14.48L23.92 14.97L22.7 15.59L21.06 15.2L17.23 14.29L15.92 13.96H15.74V14.07L16.84 15.15L18.85 16.96L21.36 19.29L21.57 19.87L21.25 20.33L20.91 20.28L18.7 18.62L17.85 17.87L15.92 16.25H15.79V16.42L16.23 17.07L18.58 20.59L18.7 21.67L18.53 22.02L17.92 22.23L17.25 22.11L15.88 20.18L14.46 18.01L13.32 16.07L13.18 16.15L12.5 23.4L12.19 23.77L11.46 24L10.85 23.54L10.53 22.79L10.85 21.31L11.24 19.38L11.56 17.85L11.85 15.95L12.02 15.32L12.01 15.28L11.87 15.3L10.44 17.27L8.26 20.22L6.53 22.06L6.12 22.23L5.4 21.86L5.47 21.2L5.87 20.61L8.26 17.57L9.7 15.69L10.63 14.6L10.62 14.44H10.57L4.23 18.56L3.1 18.71L2.61 18.25L2.67 17.5L2.9 17.26L4.71 15.96Z"
+      fill="#D97757"
+    />
+  </svg>
+);
+
+/** Authentic OpenAI / ChatGPT 6-loop knot mark */
+const OpenAiLogo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.677l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+  </svg>
+);
+
+/** Authentic xAI Grok orbital slash mark */
+const GrokLogo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M9.27 15.2L19.05 5.42c.46-.46 1.24-.22 1.37.41.45 2.09.24 4.38-.68 6.51-1.42 3.29-4.63 5.56-8.21 5.89-1.91.18-3.71-.21-5.26-1.02L3.2 20.28H1.05l4.46-4.46a8.91 8.91 0 0 1-.91-5.58C5.15 5.88 8.7 2.38 13.07 1.9c1.73-.19 3.38.12 4.82.82l-1.9 1.9a6.48 6.48 0 0 0-3.68-.5c-2.98.41-5.34 2.87-5.67 5.86-.2 1.85.39 3.57 1.5 4.83l1.13.39zm3.48-.34a6.44 6.44 0 0 0 4.91-4.88c.26-1.14.21-2.26-.1-3.28l-7.55 7.55c.86.45 1.79.68 2.74.61z" />
+  </svg>
+);
+
+/** Authentic Meta infinity loop mark */
+const MetaLogo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+    <path
+      d="M17.52 5C15.4 5 13.73 6.37 12.22 8.53C10.82 6.51 9.09 5 6.64 5C3.28 5 1 7.77 1 11.78C1 15.63 3.23 18.2 6.08 18.2C8.16 18.2 9.93 16.82 11.83 13.84C11.83 13.84 12.82 12.21 13.25 11.5C13.75 12.31 14.48 13.48 14.48 13.48C16.32 16.48 18.06 18.2 20.2 18.2C22.84 18.2 24 15.54 24 11.7C24 7.66 21.2 5 17.52 5ZM6.17 15.6C4.47 15.6 3.55 14.07 3.55 11.73C3.55 9.15 4.82 7.56 6.66 7.56C8.12 7.56 9.31 8.59 10.67 10.75C9.24 13.12 7.77 15.6 6.17 15.6ZM19.95 15.6C18.67 15.6 17.44 14.37 15.89 11.87C15.48 11.21 14.79 10.08 14.28 9.27C15.39 7.98 16.43 7.56 17.56 7.56C19.64 7.56 21.43 9.21 21.43 11.78C21.43 14.12 20.99 15.6 19.95 15.6Z"
+      fill="#0081FB"
+    />
+  </svg>
+);
+
+/** Authentic Cursor 3D isometric cube mark */
+const CursorLogo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M11.999 1.5L2.75 6.84v10.32l9.249 5.34 9.251-5.34V6.84L11.999 1.5zm6.96 5.56L12 11.08 5.04 7.06 12 3.04l6.96 4.02zM4.5 8.77l6.75 3.9v7.8L4.5 16.57v-7.8zm8.25 11.7v-7.8l6.75-3.9v7.8l-6.75 3.9z" />
+  </svg>
+);
+
 const CHAT_PLATFORMS: ChatPlatform[] = [
   {
     id: 'claude',
     label: 'Claude',
     blurb: 'Claude Web, Mobile & Desktop',
-    icon: Sparkles,
+    icon: ClaudeLogo,
     defaultName: 'Claude',
   },
   {
     id: 'openai',
-    label: 'OpenAI / Dot',
+    label: 'OpenAI / ChatGPT',
     blurb: 'ChatGPT, OpenAI Dot & GPT Actions',
-    icon: MessageSquare,
+    icon: OpenAiLogo,
     defaultName: 'OpenAI Dot',
   },
   {
     id: 'grok',
     label: 'Grok Bot',
     blurb: 'Grok on 𝕏 & xAI Grok Assistant',
-    icon: Zap,
+    icon: GrokLogo,
     defaultName: 'Grok Bot',
   },
   {
     id: 'metamuse',
     label: 'Meta Muse',
     blurb: 'Meta Muse & Meta AI Assistant',
-    icon: Compass,
+    icon: MetaLogo,
     defaultName: 'Meta Muse',
   },
   {
     id: 'cursor',
     label: 'Cursor / Windsurf',
     blurb: 'Pay & check balance from IDE chat',
-    icon: Terminal,
+    icon: CursorLogo,
     defaultName: 'Cursor',
   },
   {
@@ -332,7 +374,7 @@ export const AgentsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
         <div>
           <div className="flex items-center space-x-2 text-stone-900">
-            <Bot className="w-5 h-5" />
+            <Robot weight="fill" className="w-5 h-5" />
             <h1 className="text-xl sm:text-2xl font-display font-extrabold tracking-tight">AI Chat Payments</h1>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-stone-500 max-w-xl">
@@ -348,14 +390,14 @@ export const AgentsPage: React.FC = () => {
             rel="noopener noreferrer"
             className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-display font-bold uppercase tracking-wider transition-colors flex-shrink-0"
           >
-            <BookOpen className="w-3.5 h-3.5" />
+            <BookOpen weight="fill" className="w-3.5 h-3.5" />
             <span>Setup docs</span>
           </a>
           <button
             onClick={() => setShowConnect((v) => !v)}
             className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer flex-shrink-0"
           >
-            {showConnect ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+            {showConnect ? <X weight="bold" className="w-3.5 h-3.5" /> : <Plus weight="bold" className="w-3.5 h-3.5" />}
             <span>{showConnect ? 'Close' : 'Connect AI Chat'}</span>
           </button>
         </div>
@@ -363,7 +405,7 @@ export const AgentsPage: React.FC = () => {
 
       {error && (
         <div className="flex items-start space-x-2 p-3 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <Warning weight="fill" className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
       )}
@@ -373,14 +415,11 @@ export const AgentsPage: React.FC = () => {
         <div className="p-5 rounded-3xl bg-white border border-stone-200 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
             <div className="space-y-1">
-              <div className="flex items-center space-x-2 text-stone-950">
-                <Zap className="w-4 h-4 text-emerald-600" />
+              <div className="flex items-center flex-wrap gap-2 text-stone-950">
+                <Lightning weight="fill" className="w-4 h-4 text-emerald-600" />
                 <h2 className="text-sm font-display font-bold uppercase tracking-wider">
                   Agent Allowance Pocket
                 </h2>
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  ZERO-PROMPT CHAT
-                </span>
               </div>
               <p className="text-xs text-stone-500 max-w-2xl leading-relaxed">
                 Pre-load USDC, USDT, or NEAR here for instant AI chat sends &amp; withdrawals inside
@@ -389,7 +428,7 @@ export const AgentsPage: React.FC = () => {
               </p>
             </div>
             <div className="sm:text-right flex-shrink-0">
-              <span className="block text-[10px] font-mono uppercase tracking-wider text-stone-400">
+              <span className="block text-[10px] font-mono uppercase tracking-wider text-stone-500">
                 Loaded Allowance
               </span>
               <span className="text-xl font-display font-extrabold text-stone-950 tabular-nums">
@@ -414,7 +453,7 @@ export const AgentsPage: React.FC = () => {
 
           {pocketStatusMsg && (
             <div className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-700">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-stone-600 flex-shrink-0" />
+              <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin text-stone-600 flex-shrink-0" />
               <span>{pocketStatusMsg}</span>
             </div>
           )}
@@ -448,9 +487,9 @@ export const AgentsPage: React.FC = () => {
                 className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
               >
                 {pocketBusy === 'fund' ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus weight="bold" className="w-3.5 h-3.5" />
                 )}
                 <span>Load Allowance</span>
               </button>
@@ -464,9 +503,9 @@ export const AgentsPage: React.FC = () => {
                 className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 self-start sm:self-auto"
               >
                 {pocketBusy === 'reclaim' ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <RefreshCw className="w-3.5 h-3.5" />
+                  <ArrowsClockwise weight="bold" className="w-3.5 h-3.5" />
                 )}
                 <span>Return to Main Vault</span>
               </button>
@@ -494,9 +533,9 @@ export const AgentsPage: React.FC = () => {
                 Face ID approval — there is no secret key to copy.
               </p>
             </div>
-            <span className="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 self-start">
-              OAUTH 2.1
-            </span>
+            <Badge tone="ok" className="self-start">
+              OAuth 2.1
+            </Badge>
           </div>
 
           <div className="space-y-2.5">
@@ -545,7 +584,7 @@ export const AgentsPage: React.FC = () => {
             >
               <ActivePlatformIcon className="w-3.5 h-3.5" />
               <span>Open {activePlatformObj.label}</span>
-              <ExternalLink className="w-3 h-3 opacity-70" />
+              <ArrowSquareOut weight="fill" className="w-3 h-3 opacity-70" />
             </a>
             {activePlatformObj.id === 'claude' && (
               <a
@@ -554,7 +593,7 @@ export const AgentsPage: React.FC = () => {
                 rel="noopener noreferrer"
                 className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
               >
-                <Sparkles className="w-3.5 h-3.5" />
+                <ClaudeLogo className="w-3.5 h-3.5" />
                 <span>Prefill Claude connector</span>
               </a>
             )}
@@ -565,7 +604,7 @@ export const AgentsPage: React.FC = () => {
               }}
               className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
             >
-              <Copy className="w-3.5 h-3.5" />
+              <Copy weight="fill" className="w-3.5 h-3.5" />
               <span>Copy URL</span>
             </button>
             {activePlatformObj.id === 'cursor' && (
@@ -576,7 +615,7 @@ export const AgentsPage: React.FC = () => {
                 }}
                 className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
               >
-                <Terminal className="w-3.5 h-3.5" />
+                <TerminalWindow weight="fill" className="w-3.5 h-3.5" />
                 <span>Copy MCP config</span>
               </button>
             )}
@@ -588,7 +627,7 @@ export const AgentsPage: React.FC = () => {
                 }}
                 className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer"
               >
-                <Compass className="w-3.5 h-3.5" />
+                <Compass weight="fill" className="w-3.5 h-3.5" />
                 <span>Copy setup prompt</span>
               </button>
             )}
@@ -600,7 +639,7 @@ export const AgentsPage: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 text-stone-900">
-            <KeyRound className="w-4 h-4" />
+            <Key weight="fill" className="w-4 h-4" />
             <h2 className="text-sm font-display font-bold uppercase tracking-wider">Connected AI Chats</h2>
           </div>
           <button
@@ -608,7 +647,7 @@ export const AgentsPage: React.FC = () => {
             className="p-1.5 rounded-lg text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer"
             title="Refresh"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <ArrowsClockwise weight="bold" className="w-3.5 h-3.5" />
           </button>
         </div>
 
@@ -617,7 +656,7 @@ export const AgentsPage: React.FC = () => {
         ) : keys.length === 0 ? (
           <div className="p-8 rounded-3xl bg-stone-50 border border-dashed border-stone-200 text-center space-y-3">
             <div className="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center mx-auto">
-              <Bot className="w-5 h-5 text-stone-400" />
+              <Robot weight="fill" className="w-5 h-5 text-stone-400" />
             </div>
             <div className="space-y-1">
               <p className="text-sm font-bold text-stone-900">No AI chats connected yet</p>
@@ -661,7 +700,7 @@ export const AgentsPage: React.FC = () => {
               const spendTone =
                 spendPct >= 1 ? 'bg-red-500' : spendPct >= 0.8 ? 'bg-amber-500' : 'bg-emerald-500';
               const matchedPlatform = resolveSessionPlatform(k);
-              const SessionIcon = matchedPlatform?.icon || Bot;
+              const SessionIcon = matchedPlatform?.icon || Robot;
 
               return (
                 <div
@@ -698,26 +737,16 @@ export const AgentsPage: React.FC = () => {
 
                     <div className="flex-shrink-0">
                       {!dead && (
-                        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          <span>ACTIVE</span>
-                        </span>
+                        <Badge
+                          tone="ok"
+                          icon={<span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                        >
+                          Active
+                        </Badge>
                       )}
-                      {status === 'revoked' && (
-                        <span className="inline-flex text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-stone-200 text-stone-600">
-                          REVOKED
-                        </span>
-                      )}
-                      {status === 'expired' && (
-                        <span className="inline-flex text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-stone-200 text-stone-600">
-                          EXPIRED
-                        </span>
-                      )}
-                      {status === 'disconnected' && (
-                        <span className="inline-flex text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                          REAUTHORIZE
-                        </span>
-                      )}
+                      {status === 'revoked' && <Badge tone="neutral">Revoked</Badge>}
+                      {status === 'expired' && <Badge tone="neutral">Expired</Badge>}
+                      {status === 'disconnected' && <Badge tone="warn">Reauthorize</Badge>}
                     </div>
                   </div>
 
@@ -786,9 +815,9 @@ export const AgentsPage: React.FC = () => {
                         className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-stone-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50/50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
                       >
                         {busyId === k.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Ban className="w-3.5 h-3.5" />
+                          <Prohibit weight="fill" className="w-3.5 h-3.5" />
                         )}
                         <span>{isOAuth ? 'Disconnect' : 'Revoke'}</span>
                       </button>
@@ -799,9 +828,9 @@ export const AgentsPage: React.FC = () => {
                         className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
                       >
                         {busyId === k.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                         ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash weight="fill" className="w-3.5 h-3.5" />
                         )}
                         <span>Delete</span>
                       </button>
@@ -817,7 +846,7 @@ export const AgentsPage: React.FC = () => {
       {/* Setup & Example Prompts */}
       <div className="space-y-3">
         <div className="flex items-center space-x-2 text-stone-900">
-          <Code2 className="w-4 h-4" />
+          <Code weight="bold" className="w-4 h-4" />
           <h2 className="text-sm font-display font-bold uppercase tracking-wider">How to connect</h2>
         </div>
 
@@ -876,7 +905,7 @@ export const AgentsPage: React.FC = () => {
               rel="noopener noreferrer"
               className="inline-flex items-center space-x-1.5 text-[11px] font-mono font-bold text-stone-300 hover:text-white transition-colors"
             >
-              <BookOpen className="w-3 h-3" />
+              <BookOpen weight="fill" className="w-3 h-3" />
               <span>Per-chat setup guide &amp; troubleshooting →</span>
             </a>
           </div>
@@ -959,7 +988,7 @@ const CopyRow: React.FC<{ value: string }> = ({ value }) => {
         className="p-1.5 rounded-lg text-stone-400 hover:text-white transition-colors cursor-pointer flex-shrink-0"
         title="Copy"
       >
-        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+        {copied ? <Check weight="bold" className="w-3.5 h-3.5" /> : <Copy weight="fill" className="w-3.5 h-3.5" />}
       </button>
     </div>
   );

@@ -2,17 +2,19 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Zap,
-  CheckCircle2,
-  AlertCircle,
+  Lightning,
+  CheckCircle,
+  WarningCircle,
   ArrowRight,
   Wallet,
-  AtSign,
+  At,
   Fingerprint,
-} from 'lucide-react';
+  Lock,
+} from '@phosphor-icons/react';
 import { HandleInput } from '../components/HandleInput';
 import { AmountInput } from '../components/AmountInput';
 import { BackBar } from '../components/BackBar';
+import { Badge } from '../components/Badge';
 import { ShareModal } from '../components/ShareModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { WalletShareModal, WalletSendReceipt } from '../components/WalletShareModal';
@@ -162,9 +164,23 @@ export const SendPage: React.FC = () => {
     setDestinationChain(preferred?.key || '');
   }, [showChainSelector, withdrawChains, destinationChain, destinationChainTouched, detectedFamily]);
 
+  const availableBalanceNum = parseFloat(selectedToken.balance || '0') || 0;
+  const enteredAmountNum = parseFloat(amount) || 0;
+  const estimatedTotalDebitNum =
+    sendMode === 'handle'
+      ? quote?.totalAmount
+        ? parseFloat(quote.totalAmount) || enteredAmountNum * (1 + PROTOCOL_FEE_RATE)
+        : enteredAmountNum * (1 + PROTOCOL_FEE_RATE)
+      : enteredAmountNum;
+  const insufficientBalanceForFee =
+    selectedToken.balance !== undefined &&
+    enteredAmountNum > 0 &&
+    estimatedTotalDebitNum > availableBalanceNum + 0.0001;
+
   const isFormValid =
     (sendMode === 'handle' ? (recipient.trim().length >= 1 && isHandleValid !== false) : walletAddress.trim().length >= 5) &&
-    parseFloat(amount) > 0 &&
+    enteredAmountNum > 0 &&
+    !insufficientBalanceForFee &&
     !chainFamilyMismatch &&
     !isSubmitting;
 
@@ -228,11 +244,11 @@ export const SendPage: React.FC = () => {
       setShowShareModal(true);
       if (payment.isDirect || payment.status === 'claimed') {
         setSuccessToast(
-          `Successfully sent ${formatTokenAmount(payment.grossAmount || payment.amount)} ${payment.token.symbol} directly to @${payment.recipientHandle}'s UPRAIL account!`
+          `Successfully sent ${formatTokenAmount(payment.amount)} ${payment.token.symbol} directly to @${payment.recipientHandle}'s UPRAIL account!`
         );
       } else {
         setSuccessToast(
-          `Payment sent to @${payment.recipientHandle} · ${formatTokenAmount(payment.grossAmount || payment.amount)} ${payment.token.symbol} waiting.`
+          `Payment sent to @${payment.recipientHandle} · ${formatTokenAmount(payment.amount)} ${payment.token.symbol} waiting.`
         );
       }
       setRecipient('');
@@ -244,10 +260,13 @@ export const SendPage: React.FC = () => {
     }
   };
 
-  const confirmAmountLabel = `${formatTokenAmount(amount || '0')} ${selectedToken.symbol}`;
+  const confirmTotalLabel =
+    sendMode === 'handle'
+      ? `${quote ? formatTokenAmount(quote.totalAmount) : formatTokenAmount(String(estimatedTotalDebitNum))} ${quote?.token.symbol ?? selectedToken.symbol}`
+      : `${formatTokenAmount(amount || '0')} ${selectedToken.symbol}`;
   const confirmReceiveLabel =
     sendMode === 'handle'
-      ? `${quote ? formatTokenAmount(quote.recipientAmount) : amount} ${quote?.token.symbol ?? selectedToken.symbol}`
+      ? `${quote ? formatTokenAmount(quote.recipientAmount) : formatTokenAmount(amount || '0')} ${quote?.token.symbol ?? selectedToken.symbol}`
       : `${quote?.amount ?? amount} ${quote?.token.symbol ?? selectedToken.symbol}`;
   const confirmDestination =
     sendMode === 'handle'
@@ -263,7 +282,7 @@ export const SendPage: React.FC = () => {
       {successToast && (
         <div className="p-4 rounded-2xl bg-stone-100 border border-stone-300 text-stone-900 text-xs flex items-center justify-between shadow-xs animate-fade-in">
           <div className="flex items-center space-x-2.5">
-            <CheckCircle2 className="w-4 h-4 text-stone-900 flex-shrink-0" />
+            <CheckCircle weight="fill" className="w-4 h-4 text-stone-900 flex-shrink-0" />
             <span className="font-medium">{successToast}</span>
           </div>
           {(createdPayment || walletReceipt) && (
@@ -282,7 +301,7 @@ export const SendPage: React.FC = () => {
       {/* Error Banner */}
       {error && (
         <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center space-x-2.5 animate-fade-in">
-          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+          <WarningCircle weight="fill" className="w-4 h-4 text-red-500 flex-shrink-0" />
           <span>{error}</span>
         </div>
       )}
@@ -291,36 +310,34 @@ export const SendPage: React.FC = () => {
       <div className="rounded-3xl p-4 sm:p-6 md:p-8 shadow-sm bg-white border border-stone-200 relative space-y-5 sm:space-y-6">
 
         {/* Destination Mode Selector (𝕏 Handle vs Wallet Address via Intents) */}
-        <div className="flex p-1 rounded-2xl bg-stone-100 border border-stone-200 text-xs font-mono font-bold">
+        <div className="flex gap-1.5 p-1.5 rounded-2xl bg-stone-200/75 dark:bg-stone-900 border border-stone-300/80 dark:border-stone-700 text-xs font-mono font-bold">
           <button
             type="button"
             onClick={() => setSendMode('handle')}
-            className={`flex-1 py-2.5 px-2 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+            className={`flex-1 py-2.5 px-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer border ${
               sendMode === 'handle'
-                ? 'bg-white text-stone-950 shadow-xs'
-                : 'text-stone-500 hover:text-black'
+                ? 'bg-stone-950 dark:bg-white text-white dark:text-stone-950 border-stone-950 dark:border-white shadow-sm'
+                : 'bg-white/85 dark:bg-stone-800/70 hover:bg-white dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white border-stone-300/90 dark:border-stone-700 shadow-2xs'
             }`}
           >
-            <AtSign className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+            <At weight="bold" className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="hidden sm:inline">Send to 𝕏 Handle</span>
             <span className="sm:hidden">𝕏 Handle</span>
           </button>
           <button
             type="button"
             onClick={() => setSendMode('wallet')}
-            className={`flex-1 py-2.5 px-2 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+            className={`flex-1 py-2.5 px-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer border ${
               sendMode === 'wallet'
-                ? 'bg-white text-stone-950 shadow-xs'
-                : 'text-stone-500 hover:text-black'
+                ? 'bg-stone-950 dark:bg-white text-white dark:text-stone-950 border-stone-950 dark:border-white shadow-sm'
+                : 'bg-white/85 dark:bg-stone-800/70 hover:bg-white dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white border-stone-300/90 dark:border-stone-700 shadow-2xs'
             }`}
           >
-            <Wallet className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+            <Wallet weight="fill" className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="hidden sm:inline">
               {quote?.rail === 'native' ? 'Send to Wallet' : 'Send to Wallet via Intents'}
             </span>
-            <span className="sm:hidden">
-              {quote?.rail === 'native' ? 'Wallet' : 'Wallet Intents'}
-            </span>
+            <span className="sm:hidden">Via Wallet</span>
           </button>
         </div>
 
@@ -452,22 +469,34 @@ export const SendPage: React.FC = () => {
             tokens={tokens}
             selectedToken={selectedToken}
             onSelectToken={setSelectedToken}
+            feeRate={sendMode === 'handle' ? PROTOCOL_FEE_RATE : 0}
             disabled={isSubmitting}
           />
 
+          {insufficientBalanceForFee && (
+            <div className="px-3.5 py-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-xs font-mono text-amber-900">
+              {sendMode === 'handle'
+                ? `Insufficient ${selectedToken.symbol} balance for amount + 1% fee (${formatTokenAmount(String(estimatedTotalDebitNum))} needed, ${selectedToken.balance} available).`
+                : `Insufficient ${selectedToken.symbol} balance (${selectedToken.balance} available).`}
+            </div>
+          )}
+
           {/* Optional Memo */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wider text-stone-600">
-                Note (Optional)
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--fg-muted)]">
+                Note <span className="font-normal lowercase tracking-normal">optional</span>
               </label>
-              <span className="text-[11px] font-mono text-stone-700 font-semibold">Encrypted</span>
+              <Badge tone="neutral" icon={<Lock weight="fill" className="w-3 h-3" />}>
+                Encrypted
+              </Badge>
             </div>
             <input
               type="text"
               value={memo}
               onChange={(e) => setMemo(e.target.value)}
               disabled={isSubmitting}
+              enterKeyHint="send"
               placeholder="e.g. bounty, consulting, dinner ☕"
               maxLength={120}
               className="w-full rounded-2xl bg-stone-50 border border-stone-200 px-4 py-3 text-base sm:text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:border-black focus:bg-white transition-colors"
@@ -476,84 +505,87 @@ export const SendPage: React.FC = () => {
 
           {/* Quote & Execution Telemetry */}
           {quote && parseFloat(amount) > 0 && (
-            <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3.5 sm:p-4 space-y-2 text-xs font-mono">
-              <div className="flex items-center justify-between gap-2 text-stone-500">
-                <span>Recipient Receives</span>
-                <span className="text-stone-900 font-bold text-right">
-                  {/* Wallet withdrawals take no fee — the destination gets the
-                      full amount. The quote's net figure is for handle sends. */}
-                  {formatTokenAmount(sendMode === 'handle' ? quote.recipientAmount : quote.amount)} {quote.token.symbol} (
-                  {formatUsd(sendMode === 'handle' ? quote.recipientAmountUsd : quote.amountUsd)})
+            <div className="rounded-2xl bg-[var(--bg-subtle)] border border-[var(--line)] p-3.5 sm:p-4 space-y-2 text-sm font-sans">
+              <div className="flex items-center justify-between gap-2 text-[var(--fg-muted)]">
+                <span className="truncate">
+                  {sendMode === 'handle'
+                    ? `@${recipient.replace(/^@+/, '') || 'handle'} gets`
+                    : 'Recipient gets'}
+                </span>
+                <span className="text-[var(--fg)] font-semibold text-right whitespace-nowrap">
+                  {formatTokenAmount(sendMode === 'handle' ? quote.recipientAmount : quote.amount)} {quote.token.symbol}
+                  <span className="text-[var(--fg-muted)] font-normal">
+                    {' · '}
+                    {formatUsd(sendMode === 'handle' ? quote.recipientAmountUsd : quote.amountUsd)}
+                  </span>
                 </span>
               </div>
               {/* Wallet withdrawals take no platform fee — only handle sends
-                  carve one out of the amount. Rendering it in wallet mode
-                  understated what the destination would receive. */}
+                  charge a 1% fee on top from the sender's balance. */}
               {sendMode === 'handle' && (
-                <div className="flex items-center justify-between gap-2 text-stone-500">
-                  <span>Platform Fee ({feePercentLabel})</span>
-                  <span className="text-stone-900 font-bold text-right">
-                    {quote.protocolFee} {quote.token.symbol} ({formatUsd(quote.protocolFeeUsd)})
+                <div className="flex items-center justify-between gap-2 text-[var(--fg-muted)]">
+                  <span>Fee ({feePercentLabel})</span>
+                  <span className="text-[var(--fg)] font-semibold text-right whitespace-nowrap">
+                    {quote.protocolFee} {quote.token.symbol}
+                    <span className="text-[var(--fg-muted)] font-normal">
+                      {' · '}
+                      {formatUsd(quote.protocolFeeUsd)}
+                    </span>
                   </span>
                 </div>
               )}
-              <div className="flex items-center justify-between gap-2 text-stone-500">
-                <span>{sendMode === 'handle' ? 'Settlement Rail' : 'Withdrawal Rail'}</span>
-                <span className="text-stone-900 flex items-center font-bold text-right">
-                  <Zap className="w-3 h-3 text-stone-900 mr-1 flex-shrink-0" />
-                  <span>
-                    {quote.rail === 'native'
-                      ? 'NEAR Native Transfer'
-                      : sendMode === 'handle'
-                        ? 'NEAR Intent'
-                        : 'NEAR Intent Withdrawal'}
+              <div className="pt-2 border-t border-[var(--line)] flex items-center justify-between gap-2 font-bold text-[var(--fg)]">
+                <span>You send</span>
+                <span className="font-bold text-right whitespace-nowrap">
+                  {sendMode === 'handle' ? formatTokenAmount(quote.totalAmount) : quote.amount} {quote.token.symbol}
+                  <span className="text-[var(--fg-muted)] font-normal">
+                    {' · '}
+                    {formatUsd(sendMode === 'handle' ? quote.totalUsd : quote.amountUsd)}
                   </span>
-                </span>
-              </div>
-              <div className="pt-2 border-t border-stone-200 flex items-center justify-between gap-2 font-bold text-stone-900 text-sm">
-                <span>Total to Send</span>
-                <span className="text-stone-950 font-bold text-right">
-                  {quote.totalAmount} {quote.token.symbol} ({formatUsd(quote.totalUsd)})
                 </span>
               </div>
             </div>
           )}
 
-          {/* Send CTA Button — confirmed on the user's device */}
-          <button
-            type="submit"
-            disabled={!isFormValid}
-            className={`w-full py-4 px-4 sm:px-6 rounded-2xl font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center space-x-2 transition-all duration-200 shadow-xs ${
-              isFormValid
-                ? 'bg-black hover:bg-stone-800 text-white cursor-pointer hover:scale-[1.01] active:scale-[0.99]'
-                : 'bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed'
-            }`}
-          >
-            {isSubmitting ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                <span>
-                  {txStage === 'authorizing'
-                    ? 'Waiting for your passkey...'
-                    : 'Broadcasting confidential payment...'}
-                </span>
-              </>
-            ) : (
-              <>
-                <Fingerprint className="w-4 h-4 flex-shrink-0" />
+          {/* Send CTA Button — sticky above mobile keyboard */}
+          <div className="sticky bottom-[max(0.5rem,env(keyboard-inset-height,0px))] z-10 -mx-1 px-1 pt-1 sm:static sm:mx-0 sm:px-0 sm:pt-0">
+            <button
+              type="submit"
+              disabled={!isFormValid}
+              className={`w-full min-h-12 py-3.5 px-4 sm:px-6 rounded-2xl font-display font-extrabold text-sm flex items-center justify-center gap-2 transition-all duration-200 shadow-xs ${
+                isFormValid
+                  ? 'bg-black hover:bg-stone-800 text-white cursor-pointer hover:scale-[1.01] active:scale-[0.99]'
+                  : 'bg-[var(--bg-muted)] text-[var(--fg-muted)] border border-[var(--line)] cursor-not-allowed'
+              }`}
+            >
+              {isSubmitting ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <span>
+                    {txStage === 'authorizing'
+                      ? 'Waiting for your passkey...'
+                      : 'Broadcasting confidential payment...'}
+                  </span>
+                </>
+              ) : isFormValid ? (
+                <>
+                  <Fingerprint weight="bold" className="w-4 h-4 flex-shrink-0" />
+                  <span className="truncate">
+                    {sendMode === 'handle'
+                      ? `Review & send to @${recipient.replace(/^@/, '')}`
+                      : 'Review & send'}
+                  </span>
+                  <ArrowRight weight="bold" className="w-4 h-4 flex-shrink-0" />
+                </>
+              ) : (
                 <span className="truncate">
                   {sendMode === 'handle'
-                    ? recipient
-                      ? `Review & send to @${recipient.replace(/^@/, '')}`
-                      : 'Enter Handle to Send'
-                    : walletAddress
-                      ? 'Review & send'
-                      : 'Enter Wallet Address'}
+                    ? 'Add a handle and amount'
+                    : 'Add an address and amount'}
                 </span>
-                <ArrowRight className="w-4 h-4 ml-1" />
-              </>
-            )}
-          </button>
+              )}
+            </button>
+          </div>
         </form>
       </div>
 
@@ -565,13 +597,17 @@ export const SendPage: React.FC = () => {
         title={sendMode === 'handle' ? 'Confirm payment' : 'Confirm withdrawal'}
         description={
           sendMode === 'handle'
-            ? 'Review the payment, then confirm with your passkey (Face ID or fingerprint).'
+            ? 'Confirm with your passkey next.'
             : 'This moves money out of your UPRAIL account to an external address.'
         }
-        confirmLabel={sendMode === 'handle' ? 'Confirm & send' : 'Withdraw'}
+        confirmLabel={
+          sendMode === 'handle'
+            ? `Send ${amount.trim() || '0'} ${selectedToken.symbol}`
+            : `Withdraw ${amount.trim() || '0'} ${selectedToken.symbol}`
+        }
         warning={
           sendMode === 'handle'
-            ? 'The recipient can receive it right away. If they are not on UPRAIL yet, share this payment link with them.'
+            ? 'Not on UPRAIL yet? Share the payment link with them.'
             : 'Withdrawals are irreversible. Confirm the destination address and network before continuing.'
         }
         details={[
@@ -579,26 +615,20 @@ export const SendPage: React.FC = () => {
           ...(sendMode === 'wallet' && selectedChainName
             ? [{ label: 'Network', value: selectedChainName, mono: false }]
             : []),
-          { label: 'Amount', value: confirmAmountLabel, emphasis: true },
+          {
+            label: sendMode === 'handle' ? `@${recipient.replace(/^@+/, '') || 'handle'} gets` : 'Recipient gets',
+            value: confirmReceiveLabel,
+            emphasis: true,
+          },
           ...(sendMode === 'handle'
             ? [
                 {
-                  label: 'Platform fee',
+                  label: 'Fee (1%)',
                   value: `${quote?.protocolFee ?? '0'} ${quote?.token.symbol ?? selectedToken.symbol}`,
                 },
+                { label: 'You send', value: confirmTotalLabel, emphasis: true },
               ]
             : []),
-          { label: 'Recipient receives', value: confirmReceiveLabel },
-          {
-            label: 'Rail',
-            value:
-              quote?.rail === 'native'
-                ? 'NEAR native transfer'
-                : sendMode === 'handle'
-                  ? 'NEAR intent'
-                  : 'NEAR intent withdrawal',
-            mono: false,
-          },
           ...(memo.trim() ? [{ label: 'Note', value: memo.trim(), mono: false }] : []),
         ]}
       />

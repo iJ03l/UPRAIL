@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Shield, ArrowRight, Loader2 } from 'lucide-react';
+import { Shield, ArrowRight, CircleNotch } from '@phosphor-icons/react';
 import { useXAuth } from '../hooks/useXAuth';
 
 interface XAuthBannerProps {
@@ -43,20 +43,20 @@ export const XAuthBanner: React.FC<XAuthBannerProps> = ({
         >
           {isRedirecting ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin text-stone-900" />
+              <CircleNotch weight="bold" className="w-4 h-4 animate-spin text-stone-900" />
               <span>Connecting...</span>
             </>
           ) : (
             <>
               <span>{actionText}</span>
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight weight="bold" className="w-4 h-4" />
             </>
           )}
         </button>
       </div>
 
       <div className="flex items-center space-x-2 pt-2 border-t border-stone-800 text-[11px] font-mono text-stone-400">
-        <Shield className="w-3.5 h-3.5 text-stone-400" />
+        <Shield weight="fill" className="w-3.5 h-3.5 text-stone-400" />
         <span>Protected by your passkey · No crypto wallet needed</span>
       </div>
     </div>

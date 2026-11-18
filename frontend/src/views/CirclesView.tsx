@@ -4,34 +4,33 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Link } from '../lib/router';
 import {
   ArrowLeft,
-  CircleDot,
+  Record,
   Gift,
   Plus,
   Lock,
-  Unlock,
+  LockOpen,
   Check,
-  ChevronDown,
+  CaretDown,
   Copy,
-  ExternalLink,
-  RefreshCw,
+  ArrowSquareOut,
+  ArrowsClockwise,
   Fingerprint,
   Users,
-  TrendingUp,
-  Trash2,
-  X,
+  TrendUp,
+  Trash,
   ArrowUpRight,
-  Share2,
-  CheckCircle2,
+  ShareNetwork,
+  CheckCircle,
   Clock,
   ShieldCheck,
-} from 'lucide-react';
+} from '@phosphor-icons/react';
 import { api, formatUsd } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
-import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from '../components/Toast';
-import { Portal } from '../components/Portal';
+import { Badge } from '../components/Badge';
+import { ModalSheet } from '../components/ModalSheet';
 import type {
   EarnVaultDescriptor,
   EarnVaultSymbol,
@@ -75,6 +74,19 @@ const OCCASION_OPTIONS: Array<{
 function formatCentsUsd(cents: number | undefined | null): string {
   if (cents === undefined || cents === null || !Number.isFinite(cents)) return '$0.00';
   return formatUsd(cents / 100);
+}
+
+function truncateDecimals(raw: string | number | undefined | null, maxDecimals = 5): string {
+  if (raw === undefined || raw === null) return '0';
+  const s = String(raw).trim();
+  if (!s) return '0';
+  const dot = s.indexOf('.');
+  if (dot === -1) return s;
+  const intPart = s.slice(0, dot);
+  const fracPart = s.slice(dot + 1);
+  if (fracPart.length <= maxDecimals) return s;
+  const trimmed = fracPart.slice(0, maxDecimals).replace(/0+$/, '');
+  return trimmed.length > 0 ? `${intPart}.${trimmed}` : intPart;
 }
 
 function formatCountdown(targetMs: number, nowMs: number): string {
@@ -186,12 +198,8 @@ function StyledSelect<T extends string>({
           {selected ? selected.label : placeholder}
         </span>
         <span className="flex items-center gap-1.5 shrink-0">
-          {selected?.badge && (
-            <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
-              {selected.badge}
-            </span>
-          )}
-          <ChevronDown
+          {selected?.badge && <Badge tone="ok">{selected.badge}</Badge>}
+          <CaretDown weight="fill"
             className={`w-4 h-4 text-stone-400 transition-transform duration-150 ${
               open ? 'rotate-180 text-stone-800' : ''
             }`}
@@ -224,12 +232,8 @@ function StyledSelect<T extends string>({
               >
                 <span className="truncate">{opt.label}</span>
                 <span className="flex items-center gap-1.5 shrink-0">
-                  {opt.badge && (
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
-                      {opt.badge}
-                    </span>
-                  )}
-                  {isSelected && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                  {opt.badge && <Badge tone="ok">{opt.badge}</Badge>}
+                  {isSelected && <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />}
                 </span>
               </button>
             );
@@ -240,70 +244,6 @@ function StyledSelect<T extends string>({
   );
 }
 
-function CustodySettlementToggle({
-  isSelfCustody,
-  value,
-  onChange,
-  kindLabel,
-}: {
-  isSelfCustody: boolean;
-  value: 'contract' | 'escrow';
-  onChange: (next: 'contract' | 'escrow') => void;
-  kindLabel: string;
-}) {
-  if (!isSelfCustody) {
-    return (
-      <div className="px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-[11px] font-mono text-stone-600 flex items-center justify-between gap-2">
-        <span>Settlement: Standard Escrow Vault</span>
-        <span className="text-stone-400">Passkey Self-Custody optional in Settings</span>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-mono font-semibold uppercase text-stone-600">
-        Custody &amp; Settlement Mode
-      </label>
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => onChange('contract')}
-          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-            value === 'contract'
-              ? 'bg-emerald-50 border-emerald-400 text-emerald-950'
-              : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
-          }`}
-        >
-          <div className="flex items-center gap-1 text-xs font-display font-bold">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>On-Chain Contract</span>
-          </div>
-          <p className="text-[10px] font-mono text-stone-500 mt-0.5">
-            Non-custodial {kindLabel} bound to signer passkeys
-          </p>
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange('escrow')}
-          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-            value === 'escrow'
-              ? 'bg-stone-950 border-stone-950 text-white'
-              : 'bg-white border-stone-200 text-stone-700 hover:bg-stone-50'
-          }`}
-        >
-          <div className="text-xs font-display font-bold">Escrow Passthrough</div>
-          <p
-            className={`text-[10px] font-mono mt-0.5 ${
-              value === 'escrow' ? 'text-stone-300' : 'text-stone-500'
-            }`}
-          >
-            Standard escrow vault settlement (works with any @handle)
-          </p>
-        </button>
-      </div>
-    </div>
-  );
-}
 
 export const CirclesView: React.FC = () => {
   const { user } = useXAuth();
@@ -329,7 +269,6 @@ export const CirclesView: React.FC = () => {
   const [isCreateCircleOpen, setIsCreateCircleOpen] = useState(false);
   const [isCreateGiftOpen, setIsCreateGiftOpen] = useState(false);
   const [contributeCircle, setContributeCircle] = useState<CircleView | null>(null);
-  useBodyScrollLock(Boolean(isCreateCircleOpen || isCreateGiftOpen || contributeCircle));
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Create Circle form state — defaults to solo creator at 100%
@@ -341,9 +280,6 @@ export const CirclesView: React.FC = () => {
   const [circleMembers, setCircleMembers] = useState<Array<{ handle: string; percentage: string }>>([
     { handle: user?.handle || '', percentage: '100' },
   ]);
-  const [circleCreateMode, setCircleCreateMode] = useState<'contract' | 'escrow'>(
-    user?.custodyMode === 'self' ? 'contract' : 'escrow'
-  );
   const [isSubmittingCircle, setIsSubmittingCircle] = useState(false);
 
   // Contribute form state
@@ -365,20 +301,9 @@ export const CirclesView: React.FC = () => {
   const [giftTimelockLocal, setGiftTimelockLocal] = useState(() =>
     defaultTimelockForOccasion('BIRTHDAY')
   );
-  const [giftCreateMode, setGiftCreateMode] = useState<'contract' | 'escrow'>(
-    user?.custodyMode === 'self' ? 'contract' : 'escrow'
-  );
   const [giftQuote, setGiftQuote] = useState<GiftQuoteResult | null>(null);
   const [isQuotingGift, setIsQuotingGift] = useState(false);
   const [isSubmittingGift, setIsSubmittingGift] = useState(false);
-
-  // Default creation mode tracks loaded custodyMode without locking user overrides
-  useEffect(() => {
-    const defaultMode: 'contract' | 'escrow' =
-      user?.custodyMode === 'self' ? 'contract' : 'escrow';
-    setCircleCreateMode(defaultMode);
-    setGiftCreateMode(defaultMode);
-  }, [user?.custodyMode]);
 
   // Live 1-second ticker for gift countdowns
   useEffect(() => {
@@ -434,7 +359,7 @@ export const CirclesView: React.FC = () => {
       {
         assetId: (anyUsdc?.defuse_asset_id || usdcId),
         symbol: 'USDC',
-        balanceFormatted: anyUsdc?.amountFormatted || '0.00',
+        balanceFormatted: truncateDecimals(anyUsdc?.amountFormatted || '0.00', 5),
         priceUsd:
           typeof anyUsdc?.priceUsd === 'number' && anyUsdc.priceUsd > 0 ? anyUsdc.priceUsd : 1,
         chain: 'near',
@@ -595,6 +520,12 @@ export const CirclesView: React.FC = () => {
   );
 
   const circleValidation = useMemo(() => {
+    if (user?.custodyMode !== 'self') {
+      return {
+        isValid: false,
+        hint: 'Enable Passkey Self-Custody in Settings to launch a Vault Circle.',
+      };
+    }
     const trimmedName = circleName.trim();
     if (trimmedName.length < 2) {
       return { isValid: false, hint: 'Enter a Circle name (at least 2 characters).' };
@@ -651,6 +582,7 @@ export const CirclesView: React.FC = () => {
     }
     return { isValid: true, hint: null };
   }, [
+    user?.custodyMode,
     circleName,
     circlePurpose,
     circleCustomPurpose,
@@ -692,6 +624,12 @@ export const CirclesView: React.FC = () => {
   }, [contributeCircle, contribOriginAsset, contribAmount, availableOriginAssets, vaults]);
 
   const giftValidation = useMemo(() => {
+    if (user?.custodyMode !== 'self') {
+      return {
+        isValid: false,
+        hint: 'Enable Passkey Self-Custody in Settings to send an Earn Gift.',
+      };
+    }
     const cleanRecip = giftRecipient.trim().replace(/^@+/, '');
     if (!cleanRecip) {
       return { isValid: false, hint: 'Enter a recipient @handle.' };
@@ -743,6 +681,7 @@ export const CirclesView: React.FC = () => {
     }
     return { isValid: true, hint: null };
   }, [
+    user?.custodyMode,
     giftRecipient,
     user?.handle,
     resolvedProfiles,
@@ -811,33 +750,21 @@ export const CirclesView: React.FC = () => {
         handle: m.handle.trim().replace(/^@+/, ''),
         percentageShare: parseFloat(m.percentage),
       }));
-      const created =
-        user?.custodyMode === 'self'
-          ? await api.createCircleSelfCustody({
-              name: circleName.trim(),
-              purpose: circlePurpose,
-              customPurpose:
-                circlePurpose === 'CUSTOM' ? circleCustomPurpose.trim() : undefined,
-              targetAmountUsd: parseFloat(circleTargetUsd),
-              vaultAsset: circleVaultSymbol,
-              payoutHandle: user?.handle,
-              members: cleanMembers,
-              mode: circleCreateMode,
-            })
-          : await api.createCircle({
-              name: circleName.trim(),
-              purpose: circlePurpose,
-              customPurpose:
-                circlePurpose === 'CUSTOM' ? circleCustomPurpose.trim() : undefined,
-              targetAmountUsd: parseFloat(circleTargetUsd),
-              vaultAsset: circleVaultSymbol,
-              payoutHandle: user?.handle,
-              members: cleanMembers,
-              mode: circleCreateMode,
-              passkeyAssertion: await authorizeWithPasskey(
-                `Create Circle "${circleName}" on ${circleVaultSymbol} Earn Vault`
-              ),
-            });
+      if (user?.custodyMode !== 'self') {
+        toast('Enable Passkey Self-Custody in Settings to launch a Vault Circle.', 'error');
+        return;
+      }
+      const created = await api.createCircleSelfCustody({
+        name: circleName.trim(),
+        purpose: circlePurpose,
+        customPurpose:
+          circlePurpose === 'CUSTOM' ? circleCustomPurpose.trim() : undefined,
+        targetAmountUsd: parseFloat(circleTargetUsd),
+        vaultAsset: circleVaultSymbol,
+        payoutHandle: user?.handle,
+        members: cleanMembers,
+        mode: 'contract',
+      });
       setCircles((prev) => [created, ...prev]);
       setIsCreateCircleOpen(false);
       setCircleName('');
@@ -906,8 +833,10 @@ export const CirclesView: React.FC = () => {
       setContributeCircle(null);
       setContribAmount('');
       refreshOnchain();
-      const addedLabel =
-        (res as any).sharesAddedFormatted || (res as any).sharesAdded || contribAmount.trim();
+      const addedLabel = truncateDecimals(
+        (res as any).sharesAddedFormatted || (res as any).sharesAdded || contribAmount.trim(),
+        5
+      );
       toast(
         (res as any).status === 'PENDING_FUNDING'
           ? `Contribution submitted to ${res.circle.name}; awaiting vault settlement.`
@@ -936,7 +865,10 @@ export const CirclesView: React.FC = () => {
             });
       setCircles((prev) => prev.map((c) => (c.id === res.circle.id ? res.circle : c)));
       refreshOnchain();
-      const settledLabel = (res as any).sharesSettledFormatted || (res as any).payoutShares;
+      const settledLabel = truncateDecimals(
+        (res as any).sharesSettledFormatted || (res as any).payoutShares,
+        5
+      );
       const settledPayout = (res as any).payoutHandle || circle.payoutHandle;
       toast(
         `Settled ${settledLabel} ${circle.vaultSymbol} (principal + yield) to @${settledPayout}!`,
@@ -1003,44 +935,30 @@ export const CirclesView: React.FC = () => {
       return;
     }
 
+    if (user?.custodyMode !== 'self') {
+      toast('Enable Passkey Self-Custody in Settings to send an Earn Gift.', 'error');
+      return;
+    }
+
     setIsSubmittingGift(true);
     setGiftStepMsg(null);
     try {
-      const created =
-        user?.custodyMode === 'self'
-          ? await api.createGiftSelfCustody(
-              {
-                recipientHandle: cleanRecip,
-                occasion: giftOccasion,
-                customOccasion:
-                  giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
-                message: giftMessage.trim() || undefined,
-                showAmount: false,
-                vaultAsset: giftVaultSymbol,
-                originAsset: giftOriginAsset,
-                amount: giftAmount.trim(),
-                timelockUntil: unlockMs,
-                mode: giftCreateMode,
-              },
-              (_stage, message) => setGiftStepMsg(message)
-            )
-          : await api.createGift({
-              recipientHandle: cleanRecip,
-              occasion: giftOccasion,
-              customOccasion:
-                giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
-              message: giftMessage.trim() || undefined,
-              showAmount: false,
-              vaultAsset: giftVaultSymbol,
-              originAsset: giftOriginAsset,
-              amount: giftAmount.trim(),
-              timelockUntil: unlockMs,
-              fundingMode: 'BALANCE',
-              mode: giftCreateMode,
-              passkeyAssertion: await authorizeWithPasskey(
-                `Gift ${giftAmount} in ${giftVaultSymbol} Earn Vault to @${cleanRecip}`
-              ),
-            });
+      const created = await api.createGiftSelfCustody(
+        {
+          recipientHandle: cleanRecip,
+          occasion: giftOccasion,
+          customOccasion:
+            giftOccasion === 'CUSTOM' ? giftCustomOccasion.trim() : undefined,
+          message: giftMessage.trim() || undefined,
+          showAmount: false,
+          vaultAsset: giftVaultSymbol,
+          originAsset: giftOriginAsset,
+          amount: giftAmount.trim(),
+          timelockUntil: unlockMs,
+          mode: 'contract',
+        },
+        (_stage, message) => setGiftStepMsg(message)
+      );
       setSentGifts((prev) => [created, ...prev]);
       setIsCreateGiftOpen(false);
       setGiftRecipient('');
@@ -1196,19 +1114,16 @@ export const CirclesView: React.FC = () => {
             className="w-9 h-9 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 flex items-center justify-center text-stone-700 transition-colors"
             title="Back to Vault"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft weight="bold" className="w-4 h-4" />
           </Link>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl sm:text-2xl font-display font-extrabold text-stone-950 tracking-tight">
                 Circles & Earn Gifting
               </h1>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-mono font-bold uppercase tracking-wider">
-                Intents Earn
-              </span>
             </div>
-            <p className="text-xs text-stone-500">
-              Pool shared goals by percentage or send timelocked Intents Earn Vault gifts to any @handle.
+            <p className="text-xs text-[var(--fg-muted)]">
+              Save toward a goal with friends, or gift a locked vault.
             </p>
           </div>
         </div>
@@ -1219,7 +1134,7 @@ export const CirclesView: React.FC = () => {
             onClick={() => setIsCreateGiftOpen(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-stone-900 text-xs font-display font-bold transition-all cursor-pointer shadow-2xs"
           >
-            <Gift className="w-3.5 h-3.5 text-amber-600" />
+            <Gift weight="fill" className="w-3.5 h-3.5 text-amber-600" />
             <span>Gift a Vault</span>
           </button>
           <button
@@ -1227,7 +1142,7 @@ export const CirclesView: React.FC = () => {
             onClick={() => setIsCreateCircleOpen(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-all cursor-pointer shadow-xs"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus weight="bold" className="w-3.5 h-3.5" />
             <span>New Circle</span>
           </button>
         </div>
@@ -1245,8 +1160,8 @@ export const CirclesView: React.FC = () => {
                 : 'text-stone-600 hover:text-stone-900'
             }`}
           >
-            <CircleDot className="w-3.5 h-3.5" />
-            <span>Circles ({circles.length})</span>
+            <Users weight="fill" className="w-3.5 h-3.5" />
+            <span>Earn Circles ({circles.length})</span>
           </button>
           <button
             type="button"
@@ -1257,7 +1172,7 @@ export const CirclesView: React.FC = () => {
                 : 'text-stone-600 hover:text-stone-900'
             }`}
           >
-            <Gift className="w-3.5 h-3.5" />
+            <Gift weight="fill" className="w-3.5 h-3.5" />
             <span>Timelocked Gifts ({sentGifts.length + receivedGifts.length})</span>
           </button>
         </div>
@@ -1284,7 +1199,7 @@ export const CirclesView: React.FC = () => {
           {circles.length === 0 ? (
             <div className="bg-stone-50 border border-stone-200 rounded-2xl p-8 text-center space-y-4">
               <div className="w-12 h-12 rounded-2xl bg-stone-100 border border-stone-200 text-emerald-600 flex items-center justify-center mx-auto">
-                <Users className="w-6 h-6" />
+                <Users weight="fill" className="w-6 h-6" />
               </div>
               <div className="space-y-1 max-w-md mx-auto">
                 <h3 className="text-base font-display font-bold text-stone-950">
@@ -1300,12 +1215,12 @@ export const CirclesView: React.FC = () => {
                 onClick={() => setIsCreateCircleOpen(true)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-all cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
+                <Plus weight="bold" className="w-4 h-4" />
                 <span>Create Your First Circle</span>
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {circles.map((circle) => {
                 const circleProgress = circle.progressPct ?? circle.completionPct ?? 0;
                 const allMembersSigned =
@@ -1335,76 +1250,59 @@ export const CirclesView: React.FC = () => {
                 const circleVaultMeta = vaults.find((v) => v.symbol === circle.vaultSymbol);
                 const vaultMinUsd = circleVaultMeta?.minDepositUsd || 5;
                 const ticketSerial = circle.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase();
+                const youCents = Math.max(0, myMemberRow?.contributedUsdCents ?? 0);
+                const totalCents = Math.max(0, circle.currentValueUsdCents || 0);
+                const targetCents = Math.max(1, circle.targetUsdCents || 1);
+                const othersCents = Math.max(0, totalCents - youCents);
+                const leftCents = Math.max(0, targetCents - totalCents);
+                const youPct = Math.min(100, (youCents / targetCents) * 100);
+                const othersPct = Math.min(100 - youPct, (othersCents / targetCents) * 100);
+                const leftPct = Math.max(0, 100 - youPct - othersPct);
+
+                const statusLabel =
+                  circle.status === 'PENDING_SIGNATURES'
+                    ? 'Waiting signatures'
+                    : circle.status === 'GOAL_MET'
+                    ? 'Goal met'
+                    : circle.status.charAt(0) + circle.status.slice(1).toLowerCase();
+                const isOkStatus =
+                  circle.status === 'ACTIVE' ||
+                  circle.status === 'GOAL_MET' ||
+                  circle.status === 'SETTLED' ||
+                  circle.status === 'COMPLETED';
 
                 return (
                   <div
                     key={circle.id}
-                    className="relative overflow-hidden bg-white border border-stone-200 rounded-2xl shadow-2xs"
+                    className="relative overflow-hidden bg-white border border-stone-200 rounded-2xl shadow-2xs flex flex-col"
                   >
                     {/* TICKET TOP STRIP */}
-                    <div className="px-5 py-2.5 bg-stone-50 border-b border-stone-200 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="px-2 py-0.5 rounded bg-stone-200/80 text-stone-800 font-mono text-[10px] font-bold uppercase tracking-wider">
-                          {circle.purposeLabel}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-[10px] font-bold">
-                          {circle.vaultSymbol} • {circle.estimatedApyPct}% APY
-                        </span>
-                        {circle.contractMode === 'contract' ? (
-                          <Link
-                            to={`/verify?kind=circle&id=${encodeURIComponent(
-                              circle.onchainCircleId || circle.id
-                            )}`}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-100/80 hover:bg-emerald-200/80 dark:bg-emerald-950/70 dark:hover:bg-emerald-900/80 border border-emerald-300 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300 font-mono text-[10px] font-bold transition-colors"
-                            title="Inspect Circle signers and balances on circle.uprail.near"
-                          >
-                            <ShieldCheck className="w-3 h-3" />
-                            <span>Contract Verified</span>
-                          </Link>
-                        ) : circle.contractMode === 'escrow' ? (
-                          <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200 text-stone-600 font-mono text-[10px] font-bold">
-                            Escrow Vault
-                          </span>
-                        ) : null}
+                    <div className="px-4 py-2 bg-stone-50 border-b border-stone-200 flex flex-wrap items-center justify-between gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge tone="neutral">{circle.purposeLabel}</Badge>
+                        <Badge tone="neutral">
+                          {circle.vaultSymbol} · {circle.estimatedApyPct}% APY
+                        </Badge>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-[10px] text-stone-400 tracking-widest uppercase">
-                          #{ticketSerial}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold uppercase ${
-                            circle.status === 'PENDING_SIGNATURES' || circle.status === 'ACTIVE'
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : circle.status === 'GOAL_MET' ||
-                                circle.status === 'SETTLED' ||
-                                circle.status === 'COMPLETED'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-stone-100 text-stone-600'
-                          }`}
-                        >
-                          {circle.status === 'PENDING_SIGNATURES'
-                            ? 'WAITING SIGNATURES'
-                            : circle.status === 'GOAL_MET'
-                            ? 'GOAL MET'
-                            : circle.status}
-                        </span>
-                      </div>
+                      <span className="font-mono text-[10px] text-[var(--fg-muted)] tracking-wider uppercase">
+                        #{ticketSerial}
+                      </span>
                     </div>
 
                     {/* TICKET MAIN BODY */}
-                    <div className="px-5 py-4 space-y-3.5">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <h3 className="text-lg font-display font-extrabold text-stone-950 leading-tight">
+                    <div className="px-4 py-3.5 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="space-y-1 min-w-0">
+                          <h3 className="text-base font-display font-extrabold text-stone-950 leading-tight truncate">
                             {circle.name}
                           </h3>
-                          <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-stone-500">
-                            <span className="inline-flex items-center gap-1.5 text-stone-800 font-semibold">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-mono text-stone-500">
+                            <span className="inline-flex items-center gap-1 text-stone-800 font-semibold">
                               <img
                                 src={`https://unavatar.io/x/${circle.payoutHandle}`}
                                 alt={`@${circle.payoutHandle}`}
-                                className="w-4 h-4 rounded-full object-cover border border-stone-200 bg-stone-100"
+                                className="w-3.5 h-3.5 rounded-full object-cover border border-stone-200 bg-stone-100"
                                 onError={(e) => {
                                   (e.currentTarget as HTMLImageElement).style.display = 'none';
                                 }}
@@ -1413,164 +1311,175 @@ export const CirclesView: React.FC = () => {
                             </span>
                             {circle.creatorHandle.toLowerCase() !==
                               circle.payoutHandle.toLowerCase() && (
-                              <span>• By @{circle.creatorHandle}</span>
+                              <span>• @{circle.creatorHandle}</span>
                             )}
                           </div>
+                          {circle.contractMode === 'contract' && (
+                            <Link
+                              to={`/verify?kind=circle&id=${encodeURIComponent(
+                                circle.onchainCircleId || circle.id
+                              )}`}
+                              className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-700 hover:underline leading-none pt-0.5"
+                              title="Inspect Circle signers and balances on circle.uprail.near"
+                            >
+                              <ShieldCheck weight="fill" className="w-2.5 h-2.5 shrink-0" />
+                              <span>Contract verified ↗</span>
+                            </Link>
+                          )}
                         </div>
 
-                        <div className="sm:text-right">
-                          <div className="text-xl font-display font-extrabold text-stone-950 tabular-nums">
+                        <div className="text-right shrink-0">
+                          <div className="text-lg font-display font-extrabold text-stone-950 tabular-nums">
                             {formatCentsUsd(circle.currentValueUsdCents)}{' '}
-                            <span className="text-xs font-mono font-normal text-stone-400">
+                            <span className="text-[11px] font-mono font-normal text-[var(--fg-muted)]">
                               / {formatCentsUsd(circle.targetUsdCents)}
                             </span>
                           </div>
                           {hasPoolShares ? (
                             <div className="text-[11px] font-mono text-emerald-600">
-                              +{formatCentsUsd(circle.yieldUsdCents)} yield ({circle.totalSharesFormatted}{' '}
-                              {circle.vaultSymbol})
+                              +{formatCentsUsd(circle.yieldUsdCents)} yield
                             </div>
                           ) : (
-                            <div className="text-[11px] font-mono text-stone-400">
-                              Min deposit ${vaultMinUsd} USD
+                            <div className="text-[11px] font-mono text-[var(--fg-muted)]">
+                              Min ${vaultMinUsd}
                             </div>
                           )}
                         </div>
                       </div>
 
-                      {/* Sleek Progress Track */}
-                      <div className="space-y-1">
+                      {/* Segmented Contribution Progress Bar + Legend */}
+                      <div className="space-y-1.5">
                         <div className="flex justify-between text-[10px] font-mono uppercase tracking-wider text-stone-500">
                           <span>Funded</span>
                           <span className="font-bold text-stone-900">
                             {circleProgress.toFixed(1)}%
                           </span>
                         </div>
-                        <div className="h-1.5 w-full rounded-full bg-stone-100 overflow-hidden">
-                          <div
-                            className="h-full bg-emerald-600 rounded-full transition-all duration-500"
-                            style={{ width: `${Math.min(100, circleProgress)}%` }}
-                          />
+                        <div className="h-2.5 w-full flex items-center gap-[2px]">
+                          {youPct > 0 && (
+                            <div
+                              style={{ width: `${youPct}%` }}
+                              className="h-full bg-[var(--fg)] rounded-sm transition-all duration-500"
+                            />
+                          )}
+                          {othersPct > 0 && (
+                            <div
+                              style={{ width: `${othersPct}%` }}
+                              className="h-full bg-[#047857] dark:bg-[#34d399] rounded-sm transition-all duration-500"
+                            />
+                          )}
+                          {leftPct > 0 && (
+                            <div
+                              style={{ width: `${leftPct}%` }}
+                              className="h-full bg-[var(--bg-muted)] rounded-sm transition-all duration-500"
+                            />
+                          )}
                         </div>
+                        <p className="text-[11px] font-mono text-[var(--fg-muted)] tabular-nums">
+                          You {formatCentsUsd(youCents)} · Others {formatCentsUsd(othersCents)} · Left{' '}
+                          {formatCentsUsd(leftCents)}
+                        </p>
                       </div>
                     </div>
 
                     {/* PERFORATED TICKET TEAR LINE WITH SIDE NOTCHES */}
                     <div className="relative flex items-center">
-                      <div className="w-4 h-4 -ml-2 rounded-full bg-stone-100 border border-stone-200 shrink-0" />
+                      <div className="w-3.5 h-3.5 -ml-2 rounded-full bg-stone-100 border border-stone-200 shrink-0" />
                       <div className="w-full border-t-2 border-dashed border-stone-200" />
-                      <div className="w-4 h-4 -mr-2 rounded-full bg-stone-100 border border-stone-200 shrink-0" />
+                      <div className="w-3.5 h-3.5 -mr-2 rounded-full bg-stone-100 border border-stone-200 shrink-0" />
                     </div>
 
-                    {/* TICKET STUB (Participants for Group Circles + Action Bar) */}
-                    <div className="px-5 py-3.5 bg-stone-50/60 space-y-3">
+                    {/* TICKET STUB (Compact Participant DPs + Status + Action Bar) */}
+                    <div className="px-4 py-2.5 bg-stone-50/60 space-y-2 mt-auto">
                       {!isSolo && (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-stone-500">
-                              Participants ({circle.members.length})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleCopyLink(
-                                  circle.id,
-                                  `${window.location.origin}/app/circles?circle=${encodeURIComponent(
-                                    circle.id
-                                  )}`
-                                )
-                              }
-                              className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
-                            >
-                              {copiedId === circle.id ? (
-                                <Check className="w-3 h-3 text-emerald-600" />
-                              ) : (
-                                <Copy className="w-3 h-3" />
-                              )}
-                              <span>Invite Link</span>
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {circle.members.map((m) => {
-                              const memberPct = m.progressPct ?? m.fulfillmentPct ?? 0;
-                              return (
-                                <div
-                                  key={m.id}
-                                  className="px-3 py-2 rounded-xl bg-white border border-stone-200 flex items-center justify-between gap-2 text-xs"
-                                >
-                                  <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="flex items-center -space-x-1.5 overflow-hidden py-0.5 pl-0.5">
+                              {circle.members.map((m) => {
+                                const memberPct = m.progressPct ?? m.fulfillmentPct ?? 0;
+                                return (
+                                  <div
+                                    key={m.id}
+                                    title={`@${m.handle} (${m.percentageShare.toFixed(2).replace(/\.00$/, '')}%) · ${formatCentsUsd(m.contributedUsdCents)}/${formatCentsUsd(m.quotaUsdCents)} · ${
+                                      m.hasMetQuota
+                                        ? '100% ✓'
+                                        : m.hasSigned
+                                        ? `${memberPct.toFixed(0)}%`
+                                        : 'Unsigned'
+                                    }`}
+                                    className={`relative w-6 h-6 rounded-full bg-stone-200 ring-2 shrink-0 ${
+                                      m.hasMetQuota || m.hasSigned
+                                        ? 'ring-emerald-500'
+                                        : 'ring-amber-400'
+                                    }`}
+                                  >
                                     <img
                                       src={`https://unavatar.io/x/${m.handle}`}
                                       alt={`@${m.handle}`}
-                                      className="w-4 h-4 rounded-full object-cover border border-stone-200 bg-stone-100 shrink-0"
+                                      className="w-full h-full rounded-full object-cover"
                                       onError={(e) => {
                                         (e.currentTarget as HTMLImageElement).style.display = 'none';
                                       }}
                                     />
-                                    <span className="font-mono font-bold text-stone-900 truncate">
-                                      @{m.handle}
-                                    </span>
-                                    <span className="text-[10px] font-mono text-stone-400">
-                                      ({m.percentageShare.toFixed(2).replace(/\.00$/, '')}%)
-                                    </span>
                                   </div>
-                                  <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10px]">
-                                    <span className="text-stone-600 tabular-nums">
-                                      {formatCentsUsd(m.contributedUsdCents)}/
-                                      {formatCentsUsd(m.quotaUsdCents)}
-                                    </span>
-                                    {m.hasApprovedDissolve && isCircleOpen && (
-                                      <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold">
-                                        Dissolve ✓
-                                      </span>
-                                    )}
-                                    <span
-                                      className={`px-1.5 py-0.5 rounded font-bold ${
-                                        m.hasMetQuota
-                                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                          : m.hasSigned
-                                          ? 'bg-stone-100 text-stone-700'
-                                          : 'bg-amber-50 text-amber-700'
-                                      }`}
-                                    >
-                                      {m.hasMetQuota
-                                        ? '100% ✓'
-                                        : m.hasSigned
-                                        ? `${memberPct.toFixed(0)}%`
-                                        : 'Unsigned'}
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
+                            <span className="text-[10px] font-mono text-stone-500 truncate">
+                              {circle.members.filter((m) => m.hasSigned).length}/{circle.members.length} signed
+                            </span>
                           </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopyLink(
+                                circle.id,
+                                `${window.location.origin}/app/circles?circle=${encodeURIComponent(
+                                  circle.id
+                                )}`
+                              )
+                            }
+                            className="inline-flex items-center gap-1 text-[10px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer shrink-0"
+                          >
+                            {copiedId === circle.id ? (
+                              <Check weight="bold" className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy weight="fill" className="w-3 h-3" />
+                            )}
+                            <span>Invite Link</span>
+                          </button>
                         </div>
                       )}
 
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        {/* Left Ticket Barcode & Pass Info */}
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="flex items-center gap-[2px] h-5 opacity-45 select-none"
-                            aria-hidden="true"
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        {/* Left Pass Info + Repositioned Smaller Status */}
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider leading-none border ${
+                              circle.status === 'PENDING_SIGNATURES'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : isOkStatus
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-stone-100 text-stone-600 border-stone-200'
+                            }`}
                           >
-                            <span className="w-[2px] h-full bg-stone-900" />
-                            <span className="w-[1px] h-full bg-stone-900" />
-                            <span className="w-[3px] h-full bg-stone-900" />
-                            <span className="w-[1px] h-full bg-stone-900" />
-                            <span className="w-[2px] h-full bg-stone-900" />
-                            <span className="w-[1px] h-full bg-stone-900" />
-                            <span className="w-[3px] h-full bg-stone-900" />
-                            <span className="w-[2px] h-full bg-stone-900" />
-                          </div>
-                          <span className="text-[11px] font-mono text-stone-500">
-                            {isSolo
-                              ? 'Solo Vault Pass • 100% Share'
-                              : `${circle.members.filter((m) => m.hasSigned).length}/${
-                                  circle.members.length
-                                } Signed`}
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                circle.status === 'PENDING_SIGNATURES'
+                                  ? 'bg-amber-500'
+                                  : isOkStatus
+                                  ? 'bg-emerald-500'
+                                  : 'bg-stone-400'
+                              }`}
+                            />
+                            <span>{statusLabel}</span>
                           </span>
+                          {isSolo && (
+                            <span className="text-[10px] font-mono text-stone-500">
+                              Solo • 100% Share
+                            </span>
+                          )}
                         </div>
 
                         {/* Right Action Buttons */}
@@ -1583,7 +1492,7 @@ export const CirclesView: React.FC = () => {
                                 onClick={() => handleJoinCircle(circle)}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-stone-900 text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
                               >
-                                <Fingerprint className="w-3.5 h-3.5 text-emerald-600" />
+                                <Fingerprint weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>Sign & Join</span>
                               </button>
                             )}
@@ -1596,14 +1505,14 @@ export const CirclesView: React.FC = () => {
                                 }}
                                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-bold transition-all cursor-pointer"
                               >
-                                <ArrowUpRight className="w-3.5 h-3.5" />
+                                <ArrowUpRight weight="bold" className="w-3.5 h-3.5" />
                                 <span>Add Funds</span>
                               </button>
                             ) : (
                               canParticipate &&
                               !allMembersSigned && (
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-mono">
-                                  <Clock className="w-3.5 h-3.5" />
+                                  <Clock weight="fill" className="w-3.5 h-3.5" />
                                   <span>
                                     Waiting for {unsignedCount} signature
                                     {unsignedCount === 1 ? '' : 's'} to activate vault
@@ -1619,7 +1528,7 @@ export const CirclesView: React.FC = () => {
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold transition-all cursor-pointer disabled:opacity-50"
                                 title="Disburse pooled vault shares + yield to payout handle (1% protocol fee on payout)"
                               >
-                                <Fingerprint className="w-3.5 h-3.5" />
+                                <Fingerprint weight="bold" className="w-3.5 h-3.5" />
                                 <span>Settle</span>
                               </button>
                             )}
@@ -1635,7 +1544,7 @@ export const CirclesView: React.FC = () => {
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-600 text-xs font-mono transition-all cursor-pointer disabled:opacity-60"
                                 title="All contributors who funded the Circle must sign with their passkey to dissolve and refund pro-rata shares + yield"
                               >
-                                <Fingerprint className="w-3 h-3" />
+                                <Fingerprint weight="bold" className="w-3 h-3" />
                                 <span>
                                   {hasPoolShares
                                     ? circle.hasApprovedDissolve
@@ -1680,13 +1589,11 @@ export const CirclesView: React.FC = () => {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-mono font-bold uppercase">
-                              {gift.occasionLabel}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-mono font-bold">
-                              {gift.vaultSymbol} • {gift.estimatedApyPct}% APY
-                            </span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge tone="neutral">{gift.occasionLabel}</Badge>
+                            <Badge tone="neutral">
+                              {gift.vaultSymbol} · {gift.estimatedApyPct}% APY
+                            </Badge>
                           </div>
                           <h3 className="text-base font-display font-extrabold text-stone-950 mt-1.5">
                             From @{gift.senderHandle}
@@ -1712,9 +1619,9 @@ export const CirclesView: React.FC = () => {
                       <div className="flex items-center justify-between p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono">
                         <div className="flex items-center gap-2 text-stone-700">
                           {unlocked ? (
-                            <Unlock className="w-4 h-4 text-emerald-600" />
+                            <LockOpen weight="fill" className="w-4 h-4 text-emerald-600" />
                           ) : (
-                            <Lock className="w-4 h-4 text-amber-600" />
+                            <Lock weight="fill" className="w-4 h-4 text-amber-600" />
                           )}
                           <span>
                             {gift.status === 'CLAIMED'
@@ -1725,7 +1632,7 @@ export const CirclesView: React.FC = () => {
                           </span>
                         </div>
                         <span className="text-stone-500">
-                          {gift.sharesFormatted} {gift.vaultSymbol}
+                          {truncateDecimals(gift.sharesFormatted, 5)} {gift.vaultSymbol}
                         </span>
                       </div>
 
@@ -1736,7 +1643,7 @@ export const CirclesView: React.FC = () => {
                             className="text-xs font-mono text-stone-500 hover:text-stone-900 inline-flex items-center gap-1"
                           >
                             <span>View Gift Card</span>
-                            <ExternalLink className="w-3 h-3" />
+                            <ArrowSquareOut weight="fill" className="w-3 h-3" />
                           </Link>
                           {gift.contractMode === 'contract' && (
                             <Link
@@ -1745,7 +1652,7 @@ export const CirclesView: React.FC = () => {
                               )}`}
                               className="text-xs font-mono font-bold text-emerald-700 hover:text-emerald-900 inline-flex items-center gap-1"
                             >
-                              <ShieldCheck className="w-3 h-3" />
+                              <ShieldCheck weight="fill" className="w-3 h-3" />
                               <span>Verify On-Chain</span>
                             </Link>
                           )}
@@ -1762,7 +1669,7 @@ export const CirclesView: React.FC = () => {
                                 : 'bg-stone-200 text-stone-500 cursor-not-allowed'
                             }`}
                           >
-                            <Fingerprint className="w-3.5 h-3.5" />
+                            <Fingerprint weight="bold" className="w-3.5 h-3.5" />
                             <span>
                               {unlocked ? 'Unwrap & Claim to USDC' : 'Locked Until Timelock'}
                             </span>
@@ -1792,17 +1699,9 @@ export const CirclesView: React.FC = () => {
                     onClick={() => setIsCreateGiftOpen(true)}
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-stone-950 text-white text-xs font-display font-bold cursor-pointer"
                   >
-                    <Gift className="w-3.5 h-3.5" />
+                    <Gift weight="fill" className="w-3.5 h-3.5" />
                     <span>Send an Earn Vault Gift</span>
                   </button>
-                  <a
-                    href="https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-xs font-mono font-semibold transition-colors"
-                  >
-                    <span>See Live Example ↗</span>
-                  </a>
                 </div>
               </div>
             ) : (
@@ -1814,13 +1713,11 @@ export const CirclesView: React.FC = () => {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-mono font-bold uppercase">
-                            {gift.occasionLabel}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-mono font-bold">
-                            {gift.vaultSymbol} • {gift.estimatedApyPct}% APY
-                          </span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge tone="neutral">{gift.occasionLabel}</Badge>
+                          <Badge tone="neutral">
+                            {gift.vaultSymbol} · {gift.estimatedApyPct}% APY
+                          </Badge>
                         </div>
                         <h3 className="text-base font-display font-extrabold text-stone-950 mt-1.5">
                           To @{gift.recipientHandle}
@@ -1857,9 +1754,9 @@ export const CirclesView: React.FC = () => {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-mono text-stone-700 cursor-pointer"
                         >
                           {copiedId === gift.id ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                           ) : (
-                            <Copy className="w-3.5 h-3.5" />
+                            <Copy weight="fill" className="w-3.5 h-3.5" />
                           )}
                           <span>Copy SEO Gift Link</span>
                         </button>
@@ -1870,13 +1767,11 @@ export const CirclesView: React.FC = () => {
                             )}`}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-emerald-700 dark:text-emerald-300 text-xs font-mono font-bold"
                           >
-                            <ShieldCheck className="w-3 h-3" />
+                            <ShieldCheck weight="fill" className="w-3 h-3" />
                             <span>Verify</span>
                           </Link>
                         ) : gift.contractMode === 'escrow' ? (
-                          <span className="px-2 py-1 rounded-lg bg-stone-100 border border-stone-200 text-stone-500 text-[10px] font-mono font-bold">
-                            Escrow
-                          </span>
+                          <Badge tone="neutral">Escrow</Badge>
                         ) : null}
                       </div>
 
@@ -1892,7 +1787,7 @@ export const CirclesView: React.FC = () => {
                             title="30 days have passed since unlock and recipient has not claimed yet — reclaim vault shares + yield back to your account"
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-200 text-xs font-display font-bold cursor-pointer"
                           >
-                            <Fingerprint className="w-3 h-3" />
+                            <Fingerprint weight="bold" className="w-3 h-3" />
                             <span>Reclaim Unclaimed</span>
                           </button>
                         )}
@@ -1904,7 +1799,7 @@ export const CirclesView: React.FC = () => {
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold"
                         >
-                          <Share2 className="w-3 h-3" />
+                          <ShareNetwork weight="fill" className="w-3 h-3" />
                           <span>Share on 𝕏</span>
                         </a>
                         <Link
@@ -1912,7 +1807,7 @@ export const CirclesView: React.FC = () => {
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-mono text-stone-600"
                         >
                           <span>Card</span>
-                          <ExternalLink className="w-3 h-3" />
+                          <ArrowSquareOut weight="fill" className="w-3 h-3" />
                         </Link>
                       </div>
                     </div>
@@ -1928,7 +1823,7 @@ export const CirclesView: React.FC = () => {
       <div className="bg-stone-50 border border-stone-200 rounded-2xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-stone-200">
           <div className="flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-emerald-600" />
+            <TrendUp weight="fill" className="w-4 h-4 text-emerald-600" />
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-stone-700">
               Intents Earn Vaults ({vaults.length})
             </span>
@@ -1938,7 +1833,7 @@ export const CirclesView: React.FC = () => {
             onClick={loadAll}
             className="inline-flex items-center gap-1 text-[11px] font-mono text-stone-500 hover:text-stone-900 cursor-pointer"
           >
-            <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+            <ArrowsClockwise weight="bold" className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Sync</span>
           </button>
         </div>
@@ -1983,9 +1878,7 @@ export const CirclesView: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono text-xs font-bold">
-                    {v.estimatedApyPct.toFixed(1)}% APY
-                  </span>
+                  <Badge tone="ok">{v.estimatedApyPct.toFixed(1)}% APY</Badge>
                 </div>
               </div>
             );
@@ -1994,613 +1887,580 @@ export const CirclesView: React.FC = () => {
       </div>
 
       {/* MODAL 1: CREATE CIRCLE (Sanitized, Dropdown Reason + Custom, Auto-100% Solo) */}
-      {isCreateCircleOpen && (
-        <Portal>
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md">
-            <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto overscroll-contain">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-stone-100 border border-stone-200 text-emerald-600 flex items-center justify-center">
-                    <CircleDot className="w-5 h-5" />
-                  </div>
-                  <h2 className="text-lg font-display font-extrabold text-stone-950">
-                    New Earn Circle
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateCircleOpen(false)}
-                  className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+      <ModalSheet
+        isOpen={isCreateCircleOpen}
+        onClose={() => setIsCreateCircleOpen(false)}
+        zIndexClass="z-[110]"
+        maxWidthClass="sm:max-w-lg"
+        panelClassName="px-4 sm:p-6 pb-6 space-y-5"
+        showCloseButton
+        closeLabel="Close New Earn Circle dialog"
+        ariaLabel="New Earn Circle"
+      >
+        <div className="flex items-center gap-2.5 pr-11">
+          <div className="w-9 h-9 rounded-xl bg-stone-100 border border-stone-200 text-emerald-600 flex items-center justify-center flex-shrink-0">
+            <Record weight="fill" className="w-5 h-5" />
+          </div>
+          <h2 className="text-lg font-display font-extrabold text-stone-950">
+            New Earn Circle
+          </h2>
+        </div>
 
-              <form onSubmit={handleCreateCircle} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                    Circle Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Tokyo Summer Trip, House Rent, Core Savings"
-                    value={circleName}
-                    onChange={(e) => setCircleName(e.target.value)}
-                    className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
-                  />
-                </div>
+        <form onSubmit={handleCreateCircle} className="space-y-4 overflow-x-hidden">
+          <div>
+            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+              Circle Name
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Tokyo Summer Trip, House Rent, Core Savings"
+              value={circleName}
+              onChange={(e) => setCircleName(e.target.value)}
+              className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
+            />
+          </div>
 
-                {/* Dropdown Reason + Custom input */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Reason
-                    </label>
-                    <StyledSelect
-                      value={circlePurpose}
-                      onChange={(val) => setCirclePurpose(val as CirclePurpose)}
-                      options={PURPOSE_OPTIONS.map((p) => ({
-                        value: p.value,
-                        label: p.label,
-                      }))}
-                    />
-                  </div>
+          {/* Dropdown Reason + Custom input */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="min-w-0">
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Reason
+              </label>
+              <StyledSelect
+                value={circlePurpose}
+                onChange={(val) => setCirclePurpose(val as CirclePurpose)}
+                options={PURPOSE_OPTIONS.map((p) => ({
+                  value: p.value,
+                  label: p.label,
+                }))}
+              />
+            </div>
 
-                  <div>
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Target Goal (USD)
-                    </label>
-                    <input
-                      type="number"
-                      min="10"
-                      step="1"
-                      required
-                      value={circleTargetUsd}
-                      onChange={(e) => setCircleTargetUsd(e.target.value)}
-                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal focus:outline-none focus:border-stone-900"
-                    />
-                  </div>
-                </div>
-
-                {circlePurpose === 'CUSTOM' && (
-                  <div>
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Custom Reason
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      maxLength={48}
-                      placeholder="Enter custom reason (e.g. Studio Equipment, Retreat)"
-                      value={circleCustomPurpose}
-                      onChange={(e) => setCircleCustomPurpose(e.target.value)}
-                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
-                    />
-                  </div>
-                )}
-
-                {/* Intents Earn Vault Dropdown */}
-                <div>
-                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                    Intents Earn Vault
-                  </label>
-                  <StyledSelect
-                    value={circleVaultSymbol}
-                    onChange={(val) => setCircleVaultSymbol(val as EarnVaultSymbol)}
-                    options={vaults.map((v) => ({
-                      value: v.symbol as EarnVaultSymbol,
-                      label: v.name,
-                      badge: `${v.estimatedApyPct}% APY`,
-                    }))}
-                  />
-                </div>
-
-                {/* Member Percentage Quotas */}
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <label className="text-xs font-mono font-semibold uppercase text-stone-600">
-                      Participants ({circleMembers.length === 1 ? 'Solo • Auto 100%' : `${circleMembers.length} Members`})
-                    </label>
-                    <div className="flex items-center gap-3">
-                      {circleMembers.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={splitMembersEvenly}
-                          className="text-[11px] font-mono text-emerald-600 hover:underline cursor-pointer"
-                        >
-                          Split Evenly
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleAddMemberRow}
-                        className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-stone-900 hover:underline cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" /> Add @handle
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                    {circleMembers.map((m, idx) => {
-                      const isSolo = circleMembers.length === 1;
-                      const pct = isSolo ? 100 : parseFloat(m.percentage) || 0;
-                      const usdShare = ((parseFloat(circleTargetUsd) || 0) * pct) / 100;
-                      const cleanH = m.handle.trim().replace(/^@+/, '').toLowerCase();
-                      const prof = cleanH ? resolvedProfiles[cleanH] : undefined;
-                      return (
-                        <div key={idx} className="flex items-center gap-2 min-w-0">
-                          <div className="relative flex-1 min-w-0">
-                            <input
-                              type="text"
-                              required
-                              placeholder="@handle"
-                              value={m.handle}
-                              onChange={(e) => {
-                                const next = [...circleMembers];
-                                next[idx] = { ...next[idx], handle: e.target.value };
-                                setCircleMembers(next);
-                              }}
-                              className="w-full min-w-0 px-3 py-2 pr-8 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal"
-                            />
-                            {prof?.loading ? (
-                              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                                <RefreshCw className="w-3.5 h-3.5 text-stone-400 animate-spin" />
-                              </span>
-                            ) : prof?.exists && prof?.avatarUrl ? (
-                              <img
-                                src={prof.avatarUrl}
-                                alt={`@${cleanH}`}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full object-cover border border-stone-200 bg-stone-100 pointer-events-none"
-                                onError={(e) => {
-                                  (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                }}
-                              />
-                            ) : null}
-                          </div>
-                          <div className="relative w-20 sm:w-24 flex-shrink-0">
-                            <input
-                              type="number"
-                              min="1"
-                              max="100"
-                              step="0.01"
-                              required
-                              readOnly={isSolo}
-                              value={isSolo ? '100' : m.percentage}
-                              onChange={(e) => {
-                                if (isSolo) return;
-                                const next = [...circleMembers];
-                                next[idx] = { ...next[idx], percentage: e.target.value };
-                                setCircleMembers(next);
-                              }}
-                              className={`w-full px-2 py-2 pr-6 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal text-right ${
-                                isSolo ? 'opacity-75 cursor-not-allowed' : ''
-                              }`}
-                            />
-                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-stone-400">
-                              %
-                            </span>
-                          </div>
-                          <span className="hidden sm:inline-block w-20 text-right text-[11px] font-mono text-stone-500 tabular-nums flex-shrink-0">
-                            {formatUsd(usdShare)}
-                          </span>
-                          {circleMembers.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveMemberRow(idx)}
-                              className="p-1.5 text-stone-400 hover:text-red-600 cursor-pointer flex-shrink-0"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs font-mono pt-1">
-                    <span className="text-stone-500">Total Share Allocation:</span>
-                    <span
-                      className={`font-bold ${
-                        Math.abs(totalMemberPercentage - 100) <= 0.01
-                          ? 'text-emerald-600'
-                          : 'text-red-600'
-                      }`}
-                    >
-                      {totalMemberPercentage.toFixed(2)}% / 100%
-                    </span>
-                  </div>
-                </div>
-
-                <CustodySettlementToggle
-                  isSelfCustody={user?.custodyMode === 'self'}
-                  value={circleCreateMode}
-                  onChange={setCircleCreateMode}
-                  kindLabel="Circle pool"
-                />
-
-                {circleValidation.hint && (
-                  <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
-                    {circleValidation.hint}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={!circleValidation.isValid || isSubmittingCircle || isAuthorizing}
-                  className="w-full py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Fingerprint className="w-4 h-4" />
-                  <span>
-                    {isSubmittingCircle || isAuthorizing
-                      ? 'Signing with Passkey...'
-                      : 'Sign with Passkey & Launch Circle'}
-                  </span>
-                </button>
-              </form>
+            <div className="min-w-0">
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Target Goal (USD)
+              </label>
+              <input
+                type="number"
+                min="10"
+                step="1"
+                required
+                value={circleTargetUsd}
+                onChange={(e) => setCircleTargetUsd(e.target.value)}
+                className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal focus:outline-none focus:border-stone-900"
+              />
             </div>
           </div>
-        </Portal>
-      )}
 
-      {/* MODAL 2: ADD FUNDS TO CIRCLE (Supports repeated partial or full additions at any point) */}
-      {contributeCircle && (
-        <Portal>
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md">
-            <div className="bg-white border border-stone-200 rounded-3xl max-w-md w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto overscroll-contain">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-display font-extrabold text-stone-950">
-                    Add Funds to {contributeCircle.name}
-                  </h2>
-                  <p className="text-xs text-stone-500">
-                    Compounds in {contributeCircle.vaultSymbol} ({contributeCircle.estimatedApyPct}% APY). Add partial amounts or complete your share anytime.
-                  </p>
-                </div>
+          {circlePurpose === 'CUSTOM' && (
+            <div>
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Custom Reason
+              </label>
+              <input
+                type="text"
+                required
+                maxLength={48}
+                placeholder="Enter custom reason (e.g. Studio Equipment, Retreat)"
+                value={circleCustomPurpose}
+                onChange={(e) => setCircleCustomPurpose(e.target.value)}
+                className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
+              />
+            </div>
+          )}
+
+          {/* Intents Earn Vault Dropdown */}
+          <div>
+            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+              Intents Earn Vault
+            </label>
+            <StyledSelect
+              value={circleVaultSymbol}
+              onChange={(val) => setCircleVaultSymbol(val as EarnVaultSymbol)}
+              options={vaults.map((v) => ({
+                value: v.symbol as EarnVaultSymbol,
+                label: v.name,
+                badge: `${v.estimatedApyPct}% APY`,
+              }))}
+            />
+          </div>
+
+          {/* Member Percentage Quotas */}
+          <div className="space-y-2 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-xs font-mono font-semibold uppercase text-stone-600">
+                Participants ({circleMembers.length === 1 ? 'Solo • Auto 100%' : `${circleMembers.length} Members`})
+              </label>
+              <div className="flex items-center gap-3">
+                {circleMembers.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={splitMembersEvenly}
+                    className="text-[11px] font-mono text-emerald-600 hover:underline cursor-pointer"
+                  >
+                    Split Evenly
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => setContributeCircle(null)}
-                  className="p-1.5 text-stone-400 hover:text-stone-700 cursor-pointer"
+                  onClick={handleAddMemberRow}
+                  className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-stone-900 hover:underline cursor-pointer"
                 >
-                  <X className="w-5 h-5" />
+                  <Plus weight="bold" className="w-3 h-3" /> Add @handle
                 </button>
               </div>
+            </div>
 
-              {myMemberInContribCircle && (
-                <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2 text-xs font-mono">
-                  <div className="flex items-center justify-between">
-                    <span className="text-stone-500">Your Share ({myMemberInContribCircle.percentageShare}%):</span>
-                    <span className="font-bold text-stone-900">
-                      {formatCentsUsd(myMemberInContribCircle.contributedUsdCents)} /{' '}
-                      {formatCentsUsd(myMemberInContribCircle.quotaUsdCents)}
+            <div className="space-y-2 max-h-48 overflow-y-auto overflow-x-hidden pr-0.5">
+              {circleMembers.map((m, idx) => {
+                const isSolo = circleMembers.length === 1;
+                const pct = isSolo ? 100 : parseFloat(m.percentage) || 0;
+                const usdShare = ((parseFloat(circleTargetUsd) || 0) * pct) / 100;
+                const cleanH = m.handle.trim().replace(/^@+/, '').toLowerCase();
+                const prof = cleanH ? resolvedProfiles[cleanH] : undefined;
+                return (
+                  <div key={idx} className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                    <div className="relative flex-1 min-w-0">
+                      <input
+                        type="text"
+                        required
+                        placeholder="@handle"
+                        value={m.handle}
+                        onChange={(e) => {
+                          const next = [...circleMembers];
+                          next[idx] = { ...next[idx], handle: e.target.value };
+                          setCircleMembers(next);
+                        }}
+                        className="w-full min-w-0 px-3 py-2 pr-8 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal"
+                      />
+                      {prof?.loading ? (
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                          <ArrowsClockwise weight="bold" className="w-3.5 h-3.5 text-stone-400 animate-spin" />
+                        </span>
+                      ) : prof?.exists && prof?.avatarUrl ? (
+                        <img
+                          src={prof.avatarUrl}
+                          alt={`@${cleanH}`}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full object-cover border border-stone-200 bg-stone-100 pointer-events-none"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                    <div className="relative w-[68px] sm:w-24 min-w-0 flex-shrink-0">
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        step="0.01"
+                        required
+                        readOnly={isSolo}
+                        value={isSolo ? '100' : m.percentage}
+                        onChange={(e) => {
+                          if (isSolo) return;
+                          const next = [...circleMembers];
+                          next[idx] = { ...next[idx], percentage: e.target.value };
+                          setCircleMembers(next);
+                        }}
+                        className={`w-full min-w-0 px-2 py-2 pr-5 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal text-right ${
+                          isSolo ? 'opacity-75 cursor-not-allowed' : ''
+                        }`}
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-mono text-stone-400 pointer-events-none">
+                        %
+                      </span>
+                    </div>
+                    <span className="hidden sm:inline-block w-20 text-right text-[11px] font-mono text-stone-500 tabular-nums flex-shrink-0">
+                      {formatUsd(usdShare)}
                     </span>
-                  </div>
-                  {myMemberInContribCircle.quotaUsdCents > myMemberInContribCircle.contributedUsdCents && (
-                    <div className="flex items-center justify-between pt-1 border-t border-stone-200">
-                      <span className="text-stone-500">Remaining to 100%:</span>
+                    {circleMembers.length > 1 && (
                       <button
                         type="button"
-                        onClick={() => {
-                          const remUsd =
-                            (myMemberInContribCircle.quotaUsdCents -
-                              myMemberInContribCircle.contributedUsdCents) /
-                            100;
-                          setContribAmount(remUsd.toFixed(2).replace(/\.00$/, ''));
-                        }}
-                        className="text-emerald-600 font-bold hover:underline cursor-pointer"
+                        onClick={() => handleRemoveMemberRow(idx)}
+                        aria-label="Remove participant"
+                        className="p-1.5 text-stone-400 hover:text-red-600 cursor-pointer flex-shrink-0"
                       >
-                        Fill {formatCentsUsd(
-                          myMemberInContribCircle.quotaUsdCents -
-                            myMemberInContribCircle.contributedUsdCents
-                        )}
+                        <Trash weight="fill" className="w-3.5 h-3.5" />
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono pt-1">
+              <span className="text-stone-500">Total Share Allocation:</span>
+              <span
+                className={`font-bold tabular-nums ${
+                  Math.abs(totalMemberPercentage - 100) <= 0.01
+                    ? 'text-emerald-600'
+                    : 'text-red-600'
+                }`}
+              >
+                {totalMemberPercentage.toFixed(2)}% / 100%
+              </span>
+            </div>
+          </div>
+
+          {circleValidation.hint && (
+            <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
+              {circleValidation.hint}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={!circleValidation.isValid || isSubmittingCircle || isAuthorizing}
+            className="w-full min-h-12 py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Fingerprint weight="bold" className="w-4 h-4" />
+            <span>
+              {isSubmittingCircle || isAuthorizing
+                ? 'Signing with Passkey...'
+                : 'Sign with Passkey & Launch Circle'}
+            </span>
+          </button>
+        </form>
+      </ModalSheet>
+
+      {/* MODAL 2: ADD FUNDS TO CIRCLE (Supports repeated partial or full additions at any point) */}
+      <ModalSheet
+        isOpen={Boolean(contributeCircle)}
+        onClose={() => setContributeCircle(null)}
+        canClose={!isSubmittingContrib && !isAuthorizing}
+        zIndexClass="z-[110]"
+        maxWidthClass="sm:max-w-md"
+        panelClassName="px-4 sm:p-6 pb-6 space-y-4"
+        showCloseButton
+        closeLabel="Close add funds dialog"
+        ariaLabel={contributeCircle ? `Add Funds to ${contributeCircle.name}` : 'Add Funds'}
+      >
+        {contributeCircle && (
+          <>
+            <div className="pr-11">
+              <h2 className="text-lg font-display font-extrabold text-stone-950">
+                Add Funds to {contributeCircle.name}
+              </h2>
+              <p className="text-xs text-stone-500">
+                Compounds in {contributeCircle.vaultSymbol} ({contributeCircle.estimatedApyPct}% APY). Add partial amounts or complete your share anytime.
+              </p>
+            </div>
+
+            {myMemberInContribCircle && (
+              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="text-stone-500">Your Share ({myMemberInContribCircle.percentageShare}%):</span>
+                  <span className="font-bold text-stone-900">
+                    {formatCentsUsd(myMemberInContribCircle.contributedUsdCents)} /{' '}
+                    {formatCentsUsd(myMemberInContribCircle.quotaUsdCents)}
+                  </span>
+                </div>
+                {myMemberInContribCircle.quotaUsdCents > myMemberInContribCircle.contributedUsdCents && (
+                  <div className="flex items-center justify-between pt-1 border-t border-stone-200">
+                    <span className="text-stone-500">Remaining to 100%:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const remUsd =
+                          (myMemberInContribCircle.quotaUsdCents -
+                            myMemberInContribCircle.contributedUsdCents) /
+                          100;
+                        setContribAmount(remUsd.toFixed(2).replace(/\.00$/, ''));
+                      }}
+                      className="text-emerald-600 font-bold hover:underline cursor-pointer"
+                    >
+                      Fill {formatCentsUsd(
+                        myMemberInContribCircle.quotaUsdCents -
+                          myMemberInContribCircle.contributedUsdCents
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <form onSubmit={handleContribute} className="space-y-4">
+              <div>
+                <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                  Pay With
+                </label>
+                <StyledSelect
+                  mono
+                  value={contribOriginAsset}
+                  onChange={setContribOriginAsset}
+                  options={availableOriginAssets.map((a) => ({
+                    value: a.assetId,
+                    label: a.symbol,
+                    badge: `${a.balanceFormatted} avail`,
+                  }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                  Amount to Add
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  min="1"
+                  required
+                  placeholder="e.g. 25"
+                  value={contribAmount}
+                  onChange={(e) => setContribAmount(e.target.value)}
+                  className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal"
+                />
+              </div>
+
+              {!isSubmittingContrib && contribValidation.hint && (
+                <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
+                  {contribValidation.hint}
                 </div>
               )}
 
-              <form onSubmit={handleContribute} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                    Pay With
-                  </label>
-                  <StyledSelect
-                    mono
-                    value={contribOriginAsset}
-                    onChange={setContribOriginAsset}
-                    options={availableOriginAssets.map((a) => ({
-                      value: a.assetId,
-                      label: a.symbol,
-                      badge: `${a.balanceFormatted} avail`,
-                    }))}
-                  />
+              {isSubmittingContrib && contribStepMsg && (
+                <div className="px-3 py-2 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono text-stone-700">
+                  {contribStepMsg}
                 </div>
+              )}
 
-                <div>
-                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                    Amount to Add
-                  </label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="1"
-                    required
-                    placeholder="e.g. 25"
-                    value={contribAmount}
-                    onChange={(e) => setContribAmount(e.target.value)}
-                    className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal"
-                  />
-                </div>
-
-                {!isSubmittingContrib && contribValidation.hint && (
-                  <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
-                    {contribValidation.hint}
-                  </div>
-                )}
-
-                {isSubmittingContrib && contribStepMsg && (
-                  <div className="px-3 py-2 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono text-stone-700">
-                    {contribStepMsg}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={!contribValidation.isValid || isSubmittingContrib || isAuthorizing}
-                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Fingerprint className="w-4 h-4" />
-                  <span>
-                    {isSubmittingContrib || isAuthorizing
-                      ? contribStepMsg || 'Signing & Adding to Vault...'
-                      : `Sign with Passkey & Add to ${contributeCircle.vaultSymbol}`}
-                  </span>
-                </button>
-              </form>
-            </div>
-          </div>
-        </Portal>
-      )}
+              <button
+                type="submit"
+                disabled={!contribValidation.isValid || isSubmittingContrib || isAuthorizing}
+                className="w-full min-h-12 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Fingerprint weight="bold" className="w-4 h-4" />
+                <span>
+                  {isSubmittingContrib || isAuthorizing
+                    ? contribStepMsg || 'Signing & Adding to Vault...'
+                    : `Sign with Passkey & Add to ${contributeCircle.vaultSymbol}`}
+                </span>
+              </button>
+            </form>
+          </>
+        )}
+      </ModalSheet>
 
       {/* MODAL 3: SEND TIMELOCKED EARN VAULT GIFT (Sanitized, Dropdown Occasion + Custom) */}
-      {isCreateGiftOpen && (
-        <Portal>
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md">
-            <div className="bg-white border border-stone-200 rounded-3xl max-w-lg w-full p-4 sm:p-6 shadow-2xl space-y-5 max-h-[92vh] overflow-y-auto overscroll-contain">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
-                    <Gift className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-display font-extrabold text-stone-950 leading-tight">
-                      Gift an Intents Earn Vault
-                    </h2>
-                    <a
-                      href="https://uprail.world/gift/gft_e0adc567066d8bacb471f6899f1edf89"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[11px] font-mono text-stone-500 hover:text-stone-900 underline underline-offset-2"
-                    >
-                      Preview what a live gift card looks like ↗
-                    </a>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateGiftOpen(false)}
-                  className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+      <ModalSheet
+        isOpen={isCreateGiftOpen}
+        onClose={() => setIsCreateGiftOpen(false)}
+        canClose={!isSubmittingGift && !isAuthorizing}
+        zIndexClass="z-[110]"
+        maxWidthClass="sm:max-w-lg"
+        panelClassName="px-4 sm:p-6 pb-6 space-y-5"
+        showCloseButton
+        closeLabel="Close Gift an Intents Earn Vault dialog"
+        ariaLabel="Gift an Intents Earn Vault"
+      >
+        <div className="flex items-center gap-2.5 pr-11">
+          <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center flex-shrink-0">
+            <Gift weight="fill" className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-display font-extrabold text-stone-950 leading-tight">
+              Gift an Intents Earn Vault
+            </h2>
+          </div>
+        </div>
 
-              <form onSubmit={handleCreateGift} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="min-w-0">
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Recipient @handle
-                    </label>
-                    {(() => {
-                      const cleanG = giftRecipient.trim().replace(/^@+/, '').toLowerCase();
-                      const profG = cleanG ? resolvedProfiles[cleanG] : undefined;
-                      return (
-                        <div className="relative">
-                          <input
-                            type="text"
-                            required
-                            placeholder="@alice"
-                            value={giftRecipient}
-                            onChange={(e) => setGiftRecipient(e.target.value)}
-                            className="w-full min-w-0 px-3.5 py-2.5 pr-9 rounded-xl border border-stone-300 text-sm font-mono font-normal focus:outline-none focus:border-stone-900"
-                          />
-                          {profG?.loading ? (
-                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
-                              <RefreshCw className="w-3.5 h-3.5 text-stone-400 animate-spin" />
-                            </span>
-                          ) : profG?.exists && profG?.avatarUrl ? (
-                            <img
-                              src={profG.avatarUrl}
-                              alt={`@${cleanG}`}
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full object-cover border border-stone-200 bg-stone-100 pointer-events-none"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
-                          ) : null}
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="min-w-0">
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Occasion
-                    </label>
-                    <StyledSelect
-                      value={giftOccasion}
-                      onChange={(val) => {
-                        const occ = val as GiftOccasion;
-                        setGiftOccasion(occ);
-                        setGiftTimelockLocal(defaultTimelockForOccasion(occ));
-                      }}
-                      options={OCCASION_OPTIONS.map((o) => ({
-                        value: o.value,
-                        label: o.label,
-                      }))}
-                    />
-                  </div>
-                </div>
-
-                {giftOccasion === 'CUSTOM' && (
-                  <div>
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Custom Occasion
-                    </label>
+        <form onSubmit={handleCreateGift} className="space-y-4 overflow-x-hidden">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="min-w-0">
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Recipient @handle
+              </label>
+              {(() => {
+                const cleanG = giftRecipient.trim().replace(/^@+/, '').toLowerCase();
+                const profG = cleanG ? resolvedProfiles[cleanG] : undefined;
+                return (
+                  <div className="relative">
                     <input
                       type="text"
                       required
-                      maxLength={48}
-                      placeholder="Enter occasion (e.g. Eid, Promotion, Baby Shower)"
-                      value={giftCustomOccasion}
-                      onChange={(e) => setGiftCustomOccasion(e.target.value)}
-                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
+                      placeholder="@alice"
+                      value={giftRecipient}
+                      onChange={(e) => setGiftRecipient(e.target.value)}
+                      className="w-full min-w-0 px-3.5 py-2.5 pr-9 rounded-xl border border-stone-300 text-sm font-mono font-normal focus:outline-none focus:border-stone-900"
                     />
-                  </div>
-                )}
-
-                {/* Intents Earn Vault Dropdown */}
-                <div>
-                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                    Intents Earn Vault
-                  </label>
-                  <StyledSelect
-                    value={giftVaultSymbol}
-                    onChange={(val) => setGiftVaultSymbol(val as EarnVaultSymbol)}
-                    options={vaults.map((v) => ({
-                      value: v.symbol as EarnVaultSymbol,
-                      label: v.name,
-                      badge: `${v.estimatedApyPct}% APY`,
-                    }))}
-                  />
-                </div>
-
-                {/* Payment Token & Amount */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="min-w-0">
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Pay With
-                    </label>
-                    <StyledSelect
-                      mono
-                      value={giftOriginAsset}
-                      onChange={setGiftOriginAsset}
-                      options={availableOriginAssets.map((a) => ({
-                        value: a.assetId,
-                        label: a.symbol,
-                        badge: a.balanceFormatted,
-                      }))}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                      Amount
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="1"
-                      required
-                      placeholder="e.g. 5"
-                      value={giftAmount}
-                      onChange={(e) => setGiftAmount(e.target.value)}
-                      className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal"
-                    />
-                  </div>
-                </div>
-
-                {/* Live Intents Earn Quote Preview */}
-                {isQuotingGift ? (
-                  <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-500">
-                    Fetching live Intents Earn Vault quote...
-                  </div>
-                ) : (
-                  giftQuote && (
-                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2 text-xs font-mono">
-                      <span className="text-stone-700">Estimated Vault Shares:</span>
-                      <span className="font-semibold text-emerald-800 text-right">
-                        ~{giftQuote.estimatedSharesOut} {giftQuote.vaultSymbol} (
-                        {giftQuote.estimatedApyPct}% APY)
+                    {profG?.loading ? (
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <ArrowsClockwise weight="bold" className="w-3.5 h-3.5 text-stone-400 animate-spin" />
                       </span>
-                    </div>
-                  )
-                )}
-
-                {/* Unlock Date & Time */}
-                <div className="min-w-0">
-                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                    Unlock Date & Time
-                  </label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={giftTimelockLocal}
-                    onChange={(e) => setGiftTimelockLocal(e.target.value)}
-                    className="w-full min-w-0 max-w-full appearance-none px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
-                    Note (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={240}
-                    placeholder="Enjoy the compounded yield!"
-                    value={giftMessage}
-                    onChange={(e) => setGiftMessage(e.target.value)}
-                    className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm sm:text-xs font-normal"
-                  />
-                </div>
-
-                <CustodySettlementToggle
-                  isSelfCustody={user?.custodyMode === 'self'}
-                  value={giftCreateMode}
-                  onChange={setGiftCreateMode}
-                  kindLabel="timelocked gift"
-                />
-
-                {!isSubmittingGift && giftValidation.hint && (
-                  <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
-                    {giftValidation.hint}
+                    ) : profG?.exists && profG?.avatarUrl ? (
+                      <img
+                        src={profG.avatarUrl}
+                        alt={`@${cleanG}`}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full object-cover border border-stone-200 bg-stone-100 pointer-events-none"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : null}
                   </div>
-                )}
+                );
+              })()}
+            </div>
 
-                {isSubmittingGift && giftStepMsg && (
-                  <div className="px-3 py-2 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono text-stone-700">
-                    {giftStepMsg}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={!giftValidation.isValid || isSubmittingGift || isAuthorizing}
-                  className="w-full py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Fingerprint className="w-4 h-4" />
-                  <span>
-                    {isSubmittingGift || isAuthorizing
-                      ? giftStepMsg || 'Signing & Locking Gift...'
-                      : `Sign with Passkey & Send ${giftVaultSymbol} Gift`}
-                  </span>
-                </button>
-              </form>
+            <div className="min-w-0">
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Occasion
+              </label>
+              <StyledSelect
+                value={giftOccasion}
+                onChange={(val) => {
+                  const occ = val as GiftOccasion;
+                  setGiftOccasion(occ);
+                  setGiftTimelockLocal(defaultTimelockForOccasion(occ));
+                }}
+                options={OCCASION_OPTIONS.map((o) => ({
+                  value: o.value,
+                  label: o.label,
+                }))}
+              />
             </div>
           </div>
-        </Portal>
-      )}
+
+          {giftOccasion === 'CUSTOM' && (
+            <div>
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Custom Occasion
+              </label>
+              <input
+                type="text"
+                required
+                maxLength={48}
+                placeholder="Enter occasion (e.g. Eid, Promotion, Baby Shower)"
+                value={giftCustomOccasion}
+                onChange={(e) => setGiftCustomOccasion(e.target.value)}
+                className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-normal focus:outline-none focus:border-stone-900"
+              />
+            </div>
+          )}
+
+          {/* Intents Earn Vault Dropdown */}
+          <div>
+            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+              Intents Earn Vault
+            </label>
+            <StyledSelect
+              value={giftVaultSymbol}
+              onChange={(val) => setGiftVaultSymbol(val as EarnVaultSymbol)}
+              options={vaults.map((v) => ({
+                value: v.symbol as EarnVaultSymbol,
+                label: v.name,
+                badge: `${v.estimatedApyPct}% APY`,
+              }))}
+            />
+          </div>
+
+          {/* Payment Token & Amount */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="min-w-0">
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Pay With
+              </label>
+              <StyledSelect
+                mono
+                value={giftOriginAsset}
+                onChange={setGiftOriginAsset}
+                options={availableOriginAssets.map((a) => ({
+                  value: a.assetId,
+                  label: a.symbol,
+                  badge: a.balanceFormatted,
+                }))}
+              />
+            </div>
+            <div className="min-w-0">
+              <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+                Amount
+              </label>
+              <input
+                type="number"
+                step="any"
+                min="1"
+                required
+                placeholder="e.g. 5"
+                value={giftAmount}
+                onChange={(e) => setGiftAmount(e.target.value)}
+                className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm font-mono font-normal"
+              />
+            </div>
+          </div>
+
+          {/* Live Intents Earn Quote Preview */}
+          {isQuotingGift ? (
+            <div className="p-3 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-500">
+              Fetching live Intents Earn Vault quote...
+            </div>
+          ) : (
+            giftQuote && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-2 text-xs font-mono">
+                <span className="text-stone-700">Estimated Vault Shares:</span>
+                <span className="font-semibold text-emerald-800 text-right">
+                  ~{truncateDecimals(giftQuote.estimatedSharesOut, 5)} {giftQuote.vaultSymbol} (
+                  {giftQuote.estimatedApyPct}% APY)
+                </span>
+              </div>
+            )
+          )}
+
+          {/* Unlock Date & Time */}
+          <div className="min-w-0">
+            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+              Unlock Date & Time
+            </label>
+            <input
+              type="datetime-local"
+              required
+              value={giftTimelockLocal}
+              onChange={(e) => setGiftTimelockLocal(e.target.value)}
+              className="w-full min-w-0 max-w-full appearance-none px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm sm:text-xs font-mono font-normal bg-white"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
+              Note (Optional)
+            </label>
+            <input
+              type="text"
+              maxLength={240}
+              placeholder="Enjoy the compounded yield!"
+              value={giftMessage}
+              onChange={(e) => setGiftMessage(e.target.value)}
+              className="w-full min-w-0 px-3.5 py-2.5 rounded-xl border border-stone-300 text-sm sm:text-xs font-normal"
+            />
+          </div>
+
+          {!isSubmittingGift && giftValidation.hint && (
+            <div className="px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-mono text-amber-800">
+              {giftValidation.hint}
+            </div>
+          )}
+
+          {isSubmittingGift && giftStepMsg && (
+            <div className="px-3 py-2 rounded-xl bg-stone-100 border border-stone-200 text-[11px] font-mono text-stone-700">
+              {giftStepMsg}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={!giftValidation.isValid || isSubmittingGift || isAuthorizing}
+            className="w-full min-h-12 py-3 rounded-2xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Fingerprint weight="bold" className="w-4 h-4" />
+            <span>
+              {isSubmittingGift || isAuthorizing
+                ? giftStepMsg || 'Signing & Locking Gift...'
+                : `Sign with Passkey & Send ${giftVaultSymbol} Gift`}
+            </span>
+          </button>
+        </form>
+      </ModalSheet>
     </div>
   );
 };

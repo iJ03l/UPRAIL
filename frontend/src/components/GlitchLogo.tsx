@@ -313,7 +313,7 @@ export const GlitchLogo: React.FC<GlitchLogoProps> = ({
           {/* Micro CRT Scanline Laser Sweep */}
           <div
             aria-hidden="true"
-            className="absolute left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#E05326] to-transparent pointer-events-none z-30 glitch-laser-beam shadow-[0_0_6px_#E05326]"
+            className="absolute left-0 right-0 h-[1.5px] bg-[#E05326] pointer-events-none z-30 glitch-laser-beam"
           />
 
           {/* Micro CRT Terminal Scanlines */}

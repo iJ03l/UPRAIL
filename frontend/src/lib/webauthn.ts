@@ -61,10 +61,15 @@ export function describePasskeyError(err: any): string {
   if (inApp.isInApp) {
     return `Passkeys can't be used inside ${inAppBrowserLabel(inApp)} — open this page in Safari or Chrome, then try again.`;
   }
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  const isGoogleAppIos = inApp.ios && /GSA\//i.test(ua);
   if (name === 'InvalidStateError' || msg.includes('already registered')) {
     return 'A passkey for this account already exists on this device — sign in with your passkey instead.';
   }
   if (name === 'NotAllowedError' || msg.includes('timed out') || msg.includes('not allowed')) {
+    if (isGoogleAppIos) {
+      return 'The Google app blocked the passkey prompt or it was cancelled. Open this page in Safari or Chrome on your iPhone, then try again.';
+    }
     return 'The passkey prompt was cancelled or timed out. Tap again and complete Face ID, fingerprint, or your screen lock.';
   }
   if (
@@ -73,6 +78,9 @@ export function describePasskeyError(err: any): string {
     msg.includes('unknown error') ||
     msg.includes('unknown transient')
   ) {
+    if (inApp.ios) {
+      return 'Your iPhone passkey provider did not respond. Make sure Passwords / iCloud Keychain (or Chrome) is enabled under Settings → General → AutoFill & Passwords, or open this page in Safari and try again.';
+    }
     return "Your device's passkey manager didn't respond. Make sure a screen lock (PIN, pattern, or biometric) is set and that Google Password Manager is your passkey provider, then update Google Play Services and try again — or use a security key or another device.";
   }
   if (
@@ -80,6 +88,9 @@ export function describePasskeyError(err: any): string {
     msg.includes('not supported') ||
     msg.includes('no create options')
   ) {
+    if (inApp.ios) {
+      return 'Passkeys could not be created in this browser window. Make sure Face ID / Touch ID & Passcode and AutoFill & Passwords are enabled in iOS Settings, or open this page in Safari.';
+    }
     return 'This device can’t create an on-device passkey. Set a screen lock (PIN, pattern, or biometric) in your device settings, or use a security key or another device.';
   }
   if (name === 'SecurityError' || msg.includes('rp id') || msg.includes('cannot be validated')) {
@@ -119,6 +130,18 @@ export interface WebAuthnSupportStatus {
   platformAuthenticator: boolean;
 }
 
+const PREFETCH_TTL_MS = 240_000; // 4 minutes (server challenge TTL is 5 minutes)
+let cachedPlatformAvailable: boolean | null = null;
+let prefetchedReg: { handle: string; options: any; at: number } | null = null;
+let prefetchedTxAuth: { options: any; at: number } | null = null;
+let prefetchedLogin: { handle: string; options: any; at: number } | null = null;
+
+function isIosDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && /Mobile/i.test(ua));
+}
+
 export const webauthn = {
   /**
    * Checks if the current browser and platform support WebAuthn Passkeys.
@@ -129,11 +152,72 @@ export const webauthn = {
     if (supported) {
       try {
         platformAuthenticator = await platformAuthenticatorIsAvailable();
+        cachedPlatformAvailable = platformAuthenticator;
       } catch {
         platformAuthenticator = false;
+        cachedPlatformAvailable = false;
       }
     }
     return { supported, platformAuthenticator };
+  },
+
+  /**
+   * Pre-fetches registration options so `startRegistration` can be invoked
+   * synchronously inside the user's tap gesture on iOS WebKit (Safari / Chrome / Google app).
+   */
+  async prefetchRegisterOptions(handle: string): Promise<void> {
+    const cleanHandle = (handle || '').replace(/^@/, '').toLowerCase();
+    if (!cleanHandle || !browserSupportsWebAuthn()) return;
+    if (
+      prefetchedReg &&
+      prefetchedReg.handle === cleanHandle &&
+      Date.now() - prefetchedReg.at < PREFETCH_TTL_MS
+    ) {
+      return;
+    }
+    try {
+      const options = await api.getPasskeyRegisterOptions(cleanHandle);
+      prefetchedReg = { handle: cleanHandle, options, at: Date.now() };
+    } catch {
+      // Ignore background prefetch errors; click handler will fetch on demand if needed
+    }
+  },
+
+  /**
+   * Pre-fetches tx_auth options so `confirmSessionPasskey` runs synchronously on tap.
+   */
+  async prefetchTxAuthOptions(): Promise<void> {
+    if (!browserSupportsWebAuthn()) return;
+    if (prefetchedTxAuth && Date.now() - prefetchedTxAuth.at < PREFETCH_TTL_MS) {
+      return;
+    }
+    try {
+      const options = await api.getTxAuthOptions();
+      prefetchedTxAuth = { options, at: Date.now() };
+    } catch {
+      // Ignore background prefetch errors
+    }
+  },
+
+  /**
+   * Pre-fetches login options so `loginWithPasskey` runs synchronously on tap.
+   */
+  async prefetchLoginOptions(handle?: string): Promise<void> {
+    if (!browserSupportsWebAuthn()) return;
+    const cleanHandle = (handle || '').replace(/^@/, '').toLowerCase();
+    if (
+      prefetchedLogin &&
+      prefetchedLogin.handle === cleanHandle &&
+      Date.now() - prefetchedLogin.at < PREFETCH_TTL_MS
+    ) {
+      return;
+    }
+    try {
+      const options = await api.getPasskeyLoginOptions(cleanHandle || undefined);
+      prefetchedLogin = { handle: cleanHandle, options, at: Date.now() };
+    } catch {
+      // Ignore background prefetch errors
+    }
   },
 
   /**
@@ -159,8 +243,19 @@ export const webauthn = {
       throw new Error('WebAuthn Passkeys are not supported on this browser or platform.');
     }
 
-    // 1. Fetch challenge and options from backend (optionally scoped to known handle)
-    const rawOptions = await api.getPasskeyLoginOptions(handle);
+    const cleanHandle = (handle || '').replace(/^@/, '').toLowerCase();
+    let rawOptions: any;
+    if (
+      prefetchedLogin &&
+      prefetchedLogin.handle === cleanHandle &&
+      Date.now() - prefetchedLogin.at < PREFETCH_TTL_MS
+    ) {
+      rawOptions = prefetchedLogin.options;
+      prefetchedLogin = null;
+    } else {
+      rawOptions = await api.getPasskeyLoginOptions(handle);
+    }
+
     const options: any = {
       ...rawOptions,
       userVerification: 'preferred',
@@ -170,7 +265,13 @@ export const webauthn = {
     delete options.allowCredentials;
 
     // 2. Perform native browser WebAuthn ceremony
-    const assertion = await startAuthentication(options);
+    let assertion: any;
+    try {
+      assertion = await startAuthentication(options);
+    } catch (err) {
+      void this.prefetchLoginOptions(handle);
+      throw err;
+    }
 
     // 3. Verify assertion signature on backend and receive session
     const res = await api.verifyPasskeyLogin(assertion);
@@ -196,10 +297,22 @@ export const webauthn = {
     hasRecoveryCodes?: boolean;
     recoveryCodesRemaining?: number;
   }> {
-    const rawOptions = await api.getTxAuthOptions();
+    let rawOptions: any;
+    if (prefetchedTxAuth && Date.now() - prefetchedTxAuth.at < PREFETCH_TTL_MS) {
+      rawOptions = prefetchedTxAuth.options;
+      prefetchedTxAuth = null;
+    } else {
+      rawOptions = await api.getTxAuthOptions();
+    }
     const options: any = { ...rawOptions, userVerification: 'preferred' };
     delete options.allowCredentials;
-    const assertion = await startAuthentication(options);
+    let assertion: any;
+    try {
+      assertion = await startAuthentication(options);
+    } catch (err) {
+      void this.prefetchTxAuthOptions();
+      throw err;
+    }
     const result = await api.confirmPasskey(assertion);
     if (handle) {
       saveStoredPasskey({
@@ -253,34 +366,53 @@ export const webauthn = {
       throw new Error('WebAuthn is not supported on this browser.');
     }
 
-    const rawOptions = (await api.getPasskeyRegisterOptions(cleanHandle)) as any;
+    const isIos = isIosDevice();
 
-    // Prefer the device's built-in authenticator (fingerprint / face / screen
-    // lock). When one is available we constrain to 'platform' so Chrome skips
-    // the "choose a device" sheet — which on Android only lists security
-    // key / NFC / other device when no on-device passkey provider is set up —
-    // and prompts for the device lock directly. When it is NOT available we
-    // leave it unconstrained so a security key or another device still works,
-    // and the error path explains how to enable the on-device option.
-    let platformAvailable = false;
-    try {
-      platformAvailable = await platformAuthenticatorIsAvailable();
-    } catch {
-      platformAvailable = false;
+    // Use pre-fetched registration options when available so `startRegistration`
+    // runs synchronously inside the user's tap gesture (critical on iOS WebKit /
+    // Chrome iOS / Google app where awaiting a network fetch expires transient
+    // user activation and causes WebKit to throw NotAllowedError).
+    let rawOptions: any;
+    if (
+      prefetchedReg &&
+      prefetchedReg.handle === cleanHandle &&
+      Date.now() - prefetchedReg.at < PREFETCH_TTL_MS
+    ) {
+      rawOptions = prefetchedReg.options;
+      prefetchedReg = null;
+    } else {
+      rawOptions = (await api.getPasskeyRegisterOptions(cleanHandle)) as any;
+    }
+
+    let platformAvailable = cachedPlatformAvailable ?? false;
+    if (!isIos && cachedPlatformAvailable === null) {
+      try {
+        platformAvailable = await platformAuthenticatorIsAvailable();
+        cachedPlatformAvailable = platformAvailable;
+      } catch {
+        platformAvailable = false;
+      }
     }
 
     const options: any = {
       ...rawOptions,
-      // WebAuthn client hints (Chrome 128+, ignored by other browsers) steer
-      // the authenticator chooser and are kept aligned with the attachment
-      // below: prefer the device passkey, fall back to cross-device.
-      hints: platformAvailable ? ['client-device', 'hybrid'] : ['security-key', 'hybrid'],
+      ...(platformAvailable && !isIos ? { hints: ['client-device', 'hybrid'] } : {}),
       authenticatorSelection: {
         ...(rawOptions.authenticatorSelection || {}),
+        residentKey: isIos
+          ? 'preferred'
+          : rawOptions.authenticatorSelection?.residentKey || 'required',
+        requireResidentKey: isIos
+          ? false
+          : Boolean(rawOptions.authenticatorSelection?.requireResidentKey ?? true),
         userVerification: 'preferred',
-        ...(platformAvailable ? { authenticatorAttachment: 'platform' } : {}),
+        ...(platformAvailable && !isIos ? { authenticatorAttachment: 'platform' } : {}),
       },
     };
+    if (isIos && options.authenticatorSelection) {
+      delete options.authenticatorSelection.authenticatorAttachment;
+      delete options.hints;
+    }
 
     let attResp: any;
     try {
@@ -289,12 +421,10 @@ export const webauthn = {
         options as unknown as Parameters<typeof startRegistration>[0]
       );
     } catch (err: any) {
-      // A provider hiccup (e.g. Android Credential Manager `UnknownError`) is
-      // sometimes resolved by retrying once with resident keys relaxed to
-      // 'preferred', which a provider that cannot mint a required resident key
-      // will accept. The same server challenge is reused; it is only consumed
-      // by the POST below.
-      if (!isCredentialManagerError(err)) throw err;
+      if (!isCredentialManagerError(err)) {
+        void this.prefetchRegisterOptions(cleanHandle);
+        throw err;
+      }
       console.warn('[webauthn] create failed, retrying with relaxed selection:', err?.name);
 
       const relaxed: any = {
@@ -307,9 +437,14 @@ export const webauthn = {
       };
       delete relaxed.authenticatorSelection.authenticatorAttachment;
       delete relaxed.hints;
-      attResp = await startRegistration(
-        relaxed as unknown as Parameters<typeof startRegistration>[0]
-      );
+      try {
+        attResp = await startRegistration(
+          relaxed as unknown as Parameters<typeof startRegistration>[0]
+        );
+      } catch (retryErr) {
+        void this.prefetchRegisterOptions(cleanHandle);
+        throw retryErr;
+      }
     }
 
     const nearAccount = typeof rawOptions?.nearAccount === 'string' ? rawOptions.nearAccount : '';

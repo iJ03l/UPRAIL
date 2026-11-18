@@ -324,7 +324,7 @@ export function usePayments() {
       }
 
       setCreatedPayment(payment);
-      deductBalanceOptimistically(selectedToken.id, selectedToken.symbol, amount);
+      deductBalanceOptimistically(selectedToken.id, selectedToken.symbol, payment.grossAmount || amount);
 
       // Refresh history & balances
       loadHistory();

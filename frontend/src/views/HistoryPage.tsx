@@ -2,20 +2,20 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import {
-  Search,
-  RefreshCw,
+  MagnifyingGlass,
+  ArrowsClockwise,
   ArrowUpRight,
   ArrowDownLeft,
   Copy,
   Check,
-  Share2,
-  ExternalLink,
-  AlertCircle,
+  ShareNetwork,
+  ArrowSquareOut,
+  WarningCircle,
   Clock,
   ShieldCheck,
   XCircle,
-  Loader2,
-} from 'lucide-react';
+  CircleNotch,
+} from '@phosphor-icons/react';
 import { Link } from '../lib/router';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
 import { usePayments } from '../hooks/usePayments';
@@ -335,7 +335,7 @@ export const HistoryPage: React.FC = () => {
           className="p-2.5 rounded-xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer text-xs flex items-center space-x-1"
           title="Refresh"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          <ArrowsClockwise weight="bold" className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline font-mono">Refresh</span>
         </button>
       </div>
@@ -344,7 +344,7 @@ export const HistoryPage: React.FC = () => {
       <div className="space-y-3">
         {/* Search Input */}
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
+          <MagnifyingGlass weight="bold" className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
           <input
             type="text"
             value={searchQuery}
@@ -355,7 +355,7 @@ export const HistoryPage: React.FC = () => {
         </div>
 
         {/* Filter Pills */}
-        <div className="flex gap-2 overflow-x-auto pb-1 text-xs font-mono">
+        <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory scroll-px-1 pb-1.5 text-xs font-mono">
           {[
             { id: 'all', label: 'All' },
             { id: 'requests', label: 'Requests' },
@@ -372,7 +372,7 @@ export const HistoryPage: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setStatusFilter(tab.id)}
-              className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-colors cursor-pointer ${
+              className={`snap-start flex-shrink-0 min-h-10 px-3.5 py-2 rounded-xl whitespace-nowrap transition-colors cursor-pointer ${
                 statusFilter === tab.id
                   ? 'bg-black text-white font-bold'
                   : 'bg-stone-100 hover:bg-stone-200 text-stone-600'
@@ -412,11 +412,11 @@ export const HistoryPage: React.FC = () => {
                       }`}
                     >
                       {tx.balanceEffect === 'debit' ? (
-                        <ArrowUpRight className="w-4 h-4 text-red-600 dark:text-red-400" />
+                        <ArrowUpRight weight="bold" className="w-4 h-4 text-red-600 dark:text-red-400" />
                       ) : tx.balanceEffect === 'incoming' ? (
-                        <ArrowDownLeft className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <ArrowDownLeft weight="bold" className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                       ) : (
-                        <Clock className="w-4 h-4 text-stone-500 dark:text-stone-400" />
+                        <Clock weight="fill" className="w-4 h-4 text-stone-500 dark:text-stone-400" />
                       )}
                     </div>
                     <div className="min-w-0">
@@ -436,7 +436,7 @@ export const HistoryPage: React.FC = () => {
                           className="text-[10px] text-amber-700 dark:text-amber-400 font-mono mt-1 flex items-start gap-1.5 leading-snug"
                           title={tx.reason}
                         >
-                          <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                          <WarningCircle weight="fill" className="w-3 h-3 mt-0.5 flex-shrink-0" />
                           <span className="line-clamp-2 break-words">{tx.reason}</span>
                         </p>
                       )}
@@ -489,9 +489,9 @@ export const HistoryPage: React.FC = () => {
                           title={tx.payment ? 'Copy payment link' : 'Copy transaction hash'}
                         >
                           {copiedId === tx.id ? (
-                            <Check className="w-3.5 h-3.5 text-stone-900" />
+                            <Check weight="bold" className="w-3.5 h-3.5 text-stone-900" />
                           ) : (
-                            <Copy className="w-3.5 h-3.5" />
+                            <Copy weight="fill" className="w-3.5 h-3.5" />
                           )}
                         </button>
                       )}
@@ -502,7 +502,7 @@ export const HistoryPage: React.FC = () => {
                           className="p-1.5 rounded-lg text-stone-400 hover:text-black hover:bg-stone-100 transition-colors cursor-pointer"
                           title="Share link"
                         >
-                          <Share2 className="w-3.5 h-3.5" />
+                          <ShareNetwork weight="fill" className="w-3.5 h-3.5" />
                         </button>
                       )}
 
@@ -527,9 +527,9 @@ export const HistoryPage: React.FC = () => {
                             title="Cancel unclaimed send & refund"
                           >
                             {cancellingId === tx.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <CircleNotch weight="bold" className="w-3 h-3 animate-spin" />
                             ) : (
-                              <XCircle className="w-3 h-3" />
+                              <XCircle weight="fill" className="w-3 h-3" />
                             )}
                             <span>Cancel & Refund</span>
                           </button>
@@ -544,7 +544,7 @@ export const HistoryPage: React.FC = () => {
                             className="p-1.5 rounded-lg text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 transition-colors"
                             title="Verify on-chain contract escrow"
                           >
-                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <ShieldCheck weight="fill" className="w-3.5 h-3.5" />
                           </Link>
                         )}
 
@@ -556,7 +556,7 @@ export const HistoryPage: React.FC = () => {
                           className="p-1.5 rounded-lg text-stone-400 hover:text-black hover:bg-stone-100 transition-colors"
                           title="View on NEARBlocks"
                         >
-                          <ExternalLink className="w-3.5 h-3.5" />
+                          <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
                         </a>
                       )}
                     </div>

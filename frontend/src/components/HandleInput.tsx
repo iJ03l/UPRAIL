@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { CheckCircle2, User, X, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { CheckCircle, User, X, WarningCircle, CircleNotch, ShieldCheck } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../lib/api';
+import { Badge } from './Badge';
 
 export interface ResolvedAccountInfo {
   handle: string;
@@ -116,22 +117,22 @@ export const HandleInput: React.FC<HandleInputProps> = ({
   return (
     <div className="w-full space-y-2">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-400">
+        <label className="text-xs font-bold uppercase tracking-[0.06em] text-[var(--fg-muted)]">
           {displayLabel}
         </label>
         {isResolving ? (
           <span className="text-xs text-stone-500 flex items-center space-x-1.5 font-mono animate-pulse">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
             <span>Verifying on 𝕏...</span>
           </span>
         ) : resolvedAccount ? (
           <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center space-x-1 font-medium">
-            <CheckCircle2 className="w-3.5 h-3.5" />
+            <CheckCircle weight="fill" className="w-3.5 h-3.5" />
             <span>{resolvedAccount.isRegistered ? 'On UPRAIL' : 'Valid 𝕏 Account'}</span>
           </span>
         ) : resolutionError && !isFocused ? (
           <span className="text-xs text-red-500 dark:text-red-400 flex items-center space-x-1 font-medium">
-            <AlertCircle className="w-3.5 h-3.5" />
+            <WarningCircle weight="fill" className="w-3.5 h-3.5" />
             <span>Not found</span>
           </span>
         ) : null}
@@ -182,11 +183,11 @@ export const HandleInput: React.FC<HandleInputProps> = ({
             className="absolute right-3.5 p-1 rounded-full text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200 dark:hover:bg-stone-800 transition-colors cursor-pointer"
             title="Clear"
           >
-            <X className="w-4 h-4" />
+            <X weight="bold" className="w-4 h-4" />
           </button>
         ) : (
           <div className="absolute right-3.5 text-stone-300 dark:text-stone-600 pointer-events-none">
-            <User className="w-4 h-4" />
+            <User weight="fill" className="w-4 h-4" />
           </div>
         )}
       </div>
@@ -200,7 +201,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 4 }}
             transition={{ type: 'spring', stiffness: 350, damping: 25 }}
-            className="relative overflow-hidden rounded-2xl p-3 bg-gradient-to-r from-stone-50 to-stone-100/70 dark:from-stone-900/90 dark:to-stone-900/50 border border-stone-200 dark:border-stone-800 shadow-xs"
+            className="relative overflow-hidden rounded-2xl p-3 bg-[var(--bg-subtle)] border border-[var(--line)] shadow-xs"
           >
             <div className="flex items-center space-x-3">
               {/* DP Avatar */}
@@ -236,7 +237,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
                   title={resolvedAccount.isRegistered ? 'On UPRAIL' : '𝕏 Account (not on UPRAIL yet)'}
                 >
                   {resolvedAccount.isRegistered ? (
-                    <ShieldCheck className="w-2.5 h-2.5" />
+                    <ShieldCheck weight="fill" className="w-2.5 h-2.5" />
                   ) : (
                     <svg className="w-2 h-2 fill-current" viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
@@ -248,12 +249,13 @@ export const HandleInput: React.FC<HandleInputProps> = ({
               {/* Profile Details */}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center space-x-1.5 truncate">
-                  <span className="font-semibold text-xs sm:text-sm text-stone-900 dark:text-stone-100 truncate">
+                  <span className="font-semibold text-xs sm:text-sm text-[var(--fg)] truncate">
                     {resolvedAccount.name || resolvedAccount.cleanHandle}
                   </span>
                   {resolvedAccount.isRegistered && (
-                    <span className="flex-shrink-0 text-[9px] font-mono tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800">
-                      // UPRAIL
+                    <span className="inline-flex items-center gap-0.5 px-1.5 py-[1px] rounded bg-emerald-500/10 dark:bg-emerald-400/10 border border-emerald-500/25 text-[8.5px] leading-[11px] font-mono font-bold tracking-[0.08em] uppercase text-emerald-700 dark:text-emerald-300 shrink-0 select-none">
+                      <span className="text-emerald-500 dark:text-emerald-400 opacity-75">//</span>
+                      <span>UPRAIL</span>
                     </span>
                   )}
                 </div>
@@ -279,7 +281,7 @@ export const HandleInput: React.FC<HandleInputProps> = ({
             transition={{ duration: 0.2 }}
             className="p-3 rounded-2xl bg-red-50/70 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 flex items-start space-x-2.5 shadow-xs"
           >
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+            <WarningCircle weight="fill" className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
             <div className="min-w-0 flex-1 leading-snug">
               <span className="font-medium">{resolutionError}</span>
               <p className="text-[11px] text-red-600/80 dark:text-red-400/80 mt-0.5 font-sans">

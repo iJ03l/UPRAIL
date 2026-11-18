@@ -59,19 +59,19 @@ export default function RootLayout({
       <head>
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
         />
         <meta name="theme-color" content="#F7F5F0" />
-        {/* Apply the stored theme before first paint to avoid a light flash. */}
+        {/* Apply the stored theme (or OS preference on first visit) before first paint. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var m=localStorage.getItem('uprail_theme');m=(m==='light'||m==='dark'||m==='system')?m:'light';var d=m==='dark'||(m==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;if(d){e.classList.add('dark');}else{e.classList.remove('dark');}}catch(e){}})();",
+              "(function(){try{var m=localStorage.getItem('uprail_theme');m=(m==='light'||m==='dark'||m==='system')?m:'system';var d=m==='dark'||(m==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;if(d){e.classList.add('dark');}else{e.classList.remove('dark');}var mc=document.querySelector('meta[name=\"theme-color\"]');if(mc)mc.setAttribute('content',d?'#1B1C1E':'#F7F5F0');}catch(e){}})();",
           }}
         />
         <link rel="manifest" href="/manifest.webmanifest" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="UPRAIL" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="icon" type="image/png" href="/brand/uprail-favicon.png" />

@@ -4,20 +4,19 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   ArrowUpRight,
   Check,
-  CheckCircle2,
-  ClipboardPaste,
+  CheckCircle,
+  ClipboardText,
   Copy,
-  Edit3,
-  ExternalLink,
+  PencilSimple,
+  ArrowSquareOut,
   Fingerprint,
   Lock,
   Shield,
-  Sparkles,
-  X,
-  AlertCircle,
+  Sparkle,
+  WarningCircle,
   ArrowLeft,
-} from 'lucide-react';
-import { Portal } from './Portal';
+} from '@phosphor-icons/react';
+import { ModalSheet } from './ModalSheet';
 import { ConfirmDialog } from './ConfirmDialog';
 import { AssetPicker } from './AssetPicker';
 import { TokenIcon } from './TokenIcon';
@@ -244,18 +243,6 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
     };
   }, [isOpen]);
 
-  // Close on Escape when not busy or in confirmation dialog
-  useEffect(() => {
-    if (!isOpen || showConfirm) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSavingAddress && !isWithdrawing && !isAuthorizing) {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, showConfirm, isSavingAddress, isWithdrawing, isAuthorizing, onClose]);
-
   const parsedInput = useMemo(
     () => validateNearcomAddressInput(addressInput),
     [addressInput]
@@ -405,41 +392,19 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
     setTimeout(() => setCopiedDest(false), 2000);
   };
 
-  if (!isOpen) return null;
-
   return (
     <>
-      <Portal>
-        <div
-          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-md"
-          onMouseDown={(e) => {
-            if (
-              e.target === e.currentTarget &&
-              !isSavingAddress &&
-              !isWithdrawing &&
-              !isAuthorizing &&
-              !showConfirm
-            ) {
-              onClose();
-            }
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="nearcom-modal-title"
-            className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl p-6 sm:p-7 animate-fade-in max-h-[92vh] overflow-y-auto"
-          >
-            {/* Close button */}
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSavingAddress || isWithdrawing || isAuthorizing}
-              aria-label="Close modal"
-              className="absolute top-4 right-4 p-1.5 rounded-full text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <X className="w-4 h-4" />
-            </button>
+      <ModalSheet
+        isOpen={isOpen}
+        onClose={onClose}
+        canClose={!isSavingAddress && !isWithdrawing && !isAuthorizing && !showConfirm}
+        zIndexClass="z-[110]"
+        maxWidthClass="sm:max-w-md"
+        panelClassName="px-6 sm:p-7 pt-2 sm:pt-7 pb-6"
+        showCloseButton
+        closeLabel="Close near.com withdraw modal"
+        ariaLabelledBy="nearcom-modal-title"
+      >
 
             {/* ── MODE: LOADING ── */}
             {mode === 'loading' && (
@@ -468,11 +433,11 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       className="w-10 h-10 rounded-2xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-800 flex items-center justify-center flex-shrink-0 transition-colors cursor-pointer"
                       title="Back to Withdraw"
                     >
-                      <ArrowLeft className="w-4 h-4" />
+                      <ArrowLeft weight="bold" className="w-4 h-4" />
                     </button>
                   ) : (
                     <div className="w-10 h-10 rounded-2xl bg-stone-900 text-white flex items-center justify-center flex-shrink-0">
-                      <Shield className="w-5 h-5" />
+                      <Shield weight="fill" className="w-5 h-5" />
                     </div>
                   )}
                   <div className="min-w-0">
@@ -514,7 +479,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       onClick={handlePasteClipboard}
                       className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-stone-700 hover:text-black px-2 py-0.5 rounded-lg hover:bg-stone-100 transition-colors cursor-pointer"
                     >
-                      <ClipboardPaste className="w-3 h-3" />
+                      <ClipboardText weight="fill" className="w-3 h-3" />
                       <span>Paste</span>
                     </button>
                   </div>
@@ -536,14 +501,14 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   {/* Live validation feedback */}
                   {parsedInput.valid && (
                     <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-1.5 flex items-center gap-2 text-[11px] font-mono text-emerald-900">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                      <CheckCircle weight="fill" className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                       <span className="truncate">Valid near.com address</span>
                     </div>
                   )}
 
                   {(addressError || (addressInput.trim() && parsedInput.error)) && (
                     <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-1.5 flex items-start gap-2 text-[11px] font-mono text-red-700">
-                      <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
+                      <WarningCircle weight="fill" className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
                       <span className="break-words">{addressError || parsedInput.error}</span>
                     </div>
                   )}
@@ -577,7 +542,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       </>
                     ) : (
                       <>
-                        <Fingerprint className="w-4 h-4" />
+                        <Fingerprint weight="bold" className="w-4 h-4" />
                         <span>{mode === 'edit' ? 'Update Address' : 'Save Address'}</span>
                       </>
                     )}
@@ -592,7 +557,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                 {/* Header */}
                 <div className="flex items-center gap-3 pr-6">
                   <div className="w-10 h-10 rounded-2xl bg-stone-950 text-white flex items-center justify-center flex-shrink-0">
-                    <ArrowUpRight className="w-5 h-5" />
+                    <ArrowUpRight weight="bold" className="w-5 h-5" />
                   </div>
                   <div className="min-w-0">
                     <h3
@@ -625,9 +590,9 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       title="Copy address"
                     >
                       {copiedDest ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" />
                       ) : (
-                        <Copy className="w-3.5 h-3.5" />
+                        <Copy weight="fill" className="w-3.5 h-3.5" />
                       )}
                     </button>
                     <button
@@ -639,7 +604,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       }}
                       className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border border-stone-200 bg-white hover:border-stone-900 text-[11px] font-mono font-bold text-stone-800 hover:text-black transition-all cursor-pointer"
                     >
-                      <Edit3 className="w-3 h-3" />
+                      <PencilSimple weight="fill" className="w-3 h-3" />
                       <span>Edit</span>
                     </button>
                   </div>
@@ -759,7 +724,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                     {/* Error Feedback */}
                     {(exceedsBalance || withdrawError) && (
                       <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
-                        <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
+                        <WarningCircle weight="fill" className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
                         <span>
                           {exceedsBalance
                             ? `Insufficient ${selectedToken?.symbol} balance. Available: ${formatTokenAmount(
@@ -786,7 +751,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                         <span>║▓▒░╬──┼──SHIELDED──┼──0.00 GAS──┼──WITHDRAW──┼──╬░▒▓█╬║</span>
                         <span>╚══╬░▒▓█═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░╬══╝</span>
                       </span>
-                      <Fingerprint className="relative z-10 w-4 h-4 drop-shadow-xs" />
+                      <Fingerprint weight="bold" className="relative z-10 w-4 h-4 drop-shadow-xs" />
                       <span className="relative z-10 drop-shadow-xs">Withdraw to near.com</span>
                     </button>
                   </>
@@ -799,7 +764,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
               <div className="space-y-5 py-2">
                 <div className="flex flex-col items-center text-center space-y-2">
                   <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center">
-                    <CheckCircle2 className="w-6 h-6" />
+                    <CheckCircle weight="fill" className="w-6 h-6" />
                   </div>
                   <h3 className="text-xl font-display font-extrabold text-stone-950">
                     {receipt.status === 'COMPLETED'
@@ -839,7 +804,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                       className="flex-1 py-3 px-4 rounded-2xl border border-stone-200 hover:border-stone-900 text-stone-800 text-xs font-display font-bold flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <span>View Receipt</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
                     </a>
                   )}
                   <button
@@ -852,9 +817,7 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      </Portal>
+      </ModalSheet>
 
       {/* ── CONFIRMATION MODAL (Passkey Gated) ── */}
       {destination && selectedToken && (

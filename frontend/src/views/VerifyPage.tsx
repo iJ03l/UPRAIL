@@ -3,21 +3,22 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ShieldCheck,
-  ShieldAlert,
-  Search,
-  KeyRound,
-  CheckCircle2,
+  ShieldWarning,
+  MagnifyingGlass,
+  Key,
+  CheckCircle,
   XCircle,
-  ExternalLink,
+  ArrowSquareOut,
   Copy,
   Check,
   ArrowRight,
-  CircleDot,
+  Record as RecordIcon,
   Gift,
-  Send,
-} from 'lucide-react';
+  PaperPlaneTilt,
+} from '@phosphor-icons/react';
 import { api } from '../lib/api';
 import { GlitchLogo } from '../components/GlitchLogo';
+import { Badge } from '../components/Badge';
 import { Link, useSearchParams } from '../lib/router';
 import { useToast } from '../components/Toast';
 import type { ContractVerifyResponse, PublicVerifyState } from '../types';
@@ -44,9 +45,9 @@ function CopyChip({ value, label }: { value: string; label?: string }) {
       title={`Copy ${label || 'value'}`}
     >
       {copied ? (
-        <Check className="w-3 h-3 text-emerald-600" />
+        <Check weight="bold" className="w-3 h-3 text-emerald-600" />
       ) : (
-        <Copy className="w-3 h-3" />
+        <Copy weight="fill" className="w-3 h-3" />
       )}
       <span>{copied ? 'Copied' : 'Copy'}</span>
     </button>
@@ -68,11 +69,11 @@ function StatusRow({
     <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-stone-50 border border-stone-200">
       <div className="flex items-center gap-2">
         {ok === true ? (
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <CheckCircle weight="fill" className="w-4 h-4 text-emerald-600 shrink-0" />
         ) : ok === false ? (
-          <XCircle className="w-4 h-4 text-amber-600 shrink-0" />
+          <XCircle weight="fill" className="w-4 h-4 text-amber-600 shrink-0" />
         ) : (
-          <KeyRound className="w-4 h-4 text-stone-500 shrink-0" />
+          <Key weight="fill" className="w-4 h-4 text-stone-500 shrink-0" />
         )}
         <span className="text-xs font-mono text-stone-600">{label}</span>
       </div>
@@ -127,9 +128,9 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<str
               }`}
             >
               {isSelfVerified ? (
-                <ShieldCheck className="w-5 h-5" />
+                <ShieldCheck weight="fill" className="w-5 h-5" />
               ) : (
-                <ShieldAlert className="w-5 h-5 text-amber-400" />
+                <ShieldWarning weight="fill" className="w-5 h-5 text-amber-400" />
               )}
             </div>
             <div>
@@ -155,7 +156,7 @@ function AccountVerifyPanel({ result }: { result: PublicVerifyState & Record<str
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-stone-200 hover:bg-stone-50 text-xs font-mono font-bold text-stone-800"
             >
               <span>Inspect on NearBlocks</span>
-              <ExternalLink className="w-3.5 h-3.5" />
+              <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
             </a>
           )}
         </div>
@@ -318,9 +319,9 @@ function ContractVerifyPanel({ result }: { result: ContractVerifyResponse }) {
               }`}
             >
               {result.foundOnchain ? (
-                <ShieldCheck className="w-5 h-5" />
+                <ShieldCheck weight="fill" className="w-5 h-5" />
               ) : (
-                <ShieldAlert className="w-5 h-5" />
+                <ShieldWarning weight="fill" className="w-5 h-5" />
               )}
             </div>
             <div>
@@ -344,7 +345,7 @@ function ContractVerifyPanel({ result }: { result: ContractVerifyResponse }) {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-stone-200 hover:bg-stone-50 text-xs font-mono font-bold text-stone-800"
             >
               <span>Inspect Contract</span>
-              <ExternalLink className="w-3.5 h-3.5" />
+              <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
             </a>
           )}
         </div>
@@ -513,7 +514,7 @@ export const VerifyPage: React.FC = () => {
         window.matchMedia('(prefers-color-scheme: dark)').matches;
       document.documentElement.classList.toggle(
         'dark',
-        savedTheme ? savedTheme === 'dark' : prefersDark
+        savedTheme === 'dark' || ((!savedTheme || savedTheme === 'system') && prefersDark)
       );
     } catch {}
   }, []);
@@ -586,17 +587,16 @@ export const VerifyPage: React.FC = () => {
           className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full border border-stone-200 bg-white hover:bg-stone-100 text-xs font-mono font-bold text-stone-800 transition-colors"
         >
           <span>Open UPRAIL App</span>
-          <ArrowRight className="w-3.5 h-3.5" />
+          <ArrowRight weight="bold" className="w-3.5 h-3.5" />
         </Link>
       </header>
 
       <main className="max-w-3xl w-full mx-auto my-8 space-y-6">
         <div className="bg-white border border-stone-200 rounded-3xl shadow-sm p-6 sm:p-8 space-y-6">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold uppercase tracking-wider">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Account &amp; Escrow Check</span>
-            </div>
+            <Badge tone="ok" icon={<ShieldCheck weight="fill" className="w-3 h-3" />}>
+              Account &amp; Escrow Check
+            </Badge>
             <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950 tracking-tight">
               Verify Account Ownership &amp; Escrows
             </h1>
@@ -657,7 +657,7 @@ export const VerifyPage: React.FC = () => {
                   disabled={isLoading || !accountQuery.trim()}
                   className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider cursor-pointer disabled:opacity-40"
                 >
-                  <Search className="w-4 h-4" />
+                  <MagnifyingGlass weight="bold" className="w-4 h-4" />
                   <span>{isLoading ? 'Checking RPC...' : 'Verify Account'}</span>
                 </button>
               </div>
@@ -666,9 +666,9 @@ export const VerifyPage: React.FC = () => {
             <form onSubmit={handleContractSubmit} className="space-y-3">
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { kind: 'circle' as const, label: 'Circle', icon: CircleDot },
+                  { kind: 'circle' as const, label: 'Circle', icon: RecordIcon },
                   { kind: 'gift' as const, label: 'Earn Gift', icon: Gift },
-                  { kind: 'send' as const, label: 'Send Escrow', icon: Send },
+                  { kind: 'send' as const, label: 'Send Escrow', icon: PaperPlaneTilt },
                 ].map(({ kind, label, icon: Icon }) => (
                   <button
                     key={kind}
@@ -699,7 +699,7 @@ export const VerifyPage: React.FC = () => {
                   disabled={isLoading || !contractId.trim()}
                   className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider cursor-pointer disabled:opacity-40"
                 >
-                  <Search className="w-4 h-4" />
+                  <MagnifyingGlass weight="bold" className="w-4 h-4" />
                   <span>{isLoading ? 'Querying Contract...' : 'Verify On-Chain'}</span>
                 </button>
               </div>
@@ -722,7 +722,7 @@ export const VerifyPage: React.FC = () => {
         </div>
       </main>
 
-      <footer className="text-center text-[11px] font-mono text-stone-400">
+      <footer className="text-center text-[11px] font-mono text-stone-500">
         Powered by UPRAIL &bull; Verifiable Passkey Custody on NEAR Intents
       </footer>
     </div>

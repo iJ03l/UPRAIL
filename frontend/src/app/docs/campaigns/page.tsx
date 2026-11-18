@@ -33,7 +33,8 @@ export default function CampaignsDocsPage() {
           </li>
           <li>
             Register your device Passkey (Face ID, Touch ID, or hardware key) when prompted and
-            save your encrypted recovery codes somewhere safe.
+            save your offline <code className="font-mono text-[13px]">UP1-...</code> Recovery Key
+            (plus any encrypted backup codes) somewhere safe.
           </li>
           <li>
             Turn on your public payment link from the Home screen if you also want fans, sponsors,
@@ -59,7 +60,7 @@ export default function CampaignsDocsPage() {
           <li>
             <strong className="text-stone-900">Crowdsource via a Circle:</strong> Open{' '}
             <strong>Circles</strong> and create a shared pool so partners or community sponsors
-            can add funds together and earn live yield while the campaign is running.
+            can add USDC together and earn live yield while the campaign is running.
           </li>
           <li>
             <strong className="text-stone-900">Route launchpad creator fees:</strong> Point your
@@ -87,10 +88,11 @@ export default function CampaignsDocsPage() {
             <p className="text-sm text-stone-600 leading-relaxed">
               Open <strong>Send</strong>, type the winner&apos;s{' '}
               <code className="font-mono text-[13px]">@handle</code>, pick the token and amount, and
-              confirm with your passkey. If they haven&apos;t joined UPRAIL yet, share the claim
-              link publicly or by DM — they log in with 𝕏 and claim in one tap (or withdraw
-              straight to any external wallet). Unclaimed prizes automatically refund to your
-              project after 30 days.
+              confirm with your passkey (winners receive <strong>100%</strong> of the amount you
+              enter, with the 1% protocol fee added on top from your balance). If they haven&apos;t
+              joined UPRAIL yet, share the claim link publicly or by DM — they log in with 𝕏 and
+              claim in one tap (or withdraw straight to any external wallet). Unclaimed prizes refund
+              to your project after 30 days.
             </p>
           </div>
 
@@ -104,8 +106,9 @@ export default function CampaignsDocsPage() {
               <code className="font-mono text-[13px]">stNEAR</code>, or{' '}
               <code className="font-mono text-[13px]">gtUSDCp</code>), pick a future unlock date
               (for example Demo Day, a milestone date, or New Year&apos;s), and fund with{' '}
-              <strong>0% gift fee</strong>. Share the live gift card link on 𝕏 — winners watch the
-              prize earn yield until unlock day, and can unwrap it once the countdown ends.
+              <strong>USDC</strong> (1% protocol fee at creation; 99% enters the compounding vault).
+              Share the live gift card link on 𝕏 — winners watch the prize earn yield until unlock
+              day, and unwrap into Confidential USDC once the countdown ends.
             </p>
           </div>
 
@@ -117,11 +120,12 @@ export default function CampaignsDocsPage() {
               Create a Circle on <strong>Circles → Create Circle</strong>, set a target goal and an
               Earn vault, add partner{' '}
               <code className="font-mono text-[13px]">@handles</code> with percentage splits, and
-              share the invite link. Every sponsor adds their share with one passkey tap while the
-              pool earns live APY. When the campaign closes, click <strong>Settle &amp; Payout</strong>{' '}
-              to send the entire pool + yield straight to the winner&apos;s{' '}
-              <code className="font-mono text-[13px]">@handle</code> (or <strong>Dissolve</strong>{' '}
-              with contributors to refund pro-rata if cancelled).
+              share the invite link so sponsors sign with their passkeys. Every sponsor adds USDC
+              with one passkey tap while the pool earns live APY. When the campaign closes, click{' '}
+              <strong>Settle &amp; Payout</strong> to send <strong>99%</strong> of the pool +
+              yield to the winner&apos;s <code className="font-mono text-[13px]">@handle</code> (1%
+              protocol fee on payout; or <strong>Dissolve</strong> with contributors to refund
+              pro-rata at 0% fee).
             </p>
           </div>
 

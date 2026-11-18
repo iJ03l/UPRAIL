@@ -52,8 +52,9 @@ export default function FeesDocsPage() {
         <Callout>
           Because fees are paid in the launchpad&apos;s <strong className="text-stone-900">paired token</strong>,
           they arrive as that token. The standard <strong className="text-stone-900">1% protocol fee</strong>{' '}
-          is carved out at source, exactly like a peer send; the rest is yours to hold on UPRAIL or
-          cash out to any chain from your vault.
+          is deducted from gross routed royalties (<strong className="text-stone-900">99%</strong> credited to the
+          creator; unlike peer sends, where the 1% fee is added on top from the sender&apos;s balance),
+          and the rest is yours to hold on UPRAIL or cash out to any chain from your vault.
         </Callout>
       </section>
 
@@ -198,6 +199,22 @@ POST /api/fees/adapter
           including a launchpad&apos;s own role label. If the transfer never lands, nothing is
           credited: UPRAIL does not watch the launchpad&apos;s existing payout.
         </p>
+
+        <div className="space-y-2 pt-2">
+          <Endpoint verb="GET" path="/api/launchpads/config" auth="public" />
+          <p className="text-xs text-stone-600">
+            Returns mainnet escrow receiver, supported verification modes (<code className="font-mono">token_config</code>,{' '}
+            <code className="font-mono">factory</code>, <code className="font-mono">jh_v2_dev</code>), and the NEP-413 self-serve registration schema.
+          </p>
+          <Endpoint verb="POST" path="/api/launchpads/register" auth="NEP-413 signed" />
+          <p className="text-xs text-stone-600">
+            Registers a launchpad token for an <code className="font-mono">@handle</code> using a NEP-413 signature from the token parent account.
+          </p>
+          <Endpoint verb="POST" path="/api/launchpads/claim" auth="public" />
+          <p className="text-xs text-stone-600">
+            Triggers collection of owed creator fees for a registered NEP-141 token contract.
+          </p>
+        </div>
         <Callout>
           <strong className="text-stone-900">Launchpads own the payout.</strong> The Creator fees
           page only receives. The adapter belongs in the launchpad keeper or contract.

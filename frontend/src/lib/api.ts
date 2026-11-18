@@ -387,8 +387,9 @@ export function sumUsd(values: (number | null | undefined)[]): number | null {
 export function formatUsd(value: number | null | undefined): string {
   if (typeof value !== 'number' || !isFinite(value)) return '\u2014';
   if (value === 0) return '$0.00';
-  if (Math.abs(value) < 0.01) return `$${value.toFixed(4)}`;
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const cents = Math.round(value * 100) / 100;
+  if (cents === 0) return value < 0 ? '-<$0.01' : '<$0.01';
+  return `$${cents.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /**
@@ -949,6 +950,20 @@ export const api = {
     return await res.json();
   },
 
+  async createBrowserHandoff(returnTo?: string): Promise<{ url: string; token: string }> {
+    const url = API_BASE ? `${API_BASE}/auth/browser-handoff` : '/auth/browser-handoff';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ returnTo: returnTo || '/login' }),
+    });
+    if (!res.ok) {
+      throw new Error('Could not prepare browser handoff link');
+    }
+    return await res.json();
+  },
+
   // Token list
   async getTokens(): Promise<Token[]> {
     try {
@@ -1081,15 +1096,20 @@ export const api = {
         const protocolFee = q.protocolFee !== undefined ? q.protocolFee : (numAmount * PROTOCOL_FEE_RATE).toFixed(6).replace(/\.?0+$/, '') || '0';
         const protocolFeeUsd = usd(parseFloat(protocolFee));
         const protocolFeeRecipient = q.feeRecipient || 'escrow.uprail.near';
-        // The protocol fee is carved out of the amount being sent, so the
-        // sender's balance only ever drops by the amount they entered.
+        // Fee is charged on top of the quoted amount — recipient always receives
+        // 100% of the quoted amount while sender pays amount + protocolFee.
         const recipientAmount =
-          q.recipientAmount !== undefined
-            ? q.recipientAmount
-            : Math.max(0, numAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
+          q.recipientAmount !== undefined ? q.recipientAmount : (amount || '0');
         const recipientAmountUsd = usd(parseFloat(recipientAmount));
-        const totalAmount = numAmount.toFixed(token.decimals > 6 ? 4 : 2);
-        const totalUsd = usd(numAmount);
+        const totalNum =
+          q.totalAmount !== undefined
+            ? parseFloat(q.totalAmount) || numAmount
+            : parseFloat(recipientAmount) + parseFloat(protocolFee);
+        const totalAmount =
+          q.totalAmount !== undefined
+            ? q.totalAmount
+            : totalNum.toFixed(6).replace(/\.?0+$/, '') || '0';
+        const totalUsd = usd(totalNum);
 
         return {
           token,
@@ -1121,11 +1141,11 @@ export const api = {
     const protocolFee = (numAmount * PROTOCOL_FEE_RATE).toFixed(6).replace(/\.?0+$/, '') || '0';
     const protocolFeeUsd = usd(parseFloat(protocolFee));
     const protocolFeeRecipient = 'escrow.uprail.near';
-    const recipientAmount =
-      Math.max(0, numAmount - parseFloat(protocolFee)).toFixed(6).replace(/\.?0+$/, '') || '0';
+    const recipientAmount = amount || '0';
     const recipientAmountUsd = usd(parseFloat(recipientAmount));
-    const totalAmount = numAmount.toFixed(token.decimals > 6 ? 4 : 2);
-    const totalUsd = usd(numAmount);
+    const totalNum = numAmount + parseFloat(protocolFee);
+    const totalAmount = totalNum.toFixed(6).replace(/\.?0+$/, '') || '0';
+    const totalUsd = usd(totalNum);
 
     return {
       token,
@@ -1198,14 +1218,15 @@ export const api = {
 
     if (res.ok) {
       const backendData = await res.json();
-      // The recipient-facing amount is what they can actually claim
-      // (amount − fee); the fee column carries the carved-out protocol fee.
+      // Recipient receives 100% of quoted amount; fee is debited on top from sender.
       const netAmount = backendData.recipientAmount || params.amount;
       const numNet = parseFloat(netAmount) || 0;
-      const grossAmount = params.amount || netAmount;
-      const numGross = parseFloat(grossAmount) || numNet;
       const feeVal = backendData.fee || '0';
       const numFee = parseFloat(feeVal) || 0;
+      const grossAmount =
+        backendData.totalAmount ||
+        (numFee > 0 ? Number((numNet + numFee).toFixed(8)).toString() : netAmount);
+      const numGross = parseFloat(grossAmount) || numNet;
       return {
         id: backendData.paymentId,
         claimCode: backendData.paymentId,
@@ -1559,13 +1580,16 @@ export const api = {
     return await res.json();
   },
 
-  async redeemInvite(code: string): Promise<RedeemInviteResponse> {
+  async redeemInvite(
+    code?: string,
+    opts?: { skip?: boolean }
+  ): Promise<RedeemInviteResponse> {
     const url = API_BASE ? `${API_BASE}/api/invites/redeem` : '/api/invites/redeem';
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ code }),
+      body: JSON.stringify(opts?.skip ? { skip: true } : { code }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -2613,10 +2637,14 @@ export const api = {
     const price = tokenUsdPrice(resolvedToken);
     const netAmount = String(p.amount || res.recipientAmount || params.amount);
     const numNet = parseFloat(netAmount) || 0;
-    const grossAmount = String(params.amount || netAmount);
-    const numGross = parseFloat(grossAmount) || numNet;
     const feeVal = String(p.fee ?? res.fee ?? '0');
     const numFee = parseFloat(feeVal) || 0;
+    const grossAmount = String(
+      res.totalAmount ||
+        p.grossAmount ||
+        (numFee > 0 ? Number((numNet + numFee).toFixed(8)).toString() : netAmount)
+    );
+    const numGross = parseFloat(grossAmount) || numNet;
     const paymentId = String(p.id || res.paymentId || '');
 
     return {

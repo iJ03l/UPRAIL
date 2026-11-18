@@ -2,23 +2,22 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  AlertCircle,
+  WarningCircle,
   ArrowDown,
-  ArrowLeftRight,
+  ArrowsLeftRight,
   Check,
-  CheckCircle2,
+  CheckCircle,
   Copy,
   Fingerprint,
-  RefreshCw,
+  ArrowsClockwise,
   Shield,
-  X,
-} from 'lucide-react';
-import { Portal } from './Portal';
+} from '@phosphor-icons/react';
+import { ModalSheet } from './ModalSheet';
+import { Badge } from './Badge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TokenIcon } from './TokenIcon';
 import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useXAuth } from '../hooks/useXAuth';
-import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { useToast } from './Toast';
 import {
   api,
@@ -57,7 +56,6 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
 }) => {
   const { user } = useXAuth();
   const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
-  useBodyScrollLock(isOpen);
   const { toast } = useToast();
 
   // Strictly show only the non-stablecoin crypto that the user actually holds
@@ -243,8 +241,6 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     result,
   ]);
 
-  if (!isOpen) return null;
-
   const handleSelectPercentage = (pct: number) => {
     if (!selectedToken) return;
     setSubmitError(null);
@@ -417,38 +413,25 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   };
 
   return (
-    <Portal>
-      <div
-        className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-stone-950/60 backdrop-blur-xs animate-fade-in"
-        onClick={() => {
-          if (!isSubmitting && !isAuthorizing) onClose();
-        }}
+    <>
+      <ModalSheet
+        isOpen={isOpen}
+        onClose={onClose}
+        canClose={!isSubmitting && !isAuthorizing && !isConfirmOpen}
+        zIndexClass="z-[110]"
+        maxWidthClass="sm:max-w-md"
+        panelClassName="p-0"
+        showCloseButton
+        closeLabel="Close stabilize modal"
+        ariaLabelledBy="stabilize-modal-title"
       >
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="stabilize-modal-title"
-          className="relative w-full max-w-md rounded-3xl bg-white border border-stone-200 shadow-2xl max-h-[92vh] overflow-y-auto overscroll-contain animate-scale-in"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Close Button */}
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isSubmitting || isAuthorizing}
-            className="absolute top-4 right-4 z-10 p-2 rounded-full text-stone-400 hover:text-stone-800 hover:bg-stone-100 transition-colors cursor-pointer disabled:opacity-40"
-            aria-label="Close modal"
-          >
-            <X className="w-4 h-4" />
-          </button>
-
-          <div className="p-5 sm:p-6">
+        <div className="p-5 pt-2 sm:p-6">
             {result ? (
               /* ── SUCCESS RECEIPT ── */
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
-                    <CheckCircle2 className="w-5 h-5" />
+                    <CheckCircle weight="fill" className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="text-lg font-display font-extrabold text-stone-950 tracking-tight">
@@ -491,9 +474,9 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                           {result.intentHash.slice(0, 8)}…{result.intentHash.slice(-6)}
                         </span>
                         {copiedHash ? (
-                          <Check className="w-3 h-3 text-emerald-600" />
+                          <Check weight="bold" className="w-3 h-3 text-emerald-600" />
                         ) : (
-                          <Copy className="w-3 h-3 text-stone-400" />
+                          <Copy weight="fill" className="w-3 h-3 text-stone-400" />
                         )}
                       </button>
                     </div>
@@ -514,7 +497,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                 <div className="flex items-center justify-between pb-3 border-b border-stone-100">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
-                      <RefreshCw className="w-5 h-5 animate-spin text-emerald-600" />
+                      <ArrowsClockwise weight="bold" className="w-5 h-5 animate-spin text-emerald-600" />
                     </div>
                     <div>
                       <h3 className="text-sm font-display font-bold text-stone-950">
@@ -530,9 +513,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                     </div>
                   </div>
                   {progressStep === 'settling' && (
-                    <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-                      {elapsedSeconds}s
-                    </span>
+                    <Badge tone="ok">{elapsedSeconds}s</Badge>
                   )}
                 </div>
 
@@ -548,9 +529,9 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                       }`}
                     >
                       {progressStep === 'authorizing' ? (
-                        <Fingerprint className="w-3.5 h-3.5" />
+                        <Fingerprint weight="bold" className="w-3.5 h-3.5" />
                       ) : (
-                        <Check className="w-3.5 h-3.5" />
+                        <Check weight="bold" className="w-3.5 h-3.5" />
                       )}
                     </div>
                     <span className="text-xs font-mono font-medium text-stone-800">
@@ -572,9 +553,9 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                       {progressStep === 'authorizing' ? (
                         '2'
                       ) : progressStep === 'submitting' ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        <ArrowsClockwise weight="bold" className="w-3 h-3 animate-spin" />
                       ) : (
-                        <Check className="w-3.5 h-3.5" />
+                        <Check weight="bold" className="w-3.5 h-3.5" />
                       )}
                     </div>
                     <span
@@ -596,7 +577,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                       }`}
                     >
                       {progressStep === 'settling' ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        <ArrowsClockwise weight="bold" className="w-3 h-3 animate-spin" />
                       ) : (
                         '3'
                       )}
@@ -621,7 +602,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                 </div>
 
                 <div className="rounded-2xl bg-stone-50 border border-stone-200/80 p-3 text-[11px] font-mono text-stone-500 flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <Shield weight="fill" className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                   <span>Confidential Intents swap. Your vault balances update automatically once filled.</span>
                 </div>
               </div>
@@ -631,7 +612,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                 {/* Header */}
                 <div className="flex items-center gap-3 pr-6">
                   <div className="w-10 h-10 rounded-2xl bg-stone-950 text-white flex items-center justify-center flex-shrink-0 shadow-xs">
-                    <ArrowLeftRight className="w-4 h-4 text-white" />
+                    <ArrowsLeftRight weight="bold" className="w-4 h-4 text-white" />
                   </div>
                   <div className="min-w-0">
                     <h3
@@ -753,7 +734,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                     <div className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50 p-2.5">
                       <div className="flex items-center gap-2 pl-1">
                         <div className="w-6 h-6 rounded-lg bg-stone-200/80 text-stone-700 flex items-center justify-center">
-                          <ArrowDown className="w-3.5 h-3.5" />
+                          <ArrowDown weight="bold" className="w-3.5 h-3.5" />
                         </div>
                         <span className="text-xs font-mono font-bold uppercase tracking-wider text-stone-600">
                           To
@@ -788,7 +769,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                         <span className="text-stone-500">You Receive (Est.)</span>
                         {isQuoting ? (
                           <span className="inline-flex items-center gap-1.5 text-stone-500">
-                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <ArrowsClockwise weight="bold" className="w-3 h-3 animate-spin" />
                             <span>Calculating…</span>
                           </span>
                         ) : quote ? (
@@ -812,7 +793,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                       <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-stone-200/70">
                         <span className="text-stone-500">Gas</span>
                         <span className="text-emerald-700 font-bold inline-flex items-center gap-1">
-                          <Shield className="w-3 h-3" />
+                          <Shield weight="fill" className="w-3 h-3" />
                           $0.00 Sponsored
                         </span>
                       </div>
@@ -821,7 +802,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                     {/* Error Feedback */}
                     {(exceedsBalance || belowMinimum || quoteError || submitError) && (
                       <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
-                        <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
+                        <WarningCircle weight="fill" className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
                         <span>
                           {exceedsBalance
                             ? `Insufficient ${selectedToken?.symbol} balance. Available: ${formatTokenAmount(
@@ -864,7 +845,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                         </span>
                       ) : (
                         <span className="relative z-10 inline-flex items-center gap-2 drop-shadow-xs">
-                          <Fingerprint className="w-4 h-4" />
+                          <Fingerprint weight="bold" className="w-4 h-4" />
                           <span>
                             Stabilize to {targetAsset}
                             {quote ? ` (${quote.amountOut} ${targetAsset})` : ''}
@@ -876,9 +857,8 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                 )}
               </form>
             )}
-          </div>
         </div>
-      </div>
+      </ModalSheet>
 
       {/* Passkey Confirmation Dialog */}
       <ConfirmDialog
@@ -910,6 +890,6 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
           if (!isSubmitting && !isAuthorizing) setIsConfirmOpen(false);
         }}
       />
-    </Portal>
+    </>
   );
 };

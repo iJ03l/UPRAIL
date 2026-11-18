@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { IconContext } from '@phosphor-icons/react';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
@@ -21,14 +22,14 @@ function systemTheme(): ResolvedTheme {
 }
 
 function readStoredMode(): ThemeMode {
-  if (typeof window === 'undefined') return 'light';
+  if (typeof window === 'undefined') return 'system';
   try {
     const v = window.localStorage.getItem(STORAGE_KEY);
     if (v === 'light' || v === 'dark' || v === 'system') return v;
   } catch {
-    /* storage blocked (private mode) — fall through to light */
+    /* storage blocked (private mode) — fall through to OS preference */
   }
-  return 'light';
+  return 'system';
 }
 
 function applyTheme(resolved: ResolvedTheme) {
@@ -39,7 +40,7 @@ function applyTheme(resolved: ResolvedTheme) {
 }
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, setModeState] = useState<ThemeMode>('light');
+  const [mode, setModeState] = useState<ThemeMode>('system');
   const [resolved, setResolved] = useState<ResolvedTheme>('light');
 
   // The inline <head> script already applied the class before paint; this
@@ -76,7 +77,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const value = useMemo(() => ({ mode, resolved, setMode }), [mode, resolved, setMode]);
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  const iconValue = useMemo(() => ({ weight: 'fill' as const }), []);
+  return (
+    <ThemeContext.Provider value={value}>
+      <IconContext.Provider value={iconValue}>{children}</IconContext.Provider>
+    </ThemeContext.Provider>
+  );
 };
 
 export function useTheme(): ThemeContextValue {

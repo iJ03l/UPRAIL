@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Shield, FileText, CheckCircle2, Lock, Scale, ExternalLink } from 'lucide-react';
+import { Shield, FileText, CheckCircle, Lock, Scales, ArrowSquareOut } from '@phosphor-icons/react';
+import { ModalSheet } from './ModalSheet';
 
 export type LegalTab = 'privacy' | 'terms';
 
@@ -24,52 +25,33 @@ export const LegalModal: React.FC<LegalModalProps> = ({
     }
   }, [isOpen, initialTab]);
 
-  // Handle ESC key press
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-stone-950/60 backdrop-blur-md animate-fade-in select-none">
-      <div
-        className="fixed inset-0"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      <div className="relative z-10 w-full max-w-2xl bg-white border border-stone-200 rounded-3xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-        {/* Header */}
-        <div className="p-5 sm:p-6 border-b border-stone-100 flex items-center justify-between bg-stone-50/60 flex-shrink-0">
-          <div className="flex items-center space-x-3">
-            <img src="/brand/uprail-icon.png" alt="UPRAIL" className="w-8 h-8 object-contain" />
-            <div>
-              <h2 className="font-display font-extrabold text-base sm:text-lg text-stone-950 tracking-tight">
-                {activeTab === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions'}
-              </h2>
-              <div className="flex items-center space-x-2 text-[11px] font-mono text-stone-400">
-                <span>UPRAIL.app</span>
-                <span>•</span>
-                <span>Last updated: October 2026</span>
-              </div>
+    <ModalSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      zIndexClass="z-50"
+      maxWidthClass="sm:max-w-2xl"
+      panelClassName="p-0 flex flex-col overflow-hidden select-none"
+      showCloseButton
+      closeLabel="Close legal document"
+      ariaLabel={activeTab === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions'}
+    >
+      {/* Header */}
+      <div className="p-5 sm:p-6 pr-14 border-b border-stone-100 flex items-center justify-between bg-stone-50/60 flex-shrink-0">
+        <div className="flex items-center space-x-3">
+          <img src="/brand/uprail-icon.png" alt="UPRAIL" className="w-8 h-8 object-contain" />
+          <div>
+            <h2 className="font-display font-extrabold text-base sm:text-lg text-stone-950 tracking-tight">
+              {activeTab === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions'}
+            </h2>
+            <div className="flex items-center space-x-2 text-[11px] font-mono text-stone-500">
+              <span>UPRAIL.app</span>
+              <span>•</span>
+              <span>Last updated: October 2026</span>
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-stone-100 hover:bg-stone-200 text-stone-500 hover:text-stone-900 transition-colors flex items-center justify-center cursor-pointer"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
+      </div>
 
         {/* Tab Controls */}
         <div className="px-5 sm:px-6 pt-3 pb-2 border-b border-stone-100 flex items-center space-x-2 bg-white flex-shrink-0">
@@ -82,7 +64,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
                 : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
             }`}
           >
-            <Shield className="w-3.5 h-3.5" />
+            <Shield weight="fill" className="w-3.5 h-3.5" />
             <span>Privacy Policy</span>
           </button>
 
@@ -95,7 +77,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
                 : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
             }`}
           >
-            <Scale className="w-3.5 h-3.5" />
+            <Scales weight="fill" className="w-3.5 h-3.5" />
             <span>Terms & Conditions</span>
           </button>
         </div>
@@ -106,7 +88,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
             <div className="space-y-6">
               {/* Highlight Box */}
               <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/90 flex items-start space-x-3">
-                <Lock className="w-4 h-4 text-stone-900 mt-0.5 flex-shrink-0" />
+                <Lock weight="fill" className="w-4 h-4 text-stone-900 mt-0.5 flex-shrink-0" />
                 <div className="space-y-1">
                   <div className="font-bold text-stone-950 font-sans text-xs">
                     Confidential & Privacy-First Architecture
@@ -178,7 +160,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({
             <div className="space-y-6">
               {/* Highlight Box */}
               <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200/90 flex items-start space-x-3">
-                <Scale className="w-4 h-4 text-stone-900 mt-0.5 flex-shrink-0" />
+                <Scales weight="fill" className="w-4 h-4 text-stone-900 mt-0.5 flex-shrink-0" />
                 <div className="space-y-1">
                   <div className="font-bold text-stone-950 font-sans text-xs">
                     Non-Custodial Protocol Interface
@@ -252,21 +234,20 @@ export const LegalModal: React.FC<LegalModalProps> = ({
           )}
         </div>
 
-        {/* Footer */}
+          {/* Footer */}
         <div className="p-4 sm:p-5 border-t border-stone-100 bg-stone-50 flex items-center justify-between flex-shrink-0">
-          <div className="text-[11px] font-mono text-stone-400">
+          <div className="text-[11px] font-mono text-stone-500">
             Confidential rail tooling for 𝕏
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-sans font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+            className="px-5 py-2.5 min-h-11 rounded-xl bg-black hover:bg-stone-800 text-white font-sans font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-xs"
           >
             Understood
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSheet>
   );
 };

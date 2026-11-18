@@ -122,7 +122,7 @@ export default function NearcomDocsPage() {
               Step 3: Choose Asset &amp; Amount
             </h3>
             <p>
-              Once configured, clicking Withdraw brings up your saved destination card, one-tap asset selection for all held/popular Intents assets (<code className="font-mono text-stone-900">USDC</code>, <code className="font-mono text-stone-900">NEAR</code>, <code className="font-mono text-stone-900">USDT</code>, <code className="font-mono text-stone-900">ETH</code>, <code className="font-mono text-stone-900">BTC</code>, <code className="font-mono text-stone-900">SOL</code>), and quick amount buttons (<code className="font-mono text-stone-900">25%</code>, <code className="font-mono text-stone-900">50%</code>, <code className="font-mono text-stone-900">75%</code>, <code className="font-mono text-stone-900">MAX</code>).
+              Once configured, clicking Withdraw brings up your saved destination card, one-tap asset selection for all held/popular Intents assets (<code className="font-mono text-stone-900">USDC</code>, <code className="font-mono text-stone-900">NEAR</code>, <code className="font-mono text-stone-900">USDT</code>, <code className="font-mono text-stone-900">ETH</code>, <code className="font-mono text-stone-900">BTC</code>, <code className="font-mono text-stone-900">SOL</code>), and quick amount buttons (<code className="font-mono text-stone-900">25%</code>, <code className="font-mono text-stone-900">50%</code>, <code className="font-mono text-stone-900">MAX</code>).
             </p>
           </div>
 
@@ -159,13 +159,13 @@ export default function NearcomDocsPage() {
         </p>
         <ul className="list-disc list-inside space-y-1.5 text-sm text-stone-600 leading-relaxed font-sans">
           <li>
-            <strong className="text-stone-900">Internal NEP-518 Routing:</strong> Strips the UI scheme (<code className="font-mono text-stone-900">nearcom:</code>) and executes via <code className="font-mono text-stone-900">submitPrivateTransfer</code> to <code className="font-mono text-stone-900">0x...</code> under <code className="font-mono text-stone-900">CONFIDENTIAL_INTENTS</code>.
+            <strong className="text-stone-900">Internal NEP-518 Routing:</strong> Strips the UI scheme (<code className="font-mono text-stone-900">nearcom:</code>) and executes a 1:1 <code className="font-mono text-stone-900">CONFIDENTIAL_INTENTS</code> transfer to <code className="font-mono text-stone-900">0x...</code> — signed directly via user WebAuthn <code className="font-mono text-stone-900">prepare</code> / <code className="font-mono text-stone-900">submit</code> for Passkey Self-Custody accounts (or <code className="font-mono text-stone-900">submitPrivateTransfer</code> for server-custody accounts).
           </li>
           <li>
             <strong className="text-stone-900">Zero Bridge Fees:</strong> Because the transfer remains internal to the NEAR Intents liquidity layer, no cross-chain bridge fees or slippage occur.
           </li>
           <li>
-            <strong className="text-stone-900">Automated Shortfall Shielding:</strong> If assets are held in plain/public balance, the worker automatically calls <code className="font-mono text-stone-900">ensureConfidentialFunds</code> to shield the balance before executing the private transfer.
+            <strong className="text-stone-900">Automated Shortfall Shielding:</strong> If assets are held in plain or public Intents balance, shortfalls are automatically shielded before executing the confidential transfer.
           </li>
         </ul>
       </section>

@@ -8,17 +8,18 @@ import { currentInvite, inviteFromSearch, takeInvite } from '../lib/invite';
 import { QuantusInteractiveCanvas } from '../components/QuantusInteractiveCanvas';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { AuthLoadingScreen } from '../components/AuthLoadingScreen';
+import { Badge } from '../components/Badge';
 import { useToast } from '../components/Toast';
 import {
   ArrowRight,
-  CheckCircle2,
-  AlertCircle,
-  KeyRound,
-  HelpCircle,
+  CheckCircle,
+  WarningCircle,
+  Key,
+  Question,
   Copy,
   Check,
-  Sparkles,
-} from 'lucide-react';
+  Sparkle,
+} from '@phosphor-icons/react';
 
 export const ParkingPage: React.FC = () => {
   const { user, isLoading, refreshSession } = useXAuth();
@@ -68,6 +69,22 @@ export const ParkingPage: React.FC = () => {
     setErrorMsg(null);
   };
 
+  const finishActivation = async (res: { personalInviteCode: string; message?: string }) => {
+    takeInvite();
+    setSuccessData({
+      personalInviteCode: res.personalInviteCode,
+      message: res.message || 'Access granted! Welcome to UPRAIL.',
+    });
+
+    // Refresh session in background to pick up is_activated = true
+    await refreshSession();
+
+    // Automatically transition into /app after 2 seconds
+    setTimeout(() => {
+      navigate('/app', { replace: true });
+    }, 2000);
+  };
+
   const handleValidate = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (code.length !== 6) {
@@ -89,21 +106,22 @@ export const ParkingPage: React.FC = () => {
 
       // 2. Redeem ref code and activate account
       const res = await api.redeemInvite(code);
-      takeInvite();
-      setSuccessData({
-        personalInviteCode: res.personalInviteCode,
-        message: res.message || 'Access granted! Welcome to UPRAIL.',
-      });
-
-      // Refresh session in background to pick up is_activated = true
-      await refreshSession();
-
-      // Automatically transition into /app after 2 seconds
-      setTimeout(() => {
-        navigate('/app', { replace: true });
-      }, 2000);
+      await finishActivation(res);
     } catch (err: any) {
       setErrorMsg(err.message || 'Invalid or expired ref code. Please check and try again.');
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    setIsValidating(true);
+    setErrorMsg(null);
+    try {
+      const res = await api.redeemInvite(undefined, { skip: true });
+      await finishActivation(res);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Could not activate account. Please try again.');
     } finally {
       setIsValidating(false);
     }
@@ -132,16 +150,14 @@ export const ParkingPage: React.FC = () => {
           <div className="flex flex-col items-center text-center space-y-3">
             <GlitchLogo href="/" size="lg" />
 
-            <div className="space-y-1">
-              <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-stone-100 border border-stone-200 text-[10px] font-mono font-bold uppercase tracking-wider text-stone-600 mb-1">
-                <span>Early Access</span>
-              </div>
+            <div className="space-y-1.5 flex flex-col items-center">
+              <Badge tone="neutral">Early Access</Badge>
 
               <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-stone-950 tracking-tight">
                 Enter Ref Code
               </h1>
               <p className="text-xs sm:text-sm text-stone-500 font-sans">
-                UPRAIL is currently invite-only. Enter your 6-letter referral code to activate your account.
+                Have a 6-letter referral code? Enter it below, or skip to enter UPRAIL immediately.
               </p>
             </div>
           </div>
@@ -168,7 +184,7 @@ export const ParkingPage: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-center space-x-1 text-[10px] font-mono font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                <CheckCircle2 className="w-3 h-3" />
+                <CheckCircle weight="fill" className="w-3 h-3" />
                 <span>Verified</span>
               </div>
             </div>
@@ -178,7 +194,7 @@ export const ParkingPage: React.FC = () => {
           {successData ? (
             <div className="text-center space-y-5 animate-fade-in py-1">
               <div className="w-14 h-14 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto shadow-xs">
-                <Sparkles className="w-7 h-7" />
+                <Sparkle weight="fill" className="w-7 h-7" />
               </div>
 
               <div className="space-y-1.5">
@@ -206,9 +222,9 @@ export const ParkingPage: React.FC = () => {
                     title="Copy Code"
                   >
                     {copiedCode ? (
-                      <Check className="w-4 h-4 text-emerald-600" />
+                      <Check weight="bold" className="w-4 h-4 text-emerald-600" />
                     ) : (
-                      <Copy className="w-4 h-4" />
+                      <Copy weight="fill" className="w-4 h-4" />
                     )}
                   </button>
                 </div>
@@ -224,7 +240,7 @@ export const ParkingPage: React.FC = () => {
                   className="w-full h-13 py-3.5 px-6 rounded-2xl bg-black hover:bg-stone-900 text-white font-display font-bold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all shadow-sm cursor-pointer"
                 >
                   <span>Launch Terminal</span>
-                  <ArrowRight className="w-4 h-4 ml-1" />
+                  <ArrowRight weight="bold" className="w-4 h-4 ml-1" />
                 </button>
               </div>
             </div>
@@ -235,7 +251,7 @@ export const ParkingPage: React.FC = () => {
               {/* Error Message */}
               {errorMsg && (
                 <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start space-x-2.5 animate-fade-in font-mono">
-                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <WarningCircle weight="fill" className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
                   <span className="leading-relaxed">{errorMsg}</span>
                 </div>
               )}
@@ -243,7 +259,7 @@ export const ParkingPage: React.FC = () => {
               {/* 6-Letter Capital Input */}
               <div className="space-y-2">
                 <label className="text-[11px] font-mono font-bold uppercase tracking-widest text-stone-500 block text-center">
-                  Ref Code
+                  Ref Code (Optional)
                 </label>
 
                 <div className="relative">
@@ -264,31 +280,42 @@ export const ParkingPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={code.length !== 6 || isValidating}
-                className="w-full h-14 px-5 rounded-2xl bg-black hover:bg-stone-900 active:scale-[0.99] text-white font-display font-bold text-sm tracking-wide transition-all duration-150 flex items-center justify-center space-x-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none"
-              >
-                {isValidating ? (
-                  <div className="flex items-center space-x-2 font-mono text-xs">
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Validating Ref Code...</span>
-                  </div>
-                ) : (
-                  <>
-                    <KeyRound className="w-4 h-4" />
-                    <span>Activate Account</span>
-                    <ArrowRight className="w-4 h-4 ml-0.5" />
-                  </>
-                )}
-              </button>
+              {/* Submit + Skip Buttons */}
+              <div className="space-y-2.5">
+                <button
+                  type="submit"
+                  disabled={code.length !== 6 || isValidating}
+                  className="w-full h-14 px-5 rounded-2xl bg-black hover:bg-stone-900 active:scale-[0.99] text-white font-display font-bold text-sm tracking-wide transition-all duration-150 flex items-center justify-center space-x-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none"
+                >
+                  {isValidating ? (
+                    <div className="flex items-center space-x-2 font-mono text-xs">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Activating Account...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <Key weight="fill" className="w-4 h-4" />
+                      <span>Activate With Code</span>
+                      <ArrowRight weight="bold" className="w-4 h-4 ml-0.5" />
+                    </>
+                  )}
+                </button>
 
-              {/* Clean Description on How to Get It */}
+                <button
+                  type="button"
+                  disabled={isValidating}
+                  onClick={handleSkip}
+                  className="w-full py-3 px-4 rounded-2xl border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 font-mono font-bold text-xs uppercase tracking-wider transition-all cursor-pointer disabled:opacity-50"
+                >
+                  Skip for now &amp; continue →
+                </button>
+              </div>
+
+              {/* Clean Description on How It Works */}
               <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200/80 flex items-center space-x-2.5 text-stone-600 font-sans text-xs">
-                <HelpCircle className="w-4 h-4 text-stone-400 flex-shrink-0" />
+                <Question weight="fill" className="w-4 h-4 text-stone-400 flex-shrink-0" />
                 <p className="text-[11px] leading-relaxed text-stone-500">
-                  <strong className="text-stone-800">Need a ref code?</strong> Ask an active member. Each registered user receives 1 personal code to invite a peer.
+                  <strong className="text-stone-800">No ref code?</strong> Click Skip above to activate right away and receive your own personal code to share.
                 </p>
               </div>
             </form>
