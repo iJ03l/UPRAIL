@@ -14,6 +14,7 @@ import { ModalSheet } from './ModalSheet';
 import { Badge } from './Badge';
 import { api, SHARE_CARD_VERSION } from '../lib/api';
 import { useToast } from './Toast';
+import { getInviteClaimSummary } from '../lib/invite';
 import { MyInviteResponse } from '../types';
 
 interface InviteModalProps {
@@ -95,10 +96,10 @@ export const InviteModal: React.FC<InviteModalProps> = ({
         <div className="min-w-0">
           <h3 className="text-xl font-black font-display text-stone-950 tracking-tight flex items-center flex-wrap gap-2">
             <span>Your Ref Code</span>
-            <Badge tone="neutral">1 Allotted</Badge>
+            <Badge tone="neutral">Reusable</Badge>
           </h3>
           <p className="text-xs text-stone-500 font-mono">
-            Share your 6-letter referral code to grant access to a peer.
+            Share your 6-letter referral code with anyone joining UPRAIL.
           </p>
         </div>
       </div>
@@ -119,70 +120,88 @@ export const InviteModal: React.FC<InviteModalProps> = ({
       )}
 
       {/* Content */}
-      {!isLoading && inviteData && (
-        <div className="space-y-5">
-          {/* 1 Personal Ref Code Card */}
-          <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-500">
-                Personal Ref Code
-              </span>
-              {inviteData.status === 'ACTIVE' ? (
-                <Badge tone="ok" icon={<Sparkle weight="fill" className="w-3 h-3" />}>
-                  1 Available
-                </Badge>
-              ) : (
-                <Badge tone="neutral" icon={<UserCheck weight="fill" className="w-3 h-3" />}>
-                  Used
-                </Badge>
-              )}
-            </div>
+      {!isLoading && inviteData && (() => {
+        const { claims, useCount } = getInviteClaimSummary(inviteData);
 
-            {/* Code Box */}
-            <div className="flex items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-stone-200 shadow-xs">
-              <span className="text-2xl sm:text-3xl font-mono font-black tracking-widest text-stone-950">
-                {inviteData.inviteCode}
-              </span>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyCode}
-                  className="p-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 border border-stone-200 text-stone-800 text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 min-h-11"
-                  title="Copy code"
-                >
-                  {copiedCode ? <Check weight="bold" className="w-4 h-4" /> : <Copy weight="fill" className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{copiedCode ? 'Copied' : 'Copy'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCopyLink}
-                  className="p-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 shadow-xs min-h-11"
-                  title="Copy direct invite link"
-                >
-                  {copiedLink ? <Check weight="bold" className="w-4 h-4" /> : <ArrowSquareOut weight="fill" className="w-4 h-4" />}
-                  <span className="hidden sm:inline">{copiedLink ? 'Link Copied' : 'Copy Link'}</span>
-                </button>
+        return (
+          <div className="space-y-5">
+            {/* Reusable Personal Ref Code Card */}
+            <div className="p-5 rounded-2xl bg-stone-50 border border-stone-200 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-stone-500">
+                  Personal Ref Code
+                </span>
+                {inviteData.status === 'ACTIVE' ? (
+                  <Badge tone="ok" icon={<Sparkle weight="fill" className="w-3 h-3" />}>
+                    {useCount > 0 ? `Active · ${useCount} used` : 'Active · Unlimited'}
+                  </Badge>
+                ) : (
+                  <Badge tone="neutral" icon={<UserCheck weight="fill" className="w-3 h-3" />}>
+                    Inactive
+                  </Badge>
+                )}
               </div>
-            </div>
 
-            {/* Claimed status detail */}
-            {inviteData.status === 'USED' && inviteData.claimedBy ? (
-              <div className="p-3 rounded-xl bg-white border border-stone-200 text-xs text-stone-700 flex items-center space-x-2">
-                <ShieldCheck weight="fill" className="w-4 h-4 text-stone-900 flex-shrink-0" />
-                <div>
-                  Used by <span className="font-mono font-bold text-stone-900">@{inviteData.claimedBy.handle}</span> on {new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()}
+              {/* Code Box */}
+              <div className="flex items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-stone-200 shadow-xs">
+                <span className="text-2xl sm:text-3xl font-mono font-black tracking-widest text-stone-950">
+                  {inviteData.inviteCode}
+                </span>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    className="p-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 border border-stone-200 text-stone-800 text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 min-h-11"
+                    title="Copy code"
+                  >
+                    {copiedCode ? <Check weight="bold" className="w-4 h-4" /> : <Copy weight="fill" className="w-4 h-4" />}
+                    <span className="hidden sm:inline">{copiedCode ? 'Copied' : 'Copy'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="p-2.5 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 shadow-xs min-h-11"
+                    title="Copy direct invite link"
+                  >
+                    {copiedLink ? <Check weight="bold" className="w-4 h-4" /> : <ArrowSquareOut weight="fill" className="w-4 h-4" />}
+                    <span className="hidden sm:inline">{copiedLink ? 'Link Copied' : 'Copy Link'}</span>
+                  </button>
                 </div>
               </div>
-            ) : (
-              <p className="text-[11px] text-stone-500 font-mono">
-                Your colleague will enter this 6-letter code during sign-up to unlock access.
-              </p>
-            )}
+
+              {/* Claimed history */}
+              {claims.length > 0 ? (
+                <div className="p-3 rounded-xl bg-white border border-stone-200 text-xs text-stone-700 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center space-x-2 font-semibold text-stone-900">
+                      <ShieldCheck weight="fill" className="w-4 h-4 flex-shrink-0" />
+                      <span>Joined with your code ({useCount})</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-stone-500">Code stays active</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                    {claims.map((claim) => (
+                      <span
+                        key={`${claim.handle}-${claim.claimedAt}`}
+                        className="inline-flex items-center px-2 py-0.5 rounded-lg bg-stone-50 border border-stone-200 text-[11px] font-mono font-bold text-stone-900"
+                        title={`Joined ${new Date(claim.claimedAt).toLocaleDateString()}`}
+                      >
+                        @{claim.handle}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-stone-500 font-mono">
+                  Anyone signing up can enter this 6-letter code to unlock access — it stays active after every use.
+                </p>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </ModalSheet>
   );
 };

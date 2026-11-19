@@ -124,13 +124,13 @@ export const InviteGateModal: React.FC<InviteGateModalProps> = ({
 
           <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center space-y-2">
             <div className="text-[11px] font-mono text-stone-500 uppercase tracking-wider font-bold">
-              Your 1 Personal Invite Code to Share
+              Your Personal Ref Code to Share
             </div>
             <div className="text-2xl font-mono font-black tracking-widest text-stone-950 bg-white py-2 px-4 rounded-xl border border-stone-200 inline-block shadow-xs">
               {successData.personalInviteCode}
             </div>
             <p className="text-[11px] text-stone-500">
-              You have exactly 1 invite code to invite a friend. You will see who uses it in your Settings.
+              This code is reusable — share it with anyone joining UPRAIL and see who uses it in Settings.
             </p>
           </div>
 

@@ -163,6 +163,17 @@ export async function fetchOnchainBalances(): Promise<OnchainBalancesResponse | 
   return await res.json() as OnchainBalancesResponse;
 }
 
+export class OneClickAuthRequiredError extends Error {
+  readonly code = 'ONECLICK_AUTH_REQUIRED';
+  readonly oneClickPrepare: Record<string, any>;
+
+  constructor(message: string, oneClickPrepare: Record<string, any>) {
+    super(message);
+    this.name = 'OneClickAuthRequiredError';
+    this.oneClickPrepare = oneClickPrepare;
+  }
+}
+
 /**
  * Fetches the deposit address for a specific chain and token for the authenticated user.
  * Ephemeral addresses are fetched live and cached at the edge. Pass refresh=true to regenerate.
@@ -172,7 +183,8 @@ export async function fetchDepositAddress(
   refresh = false,
   token?: string,
   amount?: string,
-  contract?: string
+  contract?: string,
+  swapType?: 'EXACT_INPUT' | 'FLEX_INPUT'
 ): Promise<DepositAddress | null> {
   const params = new URLSearchParams();
   params.set('chain', chain);
@@ -180,10 +192,22 @@ export async function fetchDepositAddress(
   if (token) params.set('token', token);
   if (amount) params.set('amount', amount);
   if (contract) params.set('contract', contract);
+  if (swapType) params.set('swapType', swapType);
 
   const res = await fetch(url(`/api/onchain/deposit-address?${params.toString()}`), {
     credentials: 'include',
   });
+  if (res.status === 401) {
+    const errBody = (await res.json().catch(() => null)) as
+      | { code?: string; error?: string; oneClickPrepare?: Record<string, any> }
+      | null;
+    if (errBody?.code === 'ONECLICK_AUTH_REQUIRED' && errBody.oneClickPrepare) {
+      throw new OneClickAuthRequiredError(
+        errBody.error || 'Confirm once with your passkey to unlock private receiving addresses.',
+        errBody.oneClickPrepare
+      );
+    }
+  }
   if (res.status === 400 || res.status === 404) return null;
   if (!res.ok) throw new Error(`Failed to fetch deposit address for ${chain}: ${res.status}`);
   const data = await res.json() as DepositAddressResponse;
@@ -293,4 +317,110 @@ export async function fetchIntentAccount(): Promise<{
     xHandle: data.xHandle ?? '',
     provisionError: typeof data.provisionError === 'string' ? data.provisionError : undefined,
   };
+}
+
+export type FiatPaymentMethod = 'APPLE_PAY' | 'GOOGLE_PAY';
+
+export interface PingPayConfigResponse {
+  fiatAvailable: boolean;
+  availablePaymentMethods: FiatPaymentMethod[];
+  paymentCurrencies: string[];
+  defaultCurrency: string;
+  limitsByMethod: Record<string, { min: string; max: string }>;
+  isIosDevice: boolean;
+  userCountry: string | null;
+}
+
+export interface PingPayQuoteResponse {
+  estimatedReceiveAmount: string;
+  fees: {
+    maxSlippage?: string;
+    networkFee?: string;
+    providerFee?: string;
+    partnerAppFee?: string;
+    pingpayFee?: string;
+    swapFee?: string;
+    totalFee?: string;
+  } | null;
+  originNetwork?: string | null;
+  originAsset?: string | null;
+  quoteDeadline?: string | null;
+}
+
+export class PingPayApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'PingPayApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+async function pingpayJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url(path), {
+    credentials: 'include',
+    ...init,
+    headers: {
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.headers || {}),
+    },
+  });
+  const data = (await res.json().catch(() => null)) as any;
+  if (!res.ok) {
+    throw new PingPayApiError(
+      data?.error || `Request failed (${res.status})`,
+      res.status,
+      data?.code
+    );
+  }
+  return data as T;
+}
+
+export function fetchPingPayConfig(currency = 'USD'): Promise<PingPayConfigResponse> {
+  return pingpayJson(`/api/pingpay/config?currency=${encodeURIComponent(currency)}`);
+}
+
+export function fetchPingPayQuote(params: {
+  amount: string;
+  paymentMethod: FiatPaymentMethod;
+  sourceCurrency?: string;
+}): Promise<PingPayQuoteResponse> {
+  return pingpayJson('/api/pingpay/quote', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export function startPingPayOtp(phone: string): Promise<{ sent: boolean }> {
+  return pingpayJson('/api/pingpay/otp/start', {
+    method: 'POST',
+    body: JSON.stringify({ phone }),
+  });
+}
+
+export function checkPingPayOtp(
+  phone: string,
+  code: string
+): Promise<{ status: string; token: string; exp: number }> {
+  return pingpayJson('/api/pingpay/otp/check', {
+    method: 'POST',
+    body: JSON.stringify({ phone, code }),
+  });
+}
+
+export function createPingPayHeadlessOrder(params: {
+  amount: string;
+  paymentMethod: FiatPaymentMethod;
+  recipientAddress: string;
+  selectedCurrency?: string;
+  email: string;
+  phone: string;
+  verificationToken?: string;
+}): Promise<{ paymentLinkUrl: string; orderId?: string }> {
+  return pingpayJson('/api/pingpay/create-order', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
 }

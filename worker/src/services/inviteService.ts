@@ -1,8 +1,8 @@
 /**
  * Invite & Referral Service for UPRAIL
  * - Enforces 6 capital letter invite codes for first-time onboarding
- * - Allocates exactly 1 personal invite code per registered user in Settings
- * - Generates preloaded payment invites attached to send links
+ * - Allocates 1 reusable personal ref code per registered user in Settings
+ * - Generates preloaded single-use payment invites attached to send links
  * - Tracks who claimed each invite
  */
 
@@ -104,6 +104,26 @@ export async function isUserActivated(env: Env, xId: string): Promise<boolean> {
   }
 }
 
+function isSystemGenesisInvite(
+  row: Pick<Invite, 'code' | 'creator_x_handle' | 'payment_id'>
+): boolean {
+  return (
+    !row.payment_id &&
+    (row.creator_x_handle === 'system' ||
+      (SYSTEM_GENESIS_CODES as readonly string[]).includes(row.code))
+  );
+}
+
+function isPersonalRefInvite(row: Pick<Invite, 'creator_x_id' | 'payment_id'>): boolean {
+  return Boolean(row.creator_x_id) && !row.payment_id;
+}
+
+function isReusableInviteRow(
+  row: Pick<Invite, 'code' | 'creator_x_id' | 'creator_x_handle' | 'payment_id'>
+): boolean {
+  return isSystemGenesisInvite(row) || isPersonalRefInvite(row);
+}
+
 /**
  * Validates an invite code without consuming it
  */
@@ -132,7 +152,11 @@ export async function validateInviteCode(
       return { valid: false, reason: 'Invite code does not exist' };
     }
 
-    if (row.status !== 'ACTIVE') {
+    if (row.status === 'EXPIRED') {
+      return { valid: false, reason: 'Invite code has expired' };
+    }
+
+    if (!isReusableInviteRow(row) && row.status !== 'ACTIVE') {
       return {
         valid: false,
         reason: row.claimed_by_x_handle
@@ -147,9 +171,32 @@ export async function validateInviteCode(
   }
 }
 
+async function allocatePersonalInviteCode(
+  env: Env,
+  xId: string,
+  cleanHandle: string,
+  now: number
+): Promise<string> {
+  let personalCode = generateInviteCode();
+  for (let attempts = 0; attempts < 5; attempts++) {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
+         VALUES (?, ?, ?, NULL, NULL, NULL, 'ACTIVE', ?, NULL)`
+      )
+        .bind(personalCode, xId, cleanHandle, now)
+        .run();
+      return personalCode;
+    } catch {
+      personalCode = generateInviteCode();
+    }
+  }
+  return personalCode;
+}
+
 /**
  * Redeems an invite code for a user, activating their account and
- * generating their 1 personal invite code to share.
+ * generating their reusable personal ref code to share.
  */
 export async function redeemInvite(
   env: Env,
@@ -170,6 +217,28 @@ export async function redeemInvite(
     throw new Error('You cannot redeem your own invite code');
   }
 
+  // Check if user is already activated so repeat logins via a ?invite= link never
+  // rotate their existing personal ref code or overwrite their referrer attribution.
+  const existingIdentity = await env.DB.prepare(
+    'SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
+  )
+    .bind(user.x_id)
+    .first<{ is_activated: number | null; personal_invite_code: string | null }>()
+    .catch(() => null);
+
+  if (
+    !check.invite.payment_id &&
+    existingIdentity?.is_activated === 1 &&
+    existingIdentity?.personal_invite_code
+  ) {
+    return {
+      success: true,
+      message: 'Your account is already active.',
+      personalInviteCode: existingIdentity.personal_invite_code,
+      isActivated: true,
+    };
+  }
+
   // If this invite is tied to an escrow payment, bind it strictly to the recipient!
   if (check.invite.payment_id) {
     const payment = await env.DB.prepare(
@@ -188,11 +257,10 @@ export async function redeemInvite(
     }
   }
 
-  // 1. Mark invite as USED (user-generated personal invites are single-use; system bootstrap codes remain active)
-  const isSystemGenesis =
-    check.invite.creator_x_handle === 'system' ||
-    (SYSTEM_GENESIS_CODES as readonly string[]).includes(code);
-  if (!isSystemGenesis) {
+  // 1. Only single-use invites (e.g. payment-attached invites) transition to USED.
+  // System bootstrap codes and user personal ref codes remain ACTIVE for reuse.
+  const reusable = isReusableInviteRow(check.invite);
+  if (!reusable) {
     const claimResult = await env.DB.prepare(
       `UPDATE invites
        SET status = 'USED', claimed_by_x_id = ?, claimed_by_x_handle = ?, claimed_at = ?
@@ -207,25 +275,30 @@ export async function redeemInvite(
     if ((claimResult.meta?.changes ?? 0) === 0) {
       throw new Error('Invite code was already claimed');
     }
+  } else if (isPersonalRefInvite(check.invite) && check.invite.status === 'USED') {
+    // Heal legacy personal ref codes that were marked USED before reuse was enabled.
+    await env.DB.prepare(
+      `UPDATE invites
+       SET status = 'ACTIVE'
+       WHERE code = ? AND status = 'USED' AND payment_id IS NULL AND creator_x_id IS NOT NULL`
+    )
+      .bind(code)
+      .run()
+      .catch(() => {});
   }
 
-  // 2. Generate exactly 1 personal invite code for the new user
-  let personalCode = generateInviteCode();
-  let attempts = 0;
-  while (attempts < 5) {
-    try {
-      await env.DB.prepare(
-        `INSERT INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
-         VALUES (?, ?, ?, NULL, NULL, NULL, 'ACTIVE', ?, NULL)`
-      )
-        .bind(personalCode, user.x_id, cleanHandle, now)
-        .run();
-      break;
-    } catch {
-      personalCode = generateInviteCode();
-      attempts++;
-    }
+  // Keep existing personal ref code if an activated user is claiming a payment invite.
+  if (existingIdentity?.is_activated === 1 && existingIdentity?.personal_invite_code) {
+    return {
+      success: true,
+      message: 'Your account is already active.',
+      personalInviteCode: existingIdentity.personal_invite_code,
+      isActivated: true,
+    };
   }
+
+  // 2. Generate reusable personal ref code for the new user
+  const personalCode = await allocatePersonalInviteCode(env, user.x_id, cleanHandle, now);
 
   // 3. Mark user identity as activated
   await env.DB.prepare(
@@ -294,7 +367,7 @@ export async function createPaymentInvite(
 }
 
 /**
- * Retrieves the user's 1 personal invite code and who used it.
+ * Retrieves the user's reusable personal ref code and everyone who used it.
  */
 export async function getUserInvite(
   env: Env,
@@ -304,7 +377,7 @@ export async function getUserInvite(
   const cleanHandle = xHandle.toLowerCase();
 
   // 1. Fetch user identity to check personal_invite_code
-  let identity = await env.DB.prepare(
+  const identity = await env.DB.prepare(
     'SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?'
   )
     .bind(xId)
@@ -312,18 +385,11 @@ export async function getUserInvite(
 
   let personalCode = identity?.personal_invite_code;
 
-  // If activated but code missing, generate their 1 personal invite code
+  // If code is missing, allocate their reusable personal ref code
   if (!personalCode) {
-    personalCode = generateInviteCode();
     const now = Date.now();
+    personalCode = await allocatePersonalInviteCode(env, xId, cleanHandle, now);
     try {
-      await env.DB.prepare(
-        `INSERT INTO invites (code, creator_x_id, creator_x_handle, claimed_by_x_id, claimed_by_x_handle, payment_id, status, created_at, claimed_at)
-         VALUES (?, ?, ?, NULL, NULL, NULL, 'ACTIVE', ?, NULL)`
-      )
-        .bind(personalCode, xId, cleanHandle, now)
-        .run();
-
       await env.DB.prepare(
         'UPDATE x_identities SET personal_invite_code = ?, updated_at = ? WHERE x_id = ?'
       )
@@ -332,14 +398,75 @@ export async function getUserInvite(
     } catch {}
   }
 
-  // 2. Query personal invite record in DB to check claim status
+  // 2. Query personal invite record in DB and heal legacy single-use personal codes
   const inviteRecord = await env.DB.prepare(
     'SELECT * FROM invites WHERE code = ?'
   )
     .bind(personalCode)
     .first<Invite>();
 
-  // 3. Query any payment-attached invites created by this user
+  if (inviteRecord && inviteRecord.status === 'USED' && isPersonalRefInvite(inviteRecord)) {
+    await env.DB.prepare(
+      `UPDATE invites
+       SET status = 'ACTIVE'
+       WHERE code = ? AND status = 'USED' AND payment_id IS NULL AND creator_x_id IS NOT NULL`
+    )
+      .bind(personalCode)
+      .run()
+      .catch(() => {});
+  }
+
+  // 3. Query all activated accounts that redeemed this personal ref code
+  let useCount = 0;
+  const recentClaims: Array<{ handle: string; claimedAt: number }> = [];
+  if (personalCode) {
+    try {
+      const [countRow, claimsRows] = await Promise.all([
+        env.DB.prepare(
+          'SELECT COUNT(*) AS cnt FROM x_identities WHERE invited_by_code = ? AND is_activated = 1'
+        )
+          .bind(personalCode)
+          .first<{ cnt: number }>(),
+        env.DB.prepare(
+          `SELECT x_handle, updated_at, created_at
+           FROM x_identities
+           WHERE invited_by_code = ? AND is_activated = 1
+           ORDER BY updated_at DESC
+           LIMIT 25`
+        )
+          .bind(personalCode)
+          .all<{ x_handle: string; updated_at: number | null; created_at: number | null }>(),
+      ]);
+
+      useCount = Number(countRow?.cnt || 0);
+      const seenHandles = new Set<string>();
+      for (const r of claimsRows.results || []) {
+        const handle = (r.x_handle || '').trim();
+        if (!handle || seenHandles.has(handle.toLowerCase())) continue;
+        seenHandles.add(handle.toLowerCase());
+        recentClaims.push({
+          handle,
+          claimedAt: Number(r.updated_at || r.created_at || Date.now()),
+        });
+      }
+
+      // Preserve any historical single claim recorded on invites if missing from x_identities
+      if (
+        inviteRecord?.claimed_by_x_handle &&
+        !seenHandles.has(inviteRecord.claimed_by_x_handle.toLowerCase())
+      ) {
+        useCount = Math.max(useCount + 1, 1);
+        recentClaims.push({
+          handle: inviteRecord.claimed_by_x_handle,
+          claimedAt: Number(inviteRecord.claimed_at || Date.now()),
+        });
+      }
+
+      useCount = Math.max(useCount, recentClaims.length);
+    } catch {}
+  }
+
+  // 4. Query any payment-attached invites created by this user
   let paymentInvites: Array<{
     code: string;
     paymentId: string;
@@ -375,14 +502,11 @@ export async function getUserInvite(
 
   return {
     inviteCode: personalCode || '',
-    status: inviteRecord?.status === 'USED' ? 'USED' : 'ACTIVE',
-    claimedBy:
-      inviteRecord?.status === 'USED' && inviteRecord.claimed_by_x_handle
-        ? {
-            handle: inviteRecord.claimed_by_x_handle,
-            claimedAt: inviteRecord.claimed_at || Date.now(),
-          }
-        : null,
+    status: inviteRecord?.status === 'EXPIRED' ? 'USED' : 'ACTIVE',
+    reusable: true,
+    useCount,
+    recentClaims,
+    claimedBy: recentClaims[0] || null,
     inviteLink: `${origin}/login?invite=${personalCode}`,
     paymentInvites,
   };

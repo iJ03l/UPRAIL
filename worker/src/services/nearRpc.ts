@@ -13,6 +13,7 @@ import { getOnchainIcon } from './onchainIcons';
 import { getAssetMeta } from './assetMeta';
 import { generate1ClickSwapIntent } from './oneclickWithdraw';
 import { requestQuote } from './oneclickClient';
+import { OneClickSelfCustodyAuthRequiredError } from './oneclickAuth';
 import { cleanMemeSymbol } from '../utils/token';
 import {
   NativeL1KeyGrant,
@@ -2211,80 +2212,160 @@ CHAIN_DEPOSIT_CONFIGS['pearl'] = CHAIN_DEPOSIT_CONFIGS['prl_prl'];
  * Calls 1Click quote endpoint to generate a live, cross-chain deposit address.
  * Solvers sweep incoming deposits and route them to recipient intents vault.
  */
+async function getOptionalConfidentialUserSession(
+  env: Env,
+  xId: string,
+  context: string
+): Promise<string | null> {
+  try {
+    const { getUserSession } = await import('./oneclickAuth');
+    return (await getUserSession(env, xId)).accessToken;
+  } catch (err: any) {
+    if (
+      err instanceof OneClickSelfCustodyAuthRequiredError ||
+      err?.name === 'OneClickSelfCustodyAuthRequiredError'
+    ) {
+      throw err;
+    }
+    console.warn(`[nearRpc] could not mint User-Session for ${context}:`, err?.message || err);
+    return null;
+  }
+}
+
+function extractMinRetryAmount(errText: string): string | null {
+  const minMatch = errText.match(/try at least\s+([0-9]+)/i);
+  return minMatch?.[1] || null;
+}
+
+function formatQuoteDepositAddress(
+  cfg: ChainDepositConfig,
+  quote: {
+    depositAddress?: string;
+    depositMemo?: string;
+    deadline?: string;
+    amountInFormatted?: string;
+    amountInUsd?: string;
+  } | null | undefined,
+  minAmountOverride?: string
+): DepositAddress | null {
+  if (!quote?.depositAddress) return null;
+  return {
+    chain: cfg.chain,
+    chainName: cfg.chainName,
+    address: quote.depositAddress,
+    memo: quote.depositMemo || undefined,
+    expiresAt: quote.deadline ? new Date(quote.deadline).getTime() : undefined,
+    token: cfg.token,
+    minAmount: minAmountOverride || cfg.amount,
+    minAmountFormatted: quote.amountInFormatted
+      ? `${quote.amountInFormatted} ${cfg.token}`
+      : cfg.minAmountFormatted,
+    minAmountUsd: quote.amountInUsd
+      ? `$${parseFloat(quote.amountInUsd).toFixed(2)}`
+      : cfg.minAmountUsd,
+    isOneTime: true,
+  };
+}
+
 async function fetch1ClickDepositAddress(
   env: Env,
   nearAccount: string,
   cfg: ChainDepositConfig,
-  opts: { confidential?: boolean; userSession?: string } = {}
+  opts: { confidential?: boolean; userSession?: string; swapType?: 'EXACT_INPUT' | 'FLEX_INPUT' } = {}
 ): Promise<DepositAddress | null> {
   const apiBase = env.NEAR_API_BASE || 'https://1click.chaindefuser.com';
   const deadline = new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString();
+  const swapType: 'EXACT_INPUT' | 'FLEX_INPUT' =
+    opts.swapType === 'FLEX_INPUT' ? 'FLEX_INPUT' : 'EXACT_INPUT';
 
   if (opts.confidential) {
     if (!opts.userSession) {
       console.warn('[nearRpc] confidential deposit quote needs a User-Session');
       return null;
     }
+    const buildConfidentialReq = (amount: string) => ({
+      swapType,
+      originAsset: cfg.originAsset,
+      destinationAsset: cfg.destinationAsset,
+      amount,
+      recipient: nearAccount,
+      recipientType: 'CONFIDENTIAL_INTENTS' as const,
+      refundTo: nearAccount,
+      refundType: 'CONFIDENTIAL_INTENTS' as const,
+      depositType: 'ORIGIN_CHAIN' as const,
+      confidentiality: 'advanced' as const,
+      deadline,
+    });
     try {
-      const quote = await requestQuote(
+      const quoteRes = await requestQuote(
         env,
-        {
-          originAsset: cfg.originAsset,
-          destinationAsset: cfg.destinationAsset,
-          amount: cfg.amount,
-          recipient: nearAccount,
-          recipientType: 'CONFIDENTIAL_INTENTS',
-          refundTo: nearAccount,
-          refundType: 'CONFIDENTIAL_INTENTS',
-          depositType: 'ORIGIN_CHAIN',
-          confidentiality: 'advanced',
-          deadline,
-        },
+        buildConfidentialReq(cfg.amount),
         { userSession: opts.userSession }
       );
-      return {
-        chain: cfg.chain,
-        chainName: cfg.chainName,
-        address: quote.quote.depositAddress,
-        memo: quote.quote.depositMemo || undefined,
-        expiresAt: quote.quote.deadline ? new Date(quote.quote.deadline).getTime() : undefined,
-        token: cfg.token,
-        minAmount: cfg.amount,
-        minAmountFormatted: cfg.minAmountFormatted,
-        minAmountUsd: cfg.minAmountUsd,
-        isOneTime: true,
-      };
+      return formatQuoteDepositAddress(cfg, {
+        ...((quoteRes.raw?.quote as Record<string, any> | undefined) || {}),
+        ...quoteRes.quote,
+      });
     } catch (err: any) {
+      const errMsg = err?.message || String(err || '');
+      const retryAmount = extractMinRetryAmount(errMsg);
+      if (retryAmount && retryAmount !== cfg.amount) {
+        try {
+          const retryRes = await requestQuote(
+            env,
+            buildConfidentialReq(retryAmount),
+            { userSession: opts.userSession }
+          );
+          return formatQuoteDepositAddress(
+            cfg,
+            {
+              ...((retryRes.raw?.quote as Record<string, any> | undefined) || {}),
+              ...retryRes.quote,
+            },
+            retryAmount
+          );
+        } catch (retryErr: any) {
+          console.warn(
+            `[nearRpc] confidential deposit quote retry failed (${cfg.chain}/${cfg.token}):`,
+            retryErr?.message || retryErr
+          );
+          return null;
+        }
+      }
       console.warn(
         `[nearRpc] confidential deposit quote failed (${cfg.chain}/${cfg.token}):`,
-        err?.message || err
+        errMsg
       );
       return null;
     }
   }
 
+  const publicHeaders = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
+  };
+  const buildPublicBody = (amount: string) =>
+    JSON.stringify({
+      dry: false,
+      swapType,
+      slippageTolerance: 100,
+      recipientType: 'INTENTS',
+      recipient: nearAccount,
+      originAsset: cfg.originAsset,
+      destinationAsset: cfg.destinationAsset,
+      amount,
+      depositType: 'ORIGIN_CHAIN',
+      refundType: 'INTENTS',
+      refundTo: nearAccount,
+      deadline,
+    });
+
   try {
     const resp = await fetch(`${apiBase}/v0/quote`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
-      },
-      body: JSON.stringify({
-        dry: false,
-        swapType: 'EXACT_INPUT',
-        slippageTolerance: 100,
-        recipientType: 'INTENTS',
-        recipient: nearAccount,
-        originAsset: cfg.originAsset,
-        destinationAsset: cfg.destinationAsset,
-        amount: cfg.amount,
-        depositType: 'ORIGIN_CHAIN',
-        refundType: 'INTENTS',
-        refundTo: nearAccount,
-        deadline,
-      }),
+      headers: publicHeaders,
+      body: buildPublicBody(cfg.amount),
     });
 
     if (!resp.ok) {
@@ -2292,49 +2373,17 @@ async function fetch1ClickDepositAddress(
       console.warn(`[nearRpc] 1Click quote failed (${resp.status}) for ${cfg.chain}/${cfg.token}:`, errText);
 
       // Auto-retry with solver minAmount if 1Click specifies minimum bridge amount
-      const minMatch = errText.match(/try at least\s+([0-9]+)/i);
-      if (minMatch && minMatch[1]) {
-        const retryAmount = minMatch[1];
+      const retryAmount = extractMinRetryAmount(errText);
+      if (retryAmount) {
         try {
           const retryResp = await fetch(`${apiBase}/v0/quote`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) UPRAIL/1.0',
-            },
-            body: JSON.stringify({
-              dry: false,
-              swapType: 'EXACT_INPUT',
-              slippageTolerance: 100,
-              recipientType: 'INTENTS',
-              recipient: nearAccount,
-              originAsset: cfg.originAsset,
-              destinationAsset: cfg.destinationAsset,
-              amount: retryAmount,
-              depositType: 'ORIGIN_CHAIN',
-              refundType: 'INTENTS',
-              refundTo: nearAccount,
-              deadline,
-            }),
+            headers: publicHeaders,
+            body: buildPublicBody(retryAmount),
           });
           if (retryResp.ok) {
             const retryData = (await retryResp.json()) as any;
-            const quote = retryData.quote;
-            if (quote?.depositAddress) {
-              return {
-                chain: cfg.chain,
-                chainName: cfg.chainName,
-                address: quote.depositAddress,
-                memo: quote.depositMemo || undefined,
-                expiresAt: quote.deadline ? new Date(quote.deadline).getTime() : undefined,
-                token: cfg.token,
-                minAmount: retryAmount,
-                minAmountFormatted: quote.amountInFormatted ? `${quote.amountInFormatted} ${cfg.token}` : cfg.minAmountFormatted,
-                minAmountUsd: quote.amountInUsd ? `$${parseFloat(quote.amountInUsd).toFixed(2)}` : cfg.minAmountUsd,
-                isOneTime: true,
-              };
-            }
+            return formatQuoteDepositAddress(cfg, retryData.quote, retryAmount);
           }
         } catch (retryErr) {
           console.warn('[nearRpc] retry failed:', retryErr);
@@ -2345,23 +2394,7 @@ async function fetch1ClickDepositAddress(
     }
 
     const data = (await resp.json()) as any;
-    const quote = data.quote;
-    if (!quote?.depositAddress) {
-      return null;
-    }
-
-    return {
-      chain: cfg.chain,
-      chainName: cfg.chainName,
-      address: quote.depositAddress,
-      memo: quote.depositMemo || undefined,
-      expiresAt: quote.deadline ? new Date(quote.deadline).getTime() : undefined,
-      token: cfg.token,
-      minAmount: cfg.amount,
-      minAmountFormatted: quote.amountInFormatted ? `${quote.amountInFormatted} ${cfg.token}` : cfg.minAmountFormatted,
-      minAmountUsd: quote.amountInUsd ? `$${parseFloat(quote.amountInUsd).toFixed(2)}` : cfg.minAmountUsd,
-      isOneTime: true,
-    };
+    return formatQuoteDepositAddress(cfg, data.quote);
   } catch (err) {
     console.warn(`[nearRpc] fetch1ClickDepositAddress error for ${cfg.chain}/${cfg.token}:`, err);
     return null;
@@ -2392,12 +2425,11 @@ async function getCachedDepositAddress(
       }>();
 
     if (row && row.address) {
-      // Private rows are keyed `private_base_usdc`; strip the rail prefix
-      // before resolving the network so cached quotes don't come back with
-      // chain="private".
-      const key = chainKey.startsWith('private_')
-        ? chainKey.slice('private_'.length)
-        : chainKey;
+      // Private rows are keyed `private_...` and flexible-amount onramp rows
+      // are keyed `flex_...`; strip both prefixes before resolving config.
+      let key = chainKey;
+      if (key.startsWith('private_')) key = key.slice('private_'.length);
+      if (key.startsWith('flex_')) key = key.slice('flex_'.length);
       const cfg = CHAIN_DEPOSIT_CONFIGS[key] || CHAIN_DEPOSIT_CONFIGS[row.chain];
       // The stored key is token-specific (`near_shitzu`), while `chain` must be
       // the network (`near`). Dynamic tokens have no curated config to read it
@@ -2639,12 +2671,14 @@ export async function getDepositAddress(
   tokenSymbol?: string,
   amount?: string,
   contractId?: string,
-  opts: { xId?: string } = {}
+  opts: { xId?: string; swapType?: 'EXACT_INPUT' | 'FLEX_INPUT' } = {}
 ): Promise<DepositAddress | null> {
   const railOn = ['true', '1', 'yes'].includes(
     (env.CONFIDENTIAL_RAIL_ENABLED || '').trim().toLowerCase()
   );
   const confidential = Boolean(railOn && opts.xId);
+  const swapType: 'EXACT_INPUT' | 'FLEX_INPUT' =
+    opts.swapType === 'FLEX_INPUT' ? 'FLEX_INPUT' : 'EXACT_INPUT';
   const cleanChain = chainId.toLowerCase();
   const cleanToken = (tokenSymbol || '').toLowerCase();
   const cleanContract = (contractId || '').trim().toLowerCase();
@@ -2737,8 +2771,9 @@ export async function getDepositAddress(
     return null;
   }
 
-  // Keep private and public deposit addresses in separate cache rows so a
-  // user who switches rails never receives a previously issued public address.
+  // Keep flexible-amount onramp addresses and private/public deposit addresses in
+  // separate cache rows so tabs and privacy rails never share the wrong quote type.
+  if (swapType === 'FLEX_INPUT') cfg = { ...cfg, key: `flex_${cfg.key}` };
   if (confidential) cfg = { ...cfg, key: `private_${cfg.key}` };
 
   // If a custom exact deposit amount is specified, re-calibrate cfg.amount
@@ -2777,17 +2812,14 @@ export async function getDepositAddress(
   // 2. Fetch fresh address via 1Click quote
   let userSession: string | undefined;
   if (confidential) {
-    try {
-      const { getUserSession } = await import('./oneclickAuth');
-      userSession = (await getUserSession(env, opts.xId!)).accessToken;
-    } catch (err: any) {
-      console.warn('[nearRpc] could not mint User-Session for confidential deposit:', err?.message || err);
-      return null;
-    }
+    const token = await getOptionalConfidentialUserSession(env, opts.xId!, 'confidential deposit');
+    if (!token) return null;
+    userSession = token;
   }
   const fresh = await fetch1ClickDepositAddress(env, nearAccount, cfg, {
     confidential,
     userSession,
+    swapType,
   });
   if (fresh) {
     // NEAR-origin NEP-141 receivers must be storage-registered, otherwise a
@@ -3230,7 +3262,9 @@ export async function getAllDepositAddresses(
         .prepare(
           `SELECT chain, chain_name, address, memo, expires_at FROM deposit_addresses
             WHERE account_id = ? AND (expires_at IS NULL OR expires_at > ?)
-              AND chain ${confidential ? "LIKE 'private_%'" : "NOT LIKE 'private_%'"}`
+              AND chain ${confidential ? "LIKE 'private_%'" : "NOT LIKE 'private_%'"}
+              AND chain NOT LIKE 'flex_%'
+              AND chain NOT LIKE 'private_flex_%'`
         )
         .bind(nearAccount, Date.now() + 10 * 60 * 1000)
         .all<{
@@ -3273,13 +3307,9 @@ export async function getAllDepositAddresses(
 
   let userSession: string | undefined;
   if (confidential && missingConfigs.length > 0) {
-    try {
-      const { getUserSession } = await import('./oneclickAuth');
-      userSession = (await getUserSession(env, opts.xId!)).accessToken;
-    } catch (err: any) {
-      console.warn('[nearRpc] could not mint User-Session for confidential deposits:', err?.message || err);
-      return [];
-    }
+    const token = await getOptionalConfidentialUserSession(env, opts.xId!, 'confidential deposits');
+    if (!token) return [];
+    userSession = token;
   }
 
   if (missingConfigs.length > 0) {

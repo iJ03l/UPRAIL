@@ -246,3 +246,39 @@ describe('Robinhood and Pearl destination validation', () => {
     assert.equal(chainMatchesAddress('hood', hoodAddress), true);
   });
 });
+
+describe('native NEAR withdrawal assetId', () => {
+  it('canonicalizes native NEAR to nep141:wrap.near for 1Click quotes', async () => {
+    let quoteBody;
+    const handler = async (url, init) => {
+      const href = String(url);
+      if (href.endsWith('/v0/tokens')) return jsonResponse(TOKENS);
+      if (href.endsWith('/v0/quote')) {
+        quoteBody = JSON.parse(init.body);
+        return jsonResponse({
+          quote: {
+            depositAddress: 'deposit-near.near',
+            quoteId: 'quote-near',
+            amountIn: '1400000000000000000000000',
+            amountOut: '1400000000000000000000000',
+          },
+        });
+      }
+      throw new Error(`unexpected fetch ${href}`);
+    };
+
+    await withFetch(handler, async () => {
+      const quote = await get1ClickWithdrawalQuote(env(), {
+        asset: 'nep141:wrap.near',
+        amount: 1.4,
+        destinationAddress: 'ed32a286963961d8ee752e431e2866b89dd1f7c7e0ddaa785abe5f1f60bf9355',
+        destinationChain: 'near',
+      });
+
+      assert.equal(quoteBody.originAsset, 'nep141:wrap.near');
+      assert.equal(quoteBody.destinationAsset, 'nep141:wrap.near');
+      assert.equal(quote.originAsset, 'nep141:wrap.near');
+    });
+  });
+});
+

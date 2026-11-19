@@ -33,6 +33,7 @@ import { ModalSheet } from './ModalSheet';
 import { Badge } from './Badge';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
+import { getInviteClaimSummary } from '../lib/invite';
 import { MyInviteResponse } from '../types';
 
 interface SettingsSidebarProps {
@@ -336,75 +337,95 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
               )}
             </div>
 
-            {/* Personal Invite Section (1 Invite Access) */}
+            {/* Personal Invite Section (Reusable Ref Code) */}
             {user && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-mono uppercase tracking-wider text-stone-500 font-bold block">
                     Your Personal Invite
                   </span>
-                  <Badge tone="neutral">1 Quota</Badge>
+                  <Badge tone="neutral">Reusable</Badge>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200 space-y-3">
-                  {inviteData ? (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <span className="text-lg font-mono font-black tracking-widest text-stone-950 bg-white px-3 py-1 rounded-xl border border-stone-200">
-                          {inviteData.inviteCode}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(inviteData.inviteCode);
-                              setCopiedInvite(true);
-                              toast('Invite code copied');
-                              setTimeout(() => setCopiedInvite(false), 2000);
-                            }}
-                            className="p-1.5 rounded-lg bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono transition-colors cursor-pointer"
-                            title="Copy Code"
-                          >
-                            {copiedInvite ? <Check weight="bold" className="w-3.5 h-3.5" /> : <Copy weight="fill" className="w-3.5 h-3.5" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(inviteData.inviteLink);
-                              setCopiedLink(true);
-                              toast('Invite link copied');
-                              setTimeout(() => setCopiedLink(false), 2000);
-                            }}
-                            className="p-1.5 rounded-lg bg-black hover:bg-stone-800 text-white text-xs font-mono transition-colors cursor-pointer"
-                            title="Copy Link"
-                          >
-                            {copiedLink ? <Check weight="bold" className="w-3.5 h-3.5" /> : <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      {inviteData.status === 'USED' && inviteData.claimedBy ? (
-                        <div className="p-2.5 rounded-xl bg-white border border-stone-200 text-[11px] text-stone-700 flex items-center space-x-2">
-                          <ShieldCheck weight="fill" className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
-                          <span>
-                            Used by <strong className="font-mono text-stone-950">@{inviteData.claimedBy.handle}</strong> ({new Date(inviteData.claimedBy.claimedAt).toLocaleDateString()})
+                  {inviteData ? (() => {
+                    const { claims, useCount } = getInviteClaimSummary(inviteData);
+                    return (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-lg font-mono font-black tracking-widest text-stone-950 bg-white px-3 py-1 rounded-xl border border-stone-200">
+                            {inviteData.inviteCode}
                           </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(inviteData.inviteCode);
+                                setCopiedInvite(true);
+                                toast('Invite code copied');
+                                setTimeout(() => setCopiedInvite(false), 2000);
+                              }}
+                              className="p-1.5 rounded-lg bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 text-xs font-mono transition-colors cursor-pointer"
+                              title="Copy Code"
+                            >
+                              {copiedInvite ? <Check weight="bold" className="w-3.5 h-3.5" /> : <Copy weight="fill" className="w-3.5 h-3.5" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(inviteData.inviteLink);
+                                setCopiedLink(true);
+                                toast('Invite link copied');
+                                setTimeout(() => setCopiedLink(false), 2000);
+                              }}
+                              className="p-1.5 rounded-lg bg-black hover:bg-stone-800 text-white text-xs font-mono transition-colors cursor-pointer"
+                              title="Copy Link"
+                            >
+                              {copiedLink ? <Check weight="bold" className="w-3.5 h-3.5" /> : <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
                         </div>
-                      ) : (
-                        <div className="text-[11px] text-stone-500 font-mono flex items-center space-x-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
-                          <span>1 invite available to share with a friend</span>
-                        </div>
-                      )}
-                    </>
-                  ) : (
+
+                        {claims.length > 0 ? (
+                          <div className="p-2.5 rounded-xl bg-white border border-stone-200 text-[11px] text-stone-700 space-y-1.5">
+                            <div className="flex items-center space-x-2">
+                              <ShieldCheck weight="fill" className="w-3.5 h-3.5 text-stone-900 flex-shrink-0" />
+                              <span>
+                                Used by <strong className="font-mono text-stone-950">{useCount}</strong> {useCount === 1 ? 'person' : 'people'} — code stays active
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {claims.slice(0, 6).map((c) => (
+                                <span
+                                  key={`${c.handle}-${c.claimedAt}`}
+                                  className="px-1.5 py-0.5 rounded bg-stone-50 border border-stone-200 font-mono font-bold text-stone-900 text-[10px]"
+                                >
+                                  @{c.handle}
+                                </span>
+                              ))}
+                              {useCount > 6 && (
+                                <span className="px-1.5 py-0.5 font-mono text-stone-500 text-[10px]">
+                                  +{useCount - 6} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-stone-500 font-mono flex items-center space-x-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-stone-900" />
+                            <span>Reusable code — share with anyone joining UPRAIL</span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })() : (
                     <div className="text-xs text-stone-400 font-mono animate-pulse">
                       Loading your invite code...
                     </div>
                   )}
 
                   <div className="text-[10px] text-stone-500 font-sans border-t border-stone-200 pt-2 leading-relaxed">
-                    Need more invites? Sending money automatically adds an invite code to the recipient's payment link.
+                    Your personal ref code can be reused without limit. Sending money also attaches a dedicated claim link for new recipients.
                   </div>
                 </div>
               </div>

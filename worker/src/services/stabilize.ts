@@ -740,6 +740,29 @@ export async function executeStabilize(
     deadline,
   };
 
+  const formatUpstreamError = (
+    raw: unknown,
+    fallbackCode: string,
+    fallbackPrefix: string
+  ): StabilizeError => {
+    const msg = raw instanceof Error ? raw.message : String(raw || '');
+    if (/not enough balance|NotEnoughBalance|LackBalanceForState|insufficient balance/i.test(msg)) {
+      return new StabilizeError(
+        'INSUFFICIENT_BALANCE',
+        `Not enough ${origin.symbol} balance to complete this swap right now. Try a slightly smaller amount or retry shortly.`,
+        400
+      );
+    }
+    if (/server error/i.test(msg)) {
+      return new StabilizeError(
+        'RPC_TEMPORARY_ERROR',
+        'Network RPC is temporarily busy. Please try again in a few seconds.',
+        503
+      );
+    }
+    return new StabilizeError(fallbackCode, `${fallbackPrefix}: ${msg}`, 502);
+  };
+
   let shieldedAtomic = 0n;
   let isConfidentialSwap = true;
   const userSession = await getUserSession(env, session.x_id);
@@ -757,11 +780,10 @@ export async function executeStabilize(
     if (hasPublicFunds) {
       isConfidentialSwap = false;
     } else {
-      const msg = err?.message || String(err);
-      throw new StabilizeError(
+      throw formatUpstreamError(
+        err,
         'SHIELD_FAILED',
-        `Could not shield ${origin.symbol} into Confidential Intents: ${msg}`,
-        502
+        `Could not shield ${origin.symbol} into Confidential Intents`
       );
     }
   }
@@ -791,10 +813,10 @@ export async function executeStabilize(
       if (hasPublicFunds && err instanceof OneClickError) {
         isConfidentialSwap = false;
       } else {
-        throw new StabilizeError(
+        throw formatUpstreamError(
+          err,
           'QUOTE_FAILED',
-          `1Click quote failed for ${origin.symbol} → ${destination.symbol}: ${err?.message || String(err)}`,
-          502
+          `1Click quote failed for ${origin.symbol} → ${destination.symbol}`
         );
       }
     }
@@ -804,10 +826,10 @@ export async function executeStabilize(
     try {
       liveQuote = await requestQuote(env, publicQuoteReq);
     } catch (err: any) {
-      throw new StabilizeError(
+      throw formatUpstreamError(
+        err,
         'QUOTE_FAILED',
-        `1Click quote failed for ${origin.symbol} → ${destination.symbol}: ${err?.message || String(err)}`,
-        502
+        `1Click quote failed for ${origin.symbol} → ${destination.symbol}`
       );
     }
   }
@@ -833,10 +855,10 @@ export async function executeStabilize(
     const submitted = await submitSwapIntent(env, signedData);
     intentHash = submitted.intentHash;
   } catch (err: any) {
-    throw new StabilizeError(
+    throw formatUpstreamError(
+      err,
       'SWAP_SUBMISSION_FAILED',
-      `Failed to submit swap intent: ${err?.message || String(err)}`,
-      502
+      'Failed to submit swap intent'
     );
   }
 

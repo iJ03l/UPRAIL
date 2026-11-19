@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Link } from '../lib/router';
+import { Link, useSearchParams } from '../lib/router';
 import {
   Copy,
   Check,
@@ -14,16 +14,26 @@ import {
   CheckCircle,
   CaretDown,
   MagnifyingGlass,
+  // CreditCard,
+  Fingerprint,
 } from '@phosphor-icons/react';
 import { useOnchainData } from '../hooks/useOnchainData';
-import { fetchDepositAddress, fetchDepositStatus, DepositAddress, DepositStatusResponse } from '../lib/onchainApi';
+import {
+  fetchDepositAddress,
+  fetchDepositStatus,
+  DepositAddress,
+  DepositStatusResponse,
+  OneClickAuthRequiredError,
+} from '../lib/onchainApi';
 import { api, formatUsd } from '../lib/api';
+import { performWebAuthnAssertion } from '../lib/selfCustody';
 import { TokenIcon } from '../components/TokenIcon';
 import { ChainLogo } from '../components/ChainLogo';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { BackBar } from '../components/BackBar';
 import { AssetPicker } from '../components/AssetPicker';
 import { Badge } from '../components/Badge';
+// import { PingOnrampTab } from '../components/PingOnrampTab';
 import { useToast } from '../components/Toast';
 import { Token } from '../types';
 
@@ -184,6 +194,7 @@ function useDepositPoll(opts: {
 export const ReceivePage: React.FC = () => {
   const { hasIntentAccount, nearAccount, balances, refreshBalances, refreshHistory } = useOnchainData();
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
 
   const [tokens, setTokens] = useState<TokenOption[]>(TOKEN_OPTIONS);
   // Start BLANK — do not derive until token, chain, AND exact amount are selected
@@ -198,8 +209,23 @@ export const ReceivePage: React.FC = () => {
   const [depositStatus, setDepositStatus] = useState<DepositStatusResponse | null>(null);
   const [settledSuccess, setSettledSuccess] = useState<boolean>(false);
 
-  // Tab state: cross-chain bridge vs direct NEAR native & memes
-  const [activeTab, setActiveTab] = useState<'crosschain' | 'defuse'>('crosschain');
+  // Tab state: cross-chain bridge vs NEAR native & memes vs in-app PingPay Card & Cash
+  const resolveTabParam = (raw: string | null): 'crosschain' | 'defuse' | 'pingpay' | null => {
+    const val = (raw || '').trim().toLowerCase();
+    // Temporarily disabled while Card & Cash tab is commented out:
+    // if (val === 'pingpay' || val === 'card' || val === 'buy' || val === 'onramp') return 'pingpay';
+    if (val === 'defuse' || val === 'near' || val === 'memes') return 'defuse';
+    if (val === 'crosschain' || val === 'chain') return 'crosschain';
+    return null;
+  };
+  const [activeTab, setActiveTab] = useState<'crosschain' | 'defuse' | 'pingpay'>(
+    () => resolveTabParam(searchParams.get('tab')) || 'crosschain'
+  );
+  useEffect(() => {
+    const requested = resolveTabParam(searchParams.get('tab'));
+    if (requested) setActiveTab(requested);
+  }, [searchParams]);
+
   // Tab 2 — direct receive: pick any token from the full NEAR index; the
   // destination is always the user's own platform passkey account.
   const [nearAsset, setNearAsset] = useState<Token>(NEAR_RECEIVE_TOKEN);
@@ -212,6 +238,18 @@ export const ReceivePage: React.FC = () => {
   const [nearDepositStatus, setNearDepositStatus] = useState<DepositStatusResponse | null>(null);
   const [nearSettledSuccess, setNearSettledSuccess] = useState<boolean>(false);
   const [showDirectVault, setShowDirectVault] = useState<boolean>(false);
+
+  // Tab 3 — PingPay inline onramp: uses a FLEX_INPUT shielded NEAR USDC deposit
+  // address so variable card/Apple Pay/Cash App payouts credit directly.
+  const [onrampAddress, setOnrampAddress] = useState<DepositAddress | null>(null);
+  const [onrampError, setOnrampError] = useState<string | null>(null);
+  const [isOnrampDeriving, setIsOnrampDeriving] = useState<boolean>(false);
+  const [onrampStatus, setOnrampStatus] = useState<DepositStatusResponse | null>(null);
+  const [onrampSettled, setOnrampSettled] = useState<boolean>(false);
+  const [crosschainAuthPrepare, setCrosschainAuthPrepare] = useState<Record<string, any> | null>(null);
+  const [nearAuthPrepare, setNearAuthPrepare] = useState<Record<string, any> | null>(null);
+  const [onrampAuthPrepare, setOnrampAuthPrepare] = useState<Record<string, any> | null>(null);
+  const [isUnlockingPasskey, setIsUnlockingPasskey] = useState<boolean>(false);
 
   // Dropdown states
   const [isTokenDropdownOpen, setIsTokenDropdownOpen] = useState(false);
@@ -372,6 +410,34 @@ export const ReceivePage: React.FC = () => {
     setSettledSuccess(false);
   };
 
+  // Shared 1-tap passkey unlock when 1Click Confidential session needs WebAuthn confirmation
+  const handleUnlockOneClickPasskey = useCallback(
+    async (
+      prep: Record<string, any> | null,
+      clearPrep: () => void,
+      retry: () => Promise<void> | void
+    ) => {
+      if (!prep?.options || !prep?.actionId || isUnlockingPasskey) return;
+      setIsUnlockingPasskey(true);
+      try {
+        const assertion = await performWebAuthnAssertion(prep.options);
+        await api.submitOneClickWebAuthnSession({
+          actionId: prep.actionId,
+          assertion,
+        });
+        clearPrep();
+        await retry();
+      } catch (err: any) {
+        if (err?.name !== 'NotAllowedError') {
+          toast(err?.message || 'Could not confirm your passkey. Please try again.', 'error');
+        }
+      } finally {
+        setIsUnlockingPasskey(false);
+      }
+    },
+    [isUnlockingPasskey, toast]
+  );
+
   // Derive deposit address from backend ONLY when token, chain, and exact amount are selected
   const loadAddress = useCallback(
     async (refresh = false, overrideAmount?: string) => {
@@ -381,12 +447,18 @@ export const ReceivePage: React.FC = () => {
         return;
       }
       setIsDeriving(true);
+      setCrosschainAuthPrepare(null);
       try {
         const addr = await fetchDepositAddress(selectedChain, refresh, selectedToken, amt);
         setCurrentAddress(addr);
         setDepositStatus(null);
         setSettledSuccess(false);
       } catch (err) {
+        if (err instanceof OneClickAuthRequiredError) {
+          setCrosschainAuthPrepare(err.oneClickPrepare);
+          setCurrentAddress(null);
+          return;
+        }
         console.error('[ReceivePage] Failed to fetch deposit address:', err);
       } finally {
         setIsDeriving(false);
@@ -417,6 +489,7 @@ export const ReceivePage: React.FC = () => {
   // Changing the asset, network, or amount invalidates any address on screen.
   useEffect(() => {
     setCurrentAddress(null);
+    setCrosschainAuthPrepare(null);
     setDepositStatus(null);
     setSettledSuccess(false);
   }, [selectedToken, selectedChain, depositAmount]);
@@ -426,6 +499,7 @@ export const ReceivePage: React.FC = () => {
       if (!hasIntentAccount || !nearAsset?.symbol) return;
       setIsNearDeriving(true);
       setNearDepositError(null);
+      setNearAuthPrepare(null);
       try {
         // Pin the contract: tickers are not unique on NEAR, so resolving by
         // symbol alone can derive an address for the wrong UPTOBER.
@@ -445,6 +519,11 @@ export const ReceivePage: React.FC = () => {
         }
         setNearDepositAddress(data);
       } catch (err) {
+        if (err instanceof OneClickAuthRequiredError) {
+          setNearDepositAddress(null);
+          setNearAuthPrepare(err.oneClickPrepare);
+          return;
+        }
         console.warn('Failed to load NEAR deposit address:', err);
         // Never leave the previous token's address on screen under the new
         // token's name — that is how funds get sent to the wrong asset.
@@ -465,22 +544,98 @@ export const ReceivePage: React.FC = () => {
     }
   }, [activeTab, nearAsset, loadNearAddress]);
 
+  const loadOnrampAddress = useCallback(
+    async (refresh = false) => {
+      if (!hasIntentAccount) return;
+      setIsOnrampDeriving(true);
+      setOnrampError(null);
+      setOnrampAuthPrepare(null);
+      try {
+        const data = await fetchDepositAddress(
+          'near',
+          refresh,
+          'USDC',
+          undefined,
+          undefined,
+          'FLEX_INPUT'
+        );
+        if (!data?.address) {
+          setOnrampAddress(null);
+          setOnrampError('Could not prepare an instant receiving address right now. Please try again.');
+          return;
+        }
+        setOnrampAddress(data);
+      } catch (err) {
+        if (err instanceof OneClickAuthRequiredError) {
+          setOnrampAddress(null);
+          setOnrampAuthPrepare(err.oneClickPrepare);
+          return;
+        }
+        console.warn('Failed to load PingPay receiving address:', err);
+        setOnrampAddress(null);
+        setOnrampError('Could not connect to prepare top-up. Please try again.');
+      } finally {
+        setIsOnrampDeriving(false);
+      }
+    },
+    [hasIntentAccount]
+  );
+
+  useEffect(() => {
+    if (
+      activeTab === 'pingpay' &&
+      hasIntentAccount &&
+      !onrampAddress &&
+      !isOnrampDeriving &&
+      !onrampError &&
+      !onrampAuthPrepare
+    ) {
+      loadOnrampAddress(true);
+    }
+  }, [
+    activeTab,
+    hasIntentAccount,
+    onrampAddress,
+    isOnrampDeriving,
+    onrampError,
+    onrampAuthPrepare,
+    loadOnrampAddress,
+  ]);
+
+  const handleRefreshOnramp = useCallback(() => {
+    setOnrampSettled(false);
+    setOnrampStatus(null);
+    loadOnrampAddress(true);
+  }, [loadOnrampAddress]);
+
   // Real-time deposit polling (every 2.5s) — one instance per tab, active tab
-  // only. Both tabs share the same /api/onchain/deposit-status pipeline.
+  // only. All three tabs share the same /api/onchain/deposit-status pipeline.
   useDepositPoll({
-    address: activeTab === 'crosschain' ? currentAddress?.address : nearDepositAddress?.address,
-    settled: activeTab === 'crosschain' ? settledSuccess : nearSettledSuccess,
-    // Only the NEAR tab uses vault-ingress detection; cross-chain deposits are
-    // tracked by the bridge indexer and must not be probed on a token contract.
+    address:
+      activeTab === 'crosschain'
+        ? currentAddress?.address
+        : activeTab === 'defuse'
+        ? nearDepositAddress?.address
+        : onrampAddress?.address,
+    settled:
+      activeTab === 'crosschain'
+        ? settledSuccess
+        : activeTab === 'defuse'
+        ? nearSettledSuccess
+        : onrampSettled,
+    // Only the NEAR tab uses vault-ingress detection; cross-chain and PingPay
+    // deposits settle via the 1Click bridge tracker.
     contract: activeTab === 'defuse' ? nearAsset.nearContractId : undefined,
     token: activeTab === 'defuse' ? nearAsset.symbol : undefined,
     onStatus: (status) => {
       if (activeTab === 'crosschain') setDepositStatus(status);
-      else setNearDepositStatus(status);
+      else if (activeTab === 'defuse') setNearDepositStatus(status);
+      else setOnrampStatus(status);
     },
     onSettled: () => {
       if (activeTab === 'crosschain') setSettledSuccess(true);
-      else setNearSettledSuccess(true);
+      else if (activeTab === 'defuse') setNearSettledSuccess(true);
+      else setOnrampSettled(true);
     },
     refreshBalances,
     refreshHistory,
@@ -617,32 +772,47 @@ export const ReceivePage: React.FC = () => {
 
       {/* Mode Tabs */}
       <div className="flex justify-center mb-6">
-        <div className="w-full sm:w-auto flex p-1.5 rounded-2xl bg-stone-100 border border-stone-200 gap-1.5 shadow-xs">
+        <div className="w-full sm:w-auto flex sm:inline-flex p-1 sm:p-1.5 rounded-2xl bg-stone-100 border border-stone-200 gap-1 sm:gap-1.5 shadow-xs">
           <button
             type="button"
             onClick={() => setActiveTab('crosschain')}
-            className={`flex-1 sm:flex-initial justify-center px-3 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center space-x-1.5 sm:space-x-2 ${
+            className={`flex-auto sm:flex-initial justify-center px-2 sm:px-5 py-2.5 rounded-xl text-[10.5px] sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center gap-1 sm:gap-2 whitespace-nowrap ${
               activeTab === 'crosschain'
                 ? 'bg-black text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
             }`}
           >
-            <Lightning weight="fill" className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">Any chain</span>
+            <Lightning weight="fill" className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
+            <span>Any chain</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('defuse')}
-            className={`flex-1 sm:flex-initial justify-center px-3 sm:px-6 py-2.5 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center space-x-1.5 sm:space-x-2 ${
+            className={`flex-auto sm:flex-initial justify-center px-2 sm:px-5 py-2.5 rounded-xl text-[10.5px] sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center gap-1 sm:gap-2 whitespace-nowrap ${
               activeTab === 'defuse'
                 ? 'bg-black text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
             }`}
           >
-            <Shield weight="fill" className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">NEAR &amp; memes</span>
+            <Shield weight="fill" className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
+            <span>NEAR &amp; memes</span>
           </button>
+
+          {/* Temporarily hidden while Card & Cash is unavailable outside the US:
+          <button
+            type="button"
+            onClick={() => setActiveTab('pingpay')}
+            className={`flex-auto sm:flex-initial justify-center px-2 sm:px-5 py-2.5 rounded-xl text-[10.5px] sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center gap-1 sm:gap-2 whitespace-nowrap ${
+              activeTab === 'pingpay'
+                ? 'bg-black text-white shadow-xs'
+                : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
+            }`}
+          >
+            <CreditCard weight="fill" className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
+            <span>Card &amp; Cash</span>
+          </button>
+          */}
         </div>
       </div>
 
@@ -1225,6 +1395,39 @@ export const ReceivePage: React.FC = () => {
                 <CircleNotch weight="bold" className="w-8 h-8 animate-spin text-stone-900" />
                 <span>Creating your deposit address &amp; QR for {depositAmount || 'exact'} {selectedToken}...</span>
               </div>
+            ) : crosschainAuthPrepare ? (
+              <div className="py-12 px-4 flex flex-col items-center justify-center space-y-3.5 text-center">
+                <div className="w-14 h-14 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center text-stone-900">
+                  <Fingerprint weight="bold" className="w-7 h-7" />
+                </div>
+                <div className="space-y-1 max-w-xs">
+                  <h4 className="text-sm font-mono font-bold text-stone-900 uppercase tracking-wider">
+                    Unlock Private Deposit
+                  </h4>
+                  <p className="text-xs text-stone-500 font-sans leading-relaxed">
+                    Confirm once with Face ID or your passkey to generate your private deposit address.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleUnlockOneClickPasskey(
+                      crosschainAuthPrepare,
+                      () => setCrosschainAuthPrepare(null),
+                      () => loadAddress(true)
+                    )
+                  }
+                  disabled={isUnlockingPasskey}
+                  className="px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  {isUnlockingPasskey ? (
+                    <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Fingerprint weight="bold" className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isUnlockingPasskey ? 'Checking…' : 'Continue with Passkey'}</span>
+                </button>
+              </div>
             ) : (
               <div className="py-12 px-4 flex flex-col items-center justify-center space-y-3 text-center">
                 <div className="w-16 h-16 rounded-2xl bg-stone-50 border border-dashed border-stone-300 flex items-center justify-center text-stone-400">
@@ -1263,17 +1466,14 @@ export const ReceivePage: React.FC = () => {
           </div>
         </div>
       </div>
-      ) : (
+      ) : activeTab === 'defuse' ? (
         /* ── DIRECT NEAR NATIVE & MEMES TAB — pick token, deposit to pk account ── */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-fade-in">
           {/* ── LEFT COLUMN (7 Cols) ── */}
           <div className="lg:col-span-7 space-y-6">
             <div className="rounded-3xl p-6 sm:p-8 bg-white border border-stone-200 shadow-sm space-y-6">
-              {/* Badge & Title */}
-              <div className="space-y-2">
-                <Badge tone="ok" icon={<Shield weight="fill" className="w-3 h-3" />}>
-                  NEAR Protocol Direct Ingress
-                </Badge>
+              {/* Title */}
+              <div>
                 <h2 className="text-xl sm:text-2xl font-display font-extrabold text-stone-950">
                   Deposit any NEAR token
                 </h2>
@@ -1338,6 +1538,32 @@ export const ReceivePage: React.FC = () => {
                 <div className="py-16 flex flex-col items-center justify-center space-y-3 text-stone-500 font-mono text-xs text-center">
                   <CircleNotch weight="bold" className="w-8 h-8 animate-spin text-stone-900" />
                   <span>Deriving shielded deposit address for {nearAsset.symbol}...</span>
+                </div>
+              ) : nearAuthPrepare ? (
+                <div className="w-full py-10 flex flex-col items-center justify-center space-y-3 text-center px-2">
+                  <Fingerprint weight="bold" className="w-8 h-8 text-stone-900" />
+                  <p className="text-xs text-stone-600 font-sans leading-relaxed max-w-xs">
+                    Confirm once with Face ID or your passkey to unlock private {nearAsset.symbol} deposits.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleUnlockOneClickPasskey(
+                        nearAuthPrepare,
+                        () => setNearAuthPrepare(null),
+                        () => loadNearAddress(true)
+                      )
+                    }
+                    disabled={isUnlockingPasskey}
+                    className="px-4 py-2 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                  >
+                    {isUnlockingPasskey ? (
+                      <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Fingerprint weight="bold" className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isUnlockingPasskey ? 'Checking…' : 'Continue with Passkey'}</span>
+                  </button>
                 </div>
               ) : nearDepositError ? (
                 <div className="w-full py-10 flex flex-col items-center justify-center space-y-3 text-center px-2">
@@ -1558,7 +1784,27 @@ export const ReceivePage: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+      ) : null /* Temporarily commented out while Card & Cash tab is hidden:
+        <PingOnrampTab
+          hasIntentAccount={hasIntentAccount}
+          onrampAddress={onrampAddress?.address || ''}
+          isDeriving={isOnrampDeriving}
+          error={onrampError}
+          oneClickPrepare={onrampAuthPrepare}
+          isUnlockingPasskey={isUnlockingPasskey}
+          onUnlockWithPasskey={() =>
+            handleUnlockOneClickPasskey(
+              onrampAuthPrepare,
+              () => setOnrampAuthPrepare(null),
+              () => loadOnrampAddress(true)
+            )
+          }
+          status={onrampStatus}
+          settled={onrampSettled}
+          onRefresh={handleRefreshOnramp}
+          onRetryAccountCheck={() => refreshBalances()}
+        />
+      */}
     </div>
   );
 };

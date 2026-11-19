@@ -173,7 +173,7 @@ interface ResolvedOrigin {
  * from the live registry.
  */
 const NATIVE_NEAR_ORIGIN: ResolvedOrigin = {
-  assetId: 'wrap.near',
+  assetId: 'nep141:wrap.near',
   symbol: 'NEAR',
   decimals: 24,
   chain: 'near',

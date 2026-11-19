@@ -507,9 +507,9 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
                   )}
 
                   {(addressError || (addressInput.trim() && parsedInput.error)) && (
-                    <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-1.5 flex items-start gap-2 text-[11px] font-mono text-red-700">
+                    <div className="max-w-full overflow-hidden rounded-xl bg-red-50 border border-red-200 px-3 py-1.5 flex items-start gap-2 text-[11px] font-mono text-red-700">
                       <WarningCircle weight="fill" className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
-                      <span className="break-words">{addressError || parsedInput.error}</span>
+                      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{addressError || parsedInput.error}</span>
                     </div>
                   )}
                 </div>
@@ -723,9 +723,9 @@ export const NearcomWithdrawModal: React.FC<NearcomWithdrawModalProps> = ({
 
                     {/* Error Feedback */}
                     {(exceedsBalance || withdrawError) && (
-                      <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
+                      <div className="max-w-full overflow-hidden rounded-xl bg-red-50 border border-red-200 px-3 py-2 flex items-start gap-2 text-[11px] font-mono text-red-700">
                         <WarningCircle weight="fill" className="w-3.5 h-3.5 text-red-600 mt-0.5 flex-shrink-0" />
-                        <span>
+                        <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
                           {exceedsBalance
                             ? `Insufficient ${selectedToken?.symbol} balance. Available: ${formatTokenAmount(
                                 selectedToken?.balance || '0'

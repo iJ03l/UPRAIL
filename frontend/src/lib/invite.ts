@@ -156,3 +156,26 @@ export function withInvite(path: string): string {
     return path;
   }
 }
+
+export interface InviteClaimSummary {
+  claims: Array<{ handle: string; claimedAt: number }>;
+  useCount: number;
+}
+
+/** Normalizes recentClaims/claimedBy/useCount across reusable and legacy responses. */
+export function getInviteClaimSummary(invite?: {
+  recentClaims?: Array<{ handle: string; claimedAt: number }>;
+  claimedBy?: { handle: string; claimedAt: number } | null;
+  useCount?: number;
+} | null): InviteClaimSummary {
+  if (!invite) return { claims: [], useCount: 0 };
+  const claims = invite.recentClaims?.length
+    ? invite.recentClaims
+    : invite.claimedBy
+    ? [invite.claimedBy]
+    : [];
+  return {
+    claims,
+    useCount: invite.useCount ?? claims.length,
+  };
+}

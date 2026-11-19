@@ -72,7 +72,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed z-[200] bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-6 flex flex-col items-center sm:items-end gap-2 pointer-events-none">
+      <div className="fixed z-[200] bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-6 w-[calc(100vw-2rem)] sm:w-auto max-w-sm flex flex-col items-center sm:items-end gap-2 pointer-events-none">
         {items.map((t) => {
           const Icon = ICONS[t.tone];
           return (
@@ -80,7 +80,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               key={t.id}
               role="status"
               aria-live="polite"
-              className={`pointer-events-auto flex items-center space-x-2 pl-3 pr-1.5 py-2.5 rounded-2xl border shadow-lg bg-white/95 backdrop-blur-sm animate-fade-in ${
+              className={`pointer-events-auto max-w-full flex items-center space-x-2 pl-3 pr-1.5 py-2.5 rounded-2xl border shadow-lg bg-white/95 backdrop-blur-sm animate-fade-in ${
                 t.tone === 'error' ? 'border-red-200 text-red-800' : 'border-stone-200 text-stone-800'
               }`}
             >
@@ -93,7 +93,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                       : 'text-stone-400'
                 }`}
               />
-              <span className="text-xs font-mono font-bold max-w-[16rem]">{t.message}</span>
+              <span className="text-xs font-mono font-bold min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{t.message}</span>
               <button
                 onClick={() => dismiss(t.id)}
                 className="p-1 rounded-lg text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer"

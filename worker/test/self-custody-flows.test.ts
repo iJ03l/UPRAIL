@@ -10,8 +10,10 @@ import {
 } from '../src/services/nativeL1Grant';
 import {
   assertServerOrGrantedNativeL1ForXId,
+  getDepositAddress,
   SelfCustodySignatureRequiredError,
 } from '../src/services/nearRpc';
+import { OneClickSelfCustodyAuthRequiredError } from '../src/services/oneclickAuth';
 import {
   getAttestorPublicKey,
   signHandleAttestation,
@@ -3532,8 +3534,467 @@ test('redeemSystemSkipInvite activates account using a valid system code and iss
   assert.equal(invites.get(identity.invited_by_code)?.status, 'ACTIVE');
 });
 
+test('personal user ref codes are reusable across signups while payment invites remain single-use', async () => {
+  const {
+    redeemInvite,
+    validateInviteCode,
+    getUserInvite,
+    createPaymentInvite,
+  } = await import('../src/services/inviteService');
 
+  const invites = new Map<string, any>([
+    [
+      'LEGACY',
+      {
+        code: 'LEGACY',
+        creator_x_id: 'xid_alice',
+        creator_x_handle: 'alice',
+        claimed_by_x_id: 'xid_legacy_claimer',
+        claimed_by_x_handle: 'oldfriend',
+        payment_id: null,
+        status: 'USED',
+        created_at: 1000,
+        claimed_at: 2000,
+      },
+    ],
+  ]);
 
+  const identities = new Map<string, any>([
+    [
+      'xid_alice',
+      {
+        x_id: 'xid_alice',
+        x_handle: 'alice',
+        is_activated: 1,
+        personal_invite_code: 'LEGACY',
+        invited_by_code: 'UPRAIL',
+        invited_by_handle: 'system',
+        created_at: 1000,
+        updated_at: 1000,
+      },
+    ],
+    [
+      'xid_bob',
+      {
+        x_id: 'xid_bob',
+        x_handle: 'bob',
+        is_activated: 0,
+        personal_invite_code: null,
+        invited_by_code: null,
+        invited_by_handle: null,
+        created_at: 3000,
+        updated_at: 3000,
+      },
+    ],
+    [
+      'xid_carol',
+      {
+        x_id: 'xid_carol',
+        x_handle: 'carol',
+        is_activated: 0,
+        personal_invite_code: null,
+        invited_by_code: null,
+        invited_by_handle: null,
+        created_at: 4000,
+        updated_at: 4000,
+      },
+    ],
+  ]);
 
+  const payments = new Map<string, any>([
+    ['pay_1', { id: 'pay_1', recipient_handle: 'dave', recipient_x_id: null }],
+  ]);
 
+  const env: any = {
+    WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+    DB: {
+      prepare(sql: string) {
+        let b: any[] = [];
+        const stmt: any = {
+          bind(...args: any[]) {
+            b = args;
+            return stmt;
+          },
+          async first() {
+            if (sql.includes('SELECT * FROM invites WHERE code = ?')) {
+              return invites.get(String(b[0])) ?? null;
+            }
+            if (sql.includes('SELECT is_activated, personal_invite_code FROM x_identities WHERE x_id = ?')) {
+              return identities.get(String(b[0])) ?? null;
+            }
+            if (sql.includes('SELECT recipient_handle, recipient_x_id FROM payments WHERE id = ?')) {
+              return payments.get(String(b[0])) ?? null;
+            }
+            if (sql.includes('SELECT COUNT(*) AS cnt FROM x_identities WHERE invited_by_code = ?')) {
+              const cnt = Array.from(identities.values()).filter(
+                (r) => r.invited_by_code === String(b[0]) && r.is_activated === 1
+              ).length;
+              return { cnt };
+            }
+            return null;
+          },
+          async all() {
+            if (sql.includes('FROM x_identities') && sql.includes('WHERE invited_by_code = ?')) {
+              const results = Array.from(identities.values())
+                .filter((r) => r.invited_by_code === String(b[0]) && r.is_activated === 1)
+                .sort((a, z) => (z.updated_at || 0) - (a.updated_at || 0));
+              return { results };
+            }
+            return { results: [] };
+          },
+          async run() {
+            if (sql.includes('INSERT OR IGNORE INTO invites')) {
+              const code = String(b[0]);
+              if (!invites.has(code)) {
+                invites.set(code, { code, creator_x_id: null, creator_x_handle: 'system', status: 'ACTIVE', created_at: b[1] });
+              }
+              return { success: true, meta: { changes: 1 } };
+            }
+            if (sql.includes('INSERT INTO invites')) {
+              const code = String(b[0]);
+              if (invites.has(code)) throw new Error('UNIQUE constraint failed');
+              const isPaymentInvite = sql.includes("VALUES (?, ?, ?, NULL, NULL, ?, 'ACTIVE'");
+              invites.set(code, {
+                code,
+                creator_x_id: b[1],
+                creator_x_handle: b[2],
+                claimed_by_x_id: null,
+                claimed_by_x_handle: null,
+                payment_id: isPaymentInvite ? b[3] : null,
+                status: 'ACTIVE',
+                created_at: isPaymentInvite ? b[4] : b[3],
+              });
+              return { success: true, meta: { changes: 1 } };
+            }
+            if (sql.includes("SET status = 'USED'")) {
+              const code = String(b[3]);
+              const row = invites.get(code);
+              if (!row || row.status !== 'ACTIVE') return { success: true, meta: { changes: 0 } };
+              row.status = 'USED';
+              row.claimed_by_x_id = b[0];
+              row.claimed_by_x_handle = b[1];
+              row.claimed_at = b[2];
+              return { success: true, meta: { changes: 1 } };
+            }
+            if (sql.includes("SET status = 'ACTIVE'")) {
+              const row = invites.get(String(b[0]));
+              if (row && row.status === 'USED' && row.creator_x_id && !row.payment_id) {
+                row.status = 'ACTIVE';
+              }
+              return { success: true, meta: { changes: 1 } };
+            }
+            if (sql.includes('UPDATE x_identities')) {
+              if (sql.includes('invited_by_code = ?')) {
+                const row = identities.get(String(b[4]));
+                if (row) {
+                  row.is_activated = 1;
+                  row.personal_invite_code = b[0];
+                  row.invited_by_code = b[1];
+                  row.invited_by_handle = b[2];
+                  row.updated_at = b[3];
+                }
+              }
+              return { success: true, meta: { changes: 1 } };
+            }
+            return { success: true, meta: { changes: 0 } };
+          },
+        };
+        return stmt;
+      },
+    },
+  };
 
+  // Legacy USED personal ref code validates as ACTIVE & reusable
+  const legacyCheck = await validateInviteCode(env, 'LEGACY');
+  assert.equal(legacyCheck.valid, true);
+
+  // Two distinct users can redeem Alice's LEGACY personal ref code
+  const bobRes = await redeemInvite(env, 'LEGACY', { x_id: 'xid_bob', x_handle: 'bob' });
+  const carolRes = await redeemInvite(env, 'LEGACY', { x_id: 'xid_carol', x_handle: 'carol' });
+  assert.equal(bobRes.success, true);
+  assert.equal(carolRes.success, true);
+  assert.notEqual(bobRes.personalInviteCode, carolRes.personalInviteCode);
+  assert.equal(invites.get('LEGACY')?.status, 'ACTIVE');
+
+  // Re-redeeming while already activated preserves existing personal code cleanly
+  const repeatBob = await redeemInvite(env, carolRes.personalInviteCode, { x_id: 'xid_bob', x_handle: 'bob' });
+  assert.equal(repeatBob.personalInviteCode, bobRes.personalInviteCode);
+  assert.equal(identities.get('xid_bob')?.invited_by_code, 'LEGACY');
+
+  // Alice's my-invite summary reports reusable active status and all claims (including historical)
+  const aliceInvite = await getUserInvite(env, 'xid_alice', 'alice');
+  assert.equal(aliceInvite.inviteCode, 'LEGACY');
+  assert.equal(aliceInvite.status, 'ACTIVE');
+  assert.equal(aliceInvite.reusable, true);
+  assert.equal(aliceInvite.useCount, 3);
+  assert.deepEqual(
+    aliceInvite.recentClaims?.map((c) => c.handle).sort(),
+    ['bob', 'carol', 'oldfriend']
+  );
+
+  // Payment-attached invites remain strictly single-use
+  const payCode = await createPaymentInvite(env, 'pay_1', 'xid_alice', 'alice');
+  identities.set('xid_dave', {
+    x_id: 'xid_dave',
+    x_handle: 'dave',
+    is_activated: 0,
+    personal_invite_code: null,
+  });
+  await redeemInvite(env, payCode, { x_id: 'xid_dave', x_handle: 'dave' });
+  const reusedPayCheck = await validateInviteCode(env, payCode);
+  assert.equal(reusedPayCheck.valid, false);
+});
+
+test('getDepositAddress forwards FLEX_INPUT swapType and isolates cache key from EXACT_INPUT', async () => {
+  const quoteBodies: any[] = [];
+  const cachedRows = new Map<string, any>();
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/v0/quote')) {
+      const parsed = JSON.parse(String(init?.body || '{}'));
+      quoteBodies.push(parsed);
+      const isFlex = parsed.swapType === 'FLEX_INPUT';
+      return new Response(
+        JSON.stringify({
+          quote: {
+            depositAddress: isFlex
+              ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+              : 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            deadline: new Date(Date.now() + 86_400_000).toISOString(),
+            amountInFormatted: '0.10',
+            amountInUsd: '0.10',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    throw new Error(`Unexpected fetch in getDepositAddress test: ${url}`);
+  }) as typeof fetch;
+
+  const env: any = {
+    CONFIDENTIAL_RAIL_ENABLED: 'false',
+    NEAR_API_BASE: 'https://1click.chaindefuser.com',
+    DB: {
+      prepare(sql: string) {
+        let b: any[] = [];
+        const stmt: any = {
+          bind(...args: any[]) {
+            b = args;
+            return stmt;
+          },
+          async first() {
+            if (sql.includes('FROM deposit_addresses')) {
+              return cachedRows.get(`${b[0]}::${b[1]}`) ?? null;
+            }
+            return null;
+          },
+          async run() {
+            if (sql.includes('INSERT INTO deposit_addresses')) {
+              cachedRows.set(`${b[0]}::${b[1]}`, {
+                chain: b[1],
+                chain_name: b[2],
+                address: b[3],
+                memo: b[4],
+                expires_at: b[5],
+              });
+            }
+            return { success: true, meta: { changes: 1 } };
+          },
+        };
+        return stmt;
+      },
+    },
+  };
+
+  try {
+    const flexRes = await getDepositAddress(
+      env,
+      'alice.uprail.near',
+      'near',
+      false,
+      'USDC',
+      undefined,
+      undefined,
+      { swapType: 'FLEX_INPUT' }
+    );
+    const exactRes = await getDepositAddress(
+      env,
+      'alice.uprail.near',
+      'near',
+      false,
+      'USDC'
+    );
+    const flexCachedRes = await getDepositAddress(
+      env,
+      'alice.uprail.near',
+      'near',
+      false,
+      'USDC',
+      undefined,
+      undefined,
+      { swapType: 'FLEX_INPUT' }
+    );
+
+    assert.equal(quoteBodies.length, 2);
+    assert.equal(quoteBodies[0].swapType, 'FLEX_INPUT');
+    assert.equal(quoteBodies[1].swapType, 'EXACT_INPUT');
+    assert.equal(
+      flexRes?.address,
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    );
+    assert.equal(
+      exactRes?.address,
+      'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    );
+    assert.equal(flexCachedRes?.address, flexRes?.address);
+    assert.equal(flexCachedRes?.chain, 'near');
+    assert.equal(flexCachedRes?.token, 'USDC');
+    assert.ok(cachedRows.has('alice.uprail.near::flex_near_usdc'));
+    assert.ok(cachedRows.has('alice.uprail.near::near_usdc'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getDepositAddress propagates OneClickSelfCustodyAuthRequiredError when confidential session is missing', async () => {
+  const env: any = {
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    NEAR_API_BASE: 'https://1click.example',
+    ONE_CLICK_API_KEY: 'partner-key',
+    CACHE: {
+      async get() {
+        return null;
+      },
+      async put() {},
+      async delete() {},
+    },
+    DB: {
+      prepare(sql: string) {
+        const stmt: any = {
+          bind() {
+            return stmt;
+          },
+          async first() {
+            if (sql.includes('FROM x_identities')) {
+              return { custody_mode: 'self' };
+            }
+            return null;
+          },
+          async run() {
+            return { success: true, meta: { changes: 1 } };
+          },
+        };
+        return stmt;
+      },
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      getDepositAddress(
+        env,
+        'alice.uprail.near',
+        'near',
+        true,
+        'USDC',
+        undefined,
+        undefined,
+        { xId: 'x-self-missing', swapType: 'FLEX_INPUT' }
+      ),
+    (err: unknown) => err instanceof OneClickSelfCustodyAuthRequiredError
+  );
+});
+
+test('getDepositAddress retries confidential 1Click quote with solver try-at-least minimum', async () => {
+  const quoteBodies: any[] = [];
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/v0/quote')) {
+      const parsed = JSON.parse(String(init?.body || '{}'));
+      quoteBodies.push(parsed);
+      if (parsed.amount === '100000') {
+        return new Response(
+          JSON.stringify({ message: 'Amount is too low for bridge, try at least 1000000' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          quote: {
+            depositAddress: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            deadline: new Date(Date.now() + 86_400_000).toISOString(),
+            amountInFormatted: '1.00',
+            amountInUsd: '1.00',
+          },
+          quoteRequest: { confidentiality: 'advanced' },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    throw new Error(`Unexpected fetch in confidential retry test: ${url}`);
+  }) as typeof fetch;
+
+  const env: any = {
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    NEAR_API_BASE: 'https://1click.example',
+    ONE_CLICK_API_KEY: 'partner-key',
+    CACHE: {
+      async get() {
+        return {
+          accessToken: 'user-jwt',
+          accountId: 'alice.uprail.near',
+          expiresAt: Date.now() + 300_000,
+        };
+      },
+      async put() {},
+      async delete() {},
+    },
+    DB: {
+      prepare() {
+        const stmt: any = {
+          bind() {
+            return stmt;
+          },
+          async first() {
+            return null;
+          },
+          async run() {
+            return { success: true, meta: { changes: 1 } };
+          },
+        };
+        return stmt;
+      },
+    },
+  };
+
+  try {
+    const res = await getDepositAddress(
+      env,
+      'alice.uprail.near',
+      'near',
+      true,
+      'USDC',
+      undefined,
+      undefined,
+      { xId: 'x-cust-retry', swapType: 'FLEX_INPUT' }
+    );
+    assert.equal(quoteBodies.length, 2);
+    assert.equal(quoteBodies[0].amount, '100000');
+    assert.equal(quoteBodies[1].amount, '1000000');
+    assert.equal(quoteBodies[1].swapType, 'FLEX_INPUT');
+    assert.equal(quoteBodies[1].confidentiality, 'advanced');
+    assert.equal(
+      res?.address,
+      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+    );
+    assert.equal(res?.minAmount, '1000000');
+    assert.equal(res?.minAmountFormatted, '1.00 USDC');
+    assert.equal(res?.minAmountUsd, '$1.00');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

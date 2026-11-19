@@ -32,6 +32,7 @@ import { requestsRouter } from './routes/requests';
 import { coffeeRouter } from './routes/coffee';
 import { circlesRouter } from './routes/circles';
 import { giftsRouter } from './routes/gifts';
+import { pingpayRouter } from './routes/pingpay';
 import { custodyRouter, verifyRouter } from './routes/custody';
 import { oauthRouter } from './routes/oauth';
 import { approvalRouter } from './routes/approval';
@@ -251,6 +252,9 @@ apiRouter.route('/coffee', coffeeRouter);
 // Multi-member quota Circles & 1-to-1 Timelocked Earn Vault Gifting
 apiRouter.route('/circles', circlesRouter);
 apiRouter.route('/gifts', giftsRouter);
+
+// Card & Cash fiat onramp proxy (USDC-only, non-crypto methods)
+apiRouter.route('/pingpay', pingpayRouter);
 
 // Opt-in passkey Self-Custody & public on-chain custody verification
 apiRouter.route('/custody', custodyRouter);

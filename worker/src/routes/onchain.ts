@@ -20,6 +20,7 @@ import { requirePasskeyAuth } from '../middleware/passkeyAuth';
 import * as nearRpc from '../services/nearRpc';
 import { isConfidentialRailEnabled, getConfidentialBalances } from '../services/confidentialRail';
 import { getUserSession, OneClickSelfCustodyAuthRequiredError } from '../services/oneclickAuth';
+import { prepareOneClickWebAuthnSession } from '../services/custodyService';
 import {
   executeStabilize,
   getStabilizeExecutionStatus,
@@ -431,12 +432,21 @@ onchainRouter.get('/deposit-address', requireAuth({ passkeyVerified: true }), as
   // Pin the exact NEP-141 contract when the picker knows it — tickers are not
   // unique on NEAR and a symbol-only lookup can resolve the wrong asset.
   const contract = c.req.query('contract');
+  const swapTypeRaw = (c.req.query('swapType') || '').trim().toUpperCase();
+  if (swapTypeRaw && swapTypeRaw !== 'EXACT_INPUT' && swapTypeRaw !== 'FLEX_INPUT') {
+    return c.json<ErrorResponse>(
+      { error: 'swapType must be EXACT_INPUT or FLEX_INPUT', code: 'INVALID_SWAP_TYPE' },
+      400
+    );
+  }
+  const swapType: 'EXACT_INPUT' | 'FLEX_INPUT' =
+    swapTypeRaw === 'FLEX_INPUT' ? 'FLEX_INPUT' : 'EXACT_INPUT';
   const bypassCache = c.req.query('refresh') === 'true' || !!amount;
   const nearAccount = await nearRpc.resolveUserNearAccount(c.env, session);
 
   try {
     if (chain) {
-      // Single chain (with optional token, pinned contract and exact amount)
+      // Single chain (with optional token, pinned contract, exact amount, and swapType)
       const address = await nearRpc.getDepositAddress(
         c.env,
         nearAccount,
@@ -445,7 +455,7 @@ onchainRouter.get('/deposit-address', requireAuth({ passkeyVerified: true }), as
         token,
         amount,
         contract,
-        { xId: session.x_id }
+        { xId: session.x_id, swapType }
       );
       if (!address) {
         return c.json<ErrorResponse>(
@@ -462,6 +472,24 @@ onchainRouter.get('/deposit-address', requireAuth({ passkeyVerified: true }), as
       return c.json({ addresses, nearAccount, source: 'onchain', fetchedAt: Date.now() });
     }
   } catch (err: any) {
+    if (
+      err instanceof OneClickSelfCustodyAuthRequiredError ||
+      err?.name === 'OneClickSelfCustodyAuthRequiredError'
+    ) {
+      const oneClickPrepare = await prepareOneClickWebAuthnSession(
+        c.env,
+        session.x_id,
+        session.x_handle
+      );
+      return c.json(
+        {
+          error: 'Confirm once with your passkey to unlock private receiving addresses.',
+          code: 'ONECLICK_AUTH_REQUIRED',
+          oneClickPrepare,
+        },
+        401
+      );
+    }
     console.error('[onchain/deposit-address] error:', err);
     return c.json<ErrorResponse>(
       { error: `Failed to fetch deposit address: ${publicErrorMessage(err)}`, code: 'DEPOSIT_ADDRESS_ERROR' },

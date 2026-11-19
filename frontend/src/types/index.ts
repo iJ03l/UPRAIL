@@ -140,6 +140,12 @@ export interface WithdrawalReceipt {
 export interface MyInviteResponse {
   inviteCode: string;
   status: 'ACTIVE' | 'USED';
+  reusable?: boolean;
+  useCount?: number;
+  recentClaims?: Array<{
+    handle: string;
+    claimedAt: number;
+  }>;
   claimedBy?: {
     handle: string;
     claimedAt: number;

@@ -1336,4 +1336,73 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(html.includes('PAY ME HERE — @verify'), false);
     assert.equal(html.includes('/og/coffee/verify.png'), false);
   });
+
+  it('GET /api/onchain/deposit-address validates swapType query param', async () => {
+    const now = Date.now();
+    const session = signTestSession({
+      session_id: 'session_swap_type_test',
+      x_id: 'xid_sc_only_test',
+      x_handle: 'sc_only_test',
+      x_name: 'SC Test',
+      near_account: null,
+      passkey_verified: true,
+      passkey_verified_at: now,
+      created_at: now,
+      expires_at: now + 60 * 60 * 1000,
+    });
+    const res = await mf.dispatchFetch(
+      'http://localhost/api/onchain/deposit-address?chain=near&token=USDC&swapType=INVALID_MODE',
+      {
+        headers: {
+          Cookie: `uprail_session=${session}`,
+        },
+      }
+    );
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.code, 'INVALID_SWAP_TYPE');
+  });
+
+  it('sets Content-Security-Policy frame-src to allow Coinbase and PingPay onramp while keeping frame-ancestors none', async () => {
+    const res = await mf.dispatchFetch('http://localhost/health');
+    assert.equal(res.status, 200);
+    const csp = res.headers.get('content-security-policy') || '';
+    assert.match(csp, /frame-ancestors 'none'/);
+    assert.match(csp, /frame-src 'self' https:\/\/pay\.coinbase\.com https:\/\/onramp\.pingpay\.io https:\/\/pay\.pingpay\.io/);
+  });
+
+  it('POST /api/pingpay/quote blocks CRYPTO method and validates authenticated caller', async () => {
+    const unauth = await mf.dispatchFetch('http://localhost/api/pingpay/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: '25', paymentMethod: 'APPLE_PAY' }),
+    });
+    assert.equal(unauth.status, 401);
+
+    const now = Date.now();
+    const session = signTestSession({
+      session_id: 'session_pingpay_test',
+      x_id: 'xid_pp_test',
+      x_handle: 'pp_tester',
+      x_name: 'PP Tester',
+      near_account: null,
+      passkey_verified: true,
+      passkey_verified_at: now,
+      created_at: now,
+      expires_at: now + 60 * 60 * 1000,
+    });
+    for (const disallowed of ['CRYPTO', 'COINBASE', 'CASH_APP', 'CARD']) {
+      const blocked = await mf.dispatchFetch('http://localhost/api/pingpay/quote', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `uprail_session=${session}`,
+        },
+        body: JSON.stringify({ amount: '25', paymentMethod: disallowed }),
+      });
+      assert.equal(blocked.status, 400, `expected 400 for disallowed method ${disallowed}`);
+      const body = await blocked.json();
+      assert.equal(body.code, 'INVALID_REQUEST');
+    }
+  });
 });
