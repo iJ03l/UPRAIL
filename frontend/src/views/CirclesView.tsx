@@ -1172,23 +1172,41 @@ export const CirclesView: React.FC = () => {
     );
   }, [receivedGifts, sentGifts]);
 
-  // Summary metrics
-  const totalCirclesPrincipalCents = useMemo(
+  // Summary metrics (only active open Circles and active LOCKED Gifts)
+  const activeUniqueGifts = useMemo(() => {
+    const byId = new Map<string, AuthenticatedGiftView>();
+    for (const g of [...activeReceivedGifts, ...activeSentGifts]) {
+      byId.set(g.id, g);
+    }
+    return Array.from(byId.values());
+  }, [activeReceivedGifts, activeSentGifts]);
+
+  const activeOpenCircles = useMemo(
     () =>
-      circles.reduce(
-        (acc, c) => acc + (c.contributedUsdCents ?? c.totalContributedUsdCents ?? 0),
-        0
+      circles.filter(
+        (c) =>
+          c.status === 'PENDING_SIGNATURES' ||
+          c.status === 'ACTIVE' ||
+          c.status === 'GOAL_MET'
       ),
     [circles]
   );
+
+  const totalCirclesPrincipalCents = useMemo(
+    () =>
+      activeOpenCircles.reduce(
+        (acc, c) => acc + (c.contributedUsdCents ?? c.totalContributedUsdCents ?? 0),
+        0
+      ) + activeUniqueGifts.reduce((acc, g) => acc + (g.principalUsdCents || 0), 0),
+    [activeOpenCircles, activeUniqueGifts]
+  );
   const totalCirclesYieldCents = useMemo(
-    () => circles.reduce((acc, c) => acc + (c.yieldUsdCents || 0), 0),
-    [circles]
+    () => activeOpenCircles.reduce((acc, c) => acc + (c.yieldUsdCents || 0), 0),
+    [activeOpenCircles]
   );
   const totalGiftsYieldCents = useMemo(
-    () =>
-      [...sentGifts, ...receivedGifts].reduce((acc, g) => acc + (g.yieldUsdCents || 0), 0),
-    [sentGifts, receivedGifts]
+    () => activeUniqueGifts.reduce((acc, g) => acc + (g.yieldUsdCents || 0), 0),
+    [activeUniqueGifts]
   );
 
   const myMemberInContribCircle = useMemo(() => {
