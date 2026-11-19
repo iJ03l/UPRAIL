@@ -413,7 +413,9 @@ export const LandingPage: React.FC = () => {
         </div>
 
         {/* Built-by credit */}
-        <div className="w-full px-4 sm:px-8 lg:px-12 mt-6 pt-5 border-t border-stone-100 flex flex-col sm:flex-row items-center justify-center gap-2 text-[11px] font-mono text-stone-400 text-center">
+        <div className="w-full px-4 sm:px-8 lg:px-12 mt-6 pt-5 border-t border-stone-100 flex flex-col sm:flex-row flex-wrap items-center justify-center gap-2 text-[11px] font-mono text-stone-400 text-center">
+          <span>© 2026 Jence Ltd</span>
+          <span className="hidden sm:inline text-stone-300">·</span>
           <span>
             Built by{' '}
             <a

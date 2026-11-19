@@ -30,7 +30,7 @@ export const historyStatusLabel = (status: string): string => {
 };
 
 export const activityStatusMeta = (params: {
-  type: 'payment' | 'deposit' | 'withdrawal' | 'request';
+  type: 'payment' | 'deposit' | 'withdrawal' | 'request' | 'gift';
   isSent: boolean;
   status: string;
 }): { label: string; className: string } => {
@@ -44,6 +44,16 @@ export const activityStatusMeta = (params: {
     'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-300';
   const stone =
     'text-stone-600 bg-stone-100 border-stone-200 dark:bg-stone-800 dark:border-stone-700 dark:text-stone-300';
+
+  if (params.type === 'gift') {
+    if (s === 'claimed') {
+      return { label: params.isSent ? 'GIFT CLAIMED' : 'GIFT RECEIVED', className: emerald };
+    }
+    if (s === 'reclaimed') {
+      return { label: 'RECLAIMED', className: amber };
+    }
+    return { label: historyStatusLabel(s).toUpperCase(), className: stone };
+  }
 
   if (params.type === 'request') {
     if (s === 'completed' || s === 'settled' || s === 'success') {

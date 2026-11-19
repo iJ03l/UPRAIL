@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from '../lib/router';
 import {
   Gift,
   Lock,
   LockOpen,
   Fingerprint,
+  CircleNotch,
   TrendUp,
   Copy,
   Check,
@@ -19,10 +20,10 @@ import {
 } from '@phosphor-icons/react';
 import { api, formatUsd } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
-import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useToast } from '../components/Toast';
 import { GlitchLogo } from '../components/GlitchLogo';
 import { Badge } from '../components/Badge';
+import { SelfCustodyUpgradeModal } from '../components/SelfCustodyUpgradeModal';
 import type { PublicGiftCardView, AuthenticatedGiftView } from '../types';
 
 function extractGiftIdFromLocation(): string {
@@ -40,9 +41,9 @@ function formatCentsUsd(cents: number | undefined | null): string {
 }
 
 export const PublicGiftView: React.FC = () => {
-  const { user, isAuthenticated } = useXAuth();
-  const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
+  const { user, isAuthenticated, refreshSession } = useXAuth();
   const { toast } = useToast();
+  const isAuthorizing = false;
 
   const [giftId, setGiftId] = useState('');
   const [publicGift, setPublicGift] = useState<PublicGiftCardView | null>(null);
@@ -51,7 +52,9 @@ export const PublicGiftView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [isClaiming, setIsClaiming] = useState(false);
+  const [claimStepMsg, setClaimStepMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const settlingRef = useRef(false);
 
   useEffect(() => {
     setGiftId(extractGiftIdFromLocation());
@@ -120,79 +123,55 @@ export const PublicGiftView: React.FC = () => {
   })();
 
   const runGiftSettlement = async (mode: 'claim' | 'reclaim') => {
-    if (!activeGift) return;
+    if (!activeGift || settlingRef.current) return;
+    if (user && user.custodyMode !== 'self') {
+      toast('Please complete Passkey Self-Custody migration first.', 'error');
+      return;
+    }
+    settlingRef.current = true;
     setIsClaiming(true);
+    setClaimStepMsg(
+      mode === 'reclaim' ? 'Preparing vault reclaim…' : 'Preparing timelocked vault unlock…'
+    );
     try {
-      if (user?.custodyMode === 'self') {
-        if (mode === 'reclaim') {
-          const res = await api.reclaimGiftSelfCustody(activeGift.id);
-          if (res.gift) {
-            setAuthGift(res.gift);
-            setPublicGift((prev) => (prev ? { ...prev, status: res.gift!.status } : prev));
-          } else {
-            await loadGift();
-          }
-          toast(
-            `Reclaimed ${activeGift.vaultSymbol} Earn Vault gift back to your vault!`,
-            'success'
-          );
-        } else {
-          const res = await api.claimGiftSelfCustody(activeGift.id);
-          setAuthGift(res.gift);
-          setPublicGift((prev) => (prev ? { ...prev, status: res.gift.status } : prev));
-          if (res.payoutAsset === 'USDC') {
-            toast(
-              res.usdcSwapStatus === 'SUCCESS'
-                ? `Unwrapped & converted gift to ${res.usdcAmount} USDC!`
-                : `Claimed & converting ${res.sharesClaimed} ${res.gift.vaultSymbol} → ~${res.usdcAmount} USDC!`,
-              'success'
-            );
-          } else if (res.usdcSwapNote) {
-            toast(
-              `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} to your wallet. Stabilize to USDC anytime.`,
-              'success'
-            );
-          } else {
-            toast(
-              `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
-              'success'
-            );
-          }
-        }
-        return;
-      }
-
-      const assertion = await authorizeWithPasskey(
-        mode === 'reclaim'
-          ? `Reclaim unclaimed ${activeGift.vaultSymbol} Earn Vault gift`
-          : `Unwrap & claim ${activeGift.vaultSymbol} Earn Vault gift to USDC from @${activeGift.senderHandle}`
-      );
-      const res =
-        mode === 'reclaim'
-          ? await api.reclaimGiftServer({
-              giftId: activeGift.id,
-              passkeyAssertion: assertion,
-            })
-          : await api.claimGift({
-              giftId: activeGift.id,
-              passkeyAssertion: assertion,
-            });
-      setAuthGift(res.gift);
-      setPublicGift((prev) => (prev ? { ...prev, status: res.gift.status } : prev));
       if (mode === 'reclaim') {
-        toast(`Reclaimed ${res.sharesClaimed} ${res.gift.vaultSymbol} back to your vault!`, 'success');
-      } else if (res.payoutAsset === 'USDC') {
+        const res = await api.reclaimGiftSelfCustody(activeGift.id, (_stage, msg) =>
+          setClaimStepMsg(msg)
+        );
+        if (res.gift) {
+          setAuthGift(res.gift);
+          setPublicGift((prev) => (prev ? { ...prev, status: res.gift!.status } : prev));
+        } else {
+          await loadGift();
+        }
         toast(
-          res.usdcSwapStatus === 'SUCCESS'
-            ? `Unwrapped & converted gift to ${res.usdcAmount} USDC!`
-            : `Claimed & converting ${res.sharesClaimed} ${res.gift.vaultSymbol} → ~${res.usdcAmount} USDC!`,
+          `Reclaimed ${activeGift.vaultSymbol} Earn Vault gift back to your vault!`,
           'success'
         );
       } else {
-        toast(
-          `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
-          'success'
+        const res = await api.claimGiftSelfCustody(activeGift.id, (_stage, msg) =>
+          setClaimStepMsg(msg)
         );
+        setAuthGift(res.gift);
+        setPublicGift((prev) => (prev ? { ...prev, status: res.gift.status } : prev));
+        if (res.payoutAsset === 'USDC') {
+          toast(
+            res.usdcSwapStatus === 'SUCCESS'
+              ? `Unwrapped & converted gift to ${res.usdcAmount} USDC!`
+              : `Claimed & converting ${res.sharesClaimed} ${res.gift.vaultSymbol} → ~${res.usdcAmount} USDC!`,
+            'success'
+          );
+        } else if (res.usdcSwapNote) {
+          toast(
+            `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} to your wallet. Stabilize to USDC anytime.`,
+            'success'
+          );
+        } else {
+          toast(
+            `Unwrapped ${res.sharesClaimed} ${res.gift.vaultSymbol} (principal + yield) to your vault!`,
+            'success'
+          );
+        }
       }
     } catch (err: any) {
       toast(
@@ -203,7 +182,9 @@ export const PublicGiftView: React.FC = () => {
         'error'
       );
     } finally {
+      settlingRef.current = false;
       setIsClaiming(false);
+      setClaimStepMsg(null);
     }
   };
 
@@ -287,20 +268,36 @@ export const PublicGiftView: React.FC = () => {
 
             {/* Valuation & Yield Breakdown */}
             <div className="p-6 sm:p-8 space-y-6">
-              {(authGift || activeGift.showAmount) ? (
+              {(authGift || activeGift.showAmount) ? (() => {
+                const netCents =
+                  typeof activeGift.netChangeUsdCents === 'number'
+                    ? activeGift.netChangeUsdCents
+                    : activeGift.yieldUsdCents ?? 0;
+                const isNeg = netCents < 0;
+                return (
                 <div className="grid grid-cols-3 gap-3 p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center">
                   <div>
-                    <div className="text-[10px] font-mono uppercase text-stone-400">Principal</div>
+                    <div className="text-[10px] font-mono uppercase text-stone-400">Deposited</div>
                     <div className="text-base sm:text-lg font-display font-extrabold text-stone-900 tabular-nums mt-0.5">
                       {formatCentsUsd(activeGift.principalUsdCents)}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] font-mono uppercase text-emerald-600">
-                      Accrued Yield
+                    <div
+                      className={`text-[10px] font-mono uppercase ${
+                        isNeg ? 'text-amber-700' : 'text-emerald-600'
+                      }`}
+                    >
+                      {isNeg ? 'Net Change' : 'Accrued Yield'}
                     </div>
-                    <div className="text-base sm:text-lg font-display font-extrabold text-emerald-600 tabular-nums mt-0.5">
-                      +{formatCentsUsd(activeGift.yieldUsdCents)}
+                    <div
+                      className={`text-base sm:text-lg font-display font-extrabold tabular-nums mt-0.5 ${
+                        isNeg ? 'text-amber-700' : 'text-emerald-600'
+                      }`}
+                    >
+                      {isNeg
+                        ? `-${formatCentsUsd(Math.abs(netCents))}`
+                        : `+${formatCentsUsd(netCents)}`}
                     </div>
                   </div>
                   <div>
@@ -312,7 +309,8 @@ export const PublicGiftView: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              ) : (
+                );
+              })() : (
                 <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-center space-y-1">
                   <div className="text-xs font-mono font-bold text-stone-800">
                     Sealed Earn Vault Position ({activeGift.vaultName})
@@ -389,39 +387,73 @@ export const PublicGiftView: React.FC = () => {
                   </span>
                 </button>
               ) : isRecipient ? (
-                <button
-                  type="button"
-                  disabled={!isUnlocked || isClaiming || isAuthorizing}
-                  onClick={handleUnwrap}
-                  className={`w-full py-3.5 rounded-2xl text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
-                    isUnlocked
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-md'
-                      : 'bg-stone-200 text-stone-500 cursor-not-allowed'
-                  }`}
-                >
-                  <Fingerprint weight="bold" className="w-4 h-4" />
-                  <span>
-                    {isClaiming || isAuthorizing
-                      ? 'Unwrapping & Settling on NEAR Intents...'
-                      : isUnlocked
-                      ? `Unwrap & Claim ${activeGift.vaultSymbol} → USDC`
-                      : 'Compounding Yield Until Unlock Date'}
-                  </span>
-                </button>
+                <div className="space-y-2.5">
+                  <button
+                    type="button"
+                    disabled={!isUnlocked || isClaiming || isAuthorizing}
+                    onClick={handleUnwrap}
+                    className={`w-full py-3.5 px-4 rounded-2xl text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all disabled:cursor-not-allowed ${
+                      isUnlocked && !isClaiming && !isAuthorizing
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-md'
+                        : isClaiming || isAuthorizing
+                        ? 'bg-emerald-600/70 text-white opacity-80'
+                        : 'bg-stone-200 text-stone-500'
+                    }`}
+                  >
+                    {isClaiming || isAuthorizing ? (
+                      <CircleNotch weight="bold" className="w-4 h-4 animate-spin flex-shrink-0" />
+                    ) : (
+                      <Fingerprint weight="bold" className="w-4 h-4 flex-shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {isClaiming || isAuthorizing
+                        ? claimStepMsg || 'Unwrapping & Settling on NEAR Intents…'
+                        : isUnlocked
+                        ? `Unwrap & Claim ${activeGift.vaultSymbol} → USDC`
+                        : 'Compounding Yield Until Unlock Date'}
+                    </span>
+                  </button>
+                  {(isClaiming || isAuthorizing) && claimStepMsg && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="px-3.5 py-2.5 rounded-xl bg-stone-50 border border-stone-200 text-[11px] font-mono text-stone-700 flex items-center gap-2"
+                    >
+                      <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin text-emerald-600 flex-shrink-0" />
+                      <span>{claimStepMsg}</span>
+                    </div>
+                  )}
+                </div>
               ) : authGift?.senderCanReclaim ? (
-                <button
-                  type="button"
-                  disabled={isClaiming || isAuthorizing}
-                  onClick={handleReclaim}
-                  className="w-full py-3.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
-                >
-                  <Fingerprint weight="bold" className="w-4 h-4" />
-                  <span>
-                    {isClaiming || isAuthorizing
-                      ? 'Reclaiming Gift & Yield to Your Vault...'
-                      : `30d Grace Passed — Reclaim ${activeGift.vaultSymbol} + Yield`}
-                  </span>
-                </button>
+                <div className="space-y-2.5">
+                  <button
+                    type="button"
+                    disabled={isClaiming || isAuthorizing}
+                    onClick={handleReclaim}
+                    className="w-full py-3.5 px-4 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-amber-600"
+                  >
+                    {isClaiming || isAuthorizing ? (
+                      <CircleNotch weight="bold" className="w-4 h-4 animate-spin flex-shrink-0" />
+                    ) : (
+                      <Fingerprint weight="bold" className="w-4 h-4 flex-shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {isClaiming || isAuthorizing
+                        ? claimStepMsg || 'Reclaiming Gift & Yield to Your Vault…'
+                        : `30d Grace Passed — Reclaim ${activeGift.vaultSymbol} + Yield`}
+                    </span>
+                  </button>
+                  {(isClaiming || isAuthorizing) && claimStepMsg && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="px-3.5 py-2.5 rounded-xl bg-stone-50 border border-stone-200 text-[11px] font-mono text-stone-700 flex items-center gap-2"
+                    >
+                      <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin text-amber-600 flex-shrink-0" />
+                      <span>{claimStepMsg}</span>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="p-3.5 rounded-2xl bg-stone-100 text-center text-xs font-mono text-stone-600">
                   Signed in as @{user?.handle}. Only @{activeGift.recipientHandle} can unwrap this gift with their passkey.
@@ -477,6 +509,15 @@ export const PublicGiftView: React.FC = () => {
       <footer className="text-center text-[11px] font-mono text-stone-500">
         Powered by UPRAIL &amp; Intents Earn • Passkey-Secured Custody
       </footer>
+
+      {user && user.custodyMode !== 'self' && (
+        <SelfCustodyUpgradeModal
+          isOpen={true}
+          required={true}
+          onClose={() => {}}
+          onUpgraded={refreshSession}
+        />
+      )}
     </div>
   );
 };

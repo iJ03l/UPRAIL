@@ -250,6 +250,8 @@ export const ReceivePage: React.FC = () => {
   const [nearAuthPrepare, setNearAuthPrepare] = useState<Record<string, any> | null>(null);
   const [onrampAuthPrepare, setOnrampAuthPrepare] = useState<Record<string, any> | null>(null);
   const [isUnlockingPasskey, setIsUnlockingPasskey] = useState<boolean>(false);
+  const [unlockStepMsg, setUnlockStepMsg] = useState<string | null>(null);
+  const unlockRef = useRef(false);
 
   // Dropdown states
   const [isTokenDropdownOpen, setIsTokenDropdownOpen] = useState(false);
@@ -417,14 +419,18 @@ export const ReceivePage: React.FC = () => {
       clearPrep: () => void,
       retry: () => Promise<void> | void
     ) => {
-      if (!prep?.options || !prep?.actionId || isUnlockingPasskey) return;
+      if (!prep?.options || !prep?.actionId || unlockRef.current) return;
+      unlockRef.current = true;
       setIsUnlockingPasskey(true);
+      setUnlockStepMsg('Step 1 of 3: Confirm passkey on this device…');
       try {
         const assertion = await performWebAuthnAssertion(prep.options);
+        setUnlockStepMsg('Step 2 of 3: Unlocking private session…');
         await api.submitOneClickWebAuthnSession({
           actionId: prep.actionId,
           assertion,
         });
+        setUnlockStepMsg('Step 3 of 3: Generating deposit address…');
         clearPrep();
         await retry();
       } catch (err: any) {
@@ -432,10 +438,12 @@ export const ReceivePage: React.FC = () => {
           toast(err?.message || 'Could not confirm your passkey. Please try again.', 'error');
         }
       } finally {
+        unlockRef.current = false;
         setIsUnlockingPasskey(false);
+        setUnlockStepMsg(null);
       }
     },
-    [isUnlockingPasskey, toast]
+    [toast]
   );
 
   // Derive deposit address from backend ONLY when token, chain, and exact amount are selected
@@ -481,7 +489,7 @@ export const ReceivePage: React.FC = () => {
   );
 
   const handleShowAddress = () => {
-    if (!canShowAddress || isDeriving) return;
+    if (!canShowAddress || isDeriving || isUnlockingPasskey) return;
     loadAddress(true);
   };
 
@@ -775,8 +783,9 @@ export const ReceivePage: React.FC = () => {
         <div className="w-full sm:w-auto flex sm:inline-flex p-1 sm:p-1.5 rounded-2xl bg-stone-100 border border-stone-200 gap-1 sm:gap-1.5 shadow-xs">
           <button
             type="button"
+            disabled={isUnlockingPasskey}
             onClick={() => setActiveTab('crosschain')}
-            className={`flex-auto sm:flex-initial justify-center px-2 sm:px-5 py-2.5 rounded-xl text-[10.5px] sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center gap-1 sm:gap-2 whitespace-nowrap ${
+            className={`flex-auto sm:flex-initial justify-center px-2 sm:px-5 py-2.5 rounded-xl text-[10.5px] sm:text-sm font-mono font-bold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 sm:gap-2 whitespace-nowrap ${
               activeTab === 'crosschain'
                 ? 'bg-black text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
@@ -788,8 +797,9 @@ export const ReceivePage: React.FC = () => {
 
           <button
             type="button"
+            disabled={isUnlockingPasskey}
             onClick={() => setActiveTab('defuse')}
-            className={`flex-auto sm:flex-initial justify-center px-2 sm:px-5 py-2.5 rounded-xl text-[10.5px] sm:text-sm font-mono font-bold transition-all cursor-pointer flex items-center gap-1 sm:gap-2 whitespace-nowrap ${
+            className={`flex-auto sm:flex-initial justify-center px-2 sm:px-5 py-2.5 rounded-xl text-[10.5px] sm:text-sm font-mono font-bold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 sm:gap-2 whitespace-nowrap ${
               activeTab === 'defuse'
                 ? 'bg-black text-white shadow-xs'
                 : 'text-stone-600 hover:text-stone-950 hover:bg-stone-200/60'
@@ -1175,13 +1185,15 @@ export const ReceivePage: React.FC = () => {
             <button
               type="button"
               onClick={handleShowAddress}
-              disabled={!canShowAddress || isDeriving}
+              disabled={!canShowAddress || isDeriving || isUnlockingPasskey}
               className="w-full py-3.5 px-5 rounded-2xl bg-black hover:bg-stone-800 disabled:bg-stone-200 disabled:text-stone-400 text-white font-display font-extrabold text-xs uppercase tracking-wider transition-all shadow-sm flex items-center justify-center space-x-2 cursor-pointer disabled:cursor-not-allowed"
             >
-              {isDeriving ? (
+              {isDeriving || isUnlockingPasskey ? (
                 <>
-                  <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
-                  <span>Generating Address...</span>
+                  <CircleNotch weight="bold" className="w-4 h-4 animate-spin flex-shrink-0" />
+                  <span className="truncate">
+                    {isUnlockingPasskey ? unlockStepMsg || 'Confirming passkey…' : 'Generating Address…'}
+                  </span>
                 </>
               ) : (
                 <>
@@ -1297,9 +1309,11 @@ export const ReceivePage: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleGenerateFresh}
-                        className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
+                        disabled={isDeriving || isUnlockingPasskey}
+                        className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center space-x-1.5"
                       >
-                        Deposit Another
+                        {isDeriving && <CircleNotch weight="bold" className="w-3 h-3 animate-spin" />}
+                        <span>{isDeriving ? 'Generating…' : 'Deposit Another'}</span>
                       </button>
                     </div>
                   </div>
@@ -1382,8 +1396,8 @@ export const ReceivePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleGenerateFresh}
-                    disabled={isDeriving}
-                    className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                    disabled={isDeriving || isUnlockingPasskey}
+                    className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <ArrowsClockwise weight="bold" className={`w-3 h-3 ${isDeriving ? 'animate-spin' : ''}`} />
                     <span>New Address</span>
@@ -1418,14 +1432,14 @@ export const ReceivePage: React.FC = () => {
                     )
                   }
                   disabled={isUnlockingPasskey}
-                  className="px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-60"
+                  className="px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {isUnlockingPasskey ? (
-                    <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
+                    <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
                   ) : (
-                    <Fingerprint weight="bold" className="w-3.5 h-3.5" />
+                    <Fingerprint weight="bold" className="w-3.5 h-3.5 flex-shrink-0" />
                   )}
-                  <span>{isUnlockingPasskey ? 'Checking…' : 'Continue with Passkey'}</span>
+                  <span>{isUnlockingPasskey ? unlockStepMsg || 'Confirming passkey…' : 'Continue with Passkey'}</span>
                 </button>
               </div>
             ) : (
@@ -1451,11 +1465,21 @@ export const ReceivePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleShowAddress}
-                    disabled={isDeriving}
-                    className="px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center space-x-1.5 cursor-pointer"
+                    disabled={isDeriving || isUnlockingPasskey}
+                    className="px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-colors flex items-center space-x-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <QrCode weight="fill" className="w-3.5 h-3.5" />
-                    <span>Show Address</span>
+                    {isDeriving || isUnlockingPasskey ? (
+                      <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <QrCode weight="fill" className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {isUnlockingPasskey
+                        ? unlockStepMsg || 'Confirming passkey…'
+                        : isDeriving
+                        ? 'Generating…'
+                        : 'Show Address'}
+                    </span>
                   </button>
                 )}
                 <Badge tone="neutral" icon={<Lightning weight="fill" className="w-3 h-3" />}>
@@ -1555,14 +1579,14 @@ export const ReceivePage: React.FC = () => {
                       )
                     }
                     disabled={isUnlockingPasskey}
-                    className="px-4 py-2 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                    className="px-4 py-2 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isUnlockingPasskey ? (
-                      <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
+                      <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
                     ) : (
-                      <Fingerprint weight="bold" className="w-3.5 h-3.5" />
+                      <Fingerprint weight="bold" className="w-3.5 h-3.5 flex-shrink-0" />
                     )}
-                    <span>{isUnlockingPasskey ? 'Checking…' : 'Continue with Passkey'}</span>
+                    <span>{isUnlockingPasskey ? unlockStepMsg || 'Confirming passkey…' : 'Continue with Passkey'}</span>
                   </button>
                 </div>
               ) : nearDepositError ? (
@@ -1572,7 +1596,8 @@ export const ReceivePage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => loadNearAddress(true)}
-                    className="px-3 py-1.5 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors cursor-pointer"
+                    disabled={isNearDeriving || isUnlockingPasskey}
+                    className="px-3 py-1.5 rounded-xl bg-black text-white text-[11px] font-bold font-mono hover:bg-stone-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Try again
                   </button>
@@ -1631,9 +1656,11 @@ export const ReceivePage: React.FC = () => {
                         <button
                           type="button"
                           onClick={handleGenerateFreshNear}
-                          className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer"
+                          disabled={isNearDeriving || isUnlockingPasskey}
+                          className="px-3 py-1.5 rounded-xl bg-white border border-stone-200 text-stone-900 text-[11px] font-bold font-mono hover:bg-stone-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center space-x-1.5"
                         >
-                          Deposit Another
+                          {isNearDeriving && <CircleNotch weight="bold" className="w-3 h-3 animate-spin" />}
+                          <span>{isNearDeriving ? 'Generating…' : 'Deposit Another'}</span>
                         </button>
                       </div>
                     </div>
@@ -1695,8 +1722,8 @@ export const ReceivePage: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleGenerateFreshNear}
-                      disabled={isNearDeriving}
-                      className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                      disabled={isNearDeriving || isUnlockingPasskey}
+                      className="text-stone-600 hover:text-black flex items-center space-x-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <ArrowsClockwise weight="bold" className={`w-3 h-3 ${isNearDeriving ? 'animate-spin' : ''}`} />
                       <span>{nearIsOneTime ? 'New Address' : 'Refresh'}</span>

@@ -2,12 +2,54 @@ import React from 'react';
 import { Callout } from '@/components/docs/DocsUI';
 
 const VAULTS = [
-  { symbol: 'stNEAR', name: 'Meta Pool Staked NEAR', apy: '9.2% est. APY', min: '$5' },
-  { symbol: 'cNEAR', name: 'Compounding NEAR Vault', apy: '8.8% est. APY', min: '$5' },
-  { symbol: 'kV-gtSOLb', name: 'Kamino Gauntlet SOL', apy: '8.1% est. APY', min: '$10' },
-  { symbol: 'gtUSDCp', name: 'Gauntlet USDC Prime', apy: '7.4% est. APY', min: '$25' },
-  { symbol: 'TLO', name: 'Taler USDC Vault', apy: '6.2% est. APY', min: '$10' },
-  { symbol: 'wstETH', name: 'Lido Wrapped Staked ETH', apy: '3.4% est. APY', min: '$15' },
+  {
+    symbol: 'gtUSDCp',
+    name: 'Gauntlet USDC Prime (Morpho · Base)',
+    apy: '~4.5% var. APY',
+    min: '$25',
+    principal: 'USD Stable',
+    tier: 'Core',
+  },
+  {
+    symbol: 'TLO',
+    name: 'Taler USDC Vault (Ethereum)',
+    apy: '~6.5% var. APY',
+    min: '$10',
+    principal: 'USD Stable',
+    tier: 'Moderate',
+  },
+  {
+    symbol: 'wstETH',
+    name: 'Lido Wrapped Staked ETH (Ethereum)',
+    apy: '~2.9% var. APY',
+    min: '$15',
+    principal: 'ETH Volatile',
+    tier: 'Core Protocol',
+  },
+  {
+    symbol: 'stNEAR',
+    name: 'Meta Pool Staked NEAR (NEAR Native)',
+    apy: '~4.8% var. APY',
+    min: '$5',
+    principal: 'NEAR Volatile',
+    tier: 'Moderate',
+  },
+  {
+    symbol: 'cNEAR',
+    name: 'Assetize Compounding NEAR (NEAR Native)',
+    apy: '~4.8% var. APY',
+    min: '$5',
+    principal: 'NEAR Volatile',
+    tier: 'Elevated',
+  },
+  {
+    symbol: 'kV-gtSOLb',
+    name: 'Kamino Gauntlet SOL Balanced (Solana)',
+    apy: '~4.7% var. APY',
+    min: '$10',
+    principal: 'SOL Volatile',
+    tier: 'Elevated',
+  },
 ];
 
 export default function CirclesDocsPage() {
@@ -34,21 +76,36 @@ export default function CirclesDocsPage() {
         </h2>
         <p className="text-sm text-stone-600 leading-relaxed">
           Fund any Circle or Gift with USDC from your UPRAIL balance — it converts automatically
-          into whichever Earn pool you pick:
+          into whichever Earn pool you pick. Rates are <strong>variable and not guaranteed</strong>,
+          and crypto-denominated vaults carry full token price volatility:
         </p>
         <div className="grid sm:grid-cols-2 gap-2.5">
           {VAULTS.map((v) => (
             <div
               key={v.symbol}
-              className="p-3.5 rounded-2xl border border-stone-200 bg-white flex items-center justify-between"
+              className="p-3.5 rounded-2xl border border-stone-200 bg-white flex items-center justify-between gap-2"
             >
-              <div>
-                <div className="text-sm font-display font-extrabold text-stone-950">
-                  {v.symbol}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-sm font-display font-extrabold text-stone-950">
+                    {v.symbol}
+                  </span>
+                  <span
+                    className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                      v.principal === 'USD Stable'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border border-amber-200'
+                    }`}
+                  >
+                    {v.principal}
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-stone-100 text-stone-600">
+                    {v.tier}
+                  </span>
                 </div>
-                <div className="text-xs text-stone-500">{v.name}</div>
+                <div className="text-xs text-stone-500 truncate mt-0.5">{v.name}</div>
               </div>
-              <div className="text-right font-mono">
+              <div className="text-right font-mono shrink-0">
                 <div className="text-xs font-bold text-emerald-600">{v.apy}</div>
                 <div className="text-[11px] text-stone-400">Min {v.min}</div>
               </div>
@@ -178,6 +235,95 @@ export default function CirclesDocsPage() {
           it still hasn&apos;t been claimed 30 days after unlock, a{' '}
           <strong>Reclaim Unclaimed</strong> button appears on your Sent Gift card so you can
           recover the vault shares + yield back to your account.
+        </Callout>
+      </section>
+
+      {/* Vault Risks, Audits & Fees */}
+      <section id="risks" className="space-y-4 scroll-mt-24">
+        <h2 className="text-xl font-display font-extrabold text-stone-950">
+          Part 3 — Understanding Vault Risks, Audits &amp; Fees
+        </h2>
+        <p className="text-sm text-stone-600 leading-relaxed">
+          UPRAIL Earn Vaults are non-custodial DeFi yield positions — not FDIC-insured bank
+          accounts. Every vault is labeled across <strong>two independent dimensions</strong> so you
+          can distinguish dollar price stability from protocol maturity:
+        </p>
+
+        <div className="grid sm:grid-cols-2 gap-3 text-xs">
+          <div className="p-4 rounded-2xl border border-stone-200 bg-white space-y-1.5">
+            <div className="font-display font-extrabold text-stone-950 text-sm">
+              1. Principal Stability
+            </div>
+            <p className="text-stone-600 leading-relaxed">
+              <strong>USD Stable</strong> vaults (<code className="font-mono">gtUSDCp</code>,{' '}
+              <code className="font-mono">TLO</code>) lend USDC to target dollar-denominated
+              principal. <strong>Crypto Volatile</strong> vaults (
+              <code className="font-mono">wstETH</code>, <code className="font-mono">stNEAR</code>,{' '}
+              <code className="font-mono">cNEAR</code>, <code className="font-mono">kV-gtSOLb</code>
+              ) convert your USDC into ETH, NEAR, or SOL — your USD value moves up and down with
+              market prices and can end up worth less than deposited.
+            </p>
+          </div>
+          <div className="p-4 rounded-2xl border border-stone-200 bg-white space-y-1.5">
+            <div className="font-display font-extrabold text-stone-950 text-sm">
+              2. Protocol &amp; Liquidity Risk Tier
+            </div>
+            <p className="text-stone-600 leading-relaxed">
+              <strong>Core</strong> denotes deep-TVL, extensively audited protocols (Morpho Prime,
+              Lido). <strong>Moderate</strong> denotes newer vaults, async redemptions, or past
+              adjacent-chain incidents (Taler, Meta Pool). <strong>Elevated</strong> denotes thinner
+              liquidity pools or stacked lending + volatile asset risks (Assetize cNEAR, Kamino
+              Gauntlet SOL Balanced).
+            </p>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl border border-stone-200 bg-stone-50 space-y-2.5 text-xs text-stone-600 leading-relaxed">
+          <div className="font-display font-extrabold text-stone-950 text-sm">
+            The 4-Layer Risk Stack
+          </div>
+          <ul className="list-disc pl-5 space-y-1.5">
+            <li>
+              <strong className="text-stone-900">Underlying DeFi Protocol Risk:</strong> Smart
+              contract bugs, lending bad debt during sharp crashes, oracle failures, validator
+              slashing, or curator parameter changes. Displayed APYs are variable estimates and can
+              drop (for example, NEAR staking rewards adjust downward under protocol inflation cuts
+              like HSP-029).
+            </li>
+            <li>
+              <strong className="text-stone-900">Cross-Chain Bridge &amp; Wrapper Risk:</strong>{' '}
+              Non-NEAR vaults (<code className="font-mono">gtUSDCp</code>,{' '}
+              <code className="font-mono">TLO</code>, <code className="font-mono">wstETH</code>,{' '}
+              <code className="font-mono">kV-gtSOLb</code>) are held as bridged receipt tokens via
+              NEAR Omni Bridge (<code className="font-mono">omft.near</code> /{' '}
+              <code className="font-mono">omdep.near</code>) and NEAR Chain Signatures MPC.
+            </li>
+            <li>
+              <strong className="text-stone-900">NEAR Intents &amp; 1Click Solver Liquidity:</strong>{' '}
+              Entering and exiting vaults uses 1Click solver swaps rather than direct underlying
+              redemption queues. During volatile markets, spreads can widen or exit quotes can be
+              temporarily unavailable (unwrapping a Gift safely delivers the raw vault shares so you
+              can stabilize later).
+            </li>
+            <li>
+              <strong className="text-stone-900">
+                UPRAIL Escrow Contract (<code className="font-mono">circle.uprail.near</code>):
+              </strong>{' '}
+              Enforces passkey-signed terms, timelocks, and quotas on-chain (verifiable at{' '}
+              <code className="font-mono">/verify</code>), but is a custom Rust smart contract that
+              has not yet completed an external third-party audit and currently retains an upgrade
+              hook while a Full Access Key exists.
+            </li>
+          </ul>
+        </div>
+
+        <Callout tone="warn">
+          <strong className="text-stone-900">Short-timelock fee break-even:</strong> Gifts charge a
+          1% creation fee (Circles charge 1% on settlement payout, 0% on dissolve), plus 1Click
+          entry/exit swap spreads. At ~4.5% variable APY, earning back a 1% fee takes roughly{' '}
+          <strong>2.5–3 months</strong>. For very short lockups (a few days or weeks), fees and
+          spreads will typically exceed accrued yield — consider a longer lockup or a direct Send
+          instead.
         </Callout>
       </section>
     </article>

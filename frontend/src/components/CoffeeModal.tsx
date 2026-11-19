@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Copy,
   Check,
@@ -116,6 +116,8 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
   const [settings, setSettings] = useState<CoffeeSettingsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isToggling, setIsToggling] = useState(false);
+  const [stepMsg, setStepMsg] = useState<string | null>(null);
+  const togglingRef = useRef(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -150,16 +152,20 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
   const busy = isToggling || isAuthorizing;
 
   const handleToggle = async () => {
-    if (busy) return;
+    if (busy || togglingRef.current) return;
+    togglingRef.current = true;
     const next = !isEnabled;
     setIsToggling(true);
+    setStepMsg('Confirm with Face ID or passkey…');
     setError(null);
     try {
       const passkeyAssertion = await authorizeWithPasskey(
         next
           ? `Activate public payment link uprail.world/${cleanHandle}`
-          : `Pause public payment link uprail.world/${cleanHandle}`
+          : `Pause public payment link uprail.world/${cleanHandle}`,
+        (_stage, msg) => setStepMsg(msg)
       );
+      setStepMsg(next ? 'Activating public pay link…' : 'Pausing public pay link…');
       const res = await api.toggleCoffee({ enabled: next, passkeyAssertion });
       setSettings((prev) =>
         prev
@@ -171,7 +177,9 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
     } catch (err: any) {
       setError(err?.message || 'Passkey verification failed');
     } finally {
+      togglingRef.current = false;
       setIsToggling(false);
+      setStepMsg(null);
     }
   };
 
@@ -190,9 +198,10 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
     <ModalSheet
       isOpen={isOpen}
       onClose={onClose}
+      canClose={!busy}
       zIndexClass="z-50"
       maxWidthClass="sm:max-w-md"
-      showCloseButton
+      showCloseButton={!busy}
       closeLabel="Close Buy Me a Coffee settings"
       ariaLabel="Buy Me a Coffee settings"
     >
@@ -238,10 +247,14 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
                   </Badge>
                 </div>
                 <p className="text-xs text-stone-500 leading-relaxed flex items-center gap-1.5">
-                  <Fingerprint weight="bold" className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
+                  {busy ? (
+                    <CircleNotch weight="bold" className="w-3.5 h-3.5 text-stone-700 animate-spin flex-shrink-0" />
+                  ) : (
+                    <Fingerprint weight="bold" className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
+                  )}
                   <span>
-                    {isAuthorizing
-                      ? 'Confirm with Face ID or passkey…'
+                    {busy
+                      ? stepMsg || 'Confirm with Face ID or passkey…'
                       : 'Passkey confirmation required to change'}
                   </span>
                 </p>
@@ -253,7 +266,7 @@ export const CoffeeModal: React.FC<CoffeeModalProps> = ({
                     aria-checked={isEnabled}
                     onClick={() => void handleToggle()}
                     disabled={busy}
-                    className={`relative inline-flex h-7 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-60 ${
+                    className={`relative inline-flex h-7 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed ${
                       isEnabled ? 'bg-stone-950' : 'bg-stone-300'
                     }`}
                   >

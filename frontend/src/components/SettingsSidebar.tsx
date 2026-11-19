@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from '../lib/router';
 import {
   X,
@@ -50,9 +50,11 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   const { toast } = useToast();
   useBodyScrollLock(isOpen);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [isActivatingPasskey, setIsActivatingPasskey] = useState(false);
+  const [passkeyActivateMsg, setPasskeyActivateMsg] = useState<string | null>(null);
   const [inviteData, setInviteData] = useState<MyInviteResponse | null>(null);
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -63,16 +65,22 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   } | null>(null);
   const [isViewingRecovery, setIsViewingRecovery] = useState(false);
   const [isRegeneratingRecovery, setIsRegeneratingRecovery] = useState(false);
+  const [recoveryStepMsg, setRecoveryStepMsg] = useState<string | null>(null);
   const [showRegenerateRecovery, setShowRegenerateRecovery] = useState(false);
   const [recoveryModalMode, setRecoveryModalMode] = useState<'new' | 'view'>('new');
   const [recoveryLegacyCount, setRecoveryLegacyCount] = useState(0);
   const [freshRecoveryCodes, setFreshRecoveryCodes] = useState<string[] | null>(null);
+  const actionRef = useRef(false);
+
+  const anyBusy =
+    isActivatingPasskey || isViewingRecovery || isRegeneratingRecovery || isSigningOut;
 
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (
         e.key === 'Escape' &&
+        !anyBusy &&
         !showSignOutModal &&
         !showResetConfirm &&
         !showUpgradeModal &&
@@ -87,6 +95,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   }, [
     isOpen,
     onClose,
+    anyBusy,
     showSignOutModal,
     showResetConfirm,
     showUpgradeModal,
@@ -95,15 +104,22 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   ]);
 
   const handleActivatePendingPasskey = async () => {
+    if (actionRef.current || anyBusy) return;
+    actionRef.current = true;
     setIsActivatingPasskey(true);
+    setPasskeyActivateMsg('Preparing passkey activation…');
     try {
-      await api.addPasskeyOnchainWithPasskey();
+      await api.addPasskeyOnchainWithPasskey(undefined, (_stage, msg) => {
+        if (msg) setPasskeyActivateMsg(msg);
+      });
       await refreshSession();
       toast('Pending passkey activated on-chain!', 'success');
     } catch (err: any) {
       toast(describePasskeyError(err) || err?.message || 'Could not activate pending passkey', 'error');
     } finally {
+      actionRef.current = false;
       setIsActivatingPasskey(false);
+      setPasskeyActivateMsg(null);
     }
   };
 
@@ -119,7 +135,10 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   }, [isOpen, user]);
 
   const performViewRecovery = async () => {
+    if (actionRef.current || anyBusy) return;
+    actionRef.current = true;
     setIsViewingRecovery(true);
+    setRecoveryStepMsg('Confirm with your passkey…');
     try {
       const result = await webauthn.viewRecoveryCodes();
       setRecoveryStatus({
@@ -142,15 +161,20 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     } catch (err: any) {
       toast(describePasskeyError(err), 'error');
     } finally {
+      actionRef.current = false;
       setIsViewingRecovery(false);
+      setRecoveryStepMsg(null);
     }
   };
 
   const performRegenerateRecovery = async () => {
-    setShowRegenerateRecovery(false);
+    if (actionRef.current || anyBusy) return;
+    actionRef.current = true;
     setIsRegeneratingRecovery(true);
+    setRecoveryStepMsg('Confirm with your passkey to replace codes…');
     try {
       const result = await webauthn.regenerateRecoveryCodes();
+      setShowRegenerateRecovery(false);
       setFreshRecoveryCodes(result.recoveryCodes);
       setRecoveryModalMode('new');
       setRecoveryLegacyCount(0);
@@ -161,13 +185,17 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       });
       toast('New recovery codes generated');
     } catch (err: any) {
+      setShowRegenerateRecovery(false);
       toast(describePasskeyError(err), 'error');
     } finally {
+      actionRef.current = false;
       setIsRegeneratingRecovery(false);
+      setRecoveryStepMsg(null);
     }
   };
 
   const handleClearCache = () => {
+    if (anyBusy) return;
     setShowResetConfirm(true);
   };
 
@@ -178,13 +206,21 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   };
 
   const handleConfirmSignOut = async () => {
-    setShowSignOutModal(false);
-    // Await logout before closing: the sidebar only renders while `isOpen`, so
-    // calling onClose() in the same tick as logout() unmounts this component
-    // and orphans the in-flight logout() — leaving the session half-alive and
-    // bouncing the user back to the dashboard instead of a clean sign-out.
-    await logout();
-    onClose();
+    if (actionRef.current || isSigningOut) return;
+    actionRef.current = true;
+    setIsSigningOut(true);
+    try {
+      // Await logout before closing: the sidebar only renders while `isOpen`, so
+      // calling onClose() in the same tick as logout() unmounts this component
+      // and orphans the in-flight logout() — leaving the session half-alive and
+      // bouncing the user back to the dashboard instead of a clean sign-out.
+      await logout();
+      setShowSignOutModal(false);
+      onClose();
+    } finally {
+      actionRef.current = false;
+      setIsSigningOut(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -199,8 +235,10 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       >
         {/* Backdrop */}
         <div
-          onClick={onClose}
-          className="fixed inset-0 bg-stone-950/60 transition-opacity cursor-pointer z-[100]"
+          onClick={() => {
+            if (!anyBusy) onClose();
+          }}
+          className={`fixed inset-0 bg-stone-950/60 transition-opacity z-[100] ${anyBusy ? 'cursor-not-allowed' : 'cursor-pointer'}`}
           aria-hidden="true"
         />
 
@@ -218,8 +256,11 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
               </div>
               <button
                 type="button"
-                onClick={onClose}
-                className="w-11 h-11 -mr-2 rounded-full text-stone-500 hover:text-stone-900 hover:bg-stone-100 transition-colors flex items-center justify-center cursor-pointer"
+                disabled={anyBusy}
+                onClick={() => {
+                  if (!anyBusy) onClose();
+                }}
+                className="w-11 h-11 -mr-2 rounded-full text-stone-500 hover:text-stone-900 hover:bg-stone-100 transition-colors flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 aria-label="Close settings"
               >
                 <X weight="bold" className="w-5 h-5" />
@@ -248,8 +289,9 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                     </div>
                     <button
                       type="button"
+                      disabled={anyBusy}
                       onClick={() => setShowSignOutModal(true)}
-                      className="w-10 h-10 -mr-1 rounded-xl text-stone-500 hover:text-stone-900 hover:bg-stone-200/60 transition-colors flex items-center justify-center cursor-pointer"
+                      className="w-10 h-10 -mr-1 rounded-xl text-stone-500 hover:text-stone-900 hover:bg-stone-200/60 transition-colors flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       title="Disconnect Session"
                       aria-label="Sign out"
                     >
@@ -296,8 +338,9 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                     {user.custodyMode !== 'self' && (
                       <button
                         type="button"
+                        disabled={anyBusy}
                         onClick={() => setShowUpgradeModal(true)}
-                        className="w-full py-2 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="w-full py-2 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <ShieldCheck weight="fill" className="w-3.5 h-3.5 text-emerald-400" />
                         <span>Upgrade to Passkey Self-Custody</span>
@@ -308,16 +351,18 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                       <button
                         type="button"
                         onClick={handleActivatePendingPasskey}
-                        disabled={isActivatingPasskey}
-                        className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        disabled={anyBusy}
+                        className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-mono font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isActivatingPasskey ? (
-                          <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
+                          <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
                         ) : (
-                          <Fingerprint weight="bold" className="w-3.5 h-3.5" />
+                          <Fingerprint weight="bold" className="w-3.5 h-3.5 flex-shrink-0" />
                         )}
-                        <span>
-                          Activate {user.pendingOnchainPasskeysCount} Pending Passkey On-Chain
+                        <span className="truncate">
+                          {isActivatingPasskey
+                            ? passkeyActivateMsg || 'Activating passkey…'
+                            : `Activate ${user.pendingOnchainPasskeysCount} Pending Passkey On-Chain`}
                         </span>
                       </button>
                     )}
@@ -465,13 +510,13 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                       <button
                         type="button"
                         onClick={() => void performViewRecovery()}
-                        disabled={isViewingRecovery || isRegeneratingRecovery}
-                        className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                        disabled={anyBusy}
+                        className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isViewingRecovery ? (
                           <>
                             <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
-                            <span>Waiting for your passkey...</span>
+                            <span>{recoveryStepMsg || 'Waiting for your passkey…'}</span>
                           </>
                         ) : (
                           <>
@@ -483,23 +528,24 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                       <button
                         type="button"
                         onClick={() => setShowRegenerateRecovery(true)}
-                        disabled={isViewingRecovery || isRegeneratingRecovery}
-                        className="w-full text-[10px] font-mono font-bold text-stone-500 hover:text-stone-900 transition-colors cursor-pointer disabled:opacity-50"
+                        disabled={anyBusy}
+                        className="w-full inline-flex items-center justify-center gap-1.5 text-[10px] font-mono font-bold text-stone-500 hover:text-stone-900 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isRegeneratingRecovery ? 'Waiting for your passkey...' : 'Replace recovery codes'}
+                        {isRegeneratingRecovery && <CircleNotch weight="bold" className="w-3 h-3 animate-spin" />}
+                        <span>{isRegeneratingRecovery ? 'Replacing recovery codes…' : 'Replace recovery codes'}</span>
                       </button>
                     </>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setShowRegenerateRecovery(true)}
-                      disabled={isRegeneratingRecovery}
-                      className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                      disabled={anyBusy}
+                      className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-mono font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isRegeneratingRecovery ? (
                         <>
                           <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
-                          <span>Waiting for your passkey...</span>
+                          <span>{recoveryStepMsg || 'Waiting for your passkey…'}</span>
                         </>
                       ) : (
                         <>
@@ -624,8 +670,9 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
             <div className="pt-1">
               <button
                 type="button"
+                disabled={anyBusy}
                 onClick={handleClearCache}
-                className="w-full py-2.5 px-3 rounded-xl border border-stone-200 hover:border-stone-400 text-stone-600 hover:text-stone-900 text-xs font-mono transition-colors flex items-center justify-center space-x-2 cursor-pointer"
+                className="w-full py-2.5 px-3 rounded-xl border border-stone-200 hover:border-stone-400 text-stone-600 hover:text-stone-900 text-xs font-mono transition-colors flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <ArrowCounterClockwise weight="bold" className="w-3.5 h-3.5" />
                 <span>Reset local cache</span>
@@ -644,11 +691,14 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       {/* Sign Out Confirmation Modal */}
       <ModalSheet
         isOpen={showSignOutModal}
-        onClose={() => setShowSignOutModal(false)}
+        onClose={() => {
+          if (!isSigningOut) setShowSignOutModal(false);
+        }}
+        canClose={!isSigningOut}
         zIndexClass="z-[120]"
         maxWidthClass="sm:max-w-sm"
         panelClassName="px-6 sm:p-7 pt-2 sm:pt-7 pb-6 text-center space-y-4"
-        showCloseButton
+        showCloseButton={!isSigningOut}
         closeLabel="Cancel sign out"
         ariaLabel="Sign out confirmation"
       >
@@ -668,17 +718,20 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         <div className="flex items-center gap-2 pt-2">
           <button
             type="button"
+            disabled={isSigningOut}
             onClick={() => setShowSignOutModal(false)}
-            className="flex-1 py-3 px-4 min-h-11 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer"
+            className="flex-1 py-3 px-4 min-h-11 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             type="button"
+            disabled={isSigningOut}
             onClick={handleConfirmSignOut}
-            className="flex-1 py-3 px-4 min-h-11 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors cursor-pointer"
+            className="flex-1 py-3 px-4 min-h-11 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Sign Out
+            {isSigningOut && <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />}
+            <span>{isSigningOut ? 'Signing out…' : 'Sign Out'}</span>
           </button>
         </div>
       </ModalSheet>
@@ -708,8 +761,12 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
       <ConfirmDialog
         isOpen={showRegenerateRecovery}
-        onCancel={() => setShowRegenerateRecovery(false)}
+        onCancel={() => {
+          if (!isRegeneratingRecovery) setShowRegenerateRecovery(false);
+        }}
         onConfirm={() => void performRegenerateRecovery()}
+        isLoading={isRegeneratingRecovery}
+        loadingLabel={recoveryStepMsg}
         tone="financial"
         title="Replace recovery codes?"
         description="You will get ten new single-use codes. Every old unused code stops working immediately."

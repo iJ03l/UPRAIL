@@ -18,7 +18,7 @@
  *   - Without a valid passkey assertion, send/claim are rejected with 403
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { startAuthentication } from '@simplewebauthn/browser';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/types';
 import { api } from '../lib/api';
@@ -29,7 +29,9 @@ export type PasskeyAssertion = AuthenticationResponseJSON;
 
 export function usePasskeyTxAuth() {
   const [isAuthorizing, setIsAuthorizing] = useState(false);
+  const [authStepMsg, setAuthStepMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
   const { user } = useXAuth();
 
   /**
@@ -37,19 +39,30 @@ export function usePasskeyTxAuth() {
    * Returns the assertion object to be included in the API request body.
    *
    * @param _actionDescription - Human-readable description shown in browser passkey prompt
+   * @param onStep - Optional step callback for callers showing inline progress
    * @returns PasskeyAssertion to include as `passkeyAssertion` in the API body
    */
   const authorizeWithPasskey = useCallback(async (
-    _actionDescription?: string
+    _actionDescription?: string,
+    onStep?: (stage: 'registering' | 'authorizing', message: string) => void
   ): Promise<PasskeyAssertion> => {
+    if (inFlightRef.current) {
+      throw new Error('A passkey confirmation is already in progress.');
+    }
+    inFlightRef.current = true;
     setIsAuthorizing(true);
     setError(null);
+    const report = (stage: 'registering' | 'authorizing', message: string) => {
+      setAuthStepMsg(message);
+      onStep?.(stage, message);
+    };
 
     try {
       // A device that never registered its own passkey can only answer with
       // cross-device "scan QR code" / security-key prompts. Register this
       // device first so the ceremony uses the phone's native biometrics.
       if (user?.handle && !webauthn.hasLocalPasskey(user.handle)) {
+        report('registering', 'Step 1 of 2: Register device passkey…');
         try {
           await webauthn.registerPasskey(user.handle);
         } catch (regErr) {
@@ -69,6 +82,7 @@ export function usePasskeyTxAuth() {
 
       // Step 1: Get a fresh server-issued single-use tx_auth challenge options object.
       // The server provides challenge, rpId, timeout, and allowed parameters.
+      report('authorizing', 'Preparing passkey confirmation…');
       const rawOptions = await api.getTxAuthOptions();
       const options: any = {
         ...rawOptions,
@@ -79,6 +93,7 @@ export function usePasskeyTxAuth() {
       // Step 2: Use startAuthentication from @simplewebauthn/browser
       // This ceremony ensures 100% compliant base64url encoding across all fields
       // and guarantees id === rawId matching required by SimpleWebAuthn.
+      report('authorizing', 'Confirm with Face ID or passkey…');
       const assertion = await startAuthentication(options as any);
 
       return assertion;
@@ -90,13 +105,16 @@ export function usePasskeyTxAuth() {
       setError(msg);
       throw new Error(msg);
     } finally {
+      inFlightRef.current = false;
       setIsAuthorizing(false);
+      setAuthStepMsg(null);
     }
   }, [user]);
 
   return {
     authorizeWithPasskey,
     isAuthorizing,
+    authStepMsg,
     error,
     clearError: () => setError(null),
   };

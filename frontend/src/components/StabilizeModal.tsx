@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   WarningCircle,
   ArrowDown,
@@ -16,7 +16,6 @@ import { ModalSheet } from './ModalSheet';
 import { Badge } from './Badge';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TokenIcon } from './TokenIcon';
-import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useXAuth } from '../hooks/useXAuth';
 import { useToast } from './Toast';
 import {
@@ -55,7 +54,6 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   onSuccess,
 }) => {
   const { user } = useXAuth();
-  const { authorizeWithPasskey, isAuthorizing } = usePasskeyTxAuth();
   const { toast } = useToast();
 
   // Strictly show only the non-stablecoin crypto that the user actually holds
@@ -96,15 +94,17 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progressStep, setProgressStep] = useState<
-    'idle' | 'authorizing' | 'submitting' | 'settling' | 'success'
+    'idle' | 'authorizing' | 'submitting' | 'settling' | 'shielding' | 'success'
   >('idle');
+  const [stepMessage, setStepMessage] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [result, setResult] = useState<StabilizeResult | null>(null);
   const [copiedHash, setCopiedHash] = useState(false);
 
   useEffect(() => {
-    if (progressStep !== 'settling') return;
+    if (progressStep !== 'settling' && progressStep !== 'shielding') return;
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
@@ -118,6 +118,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
     setSubmitError(null);
     setQuoteError(null);
     setProgressStep('idle');
+    setStepMessage(null);
     setElapsedSeconds(0);
 
     const def = pickDefaultToken();
@@ -242,7 +243,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   ]);
 
   const handleSelectPercentage = (pct: number) => {
-    if (!selectedToken) return;
+    if (!selectedToken || isSubmitting) return;
     setSubmitError(null);
     if (pct >= 1) {
       setAmount(selectedToken.balance || '0');
@@ -260,6 +261,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
 
   const handleOpenConfirm = (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current || isSubmitting) return;
     setSubmitError(null);
     if (!selectedToken) return;
     if (numericAmount <= 0) {
@@ -286,10 +288,16 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
   };
 
   const handleExecuteStabilize = async () => {
-    if (!selectedToken || !quote || belowMinimum || exceedsBalance) return;
+    if (submittingRef.current || !selectedToken || !quote || belowMinimum || exceedsBalance) return;
+    if (user && user.custodyMode !== 'self') {
+      setSubmitError('Please migrate your account to Passkey Self-Custody first.');
+      return;
+    }
+    submittingRef.current = true;
     setSubmitError(null);
     setIsSubmitting(true);
     setProgressStep('authorizing');
+    setStepMessage('Preparing self-custody swap…');
     setElapsedSeconds(0);
 
     try {
@@ -304,43 +312,33 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
           ? `nep141:${selectedToken.nearContractId}`
           : selectedToken.id || selectedToken.symbol;
 
-      let res: StabilizeResult;
-      if (user?.custodyMode === 'self') {
-        res = await api.stabilizeAssetSelfCustody(
-          {
-            sourceAsset: sourceId,
-            targetAsset,
-            amount: isMax ? 'all' : amount.trim(),
-          },
-          (stage) => setProgressStep(stage === 'submitting' ? 'submitting' : 'authorizing')
-        );
-      } else {
-        const assertion = await authorizeWithPasskey(
-          `Stabilize ${quote.grossAmount} ${selectedToken.symbol} to ${targetAsset}`
-        );
-
-        setProgressStep('submitting');
-
-        res = await api.stabilizeAsset({
+      const res = await api.stabilizeAssetSelfCustody(
+        {
           sourceAsset: sourceId,
           targetAsset,
           amount: isMax ? 'all' : amount.trim(),
-          passkeyAssertion: assertion,
-        });
-      }
+        },
+        (stage, message) => {
+          setProgressStep(stage === 'submitting' ? 'submitting' : 'authorizing');
+          if (message) setStepMessage(message);
+        }
+      );
 
       setIsConfirmOpen(false);
 
       const finishShieldIfNeeded = async (completedRes: StabilizeResult): Promise<StabilizeResult> => {
-        if (user?.custodyMode === 'self' && completedRes.needsPostSwapShield) {
-          setProgressStep('authorizing');
+        if (completedRes.needsPostSwapShield) {
+          setProgressStep('shielding');
+          setStepMessage(`Confirm passkey to shield ${completedRes.targetSymbol} into private balance…`);
           await api.shieldPublicAssetSelfCustody({
             assetId: completedRes.targetAsset,
             expectedAmountAtomic: completedRes.minAmountOutAtomic || completedRes.amountOutAtomic,
             sourceSwapDepositAddress: completedRes.depositAddress,
             initialShieldPrepare: completedRes.shieldPrepare,
-            onProgress: (stage) =>
-              setProgressStep(stage === 'submitting' || stage === 'polling_swap' ? 'settling' : 'authorizing'),
+            onProgress: (_stage, message) => {
+              setProgressStep('shielding');
+              if (message) setStepMessage(message);
+            },
           });
           return { ...completedRes, confidential: true, needsPostSwapShield: false };
         }
@@ -350,6 +348,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
       if (res.status === 'SUCCESS') {
         const finalRes = await finishShieldIfNeeded(res);
         setProgressStep('success');
+        setStepMessage(null);
         setResult(finalRes);
         setIsSubmitting(false);
         toast(`Stabilized ${finalRes.grossAmount} ${finalRes.sourceSymbol} → ${finalRes.amountOut} ${finalRes.targetSymbol} (Confidential)`);
@@ -359,6 +358,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
 
       // Enter settling mode with live polling against 1Click execution status
       setProgressStep('settling');
+      setStepMessage(`Matching liquidity route for ${res.amountOut} ${res.targetSymbol}…`);
       const pollStart = Date.now();
       const depositAddress = res.depositAddress;
 
@@ -372,6 +372,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
             settled = true;
             const completedResult = await finishShieldIfNeeded({ ...res, status: 'SUCCESS' });
             setProgressStep('success');
+            setStepMessage(null);
             setResult(completedResult);
             setIsSubmitting(false);
             toast(`Stabilized ${completedResult.grossAmount} ${completedResult.sourceSymbol} → ${completedResult.amountOut} ${completedResult.targetSymbol} (Confidential)`);
@@ -381,6 +382,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
           if (upper === 'FAILED' || upper === 'REFUNDED') {
             settled = true;
             setProgressStep('idle');
+            setStepMessage(null);
             setIsSubmitting(false);
             setSubmitError(`1Click reported swap as ${upper.toLowerCase()}. Funds were safely refunded to your vault.`);
             break;
@@ -391,6 +393,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
       if (!settled) {
         // Safe timeout: intent was submitted and will finish asynchronously
         setProgressStep('success');
+        setStepMessage(null);
         setResult(res);
         setIsSubmitting(false);
         toast(`Swap submitted! 1Click is settling ${res.amountOut} ${res.targetSymbol} in background.`);
@@ -398,9 +401,12 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
       }
     } catch (err: any) {
       setProgressStep('idle');
+      setStepMessage(null);
       setIsSubmitting(false);
       setIsConfirmOpen(false);
       setSubmitError(err?.message || 'Stabilization swap failed.');
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -417,7 +423,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
       <ModalSheet
         isOpen={isOpen}
         onClose={onClose}
-        canClose={!isSubmitting && !isAuthorizing && !isConfirmOpen}
+        canClose={!isSubmitting && !isConfirmOpen}
         zIndexClass="z-[110]"
         maxWidthClass="sm:max-w-md"
         panelClassName="p-0"
@@ -495,27 +501,40 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
               /* ── LIVE SETTLEMENT PROGRESS STEPPER ── */
               <div className="py-2 space-y-5 animate-fade-in">
                 <div className="flex items-center justify-between pb-3 border-b border-stone-100">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center flex-shrink-0">
                       <ArrowsClockwise weight="bold" className="w-5 h-5 animate-spin text-emerald-600" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <h3 className="text-sm font-display font-bold text-stone-950">
                         {progressStep === 'authorizing'
                           ? 'Authorizing with Passkey...'
                           : progressStep === 'submitting'
                           ? 'Submitting Swap Intent...'
+                          : progressStep === 'shielding'
+                          ? `Shielding ${targetAsset} to Private Vault...`
                           : 'Settling with 1Click Solver...'}
                       </h3>
-                      <p className="text-xs text-stone-500 font-mono mt-0.5">
+                      <p className="text-xs text-stone-500 font-mono mt-0.5 truncate">
                         {quote?.grossAmount} {selectedToken?.symbol} → {quote?.amountOut} {targetAsset}
                       </p>
                     </div>
                   </div>
-                  {progressStep === 'settling' && (
+                  {(progressStep === 'settling' || progressStep === 'shielding') && (
                     <Badge tone="ok">{elapsedSeconds}s</Badge>
                   )}
                 </div>
+
+                {stepMessage && (
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="rounded-2xl bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 text-xs font-mono text-emerald-900 flex items-center gap-2"
+                  >
+                    <ArrowsClockwise weight="bold" className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                    <span>{stepMessage}</span>
+                  </div>
+                )}
 
                 {/* Progress Steps */}
                 <div className="space-y-3.5 px-1">
@@ -573,11 +592,15 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                       className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
                         progressStep === 'settling'
                           ? 'bg-emerald-500 text-white ring-4 ring-emerald-100'
+                          : progressStep === 'shielding'
+                          ? 'bg-emerald-600 text-white'
                           : 'bg-stone-200 text-stone-400'
                       }`}
                     >
                       {progressStep === 'settling' ? (
                         <ArrowsClockwise weight="bold" className="w-3 h-3 animate-spin" />
+                      ) : progressStep === 'shielding' ? (
+                        <Check weight="bold" className="w-3.5 h-3.5" />
                       ) : (
                         '3'
                       )}
@@ -587,10 +610,12 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                         className={`text-xs font-mono font-medium ${
                           progressStep === 'settling'
                             ? 'text-stone-950 font-bold'
+                            : progressStep === 'shielding'
+                            ? 'text-stone-800'
                             : 'text-stone-400'
                         }`}
                       >
-                        Solver Matching & Settling {targetAsset}
+                        Solver Matching &amp; Settling {targetAsset}
                       </span>
                       {progressStep === 'settling' && (
                         <p className="text-[11px] font-mono text-stone-500 mt-0.5">
@@ -599,6 +624,23 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                       )}
                     </div>
                   </div>
+
+                  {/* Step 4: Post-swap Shielding (only shown when active) */}
+                  {progressStep === 'shielding' && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold bg-emerald-500 text-white ring-4 ring-emerald-100">
+                        <Fingerprint weight="bold" className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-mono font-bold text-stone-950">
+                          Shielding {targetAsset} into Confidential Vault
+                        </span>
+                        <p className="text-[11px] font-mono text-stone-500 mt-0.5">
+                          Confirm passkey once more to move settled {targetAsset} into private balance.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-2xl bg-stone-50 border border-stone-200/80 p-3 text-[11px] font-mono text-stone-500 flex items-center gap-2">
@@ -823,8 +865,7 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                         belowMinimum ||
                         isQuoting ||
                         !quote ||
-                        isSubmitting ||
-                        isAuthorizing
+                        isSubmitting
                       }
                       className="relative overflow-hidden w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 border border-emerald-700/80 text-white text-xs font-display font-extrabold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm group"
                     >
@@ -838,10 +879,10 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
                         <span>║▓▒░╬──┼──SHIELDED──┼──0.00 GAS──┼──STABILIZE──┼──╬░▒▓█║</span>
                         <span>╚══╬░▒▓█═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░▒▓█╬═══╬█▓▒░╬══╝</span>
                       </span>
-                      {isSubmitting || isAuthorizing ? (
+                      {isSubmitting ? (
                         <span className="relative z-10 inline-flex items-center gap-2 drop-shadow-xs">
                           <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          <span>Stabilizing…</span>
+                          <span>{stepMessage || 'Stabilizing…'}</span>
                         </span>
                       ) : (
                         <span className="relative z-10 inline-flex items-center gap-2 drop-shadow-xs">
@@ -884,10 +925,11 @@ export const StabilizeModal: React.FC<StabilizeModalProps> = ({
         ]}
         confirmLabel="Confirm with Passkey"
         cancelLabel="Back"
-        isLoading={isSubmitting || isAuthorizing}
+        isLoading={isSubmitting}
+        loadingLabel={stepMessage}
         onConfirm={handleExecuteStabilize}
         onCancel={() => {
-          if (!isSubmitting && !isAuthorizing) setIsConfirmOpen(false);
+          if (!isSubmitting) setIsConfirmOpen(false);
         }}
       />
     </>

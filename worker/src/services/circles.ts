@@ -146,6 +146,7 @@ export interface CircleMemberView {
   sharesFormatted: string;
   currentValueUsdCents: number;
   yieldUsdCents: number;
+  netChangeUsdCents?: number;
   isCurrentUser: boolean;
   refundedAt?: number | null;
   refundTxHash?: string | null;
@@ -195,12 +196,16 @@ export interface CircleView {
   vaultChainName: string;
   vaultAssetId: string;
   vaultDecimals: number;
+  vaultPrincipalType?: 'usd_stable' | 'volatile_crypto';
+  vaultRiskTier?: 'core' | 'moderate' | 'elevated';
   estimatedApyPct: number;
   totalSharesAtomic: string;
   totalSharesFormatted: string;
   currentValueUsdCents: number;
   yieldUsdCents: number;
   yieldPct: number;
+  netChangeUsdCents?: number;
+  netChangePct?: number;
   payoutHandle: string;
   custodyAccount: string;
   contractMode: 'escrow' | 'contract';
@@ -676,6 +681,7 @@ async function buildCircleView(
       sharesFormatted: formatAtomic(shares.toString(), vaultDecimals),
       currentValueUsdCents: memberVal.currentValueUsdCents,
       yieldUsdCents: memberVal.yieldUsdCents,
+      netChangeUsdCents: memberVal.netChangeUsdCents,
       isCurrentUser,
       refundedAt: m.refunded_at ? Number(m.refunded_at) : null,
       refundTxHash: rawRefundMarker.startsWith('DISSOLVE_APPROVED')
@@ -763,12 +769,16 @@ async function buildCircleView(
     vaultChainName: vault?.chainName || 'Multichain',
     vaultAssetId: circleRow.vault_asset_id,
     vaultDecimals,
-    estimatedApyPct: vault?.estimatedApyPct ?? 6.5,
+    vaultPrincipalType: vault?.principalType,
+    vaultRiskTier: vault?.riskTier,
+    estimatedApyPct: vault?.estimatedApyPct ?? 4.5,
     totalSharesAtomic: totalSharesAtomic.toString(),
     totalSharesFormatted: valuation.sharesFormatted,
     currentValueUsdCents: valuation.currentValueUsdCents,
     yieldUsdCents: valuation.yieldUsdCents,
     yieldPct: valuation.yieldPct,
+    netChangeUsdCents: valuation.netChangeUsdCents,
+    netChangePct: valuation.netChangePct,
     payoutHandle: circleRow.payout_handle,
     custodyAccount: circleRow.custody_account,
     contractMode: circleRow.contract_mode === 'contract' ? 'contract' : 'escrow',

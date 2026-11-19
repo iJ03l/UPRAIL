@@ -258,7 +258,7 @@ export const NativeL1AuthHost: React.FC = () => {
               type="button"
               onClick={handleCancel}
               disabled={phase === 'signing' || phase === 'authorizing'}
-              className="btn-secondary px-4 py-3 rounded-2xl text-xs font-mono font-bold cursor-pointer min-h-11"
+              className="btn-secondary px-4 py-3 rounded-2xl text-xs font-mono font-bold cursor-pointer min-h-11 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel
             </button>

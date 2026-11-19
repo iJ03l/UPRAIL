@@ -1,9 +1,9 @@
 # UPRAIL (v1.1)
 
 **Your X handle is now your non-custodial, private money hub.**  
-UPRAIL is a **non-custodial social money ecosystem built around NEAR Intents** (`intents.near` + Confidential Intents + `circle.uprail.near`): new accounts start in **Passkey Self-Custody** (with 1-click upgrade for earlier accounts) so only your device WebAuthn key and offline `UP1-...` recovery key control `intents.near`, earn together in smart-contract **Circles**, gift timelocked Earn vaults, pay anyone privately by `@handle`, accept no-login **Buy Me a Coffee** tips across 35+ chains, and route `$` directly to `near.com` or AI agents — all without seed phrases or gas.
+UPRAIL is a **non-custodial social money ecosystem built around NEAR Intents** (`intents.near` + Confidential Intents + `circle.uprail.near`): every account runs in **Passkey Self-Custody** (with mandatory 1-tap migration for any earlier account before transacting) so only your device WebAuthn key and offline `UP1-...` recovery key control `intents.near`, earn together in smart-contract **Circles**, gift timelocked Earn vaults, stabilize any asset via client-signed NEP-413 intents, pay anyone privately by `@handle`, accept no-login **Buy Me a Coffee** tips across 35+ chains, and route `$` directly to `near.com` or AI agents — all without seed phrases or gas.
 
-- **Version:** v1.1.0
+- **Version:** v1.1.0 · **© 2026 Jence Ltd**
 - **Hackathon Tracks:** Privacy & Private AI (`privacy`) · Social Money (`social`) · Unstoppable DeFi (`defi`) · Agent Economy (`agents`) · Autonomous Business (`business`) · Real-World Money (`realworld`) · Open Innovation (`open`)
 - **Mainnet Traction (Real People, Real Money):** **80 and counting** real users · **141** payment & withdrawal txs (**95** settled on-chain · **8** active escrow) · **$158.55 USDC** settled (**$156.83** payments & withdrawals + **$1.72** Buy Me a Coffee; **$186.51+ USDC** initiated) on NEAR Mainnet
 - **Live Application:** [https://app.uprail.world](https://app.uprail.world) *(Optional invite code `INTENT` or skip with system invite allocation)*
@@ -20,7 +20,7 @@ UPRAIL is a **non-custodial social money ecosystem built around NEAR Intents** (
 ## 📑 Index
 
 - **[Live Stats & Traction](#live-mainnet-traction-real-people-real-money)** — Live NEAR Mainnet user, transaction, and USDC volume metrics
-- **[Quick Start & Verification](#-quick-start--live-verification)** — `make check-mainnet`, 213 automated tests (198 Worker + 15 Rust contract), curl checks, and feature verification
+- **[Quick Start & Verification](#-quick-start--live-verification)** — `make check-mainnet`, 223 automated tests (208 Worker + 15 Rust contract), curl checks, and feature verification
 - **[Track-by-Track Map](#-judging-map-track-by-track-verification)** — Every track mapped to verified source files and tests
 - **[Why UPRAIL](#why-uprail)** — Non-custodial social money around NEAR Intents and `@handle` identity
 - **[How UPRAIL Works](#how-uprail-works)** — Passkey Self-Custody, `UP1-...` Recovery Keys, Agent Allowance Pocket, Circles & Vault Gifts, Confidential Intents, `near.com`, and MCP
@@ -72,12 +72,12 @@ make check-mainnet
 [8/11] OAuth 2.1 & MCP Discovery (RFC 8414 / RFC 9728)... ✔ OK! MCP=https://api.uprail.world/api/mcp
 [9/11] Launchpad Creator-Fee Routing (/api/launchpads/config)... ✔ OK! Kinds: token_config, factory, jh_v2_dev
 [10/11] Fail-Closed Anti-BAC Guard (/api/payments)... ✔ OK! Unauthenticated access blocked (HTTP 401)
-[11/11] Circles & Earn Vault Gifting (/api/circles/vaults)... ✔ OK! 6 Earn vaults (TLO, gtUSDCp, kV-gtSOLb, stNEAR, cNEAR, wstETH) · Auth 401 guarded
+[11/11] Circles & Earn Vault Gifting (/api/circles/vaults)... ✔ OK! 6 Earn vaults (gtUSDCp, TLO, wstETH, stNEAR, cNEAR, kV-gtSOLb) · Auth 401 guarded
 =================================================================
 🎉 ALL ON-CHAIN SPONSOR, MAINNET & FEATURE CHECKS PASSED!
 ```
 
-### 2. Full Automated Test Suite (213 Tests, 0 Failures)
+### 2. Full Automated Test Suite (223 Tests, 0 Failures)
 Run the Worker unit, Miniflare integration, Self-Custody & Agent Pocket flows, confidential rail, stabilization, coffee, Circles & Earn Vault Gifting, launchpad, and NEAR smart-contract test suites *(requires Node 22+ and Rust/Cargo; `make test` automatically switches via `nvm` when present)*:
 ```bash
 make test
@@ -86,7 +86,7 @@ make test
 ```
 **Expected Output:**
 ```text
-Worker tests   : 122 + 77 = 199 passed, 0 failed (40 suites)
+Worker tests   : 126 + 82 = 208 passed, 0 failed (41 suites)
 Contract tests : 15 passed, 0 failed (uprail-circle-escrow)
 ```
 
@@ -121,8 +121,8 @@ curl -sS https://api.uprail.world/api/launchpads/config | jq '{network, escrowAc
 curl -sS https://api.uprail.world/api/coffee/options | jq '.tokens | map({symbol, chains: (.chains | length)})'
 curl -sS "https://uprail.world/xy63ry0rx?format=json" | jq .
 
-# 9. Inspect Circles & Timelocked Earn Vault Gifting catalog (6 curated 1Click Earn vaults)
-curl -sS https://api.uprail.world/api/circles/vaults | jq '.vaults | map({symbol, estimatedApyPct, minDepositUsd, priceUsd})'
+# 9. Inspect Circles & Timelocked Earn Vault Gifting catalog (6 curated 1Click Earn vaults, default gtUSDCp first)
+curl -sS https://api.uprail.world/api/circles/vaults | jq '.vaults | map({symbol, principalType, riskTier, estimatedApyPct, minDepositUsd, priceUsd})'
 curl -sS https://api.uprail.world/api/gifts/vaults | jq '.vaults | length'
 ```
 
@@ -130,13 +130,13 @@ curl -sS https://api.uprail.world/api/gifts/vaults | jq '.vaults | length'
 
 | Feature | Do This (Action) | See This (Verified Result) |
 | :--- | :--- | :--- |
-| **0. Default Passkey Self-Custody & `/verify`** | Sign up with X (optional invite code `INTENT` or Skip), register your Passkey, save your `UP1-...` Recovery Key, and open `/verify?q=xy63ry0rx` | New accounts start in **Passkey Self-Custody** (`custody_mode = 'self'`): registers your `p256:...` passkey and offline `ed25519` backup key on `intents.near`, removes server execution, locks `auth_by_predecessor_id`, and rotates the NEAR L1 `FullAccess` key — all verifiable publicly at `app.uprail.world/verify?q=xy63ry0rx` |
-| **1. Circles & Vault Gifts (USDC → 6 Earn Pools)** | Click **Circles** (`/app/circles`) in Passkey Self-Custody to create a Circle or Gift (`circle.uprail.near`) funded with **USDC** | Strictly self-custody on-chain contract mode funded with **USDC** (`0%` entry / `99%` settle for Circles; `1%` creation fee for Gifts), swapping into 6 curated 1Click Earn pools (`TLO`, `gtUSDCp`, `kV-gtSOLb`, `stNEAR`, `cNEAR`, `wstETH`); binds every member by `(account_id, pubkey)`, supports batched 0%-fee dissolve, auto-USDC Gift unwrap, and 30-day reclaim |
+| **0. Mandatory Passkey Self-Custody & `/verify`** | Sign up with X (optional invite code `INTENT` or Skip), register your Passkey, save your `UP1-...` Recovery Key, and open `/verify?q=xy63ry0rx` | All accounts run in **Passkey Self-Custody** (`custody_mode = 'self'`; any legacy account is prompted with a required 1-tap migration modal before transacting): registers your `p256:...` passkey and offline `ed25519` backup key on `intents.near`, removes server execution, locks `auth_by_predecessor_id`, and rotates the NEAR L1 `FullAccess` key — publicly verifiable at `app.uprail.world/verify?q=xy63ry0rx` |
+| **1. Circles & Vault Gifts (USDC → 6 Earn Pools)** | Click **Circles** (`/app/circles`) to create a Circle or Gift (`circle.uprail.near`) funded with **USDC** | Defaults conservatively to USD-stable `gtUSDCp` across 6 curated 1Click Earn pools (`gtUSDCp`, `TLO`, `wstETH`, `stNEAR`, `cNEAR`, `kV-gtSOLb`) with minimal `Stable`/`Volatile` badges, signed USD PnL, and explicit volatility confirmation on crypto vaults; claimed/reclaimed gifts move cleanly into **Gift History** below the vault list and main `/app/history` |
 | **2. Private `@handle` Send & Claim Links** | Send USDC/NEAR on `/app/send` to any `@handle` (registered or new) + confirm with Passkey | Recipient receives **100%** of the quoted amount while the `1%` fee is charged on top from sender's balance; settles via Confidential Intents / `circle.uprail.near` or `/claim/<id>` link with edge OG card |
 | **3. Public Payment Link (`uprail.world/<handle>`)** | Toggle ON via dashboard coin-pouch icon; visit `uprail.world/xy63ry0rx` without logging in | Pick `USDC`/`USDT`/`NEAR`/`SOL`/`ETH`/`BTC`, exact token amount & chain → one-time `FLEX_INPUT` confidential address + 99% net payout settled directly in stables (`USDC`/`USDT`) |
 | **4. Direct `near.com` Withdrawal (0% Bridge Fee)** | Dashboard → **Withdraw** (`near.com`) → bind `nearcom:0x...` address with Passkey → withdraw | 0% bridge fee internal settlement straight into `near.com` balance (`nearcomWithdraw.ts` + single-tap Self-Custody signing) |
 | **5. 35+ Chain Cross-Chain Withdrawals** | Send/Withdraw to any external EVM, Solana, Bitcoin, TON, Tron, Sui, XRP, or NEAR address | 1Click cross-chain swap & delivery across 35+ networks (`oneclickWithdraw.ts` + Passkey Self-Custody WebAuthn intents) |
-| **6. Stabilize (Crypto → USDC/USDT)** | Click **Stabilize** on Dashboard or any held token ≥ 0.05 NEAR / $1 | Gas-sponsored 1Click Confidential or Rhea Finance swap into USDC/USDT (1% fee) |
+| **6. Self-Custody Stabilize (Crypto → USDC/USDT)** | Click **Stabilize** on Dashboard or any held token ≥ 0.05 NEAR / $1 | Client-signed NEP-413 WebAuthn intent (`prepareStabilizeIntent` → `submitStabilizeIntent`) that sweeps across Main Intents, Confidential Intents, and Native NEAR L1 (via short-lived `NativeL1KeyGrant`) into USDC/USDT (1% fee) |
 | **7. Payment Requests & Contacts** | Create request on `/app/request`; share `/request/:id`; pin/nickname frequent contacts | Recipient views/pays/declines `/request/:id` in 1 tap; persistent contact memory with anti-spam blocks |
 | **8. AI Chat Payments, MCP & Agent Allowance Pocket** | Connect `https://api.uprail.world/api/mcp` in Claude/ChatGPT/Cursor; optionally load USDC/USDT/NEAR into your **Agent Allowance Pocket** on `/app/agents` | Agents read **all** held balances (`get_balance` / `GET /api/agent/balances`), pay privately via **Confidential Intents** & withdraw inside caps with **zero passkey popup** when funded in the Agent Pocket (escalating to `/approve` otherwise); pocket funds stay counted in your UPRAIL balance and auto-pull back when you spend in the app |
 | **9. Launchpad Creator-Fee Routing** | Register token via `POST /api/launchpads/register` or send `Fees to @handle via UPRAIL` | Escrow verifies on-chain receipts/memos via NEAR RPC and credits the creator's vault automatically |

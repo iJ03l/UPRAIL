@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Warning,
   Check,
@@ -11,6 +11,7 @@ import {
   CircleNotch,
   Shield,
   ShieldCheck,
+  SignOut,
 } from '@phosphor-icons/react';
 import { ModalSheet } from './ModalSheet';
 import { api } from '../lib/api';
@@ -29,6 +30,7 @@ interface SelfCustodyUpgradeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUpgraded?: () => void;
+  required?: boolean;
 }
 
 type ModalStage = 'setup' | 'success';
@@ -37,8 +39,9 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
   isOpen,
   onClose,
   onUpgraded,
+  required = false,
 }) => {
-  const { user, refreshSession } = useXAuth();
+  const { user, refreshSession, logout } = useXAuth();
   const { toast: showToast } = useToast();
 
   const [stage, setStage] = useState<ModalStage>('setup');
@@ -55,6 +58,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   const [upgradeResult, setUpgradeResult] = useState<{
     nearAccount: string;
     backupPubkey: string;
@@ -173,10 +177,12 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
   const blockers = preflight?.blockingReasons ?? [];
 
   const handleExecuteUpgrade = async () => {
+    if (submittingRef.current) return;
     if (!backupPubkey) {
       setError('Device Recovery Key is not initialized yet.');
       return;
     }
+    submittingRef.current = true;
     setError(null);
     setIsSubmitting(true);
     try {
@@ -206,6 +212,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
     } catch (err: any) {
       setError(describePasskeyError(err) || err?.message || 'Self-Custody upgrade did not complete.');
     } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
       setSubmitStatus(null);
     }
@@ -218,15 +225,17 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
     !loadingPreflight &&
     !isSubmitting;
 
+  const canDismiss = !isSubmitting && (!required || stage === 'success');
+
   return (
     <ModalSheet
       isOpen={isOpen}
       onClose={onClose}
-      canClose={!isSubmitting}
+      canClose={canDismiss}
       zIndexClass="z-[120]"
       maxWidthClass="sm:max-w-md"
       panelClassName="p-0 flex flex-col overflow-hidden text-stone-950"
-      showCloseButton
+      showCloseButton={canDismiss}
       closeLabel="Close Self-Custody upgrade modal"
       ariaLabelledBy="sc-upgrade-title"
     >
@@ -238,7 +247,11 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
           </div>
           <div className="min-w-0">
             <h2 id="sc-upgrade-title" className="text-base font-display font-extrabold text-stone-950 truncate">
-              {stage === 'setup' ? 'Enable Passkey Self-Custody' : 'Self-Custody Active'}
+              {stage === 'setup'
+                ? required
+                  ? 'Migrate to Passkey Self-Custody'
+                  : 'Enable Passkey Self-Custody'
+                : 'Self-Custody Active'}
             </h2>
             {resolvedNearAccount && (
               <p className="text-[11px] font-mono text-stone-500 truncate">
@@ -260,6 +273,12 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
 
             {stage === 'setup' && (
               <div className="space-y-4">
+                {required && (
+                  <div className="rounded-2xl border border-amber-500/35 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-950 dark:text-amber-200 leading-relaxed">
+                    <strong>One-time migration required:</strong> UPRAIL now uses Passkey Self-Custody for all transactions. Complete this upgrade to continue — your balances remain intact.
+                  </div>
+                )}
+
                 {/* Concise Guarantees */}
                 <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3.5 space-y-2 text-xs text-stone-700">
                   <div className="flex items-start gap-2">
@@ -323,16 +342,18 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
+                      disabled={isSubmitting || !recoveryPhrase}
                       onClick={handleCopyRecoveryKey}
-                      className="btn-secondary py-2 px-3 rounded-xl text-xs font-mono font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="btn-secondary py-2 px-3 rounded-xl text-xs font-mono font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {copiedKey ? <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" /> : <Copy weight="fill" className="w-3.5 h-3.5" />}
                       <span>{copiedKey ? 'Copied' : 'Copy Key'}</span>
                     </button>
                     <button
                       type="button"
+                      disabled={isSubmitting || !recoveryPhrase}
                       onClick={handleDownloadRecoveryKey}
-                      className="btn-secondary py-2 px-3 rounded-xl text-xs font-mono font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="btn-secondary py-2 px-3 rounded-xl text-xs font-mono font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {downloadedKey ? <Check weight="bold" className="w-3.5 h-3.5 text-emerald-600" /> : <DownloadSimple weight="fill" className="w-3.5 h-3.5" />}
                       <span>{downloadedKey ? 'Saved .txt' : 'Save .txt'}</span>
@@ -340,12 +361,13 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                   </div>
                 </div>
 
-                <label className="flex items-start gap-2.5 text-xs text-stone-700 cursor-pointer select-none">
+                <label className={`flex items-start gap-2.5 text-xs text-stone-700 select-none ${isSubmitting ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
                   <input
                     type="checkbox"
                     checked={savedConfirmed}
+                    disabled={isSubmitting}
                     onChange={(e) => setSavedConfirmed(e.target.checked)}
-                    className="mt-0.5 rounded border-stone-300 text-[#E05326] focus:ring-[#E05326]"
+                    className="mt-0.5 rounded border-stone-300 text-[#E05326] focus:ring-[#E05326] disabled:cursor-not-allowed"
                   />
                   <span>
                     I saved my offline <code className="font-mono font-bold">UP1-…</code> Recovery Key (needed if I ever lose this device passkey).
@@ -356,7 +378,7 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                   type="button"
                   onClick={handleExecuteUpgrade}
                   disabled={!canSubmit}
-                  className="btn-primary w-full py-3 px-4 rounded-2xl font-display font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                  className="btn-primary w-full py-3 px-4 rounded-2xl font-display font-bold text-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
                     <>
@@ -370,6 +392,18 @@ export const SelfCustodyUpgradeModal: React.FC<SelfCustodyUpgradeModalProps> = (
                     </>
                   )}
                 </button>
+
+                {required && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => void logout()}
+                    className="w-full py-2 text-[11px] font-mono text-stone-500 hover:text-stone-900 inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <SignOut weight="bold" className="w-3.5 h-3.5" />
+                    <span>Sign out of @{user?.handle}</span>
+                  </button>
+                )}
               </div>
             )}
 

@@ -21,6 +21,7 @@ export interface ConfirmDialogProps {
   warning?: React.ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
+  loadingLabel?: string | null;
   tone?: ConfirmTone;
   isLoading?: boolean;
   onConfirm: () => void;
@@ -64,6 +65,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   warning,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
+  loadingLabel,
   tone = 'default',
   isLoading = false,
   onConfirm,
@@ -140,6 +142,17 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         </div>
       )}
 
+      {isLoading && loadingLabel && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mt-4 rounded-2xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-[11px] font-mono text-stone-700 flex items-center gap-2"
+        >
+          <span className="w-3.5 h-3.5 border-2 border-stone-900 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          <span className="leading-snug">{loadingLabel}</span>
+        </div>
+      )}
+
       <div className="mt-6 grid grid-cols-2 gap-2.5">
         <button
           ref={cancelRef}
@@ -159,7 +172,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           {isLoading ? (
             <>
               <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              <span>Working…</span>
+              <span className="truncate">{loadingLabel && loadingLabel.length <= 22 ? loadingLabel : 'Working…'}</span>
             </>
           ) : (
             <>

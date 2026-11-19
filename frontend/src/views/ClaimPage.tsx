@@ -101,6 +101,7 @@ export const ClaimPage: React.FC = () => {
   const [activeClaimId, setActiveClaimId] = useState<string | null>(null);
   const [showPasskeyModal, setShowPasskeyModal] = useState(false);
   const [pendingClaim, setPendingClaim] = useState<{ id: string; all: boolean } | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // A share link may point at a payment that was already DELIVERED or sent by this user.
   const [linkedPayment, setLinkedPayment] = useState<PaymentIntent | null>(null);
@@ -141,6 +142,7 @@ export const ClaimPage: React.FC = () => {
     pendingPayments,
     isLoading,
     isClaiming,
+    claimStepMsg,
     claimSuccess,
     claimResult,
     error,
@@ -155,35 +157,44 @@ export const ClaimPage: React.FC = () => {
   } = useClaimFlow(queryPaymentCode);
 
   const handleStartClaim = (paymentId: string) => {
+    if (isClaiming) return;
+    clearError();
     setPendingClaim({ id: paymentId, all: paymentId === 'all' });
   };
 
   const handleConfirmClaimStart = () => {
-    if (!pendingClaim) return;
+    if (!pendingClaim || isClaiming) return;
+    clearError();
     setActiveClaimId(pendingClaim.id);
     setShowPasskeyModal(true);
     setPendingClaim(null);
   };
 
   const handleConfirmPasskeyClaim = async () => {
+    if (isClaiming) return;
     try {
       if (activeClaimId === 'all') {
         await claimAllWithPasskey(visiblePayments);
       } else if (activeClaimId) {
         await claimPaymentWithPasskey(activeClaimId);
       }
-    } catch {
-      // Error is set in the hook — it will display inside PasskeyPrompt
-    } finally {
       setShowPasskeyModal(false);
+    } catch {
+      // Error is set in the hook — keep PasskeyPrompt open so the user sees it
     }
   };
 
   const handleRefresh = async () => {
-    if (isFeesView) {
-      await api.syncCreatorFees().catch(() => {});
+    if (isRefreshing || isLoading) return;
+    setIsRefreshing(true);
+    try {
+      if (isFeesView) {
+        await api.syncCreatorFees().catch(() => {});
+      }
+      await Promise.all([loadPendingPayments(), loadShieldedBalances()]);
+    } finally {
+      setIsRefreshing(false);
     }
-    await Promise.all([loadPendingPayments(), loadShieldedBalances()]);
   };
 
   const creatorFeePayments = pendingPayments.filter((p) => p.isCreatorFee);
@@ -248,12 +259,12 @@ export const ClaimPage: React.FC = () => {
         <button
           type="button"
           onClick={handleRefresh}
-          disabled={isLoading}
+          disabled={isLoading || isRefreshing || isClaiming}
           aria-label="Refresh"
           title="Refresh incoming payments"
-          className="w-12 h-12 rounded-2xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer flex items-center justify-center flex-shrink-0"
+          className="w-12 h-12 rounded-2xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center flex-shrink-0"
         >
-          <ArrowsClockwise weight="bold" className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          <ArrowsClockwise weight="bold" className={`w-4 h-4 ${isLoading || isRefreshing ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
@@ -714,10 +725,13 @@ export const ClaimPage: React.FC = () => {
       {/* Passkey Authentication Modal Prompt */}
       <PasskeyPrompt
         isOpen={showPasskeyModal}
-        onClose={() => setShowPasskeyModal(false)}
+        onClose={() => {
+          if (!isClaiming) setShowPasskeyModal(false);
+        }}
         onConfirm={handleConfirmPasskeyClaim}
         handle={user?.handle || 'your account'}
         isClaiming={isClaiming}
+        stepMessage={claimStepMsg}
         hasExistingPasskey={hasPasskey}
         error={error}
         onClearError={clearError}

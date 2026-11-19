@@ -563,14 +563,21 @@ async function userHasSufficientUsdcAnywhere(
   let total = pubBal?.balance ?? 0n;
   if (total >= grossAtomic) return true;
 
-  const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
-  const matchingPlain = plain.find(
-    (b) =>
-      nearRpc.assetsMatch(b.defuse_asset_id, origin.assetId) ||
-      nearRpc.assetsMatch(b.nearContractId, origin.nearContractId)
-  );
-  total += BigInt(matchingPlain?.amount || '0');
-  if (total >= grossAtomic) return true;
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id).catch(() => null);
+  const canSignL1 =
+    !custody ||
+    custody.custodyMode !== 'self' ||
+    (await nearRpc.canServerSignAccountL1(env, session.x_id, nearAccount));
+  if (canSignL1) {
+    const plain = await nearRpc.getPlainBalances(env, nearAccount).catch(() => []);
+    const matchingPlain = plain.find(
+      (b) =>
+        nearRpc.assetsMatch(b.defuse_asset_id, origin.assetId) ||
+        nearRpc.assetsMatch(b.nearContractId, origin.nearContractId)
+    );
+    total += BigInt(matchingPlain?.amount || '0');
+    if (total >= grossAtomic) return true;
+  }
 
   if (isConfidentialRailEnabled(env)) {
     const conf = await getAvailableConfidentialAtomicForAsset(

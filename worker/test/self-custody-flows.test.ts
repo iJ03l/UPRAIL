@@ -3998,3 +3998,257 @@ test('getDepositAddress retries confidential 1Click quote with solver try-at-lea
     globalThis.fetch = originalFetch;
   }
 });
+
+test('Self-custody Stabilize with amount="all" ignores rotated plain L1 balances and never throws SELF_CUSTODY_L1_KEY_ROTATED', async () => {
+  const { prepareSelfCustodyStabilize } = await import('../src/services/selfCustodyActions');
+  const { CustodyActionError } = await import('../src/services/custodyService');
+  const { computeStabilizeSplit } = await import('../src/services/stabilize');
+
+  const NEAR_ID = 'nep141:wrap.near';
+  const USDC_ID = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
+  const xId = 'xid_stab_rotated_l1';
+  const nearAccount = 'u_stab_rot.escrow.uprail.near';
+  const backupPubkey = 'ed25519:3P7ijos7GtNjHe9i31isZ6ERSFUYBG78ZF8byu6m8421';
+
+  const baseDb = createMockDb({
+    identities: [
+      {
+        x_id: xId,
+        x_handle: 'xy63ry0rx',
+        near_account: nearAccount,
+        custody_mode: 'self',
+        is_activated: 1,
+        backup_pubkey: backupPubkey,
+      },
+    ],
+    passkeys: [
+      {
+        id: 'pk_stab_rot_1',
+        x_id: xId,
+        credential_id: 'cred_stab_rot',
+        public_key: 'aabb',
+        counter: 1,
+        near_p256_pubkey: 'p256:11111111111111111111111111111111111111111111',
+        onchain_added_at: Date.now() - 10_000,
+      },
+    ],
+  });
+
+  const db: any = {
+    prepare(sql: string) {
+      const norm = sql.replace(/\s+/g, ' ');
+      if (norm.includes('SELECT near_account') && norm.includes('FROM x_identities WHERE x_id = ?')) {
+        const stmt: any = {
+          bind() {
+            return stmt;
+          },
+          async first() {
+            return { near_account: nearAccount };
+          },
+        };
+        return stmt;
+      }
+      return baseDb.prepare(sql);
+    },
+  };
+
+  const kvStore = new Map<string, string>([
+    [
+      `1click:user-session:${xId}`,
+      JSON.stringify({
+        accessToken: 'oc_stab_rot_token',
+        accountId: nearAccount,
+        expiresAt: Date.now() + 600_000,
+      }),
+    ],
+  ]);
+
+  const env: any = {
+    ESCROW_ACCOUNT_ID: 'escrow.uprail.near',
+    ESCROW_PRIVATE_KEY: TEST_ESCROW_KP.priv,
+    INTENTS_CONTRACT_ID: 'intents.near',
+    NEAR_RPC_URL: 'https://free.rpc.fastnear.com',
+    ONE_CLICK_API_KEY: 'test_key',
+    CONFIDENTIAL_RAIL_ENABLED: 'true',
+    WEBAUTHN_RP_ID: 'uprail.world',
+    WEBAUTHN_ORIGIN: 'https://app.uprail.world',
+    DB: db,
+    CACHE: {
+      async get(key: string, type?: string) {
+        const val = kvStore.get(key) ?? null;
+        return type === 'json' && val ? JSON.parse(val) : val;
+      },
+      async put(key: string, val: string) {
+        kvStore.set(key, val);
+      },
+    },
+  };
+
+  let publicNearAtomic = '2000000000000000000000000'; // 2 NEAR on intents.near
+  let confNearAtomic = '0';
+  const plainL1NearAtomic = '5000000000000000000000000'; // 5 NEAR stranded on rotated plain L1
+  const quoteBodies: any[] = [];
+
+  await withMockFetch(
+    {
+      current_salt: () => '01020304',
+      mt_balance_of: () => publicNearAtomic,
+      mt_batch_balance_of: () => [publicNearAtomic],
+    },
+    async () => {
+      const baseFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: any, init?: any) => {
+        const url = typeof input === 'string' ? input : input?.url || '';
+        const bodyObj = init?.body ? JSON.parse(String(init.body)) : {};
+
+        if (url.includes('/v0/tokens')) {
+          return new Response(
+            JSON.stringify([
+              {
+                assetId: NEAR_ID,
+                decimals: 24,
+                blockchain: 'near',
+                symbol: 'NEAR',
+                price: 3.0,
+                contractAddress: 'wrap.near',
+              },
+              {
+                assetId: USDC_ID,
+                decimals: 6,
+                blockchain: 'near',
+                symbol: 'USDC',
+                price: 1.0,
+                contractAddress: '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
+              },
+            ]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/account/balances')) {
+          return new Response(
+            JSON.stringify([{ tokenId: NEAR_ID, available: confNearAtomic }]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/quote')) {
+          quoteBodies.push(bodyObj);
+          return new Response(
+            JSON.stringify({
+              quote: {
+                depositAddress: '1click_stab_rot_dep',
+                deadline: new Date(Date.now() + 600_000).toISOString(),
+                amountIn: bodyObj.amount,
+                amountOut: '5900000',
+                minAmountOut: '5600000',
+                amountInUsd: '5.94',
+                amountOutUsd: '5.90',
+                timeEstimate: 8,
+              },
+              quoteRequest: { confidentiality: 'basic' },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('/v0/generate-intent')) {
+          const { createTimestampedNonceBytes, encodeVersionedNonce, saltFromHex } = await import(
+            '../src/services/intentsNonce'
+          );
+          const msgStr = JSON.stringify({
+            signer_id: nearAccount,
+            verifying_contract: 'intents.near',
+            deadline: new Date(Date.now() + 600_000).toISOString(),
+            nonce: encodeVersionedNonce(
+              saltFromHex('01020304'),
+              new Date(Date.now() + 600_000),
+              createTimestampedNonceBytes()
+            ),
+            intents: [
+              {
+                intent: 'transfer',
+                receiver_id: bodyObj.depositAddress,
+                tokens: { [NEAR_ID]: '1980000000000000000000000' },
+              },
+            ],
+          });
+          return new Response(
+            JSON.stringify({ intent: { standard: 'webauthn', payload: msgStr } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (url.includes('api.fastnear.com') && url.endsWith('/ft')) {
+          return new Response(JSON.stringify({ tokens: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (bodyObj?.params?.request_type === 'view_access_key_list') {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: bodyObj.id,
+              // Only offline backup key exists on L1 -> server L1 key was rotated off
+              result: { keys: [{ public_key: backupPubkey, access_key: { permission: 'FullAccess' } }] },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        if (bodyObj?.params?.request_type === 'view_account') {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: bodyObj.id,
+              result: { amount: plainL1NearAtomic, storage_usage: 0 },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return baseFetch(input, init);
+      }) as typeof fetch;
+
+      const session: any = { id: 'sess_stab_rot', x_id: xId, x_handle: 'xy63ry0rx', x_name: 'XY' };
+      const expectedNet = computeStabilizeSplit(2_000000000000000000000000n, 24).netInputAtomic.toString();
+
+      // Case 1: Public Intents 2 NEAR + rotated plain L1 5 NEAR -> stabilizes ONLY 2 NEAR via INTENTS
+      const res1: any = await prepareSelfCustodyStabilize(env, session, {
+        sourceAsset: NEAR_ID,
+        targetAsset: 'USDC',
+        amount: 'all',
+      });
+      assert.equal(res1.step, 'stabilize');
+      assert.equal(quoteBodies.length, 1);
+      assert.equal(quoteBodies[0].depositType, 'INTENTS');
+      assert.equal(quoteBodies[0].recipientType, 'CONFIDENTIAL_INTENTS');
+      assert.equal(quoteBodies[0].amount, expectedNet);
+
+      // Case 2: Confidential Intents 2 NEAR + rotated plain L1 5 NEAR -> stabilizes ONLY 2 NEAR via CONFIDENTIAL_INTENTS
+      publicNearAtomic = '0';
+      confNearAtomic = '2000000000000000000000000';
+      const res2: any = await prepareSelfCustodyStabilize(env, session, {
+        sourceAsset: NEAR_ID,
+        targetAsset: 'USDC',
+        amount: 'all',
+      });
+      assert.equal(res2.step, 'stabilize');
+      assert.equal(quoteBodies.length, 2);
+      assert.equal(quoteBodies[1].depositType, 'CONFIDENTIAL_INTENTS');
+      assert.equal(quoteBodies[1].amount, expectedNet);
+
+      // Case 3: ONLY rotated plain L1 5 NEAR (0 public, 0 confidential) -> clean INSUFFICIENT_BALANCE, never SELF_CUSTODY_L1_KEY_ROTATED
+      publicNearAtomic = '0';
+      confNearAtomic = '0';
+      await assert.rejects(
+        () =>
+          prepareSelfCustodyStabilize(env, session, {
+            sourceAsset: NEAR_ID,
+            targetAsset: 'USDC',
+            amount: 'all',
+          }),
+        (err: any) =>
+          err instanceof CustodyActionError &&
+          err.code === 'INSUFFICIENT_BALANCE' &&
+          err.code !== 'SELF_CUSTODY_L1_KEY_ROTATED'
+      );
+    }
+  );
+});
+

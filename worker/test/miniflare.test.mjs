@@ -1182,8 +1182,15 @@ describe('UPRAIL Cloudflare Worker (Miniflare)', () => {
     assert.equal(vaultsBody.vaults.length, 6);
     assert.deepEqual(
       vaultsBody.vaults.map((v) => v.symbol),
-      ['TLO', 'gtUSDCp', 'kV-gtSOLb', 'stNEAR', 'cNEAR', 'wstETH']
+      ['gtUSDCp', 'TLO', 'wstETH', 'stNEAR', 'cNEAR', 'kV-gtSOLb']
     );
+    const gtUsdc = vaultsBody.vaults.find((v) => v.symbol === 'gtUSDCp');
+    const stNear = vaultsBody.vaults.find((v) => v.symbol === 'stNEAR');
+    assert.equal(gtUsdc.principalType, 'usd_stable');
+    assert.equal(gtUsdc.riskTier, 'core');
+    assert.equal(gtUsdc.requiresRiskAck, false);
+    assert.equal(stNear.principalType, 'volatile_crypto');
+    assert.equal(stNear.requiresRiskAck, true);
 
     const db = await mf.getD1Database('DB');
     const now = Date.now();

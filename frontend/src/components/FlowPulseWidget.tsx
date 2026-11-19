@@ -1,12 +1,10 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { Link } from '../lib/router';
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Shield,
-  PaperPlaneTilt,
   Lock,
 } from '@phosphor-icons/react';
 import { useXAuth } from '../hooks/useXAuth';
@@ -457,139 +455,81 @@ export const FlowPulseWidget: React.FC<FlowPulseWidgetProps> = ({
     };
   }, [history, transactions, tokens, user]);
 
+  const cards = [
+    {
+      direction: 'in' as const,
+      title: 'Received this week',
+      subtitle: 'Money in · Last 7 days',
+      count: stats.inflowCount,
+      amountUsd: stats.inflowUsd,
+      maxMetric: stats.maxIn,
+      ariaLabel: 'Daily received volume over last 7 days',
+      iconBoxClass: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+      Icon: ArrowDownLeft,
+      iconClass: 'text-emerald-600',
+      AccentIcon: Shield,
+      accentClass: 'text-emerald-600',
+    },
+    {
+      direction: 'out' as const,
+      title: 'Sent this week',
+      subtitle: 'Money out · Last 7 days',
+      count: stats.egressCount,
+      amountUsd: stats.egressUsd,
+      maxMetric: stats.maxOut,
+      ariaLabel: 'Daily sent volume over last 7 days',
+      iconBoxClass: 'bg-orange-50 text-orange-700 border-orange-100',
+      Icon: ArrowUpRight,
+      iconClass: 'text-orange-600',
+      AccentIcon: Lock,
+      accentClass: 'text-orange-600',
+    },
+  ];
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-      {/* ── CARD 1: Shielded Inflow (Receive) ── */}
-      <div className="relative rounded-3xl bg-white border border-stone-200/90 shadow-xs hover:shadow-sm transition-all p-6 sm:p-7 flex flex-col justify-between overflow-hidden group">
-        <div className="space-y-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+      {cards.map(({ direction, title, subtitle, count, amountUsd, maxMetric, ariaLabel, iconBoxClass, Icon, iconClass, AccentIcon, accentClass }) => (
+        <div
+          key={direction}
+          className="relative rounded-3xl bg-white border border-stone-200/90 shadow-xs hover:shadow-sm transition-all p-5 sm:p-6 space-y-4 overflow-hidden group"
+        >
           {/* Header Row */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-3">
-              <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
-                <ArrowDownLeft weight="bold" className="w-5 h-5 text-emerald-600" />
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className={`w-10 h-10 rounded-2xl border flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform ${iconBoxClass}`}>
+                <Icon weight="bold" className={`w-5 h-5 ${iconClass}`} />
               </div>
-              <div>
+              <div className="min-w-0">
                 <h4 className="text-sm font-display font-bold text-stone-950 flex items-center space-x-1.5">
-                  <span>Received this week</span>
-                  <Shield weight="fill" className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="truncate">{title}</span>
+                  <AccentIcon weight="fill" className={`w-3.5 h-3.5 flex-shrink-0 ${accentClass}`} />
                 </h4>
                 <p className="text-[11px] font-mono text-stone-400">
-                  Money in · Last 7 days
+                  {subtitle}
                 </p>
               </div>
             </div>
 
             <Badge tone="neutral">
-              {stats.inflowCount} {stats.inflowCount === 1 ? 'tx' : 'txs'}
+              {count} {count === 1 ? 'tx' : 'txs'}
             </Badge>
           </div>
 
-          {/* Big Dollar Amount + 7-day Mini Bars */}
-          <div className="space-y-3 pt-1">
-            <div className="space-y-1">
-              <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
-                {formatUsd(stats.inflowUsd)}
-              </div>
-              <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>Deposits and payments you received</span>
-              </div>
-              {stats.inflowUnpriced > 0 && (
-                <div className="text-[11px] font-mono text-amber-600">
-                  Subtotal · {stats.inflowUnpriced} of {stats.inflowCount} txs unpriced
-                </div>
-              )}
+          {/* Dollar Amount + 7-day Wavy Chart */}
+          <div className="space-y-2.5">
+            <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight leading-none">
+              {formatUsd(amountUsd)}
             </div>
 
             <WavyFlowChart
               days={stats.days}
-              maxMetric={stats.maxIn}
-              direction="in"
-              ariaLabel="Daily received volume over last 7 days"
+              maxMetric={maxMetric}
+              direction={direction}
+              ariaLabel={ariaLabel}
             />
           </div>
         </div>
-
-        {/* Action Button */}
-        <div className="pt-6 border-t border-stone-100 flex items-center justify-between gap-2">
-          <span className="text-[11px] font-mono text-stone-400 truncate">
-            Add funds from any wallet or chain
-          </span>
-          <Link
-            to="/app/receive"
-            className="px-5 py-2.5 rounded-xl bg-black hover:bg-stone-800 text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95 flex-shrink-0"
-          >
-            <span>Deposit</span>
-            <ArrowDownLeft weight="bold" className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-      </div>
-
-      {/* ── CARD 2: Confidential Egress (Send) ── */}
-      <div className="relative rounded-3xl bg-white border border-stone-200/90 shadow-xs hover:shadow-sm transition-all p-6 sm:p-7 flex flex-col justify-between overflow-hidden group">
-        <div className="space-y-4">
-          {/* Header Row */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-3">
-              <div className="w-11 h-11 rounded-2xl bg-orange-50 text-orange-700 border border-orange-100 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
-                <ArrowUpRight weight="bold" className="w-5 h-5 text-orange-600" />
-              </div>
-              <div>
-                <h4 className="text-sm font-display font-bold text-stone-950 flex items-center space-x-1.5">
-                  <span>Sent this week</span>
-                  <Lock weight="fill" className="w-3.5 h-3.5 text-orange-600" />
-                </h4>
-                <p className="text-[11px] font-mono text-stone-400">
-                  Money out · Last 7 days
-                </p>
-              </div>
-            </div>
-
-            <Badge tone="neutral">
-              {stats.egressCount} {stats.egressCount === 1 ? 'tx' : 'txs'}
-            </Badge>
-          </div>
-
-          {/* Big Dollar Amount + 7-day Wavy Line Chart */}
-          <div className="space-y-3 pt-1">
-            <div className="space-y-1">
-              <div className="text-3xl sm:text-4xl font-display font-extrabold text-stone-950 tracking-tight">
-                {formatUsd(stats.egressUsd)}
-              </div>
-              <div className="text-xs text-stone-500 font-sans flex items-center space-x-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                <span>Sends and withdrawals you made</span>
-              </div>
-              {stats.egressUnpriced > 0 && (
-                <div className="text-[11px] font-mono text-amber-600">
-                  Subtotal · {stats.egressUnpriced} of {stats.egressCount} txs unpriced
-                </div>
-              )}
-            </div>
-
-            <WavyFlowChart
-              days={stats.days}
-              maxMetric={stats.maxOut}
-              direction="out"
-              ariaLabel="Daily sent volume over last 7 days"
-            />
-          </div>
-        </div>
-
-        {/* Action Button */}
-        <div className="pt-6 border-t border-stone-100 flex items-center justify-between gap-2">
-          <span className="text-[11px] font-mono text-stone-400 truncate">
-            Send to any 𝕏 handle or wallet
-          </span>
-          <Link
-            to="/app/send"
-            className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-black text-white font-display font-bold text-xs uppercase tracking-wider transition-all shadow-xs flex items-center space-x-1.5 cursor-pointer hover:scale-105 active:scale-95 flex-shrink-0"
-          >
-            <span>Send</span>
-            <ArrowUpRight weight="bold" className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-      </div>
+      ))}
     </div>
   );
 };

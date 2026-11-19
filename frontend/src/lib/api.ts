@@ -3045,18 +3045,37 @@ export const api = {
     usdcSwapNote?: string;
   }> {
     const id = encodeURIComponent(giftId);
+    let signStep = 0;
+    const reportClaimStage = (stage: SelfCustodyProgressStage, message: string) => {
+      if (stage === 'preparing') {
+        onProgress?.(stage, 'Preparing timelocked vault unlock…');
+      } else if (stage === 'authorizing') {
+        signStep += 1;
+        onProgress?.(stage, `Passkey ${signStep}: Confirm to unlock timelocked vault…`);
+      } else if (stage === 'submitting') {
+        onProgress?.(stage, 'Unlocking vault & claiming shares on-chain…');
+      } else {
+        onProgress?.(stage, message);
+      }
+    };
+
     const res = await runCustodyFlow<any>(
       `/api/gifts/${id}/claim/prepare`,
       `/api/gifts/${id}/claim/submit`,
       {},
-      { onProgress }
+      { onProgress: reportClaimStage }
     );
 
     let prep = res?.usdcSwapPrepare;
     try {
       if (!prep && res?.needsOneClickAuthForUsdc && res?.oneClickPrepare?.actionId && res?.oneClickPrepare?.options) {
-        onProgress?.('oneclick_auth', 'Confirm with passkey to unlock Confidential Intents session…');
+        signStep += 1;
+        onProgress?.(
+          'oneclick_auth',
+          `Passkey ${signStep}: Confirm to unlock private USDC session…`
+        );
         const ocAssertion = await performWebAuthnAssertion(res.oneClickPrepare.options);
+        onProgress?.('preparing', 'Preparing USDC conversion quote…');
         await api.submitOneClickWebAuthnSession({
           actionId: res.oneClickPrepare.actionId,
           assertion: ocAssertion,
@@ -3071,9 +3090,10 @@ export const api = {
         return res;
       }
 
+      signStep += 1;
       onProgress?.(
         'authorizing',
-        `Confirm with your passkey to convert ${res.sharesClaimed || ''} ${res.gift?.vaultSymbol || ''} to ~${prep.expectedUsdcOut || ''} Confidential USDC…`
+        `Passkey ${signStep}: Confirm to convert ${res.sharesClaimed || ''} ${res.gift?.vaultSymbol || ''} → ~${prep.expectedUsdcOut || ''} USDC…`
       );
       const assertion = await performWebAuthnAssertion(prep.options);
       onProgress?.('submitting', 'Converting claimed vault shares to USDC…');
@@ -3113,7 +3133,14 @@ export const api = {
           expectedAmountAtomic: swapRes.usdcAmountAtomic,
           sourceSwapDepositAddress: depAddr,
           initialShieldPrepare: swapRes.shieldPrepare,
-          onProgress,
+          onProgress: (stage, message) => {
+            if (stage === 'oneclick_auth' || stage === 'shielding') {
+              signStep += 1;
+              onProgress?.(stage, `Passkey ${signStep}: ${message}`);
+            } else {
+              onProgress?.(stage, message);
+            }
+          },
         });
       }
 

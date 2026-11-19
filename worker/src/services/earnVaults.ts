@@ -30,6 +30,10 @@ export class EarnVaultError extends Error {
   }
 }
 
+export type VaultPrincipalType = 'usd_stable' | 'volatile_crypto';
+export type VaultRiskTier = 'core' | 'moderate' | 'elevated';
+export type VaultBridgeType = 'native_near' | 'omni_bridge';
+
 export interface EarnVaultDescriptor {
   symbol: string;
   name: string;
@@ -40,9 +44,21 @@ export interface EarnVaultDescriptor {
   assetId: string;
   decimals: number;
   estimatedApyPct: number;
+  apyType: 'variable';
   minDepositUsd: number;
   priceUsd: number;
   available: boolean;
+  principalType: VaultPrincipalType;
+  riskTier: VaultRiskTier;
+  riskTierLabel: 'Core' | 'Moderate' | 'Elevated';
+  requiresRiskAck: boolean;
+  bridgeType: VaultBridgeType;
+  tvlBand: string;
+  strategySummary: string;
+  riskHighlights: string[];
+  exitSummary: string;
+  auditSummary: string;
+  contractExplorerUrl: string;
 }
 
 export interface EarnCustodyKey {
@@ -61,6 +77,8 @@ export interface VaultPositionValuation {
   currentValueUsdCents: number;
   yieldUsdCents: number;
   yieldPct: number;
+  netChangeUsdCents: number;
+  netChangePct: number;
 }
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -114,21 +132,9 @@ function bytesToHex(bytes: Uint8Array): string {
 /**
  * Authoritative allowlist of 1Click Earn receipt tokens.
  * Server never accepts an arbitrary client-supplied `vault_asset_id` outside this list.
+ * Ordered with USD-stable Core vault (`gtUSDCp`) first as the conservative default.
  */
 export const CURATED_EARN_VAULTS: ReadonlyArray<Omit<EarnVaultDescriptor, 'available'>> = [
-  {
-    symbol: 'TLO',
-    name: 'Taler USDC Vault',
-    protocol: 'Taler',
-    chain: 'eth',
-    chainName: 'Ethereum',
-    underlyingSymbol: 'USDC',
-    assetId: 'nep141:eth-0x0f38f1ce62776d4a0038bc6cac66877a5687383b.omft.near',
-    decimals: 8,
-    estimatedApyPct: 6.2,
-    minDepositUsd: 10,
-    priceUsd: 1.028245,
-  },
   {
     symbol: 'gtUSDCp',
     name: 'Gauntlet USDC Prime',
@@ -138,48 +144,58 @@ export const CURATED_EARN_VAULTS: ReadonlyArray<Omit<EarnVaultDescriptor, 'avail
     underlyingSymbol: 'USDC',
     assetId: 'nep141:base-0x0bb69b79bc829e1cfcc34a740110886d98d2bd14.omft.near',
     decimals: 18,
-    estimatedApyPct: 7.4,
+    estimatedApyPct: 4.5,
+    apyType: 'variable',
     minDepositUsd: 25,
     priceUsd: 0.0000011178,
+    principalType: 'usd_stable',
+    riskTier: 'core',
+    riskTierLabel: 'Core',
+    requiresRiskAck: false,
+    bridgeType: 'omni_bridge',
+    tvlBand: '$180M+ TVL',
+    strategySummary:
+      'Supplies USDC into isolated, overcollateralized Morpho lending markets on Base backed by blue-chip collateral (WETH, cbETH, cbBTC), curated by Gauntlet.',
+    riskHighlights: [
+      'Lending bad debt is possible if collateral drops faster than liquidations during extreme crashes.',
+      'Cross-chain wrapper risk: receipt shares are bridged from Base via NEAR Omni Bridge (omft.near) and swapped via 1Click solvers.',
+      'Yield fluctuates daily with borrower demand and carries USDC issuer/depeg risk.',
+    ],
+    exitSummary:
+      'Swapped back to USDC via 1Click solvers upon unwrap or stabilization. High pool utilization can temporarily widen exit spreads.',
+    auditSummary: 'Morpho core audited by OpenZeppelin, Spearbit & ChainSecurity · Risk curated by Gauntlet',
+    contractExplorerUrl: 'https://basescan.org/address/0x0bb69b79bc829e1cfcc34a740110886d98d2bd14',
   },
   {
-    symbol: 'kV-gtSOLb',
-    name: 'Kamino Gauntlet SOL',
-    protocol: 'Kamino',
-    chain: 'sol',
-    chainName: 'Solana',
-    underlyingSymbol: 'SOL',
-    assetId: 'nep141:sol-0xa69aa1bcb03a369e338156a8718ad60271145803.omdep.near',
-    decimals: 9,
-    estimatedApyPct: 8.1,
+    symbol: 'TLO',
+    name: 'Taler USDC Vault',
+    protocol: 'Taler',
+    chain: 'eth',
+    chainName: 'Ethereum',
+    underlyingSymbol: 'USDC',
+    assetId: 'nep141:eth-0x0f38f1ce62776d4a0038bc6cac66877a5687383b.omft.near',
+    decimals: 8,
+    estimatedApyPct: 6.5,
+    apyType: 'variable',
     minDepositUsd: 10,
-    priceUsd: 89.52,
-  },
-  {
-    symbol: 'stNEAR',
-    name: 'Meta Pool Staked NEAR',
-    protocol: 'Meta Pool',
-    chain: 'near',
-    chainName: 'NEAR',
-    underlyingSymbol: 'NEAR',
-    assetId: 'nep141:meta-pool.near',
-    decimals: 24,
-    estimatedApyPct: 9.2,
-    minDepositUsd: 5,
-    priceUsd: 5.71,
-  },
-  {
-    symbol: 'cNEAR',
-    name: 'Compounding NEAR Vault',
-    protocol: 'Assetize / Linear',
-    chain: 'near',
-    chainName: 'NEAR',
-    underlyingSymbol: 'NEAR',
-    assetId: 'nep141:cnear.assetize.near',
-    decimals: 24,
-    estimatedApyPct: 8.8,
-    minDepositUsd: 5,
-    priceUsd: 3.75,
+    priceUsd: 1.028245,
+    principalType: 'usd_stable',
+    riskTier: 'moderate',
+    riskTierLabel: 'Moderate',
+    requiresRiskAck: false,
+    bridgeType: 'omni_bridge',
+    tvlBand: '~$4M TVL',
+    strategySummary:
+      'Algorithmically rebalances USDC across vetted Ethereum lending markets (Morpho/Aave-class venues) using permissioned execution guardrails and NAV checks.',
+    riskHighlights: [
+      'Newer protocol (~$4M TVL, launched 2026) with shorter production battle-testing than Morpho or Lido.',
+      'Uses asynchronous epoch redemptions natively, so instant exit on UPRAIL depends on 1Click solver liquidity and spreads.',
+      'Cross-chain Ethereum Omni Bridge (omft.near), strategy/NAV accounting, and USDC depeg risks apply.',
+    ],
+    exitSummary:
+      'Instant exit relies on 1Click solver liquidity; if USDC conversion is unavailable during stress, unwrap delivers TLO vault shares directly.',
+    auditSummary: 'Audited by Quantstamp (Mar–Apr 2026; medium & low findings resolved pre-launch)',
+    contractExplorerUrl: 'https://etherscan.io/address/0x0f38f1ce62776d4a0038bc6cac66877a5687383b',
   },
   {
     symbol: 'wstETH',
@@ -190,9 +206,120 @@ export const CURATED_EARN_VAULTS: ReadonlyArray<Omit<EarnVaultDescriptor, 'avail
     underlyingSymbol: 'ETH',
     assetId: 'nep141:eth-0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0.omft.near',
     decimals: 18,
-    estimatedApyPct: 3.4,
+    estimatedApyPct: 2.9,
+    apyType: 'variable',
     minDepositUsd: 15,
     priceUsd: 2590.0,
+    principalType: 'volatile_crypto',
+    riskTier: 'core',
+    riskTierLabel: 'Core',
+    requiresRiskAck: true,
+    bridgeType: 'omni_bridge',
+    tvlBand: '$1B+ TVL',
+    strategySummary:
+      'Non-rebasing receipt token representing staked Ethereum across Lido’s decentralized node operator set; staking rewards compound in ETH terms.',
+    riskHighlights: [
+      'Full ETH market price volatility: if ETH drops 25%, your USD value drops ~25% even while earning ETH staking yield.',
+      'Ethereum validator slashing risk (mitigated by operator diversity and Lido slashing buffer) and withdrawal queue delays during stress.',
+      'Cross-chain Ethereum Omni Bridge (omft.near) and 1Click solver spread risks apply.',
+    ],
+    exitSummary:
+      'Swapped back to USDC via 1Click solvers at live ETH market price. USD payout reflects ETH price movement plus accrued staking yield.',
+    auditSummary: 'Extensively audited & formally verified (Certora, Runtime Verification, Ackee) · Dual Governance active',
+    contractExplorerUrl: 'https://etherscan.io/address/0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0',
+  },
+  {
+    symbol: 'stNEAR',
+    name: 'Meta Pool Staked NEAR',
+    protocol: 'Meta Pool',
+    chain: 'near',
+    chainName: 'NEAR',
+    underlyingSymbol: 'NEAR',
+    assetId: 'nep141:meta-pool.near',
+    decimals: 24,
+    estimatedApyPct: 4.8,
+    apyType: 'variable',
+    minDepositUsd: 5,
+    priceUsd: 5.71,
+    principalType: 'volatile_crypto',
+    riskTier: 'moderate',
+    riskTierLabel: 'Moderate',
+    requiresRiskAck: true,
+    bridgeType: 'native_near',
+    tvlBand: 'Established NEAR LST',
+    strategySummary:
+      'Native NEAR liquid staking token delegating NEAR across 80+ validators; epoch staking rewards compound automatically into the stNEAR/NEAR rate.',
+    riskHighlights: [
+      'Full NEAR market price volatility: your USD value rises and falls directly with NEAR’s market price.',
+      'NEAR protocol inflation reductions (2.5% cap tapering toward 1.6% under HSP-029) continue to compress baseline staking APY.',
+      'Team security history: Meta Pool’s separate EVM mpETH contract suffered a June 2025 mint exploit (~56 ETH drained; NEAR stNEAR was unaffected).',
+    ],
+    exitSummary:
+      'Native NEAR asset (no cross-chain bridge hop). Instant exit uses 1Click solver liquidity; native unstaking takes 48–72 hours.',
+    auditSummary: 'NEAR contracts audited by BlockSec & Halborn · Native NEAR (no cross-chain bridge)',
+    contractExplorerUrl: 'https://nearblocks.io/token/meta-pool.near',
+  },
+  {
+    symbol: 'cNEAR',
+    name: 'Compounding NEAR Vault',
+    protocol: 'Assetize / Linear',
+    chain: 'near',
+    chainName: 'NEAR',
+    underlyingSymbol: 'NEAR',
+    assetId: 'nep141:cnear.assetize.near',
+    decimals: 24,
+    estimatedApyPct: 4.8,
+    apyType: 'variable',
+    minDepositUsd: 5,
+    priceUsd: 3.75,
+    principalType: 'volatile_crypto',
+    riskTier: 'elevated',
+    riskTierLabel: 'Elevated',
+    requiresRiskAck: true,
+    bridgeType: 'native_near',
+    tvlBand: 'Specialized Pool',
+    strategySummary:
+      'Native NEAR staking wrapper managed via Assetize treasury pools that auto-compounds Proof-of-Stake epoch rewards.',
+    riskHighlights: [
+      'Full NEAR market price volatility plus shrinking baseline NEAR staking yields under HSP-029.',
+      'Thinner secondary liquidity than stNEAR: exit swaps can face wider spreads or fall back to delivering cNEAR shares directly.',
+      'Higher validator & wrapper concentration and less public DAO transparency than larger open LST protocols.',
+    ],
+    exitSummary:
+      'Native NEAR asset (no cross-chain bridge hop), but relies on thinner 1Click solver liquidity for instant conversion back to USDC.',
+    auditSummary: 'Specialized institutional wrapper (Assetize) · Verify on-chain treasury pools on NearBlocks',
+    contractExplorerUrl: 'https://nearblocks.io/token/cnear.assetize.near',
+  },
+  {
+    symbol: 'kV-gtSOLb',
+    name: 'Kamino Gauntlet SOL',
+    protocol: 'Kamino (Gauntlet)',
+    chain: 'sol',
+    chainName: 'Solana',
+    underlyingSymbol: 'SOL',
+    assetId: 'nep141:sol-0xa69aa1bcb03a369e338156a8718ad60271145803.omdep.near',
+    decimals: 9,
+    estimatedApyPct: 4.7,
+    apyType: 'variable',
+    minDepositUsd: 10,
+    priceUsd: 89.52,
+    principalType: 'volatile_crypto',
+    riskTier: 'elevated',
+    riskTierLabel: 'Elevated',
+    requiresRiskAck: true,
+    bridgeType: 'omni_bridge',
+    tvlBand: '~$1.8M TVL',
+    strategySummary:
+      'Kamino Lend V2 vault curated by Gauntlet (Balanced mandate) deploying SOL across whitelisted Solana lending and LST collateral markets.',
+    riskHighlights: [
+      'Stacks full SOL market price volatility on top of lending liquidation and Solana LST depeg risks.',
+      'Smaller vault TVL (~$1.6M–$1.9M, launched late 2025) plus Solana cross-chain wrapper (omdep.near) and solver liquidity risk.',
+      'Solana network congestion during crashes can delay liquidations or widen swap spreads.',
+    ],
+    exitSummary:
+      'Swapped back to USDC via 1Click solvers at live SOL market price; smaller pool depth can widen spreads during volatility.',
+    auditSummary: 'Kamino Lend V2 whitelisted reserves · Curated by Gauntlet (Balanced tier)',
+    contractExplorerUrl: 'https://app.kamino.finance/lending',
   },
 ];
 
@@ -520,7 +647,12 @@ export function computeVaultPositionValuation(params: {
 
   const rawValueCents = sharesFloat > 0 && price > 0 ? Math.round(sharesFloat * price * 100) : params.principalUsdCents;
   const currentValueUsdCents = atomic > 0n ? rawValueCents : params.principalUsdCents;
-  const yieldUsdCents = Math.max(0, currentValueUsdCents - params.principalUsdCents);
+  const netChangeUsdCents = currentValueUsdCents - params.principalUsdCents;
+  const netChangePct =
+    params.principalUsdCents > 0
+      ? Number(((netChangeUsdCents / params.principalUsdCents) * 100).toFixed(2))
+      : 0;
+  const yieldUsdCents = Math.max(0, netChangeUsdCents);
   const yieldPct =
     params.principalUsdCents > 0
       ? Number(((yieldUsdCents / params.principalUsdCents) * 100).toFixed(2))
@@ -534,6 +666,8 @@ export function computeVaultPositionValuation(params: {
     currentValueUsdCents,
     yieldUsdCents,
     yieldPct,
+    netChangeUsdCents,
+    netChangePct,
   };
 }
 

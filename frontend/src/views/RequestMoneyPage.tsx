@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BackBar } from '../components/BackBar';
 import { HandleInput } from '../components/HandleInput';
 import { AssetPicker } from '../components/AssetPicker';
@@ -11,7 +11,7 @@ import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { api, tokenUsdPrice, formatUsd } from '../lib/api';
 import { useSearchParams, useNavigate } from '../lib/router';
 import type { PaymentRequest, Token } from '../types';
-import { ArrowDownLeft, WarningCircle, Clock, ShieldCheck, Fingerprint } from '@phosphor-icons/react';
+import { ArrowDownLeft, WarningCircle, Clock, ShieldCheck, CircleNotch } from '@phosphor-icons/react';
 
 export const RequestMoneyPage: React.FC = () => {
   const navigate = useNavigate();
@@ -26,6 +26,8 @@ export const RequestMoneyPage: React.FC = () => {
   const [memo, setMemo] = useState('');
   const [expiresInDays, setExpiresInDays] = useState(7);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStepMsg, setSubmitStepMsg] = useState<string | null>(null);
+  const submitRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [createdRequest, setCreatedRequest] = useState<PaymentRequest | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -47,6 +49,7 @@ export const RequestMoneyPage: React.FC = () => {
   }, [prefillAsset, tokens, setSelectedToken]);
 
   const handleSelectFromPeople = (handle: string, asset?: string, prefAmount?: string) => {
+    if (isSubmitting || isAuthorizing) return;
     setRecipientHandle(handle.replace(/^@+/, ''));
     if (prefAmount) setAmount(prefAmount);
     if (asset && tokens.length > 0) {
@@ -65,6 +68,7 @@ export const RequestMoneyPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitRef.current) return;
     const cleanHandle = recipientHandle.trim().replace(/^@+/, '').toLowerCase();
     if (!cleanHandle) {
       setError('Please enter a valid 𝕏 handle');
@@ -75,22 +79,25 @@ export const RequestMoneyPage: React.FC = () => {
       return;
     }
 
+    submitRef.current = true;
     try {
       setIsSubmitting(true);
+      setSubmitStepMsg('Waiting for passkey confirmation…');
       setError(null);
 
       // Prompt biometric passkey verification
       let passkeyAssertion: unknown = undefined;
       try {
         passkeyAssertion = await authorizeWithPasskey(
-          `Request ${amount} ${selectedToken.symbol} from @${cleanHandle}`
+          `Request ${amount} ${selectedToken.symbol} from @${cleanHandle}`,
+          (_stage, msg) => setSubmitStepMsg(msg)
         );
       } catch (authErr: any) {
         setError(authErr?.message || 'Passkey authorization cancelled');
-        setIsSubmitting(false);
         return;
       }
 
+      setSubmitStepMsg('Creating payment request…');
       const req = await api.createPaymentRequest({
         requestedHandle: cleanHandle,
         asset: selectedToken.symbol || selectedToken.id,
@@ -105,9 +112,13 @@ export const RequestMoneyPage: React.FC = () => {
     } catch (err: any) {
       setError(err?.message || 'Failed to create payment request');
     } finally {
+      submitRef.current = false;
       setIsSubmitting(false);
+      setSubmitStepMsg(null);
     }
   };
+
+  const isBusy = isSubmitting || isAuthorizing;
 
   return (
     <div className="w-full space-y-6 pb-12 animate-fade-in">
@@ -126,6 +137,7 @@ export const RequestMoneyPage: React.FC = () => {
       {/* People You Pay Picker */}
       <PeopleYouPay
         onSelectRecipient={(h, a, amt) => {
+          if (isBusy) return;
           const q = new URLSearchParams();
           q.set('recipient', h.replace(/^@+/, ''));
           if (a) q.set('asset', a);
@@ -154,7 +166,7 @@ export const RequestMoneyPage: React.FC = () => {
               if (!val) setIsHandleValid(null);
             }}
             onResolved={(_acc, isValid) => setIsHandleValid(isValid)}
-            disabled={isSubmitting}
+            disabled={isBusy}
             placeholder="username"
             label="Request From (𝕏 Handle)"
             mode="request"
@@ -178,7 +190,7 @@ export const RequestMoneyPage: React.FC = () => {
                   }
                 }}
                 placeholder="0.00"
-                disabled={isSubmitting}
+                disabled={isBusy}
                 style={{ outline: 'none', boxShadow: 'none' }}
                 className="w-full min-w-0 border-0 bg-transparent px-3 text-2xl font-mono font-bold text-stone-950 focus:outline-none focus-visible:outline-none focus:ring-0 outline-none"
               />
@@ -187,7 +199,7 @@ export const RequestMoneyPage: React.FC = () => {
                   tokens={tokens}
                   selectedToken={selectedToken}
                   onSelectToken={setSelectedToken}
-                  disabled={isSubmitting}
+                  disabled={isBusy}
                 />
               </div>
             </div>
@@ -209,7 +221,7 @@ export const RequestMoneyPage: React.FC = () => {
               onChange={(e) => setMemo(e.target.value)}
               placeholder="e.g. Lunch reimbursement, freelance design, etc."
               maxLength={280}
-              disabled={isSubmitting}
+              disabled={isBusy}
               style={{ outline: 'none', boxShadow: 'none' }}
               className="w-full p-3 rounded-2xl bg-stone-50 border border-stone-200 text-base sm:text-xs font-sans text-stone-900 placeholder-stone-400 focus:outline-none focus-visible:outline-none transition-colors"
             />
@@ -230,8 +242,9 @@ export const RequestMoneyPage: React.FC = () => {
                 <button
                   key={opt.days}
                   type="button"
+                  disabled={isBusy}
                   onClick={() => setExpiresInDays(opt.days)}
-                  className={`py-2 px-3 rounded-xl text-xs font-mono font-bold transition-all border ${
+                  className={`py-2 px-3 rounded-xl text-xs font-mono font-bold transition-all border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     expiresInDays === opt.days
                       ? 'bg-stone-900 dark:bg-white text-white dark:text-stone-900 border-stone-900 dark:border-white shadow-xs'
                       : 'bg-stone-50 dark:bg-stone-800/60 text-stone-700 dark:text-stone-300 border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800'
@@ -254,19 +267,17 @@ export const RequestMoneyPage: React.FC = () => {
           {/* Submit Button */}
           <button
             type="submit"
-            disabled={isSubmitting || isAuthorizing || !recipientHandle || isHandleValid === false || numericAmount <= 0}
-            className="w-full py-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            disabled={isBusy || !recipientHandle || isHandleValid === false || numericAmount <= 0}
+            className="w-full py-4 px-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            {isAuthorizing ? (
-              <Fingerprint weight="bold" className="w-4 h-4 animate-pulse text-white" />
+            {isBusy ? (
+              <CircleNotch weight="bold" className="w-4 h-4 animate-spin text-white flex-shrink-0" />
             ) : (
-              <ArrowDownLeft weight="bold" className="w-4 h-4" />
+              <ArrowDownLeft weight="bold" className="w-4 h-4 flex-shrink-0" />
             )}
-            <span>
-              {isAuthorizing
-                ? 'Confirming with Passkey...'
-                : isSubmitting
-                ? 'Creating Request...'
+            <span className="truncate">
+              {isBusy
+                ? submitStepMsg || (isAuthorizing ? 'Confirming with Passkey…' : 'Creating Request…')
                 : 'Create Payment Request'}
             </span>
           </button>

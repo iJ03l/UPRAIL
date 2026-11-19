@@ -7213,21 +7213,30 @@ export async function getUserAvailableBalance(
   }
 
   // Plain tokens sitting on the user's own pk sub-account (direct receives)
-  // are spendable too — send/withdraw deposits them into intents first.
+  // are spendable only while the server L1 key is still authorized on-chain.
+  // Once rotated to an offline Recovery Key, exclude them so "Max"/all actions
+  // never attempt an impossible server-signed L1 sweep.
   try {
-    const tokens = await getSupportedTokens(env);
-    let token = resolveTokenForAsset(targetAsset, tokens);
-    if (!token) token = await resolveRheaToken(env, targetAsset);
-    if (token) {
-      const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
-      const plainFt = await getPlainFtBalance(rpcUrl, token.nearContractId, nearAccount);
-      onchainAmount += Number(plainFt) / Math.pow(10, token.decimals || 18);
-      const isNearAsset =
-        (token.defuse_asset_id || '').toLowerCase() === 'nep141:wrap.near' ||
-        token.symbol.toUpperCase() === 'NEAR';
-      if (isNearAsset) {
-        const plainNear = await getPlainNearBalance(rpcUrl, nearAccount);
-        onchainAmount += Number(plainNear) / 1e24;
+    const custody = await getUserCustodyRecord(env, session.x_id).catch(() => null);
+    const canSignL1 =
+      !custody ||
+      custody.custodyMode !== 'self' ||
+      (await canServerSignAccountL1(env, session.x_id, nearAccount));
+    if (canSignL1) {
+      const tokens = await getSupportedTokens(env);
+      let token = resolveTokenForAsset(targetAsset, tokens);
+      if (!token) token = await resolveRheaToken(env, targetAsset);
+      if (token) {
+        const rpcUrl = env.NEAR_RPC_URL || 'https://free.rpc.fastnear.com';
+        const plainFt = await getPlainFtBalance(rpcUrl, token.nearContractId, nearAccount);
+        onchainAmount += Number(plainFt) / Math.pow(10, token.decimals || 18);
+        const isNearAsset =
+          (token.defuse_asset_id || '').toLowerCase() === 'nep141:wrap.near' ||
+          token.symbol.toUpperCase() === 'NEAR';
+        if (isNearAsset) {
+          const plainNear = await getPlainNearBalance(rpcUrl, nearAccount);
+          onchainAmount += Number(plainNear) / 1e24;
+        }
       }
     }
   } catch (err) {

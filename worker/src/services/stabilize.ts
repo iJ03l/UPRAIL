@@ -396,12 +396,20 @@ export async function getTotalSpendableOriginAtomic(
   nearAccount: string;
 }> {
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id).catch(() => null);
+  const canSignL1 =
+    !custody ||
+    custody.custodyMode !== 'self' ||
+    (await nearRpc.canServerSignAccountL1(env, session.x_id, nearAccount));
+
   const [confBal, pubBal, plainBals, pocketInfo] = await Promise.all([
     isConfidentialRailEnabled(env)
       ? getConfidentialAssetBalance(env, session.x_id, origin.assetId).catch(() => null)
       : Promise.resolve(null),
     nearRpc.getIntentAssetBalance(env, origin.assetId, nearAccount).catch(() => null),
-    nearRpc.getPlainBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[]),
+    canSignL1
+      ? nearRpc.getPlainBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[])
+      : Promise.resolve([] as nearRpc.IntentAccountBalance[]),
     getAgentPocketBalances(env, nearAccount).catch(() => ({
       pocketAccount: null,
       balances: [],

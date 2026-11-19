@@ -1952,9 +1952,12 @@ async function requestStabilizeQuoteWithFallback(params: {
       asset: originAssetId,
       requiredAtomic: netInputAtomic,
       nextStep: 'stabilize',
+      allowDirectPublicDeposit: true,
     });
     if (!ensured.ready) return { ready: false, shieldPrepare: ensured.shieldPrepare };
     userAccessToken = ensured.accessToken;
+    swapDepositType = ensured.depositType;
+    swapRefundType = ensured.depositType;
   }
 
   try {
@@ -1981,7 +1984,7 @@ async function requestStabilizeQuoteWithFallback(params: {
   } catch (err: any) {
     // Non-confidential assets like stNEAR swap via INTENTS -> INTENTS first and are
     // immediately shielded into Confidential Intents once USDC settles so no balance stays outside.
-    if (hasPublicFunds && err instanceof OneClickError) {
+    if ((hasPublicFunds || swapDepositType === 'INTENTS') && err instanceof OneClickError) {
       const liveQuote = await requestQuote(env, publicQuoteReq);
       return { ready: true, liveQuote, isConfidentialSwap: false, needsPostSwapShield: true };
     }
@@ -2072,6 +2075,10 @@ export async function prepareSelfCustodyStabilize(
   input: { sourceAsset: string; targetAsset: string; amount: string }
 ) {
   const { nearAccount } = await requireSelfCustodyAccount(env, session);
+
+  if (isConfidentialRailEnabled(env)) {
+    await getOneClickSessionOrThrowAuth(env, session);
+  }
 
   let oneClickTokens: OneClickToken[] = [];
   try {

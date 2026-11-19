@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from '../lib/router';
 import {
   Fingerprint,
@@ -47,6 +47,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [stepMsg, setStepMsg] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
   const [pendingRecoveryBackup, setPendingRecoveryBackup] = useState<{
     recoveryKey: string;
     nearAccount: string;
@@ -256,26 +258,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   // Step 1: Initiate 𝕏 OAuth login
   const handleXLogin = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       setIsXLoading(true);
+      setStepMsg('Connecting to 𝕏…');
       setError(null);
       await loginWithX();
     } catch (err: any) {
       console.error('X login error:', err);
       setError(err?.message || 'Failed to authenticate with 𝕏. Please try again.');
+      inFlightRef.current = false;
       setIsXLoading(false);
+      setStepMsg(null);
     }
   };
 
   // Step 2: Register Device Passkey for 𝕏 handle
   const handleRegisterPasskey = async () => {
-    if (!user?.handle) return;
+    if (!user?.handle || inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       setIsPasskeyLoading(true);
+      setStepMsg('Step 1 of 2: Create passkey on this device…');
       setError(null);
 
       const result = await webauthn.registerPasskey(user.handle);
       if (result.success) {
+        setStepMsg('Step 2 of 2: Activating your non-custodial vault…');
         setRecoveryAuthorized(false);
         setShowRecovery(false);
 
@@ -313,7 +323,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       console.error('Passkey creation error:', err);
       setError(describePasskeyError(err));
     } finally {
+      inFlightRef.current = false;
       setIsPasskeyLoading(false);
+      setStepMsg(null);
     }
   };
 
@@ -324,7 +336,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
   // not respond") instead of offering to create one — so we wipe it and land
   // back on step 1 to start over.
   const handleDisconnect = async () => {
-    if (isDisconnecting) return;
+    if (isDisconnecting || inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       setIsDisconnecting(true);
       setError(null);
@@ -338,13 +351,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
 
   // Primary Passkey Sign In for returning users who already signed up
   const handlePasskeyLogin = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       setIsPasskeyLoading(true);
+      setStepMsg('Waiting for passkey confirmation…');
       setError(null);
 
       const targetHandle = lastHandle || undefined;
       const result = await webauthn.loginWithPasskey(targetHandle);
       if (result.success) {
+        setStepMsg('Passkey verified. Signing you in…');
         setIsSuccess(true);
         setSuccessStepMessage('You\'re signed in. Welcome back.');
 
@@ -369,15 +386,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       );
       setLoginMethod('x');
     } finally {
+      inFlightRef.current = false;
       setIsPasskeyLoading(false);
+      setStepMsg(null);
     }
   };
 
   const handleConfirmPasskey = async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       setIsConfirmLoading(true);
+      setStepMsg('Waiting for passkey confirmation…');
       setError(null);
       await webauthn.confirmSessionPasskey(user?.handle);
+      setStepMsg('Passkey confirmed. Unlocking session…');
       setIsSuccess(true);
       setSuccessStepMessage('Passkey confirmed. Welcome back.');
       await refreshSession();
@@ -385,12 +408,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       console.error('Passkey confirmation error:', err);
       setError(describePasskeyError(err));
     } finally {
+      inFlightRef.current = false;
       setIsConfirmLoading(false);
+      setStepMsg(null);
     }
   };
 
   const handleRecoverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (inFlightRef.current) return;
     const isSelfCustody = user?.custodyMode === 'self';
     if (!recoveryCode.trim()) {
       setError(
@@ -400,14 +426,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
       );
       return;
     }
+    inFlightRef.current = true;
     try {
       setIsRecoveryLoading(true);
       setError(null);
 
       if (isSelfCustody) {
+        setStepMsg('Step 1 of 4: Preparing replacement passkey…');
         const regOpts = await api.getSelfCustodyRecoveryRegisterOptions();
+        setStepMsg('Step 2 of 4: Create passkey on this device…');
         const { startRegistration } = await import('@simplewebauthn/browser');
         const attestation = await startRegistration(regOpts.options);
+        setStepMsg('Step 3 of 4: Signing on-chain recovery with Recovery Key…');
         const prep = await api.prepareSelfCustodyRecovery({
           attestation,
           expectedChallenge: regOpts.challenge,
@@ -418,6 +448,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
           nearAccount: prep.nearAccount || user.nearAccount || regOpts.nearAccount,
           payload: prep.nep413Payload,
         });
+        setStepMsg('Step 4 of 4: Submitting recovery on-chain…');
         await api.submitSelfCustodyRecovery({
           recoveryActionId: prep.recoveryActionId,
           signedNep413,
@@ -430,6 +461,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         return;
       }
 
+      setStepMsg('Verifying recovery code…');
       await api.verifyRecoveryCode(recoveryCode);
       setRecoveryCode('');
       setShowRecovery(false);
@@ -445,22 +477,37 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
             : 'That recovery code is invalid or has already been used.')
       );
     } finally {
+      inFlightRef.current = false;
       setIsRecoveryLoading(false);
+      setStepMsg(null);
     }
   };
 
   const handleUseDifferentAccount = async () => {
-    await api.logout();
-    setRecoveryAuthorized(false);
-    setShowRecovery(false);
-    setRecoveryCode('');
-    setError(null);
-    setIsSuccess(false);
-    await refreshSession();
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setIsDisconnecting(true);
+    try {
+      await api.logout();
+      setRecoveryAuthorized(false);
+      setShowRecovery(false);
+      setRecoveryCode('');
+      setError(null);
+      setIsSuccess(false);
+      await refreshSession();
+    } finally {
+      inFlightRef.current = false;
+      setIsDisconnecting(false);
+    }
   };
 
   const isInteracting =
-    isXLoading || isPasskeyLoading || isConfirmLoading || isRecoveryLoading || isSuccess;
+    isXLoading ||
+    isPasskeyLoading ||
+    isConfirmLoading ||
+    isRecoveryLoading ||
+    isDisconnecting ||
+    isSuccess;
 
 
 
@@ -711,12 +758,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     type="button"
                     onClick={handlePasskeyLogin}
                     disabled={isInteracting}
-                    className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none"
+                    className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isPasskeyLoading ? (
                       <div className="w-full flex items-center justify-center gap-2.5">
-                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        <span className="font-mono text-xs uppercase tracking-wider">Verifying…</span>
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        <span className="font-mono text-xs tracking-wide truncate">
+                          {stepMsg || 'Verifying…'}
+                        </span>
                       </div>
                     ) : (
                       <>
@@ -733,8 +782,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   <div className="text-center">
                     <button
                       type="button"
+                      disabled={isInteracting}
                       onClick={() => setLoginMethod('x')}
-                      className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <span>Use 𝕏 instead</span>
                       <XGlyph className="w-3.5 h-3.5" />
@@ -748,12 +798,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     type="button"
                     onClick={handleXLogin}
                     disabled={isInteracting}
-                    className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none"
+                    className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isXLoading ? (
                       <div className="w-full flex items-center justify-center gap-2.5">
-                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        <span className="font-mono text-xs uppercase tracking-wider">Connecting…</span>
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        <span className="font-mono text-xs tracking-wide truncate">
+                          {stepMsg || 'Connecting…'}
+                        </span>
                       </div>
                     ) : (
                       <>
@@ -770,8 +822,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   <div className="text-center">
                     <button
                       type="button"
+                      disabled={isInteracting}
                       onClick={() => setLoginMethod('passkey')}
-                      className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer"
+                      className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       <Fingerprint weight="bold" className="w-3.5 h-3.5" />
                       <span>{hasSignedUp ? 'Sign in with passkey' : 'Already set up on this device?'}</span>
@@ -809,9 +862,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   type="button"
                   onClick={handleUseDifferentAccount}
                   disabled={isInteracting}
-                  className="text-[11px] font-mono text-subtle hover:text-ink underline underline-offset-4 transition-colors cursor-pointer disabled:opacity-50"
+                  className="text-[11px] font-mono text-subtle hover:text-ink underline underline-offset-4 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Switch
+                  {isDisconnecting ? 'Switching…' : 'Switch'}
                 </button>
               </div>
 
@@ -830,6 +883,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   </div>
                   <input
                     type="text"
+                    disabled={isInteracting}
                     value={recoveryCode}
                     onChange={(e) => {
                       setRecoveryCode(
@@ -844,29 +898,30 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     }
                     autoComplete="one-time-code"
                     spellCheck={false}
-                    className="w-full h-14 rounded-2xl border border-line bg-surface px-4 font-mono text-sm tracking-[0.12em] text-ink placeholder:text-subtle focus:outline-none focus:border-ink transition-colors"
+                    className="w-full h-14 rounded-2xl border border-line bg-surface px-4 font-mono text-sm tracking-[0.12em] text-ink placeholder:text-subtle focus:outline-none focus:border-ink transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   {user?.custodyMode === 'self' && (
                     <label className="flex items-center gap-2 text-xs text-muted px-1 cursor-pointer select-none">
                       <input
                         type="checkbox"
+                        disabled={isInteracting}
                         checked={revokeLostPasskeys}
                         onChange={(e) => setRevokeLostPasskeys(e.target.checked)}
-                        className="rounded border-line"
+                        className="rounded border-line disabled:opacity-50"
                       />
                       <span>Revoke old lost passkey(s) on-chain during recovery</span>
                     </label>
                   )}
                   <button
                     type="submit"
-                    disabled={isRecoveryLoading || !recoveryCode.trim()}
+                    disabled={isInteracting || !recoveryCode.trim()}
                     className="btn-primary w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-center gap-2.5 shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isRecoveryLoading ? (
                       <>
-                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        <span className="font-mono text-xs uppercase tracking-wider">
-                          {user?.custodyMode === 'self' ? 'Recovering…' : 'Checking…'}
+                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        <span className="font-mono text-xs tracking-wide truncate">
+                          {stepMsg || (user?.custodyMode === 'self' ? 'Recovering…' : 'Checking…')}
                         </span>
                       </>
                     ) : (
@@ -880,12 +935,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   <div className="text-center">
                     <button
                       type="button"
+                      disabled={isInteracting}
                       onClick={() => {
                         setShowRecovery(false);
                         setRecoveryCode('');
                         setError(null);
                       }}
-                      className="text-xs font-mono text-muted hover:text-ink underline underline-offset-4 transition-colors cursor-pointer"
+                      className="text-xs font-mono text-muted hover:text-ink underline underline-offset-4 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Back to passkey
                     </button>
@@ -907,12 +963,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                     type="button"
                     onClick={handleConfirmPasskey}
                     disabled={isInteracting}
-                    className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none"
+                    className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isConfirmLoading ? (
                       <div className="w-full flex items-center justify-center gap-2.5">
-                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                        <span className="font-mono text-xs uppercase tracking-wider">Verifying…</span>
+                        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        <span className="font-mono text-xs tracking-wide truncate">
+                          {stepMsg || 'Verifying…'}
+                        </span>
                       </div>
                     ) : (
                       <>
@@ -933,7 +991,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                         setError(null);
                       }}
                       disabled={isInteracting}
-                      className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 py-1 text-xs font-mono text-muted hover:text-ink transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Key weight="fill" className="w-3.5 h-3.5" />
                       <span>
@@ -1002,12 +1060,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                 type="button"
                 onClick={handleRegisterPasskey}
                 disabled={isInteracting}
-                className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none"
+                className="btn-primary group w-full h-14 rounded-2xl px-5 font-display font-bold text-base tracking-tight flex items-center justify-between shadow-md select-none disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {isPasskeyLoading ? (
                   <div className="w-full flex items-center justify-center gap-2.5">
-                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    <span className="font-mono text-xs uppercase tracking-wider">Creating…</span>
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                    <span className="font-mono text-xs tracking-wide truncate">
+                      {stepMsg || 'Creating…'}
+                    </span>
                   </div>
                 ) : (
                   <>
@@ -1026,9 +1086,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
                   type="button"
                   onClick={handleUseDifferentAccount}
                   disabled={isInteracting}
-                  className="text-[11px] font-mono text-subtle hover:text-ink underline underline-offset-4 transition-colors cursor-pointer disabled:opacity-50"
+                  className="text-[11px] font-mono text-subtle hover:text-ink underline underline-offset-4 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Use a different 𝕏 account
+                  {isDisconnecting ? 'Switching account…' : 'Use a different 𝕏 account'}
                 </button>
               </div>
             </div>
@@ -1207,11 +1267,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ initialLegalTab }) => {
         confirmLabel="Disconnect & clear"
         tone="danger"
         isLoading={isDisconnecting}
+        loadingLabel={isDisconnecting ? 'Disconnecting device…' : null}
         onConfirm={() => {
-          setShowDisconnectConfirm(false);
           void handleDisconnect();
         }}
-        onCancel={() => setShowDisconnectConfirm(false)}
+        onCancel={() => {
+          if (!isDisconnecting) setShowDisconnectConfirm(false);
+        }}
       />
 
       {/* Modal for Privacy Policy and Terms & Conditions */}

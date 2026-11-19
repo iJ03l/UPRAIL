@@ -1068,7 +1068,7 @@ export const AppHome: React.FC = () => {
       </div>
 
       {/* ── FLOW TELEMETRY & ACTIVITY PULSE WIDGET (Under everything) ── */}
-      <div className="mt-8">
+      <div className="mt-6 sm:mt-8">
         <FlowPulseWidget history={history} transactions={transactions} tokens={tokens} />
       </div>
 

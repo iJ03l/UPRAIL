@@ -16,6 +16,7 @@ interface PasskeyPromptProps {
   onConfirm: () => void;
   handle: string;
   isClaiming?: boolean;
+  stepMessage?: string | null;
   hasExistingPasskey?: boolean;
   error?: string | null;
   onClearError?: () => void;
@@ -27,6 +28,7 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
   onConfirm,
   handle,
   isClaiming = false,
+  stepMessage = null,
   hasExistingPasskey = false,
   error = null,
   onClearError,
@@ -127,16 +129,16 @@ export const PasskeyPrompt: React.FC<PasskeyPromptProps> = ({
         type="button"
         onClick={onConfirm}
         disabled={isClaiming}
-        className="w-full py-4 px-6 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-60 min-h-11"
+        className="w-full py-4 px-6 rounded-2xl bg-black hover:bg-stone-800 text-white font-display font-extrabold text-xs uppercase tracking-wider flex items-center justify-center space-x-2 shadow-md hover:shadow-lg transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed min-h-11"
       >
         {isClaiming ? (
           <>
-            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            <span>Waiting for your passkey…</span>
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <span className="truncate">{stepMessage || 'Waiting for your passkey…'}</span>
           </>
         ) : (
           <>
-            <Fingerprint weight="bold" className="w-4 h-4" />
+            <Fingerprint weight="bold" className="w-4 h-4 flex-shrink-0" />
             <span>{hasExistingPasskey ? 'Confirm with passkey & receive' : 'Set up passkey & receive'}</span>
           </>
         )}

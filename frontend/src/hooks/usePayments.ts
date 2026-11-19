@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Token, PaymentQuote, PaymentIntent } from '../types';
 import { api, SUPPORTED_TOKENS, normalizeRecipientInput, tokenUsdPrice } from '../lib/api';
-import { triggerNativeL1TwoStepPrompt } from '../lib/selfCustody';
-import { usePasskeyTxAuth } from './usePasskeyTxAuth';
 import { useXAuth } from './useXAuth';
 import { useOnchainData, persistCache, globalCache } from './useOnchainData';
 
@@ -22,17 +20,18 @@ export type TxStage = 'idle' | 'authorizing' | 'sending';
 
 export function usePayments() {
   const { user } = useXAuth();
-  const { authorizeWithPasskey } = usePasskeyTxAuth();
   const { tokens: onchainTokens, balances, balancesError, refreshBalances } = useOnchainData();
 
   const [quote, setQuote] = useState<PaymentQuote | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [txStage, setTxStage] = useState<TxStage>('idle');
+  const [txStepMsg, setTxStepMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [createdPayment, setCreatedPayment] = useState<PaymentIntent | null>(null);
   const [history, setHistory] = useState<PaymentIntent[]>(globalHistoryCache);
   const [isLoadingHistory, setIsLoadingHistory] = useState(globalHistoryCache.length === 0);
+  const inFlightRef = useRef(false);
 
   // Combine onchain tokens with live user balances & filter out raw un-defused native token
   const tokens = useMemo<Token[]>(() => {
@@ -230,28 +229,25 @@ export function usePayments() {
     persistCache({ balances: updatedBalances });
   };
 
-  const shouldUseNativeL1TwoStep = (tokenId: string, token?: Token) => {
-    const tIdLower = tokenId.toLowerCase();
-    if (quote?.token?.id?.toLowerCase() === tIdLower && quote?.rail === 'native') return true;
-    if (token?.category === 'memes') return true;
-    return balances.some(
-      (b) =>
-        Boolean(b.isPlainOnly) &&
-        (b.defuse_asset_id?.toLowerCase() === tIdLower ||
-          (token?.nearContractId && b.nearContractId?.toLowerCase() === token.nearContractId.toLowerCase()))
-    );
-  };
-
-  // Send payment (routes Self-Custody through prepare/submit + 2-step Native L1 when applicable)
+  // Send payment — exclusively uses Self-Custody WebAuthn prepare/submit flow
   const sendPayment = async (
     recipientHandle: string,
     amount: string,
     memo?: string
   ): Promise<PaymentIntent> => {
+    if (inFlightRef.current) {
+      throw new Error('A transaction is already in progress');
+    }
+    inFlightRef.current = true;
     try {
       setIsSubmitting(true);
       setTxStage('authorizing');
+      setTxStepMsg('Preparing self-custody payment…');
       setError(null);
+
+      if (user && user.custodyMode !== 'self') {
+        throw new Error('Please migrate your account to Passkey Self-Custody first.');
+      }
 
       const cleanHandle = normalizeRecipientInput(recipientHandle).recipient;
       if (!cleanHandle) {
@@ -261,67 +257,19 @@ export function usePayments() {
         throw new Error('Please enter a valid amount to send');
       }
 
-      let payment: PaymentIntent;
-
-      if (user?.custodyMode === 'self') {
-        payment = await api.sendPaymentSelfCustody(
-          {
-            recipientHandle: cleanHandle,
-            tokenId: selectedToken.id,
-            amount,
-            memo,
-            token: selectedToken,
-          },
-          (stage) => setTxStage(stage === 'submitting' ? 'sending' : 'authorizing')
-        );
-      } else if (shouldUseNativeL1TwoStep(selectedToken.id, selectedToken)) {
-        const opts = await api.getTxAuthOptions();
-        payment = await triggerNativeL1TwoStepPrompt<PaymentIntent>({
-          prepared: {
-            step: 'native_auth',
-            operation: 'native_send',
-            symbol: selectedToken.symbol,
-            amount,
-            target: `@${cleanHandle}`,
-            nearAccount: user?.nearAccount || undefined,
-            actionId: 'tx_auth_native_send',
-            options: opts,
-            summary: `${selectedToken.symbol} settles on NEAR L1. Step 1 signs with your passkey; Step 2 authorizes your NEAR L1 key to transfer ${amount} ${selectedToken.symbol}.`,
-          },
-          submitAuthorized: async (assertion) => {
-            setTxStage('sending');
-            return await api.createPayment({
-              recipientHandle: cleanHandle,
-              tokenId: selectedToken.id,
-              amount,
-              memo,
-              passkeyAssertion: assertion,
-              token: selectedToken,
-            });
-          },
-        });
-      } else {
-        // Step 1: Prompt hardware passkey to authorize fund movement
-        let assertion: unknown = undefined;
-        try {
-          assertion = await authorizeWithPasskey(`Send ${amount} ${selectedToken.symbol} to @${cleanHandle}`);
-        } catch (authErr: any) {
-          const msg = authErr?.message || 'Passkey authorization cancelled';
-          setError(msg);
-          throw new Error(msg);
-        }
-
-        // Step 2: Passkey authorized. Now send payment intent to network
-        setTxStage('sending');
-        payment = await api.createPayment({
+      const payment = await api.sendPaymentSelfCustody(
+        {
           recipientHandle: cleanHandle,
           tokenId: selectedToken.id,
           amount,
           memo,
-          passkeyAssertion: assertion,
           token: selectedToken,
-        });
-      }
+        },
+        (stage, message) => {
+          setTxStage(stage === 'submitting' ? 'sending' : 'authorizing');
+          if (message) setTxStepMsg(message);
+        }
+      );
 
       setCreatedPayment(payment);
       deductBalanceOptimistically(selectedToken.id, selectedToken.symbol, payment.grossAmount || amount);
@@ -335,13 +283,15 @@ export function usePayments() {
       setError(msg);
       throw err;
     } finally {
+      inFlightRef.current = false;
       setIsSubmitting(false);
       setTxStage('idle');
+      setTxStepMsg(null);
     }
   };
 
   /**
-   * "Send to Wallet": settles from the caller's balance to an external chain address.
+   * "Send to Wallet": settles from the caller's self-custody balance to an external chain address.
    */
   const sendToWallet = async (
     destinationAddress: string,
@@ -349,10 +299,19 @@ export function usePayments() {
     asset?: string,
     destinationChain?: string
   ): Promise<{ txHash: string; withdrawalId?: string; destinationAddress: string; shareLink?: string }> => {
+    if (inFlightRef.current) {
+      throw new Error('A transaction is already in progress');
+    }
+    inFlightRef.current = true;
     try {
       setIsSubmitting(true);
       setTxStage('authorizing');
+      setTxStepMsg('Preparing self-custody withdrawal…');
       setError(null);
+
+      if (user && user.custodyMode !== 'self') {
+        throw new Error('Please migrate your account to Passkey Self-Custody first.');
+      }
 
       const destination = (destinationAddress || '').trim();
       if (destination.length < 5) {
@@ -365,69 +324,18 @@ export function usePayments() {
       const tokenId = asset || selectedToken.id;
       const targetToken = tokens.find((t) => t.id.toLowerCase() === tokenId.toLowerCase()) || selectedToken;
 
-      let result: {
-        txHash: string;
-        withdrawalId?: string;
-        destinationAddress: string;
-        shareLink?: string;
-      };
-
-      if (user?.custodyMode === 'self') {
-        result = await api.withdrawSelfCustody(
-          {
-            destinationAddress: destination,
-            asset: tokenId,
-            amount,
-            destinationChain,
-          },
-          (stage) => setTxStage(stage === 'submitting' ? 'sending' : 'authorizing')
-        );
-      } else if (shouldUseNativeL1TwoStep(tokenId, targetToken)) {
-        const opts = await api.getTxAuthOptions();
-        result = await triggerNativeL1TwoStepPrompt({
-          prepared: {
-            step: 'native_auth',
-            operation: 'native_withdraw',
-            symbol: targetToken.symbol,
-            amount,
-            target: destination,
-            nearAccount: user?.nearAccount || undefined,
-            actionId: 'tx_auth_native_withdraw',
-            options: opts,
-            summary: `${targetToken.symbol} withdraws over NEAR L1. Step 1 signs with your passkey; Step 2 authorizes your NEAR L1 key to transfer ${amount} ${targetToken.symbol} to ${destination}.`,
-          },
-          submitAuthorized: async (assertion) => {
-            setTxStage('sending');
-            return await api.withdraw({
-              destinationAddress: destination,
-              asset: tokenId,
-              amount,
-              destinationChain,
-              passkeyAssertion: assertion,
-            });
-          },
-        });
-      } else {
-        let assertion: unknown = undefined;
-        try {
-          assertion = await authorizeWithPasskey(
-            `Send ${amount} ${targetToken.symbol} to ${destination}`
-          );
-        } catch (authErr: any) {
-          const msg = authErr?.message || 'Passkey authorization cancelled';
-          setError(msg);
-          throw new Error(msg);
-        }
-
-        setTxStage('sending');
-        result = await api.withdraw({
+      const result = await api.withdrawSelfCustody(
+        {
           destinationAddress: destination,
           asset: tokenId,
           amount,
           destinationChain,
-          passkeyAssertion: assertion,
-        });
-      }
+        },
+        (stage, message) => {
+          setTxStage(stage === 'submitting' ? 'sending' : 'authorizing');
+          if (message) setTxStepMsg(message);
+        }
+      );
 
       deductBalanceOptimistically(tokenId, targetToken.symbol, amount);
       loadHistory();
@@ -444,18 +352,30 @@ export function usePayments() {
       setError(msg);
       throw err;
     } finally {
+      inFlightRef.current = false;
       setIsSubmitting(false);
       setTxStage('idle');
+      setTxStepMsg(null);
     }
   };
 
-  const cancelPayment = async (paymentId: string) => {
+  const cancelPayment = async (
+    paymentId: string,
+    onProgress?: (stage: string, message?: string) => void
+  ) => {
+    if (inFlightRef.current) {
+      throw new Error('A transaction is already in progress');
+    }
+    inFlightRef.current = true;
     try {
       setError(null);
-      const res =
-        user?.custodyMode === 'self'
-          ? await api.cancelPaymentSelfCustody(paymentId)
-          : await api.cancelPaymentServer(paymentId);
+      if (user && user.custodyMode !== 'self') {
+        throw new Error('Please migrate your account to Passkey Self-Custody first.');
+      }
+      onProgress?.('preparing', 'Preparing escrow refund…');
+      const res = await api.cancelPaymentSelfCustody(paymentId, (stage, message) => {
+        onProgress?.(stage, message);
+      });
       await loadHistory();
       void refreshBalances();
       return res;
@@ -463,6 +383,8 @@ export function usePayments() {
       const msg = err instanceof Error ? err.message : 'Failed to cancel payment';
       setError(msg);
       throw err;
+    } finally {
+      inFlightRef.current = false;
     }
   };
 
@@ -505,6 +427,7 @@ export function usePayments() {
     isQuoting,
     isSubmitting,
     txStage,
+    txStepMsg,
     error,
     createdPayment,
     history,

@@ -232,6 +232,9 @@ export const AgentsPage: React.FC = () => {
   const [pocketAmount, setPocketAmount] = useState('10');
   const [pocketBusy, setPocketBusy] = useState<null | 'fund' | 'reclaim'>(null);
   const [pocketStatusMsg, setPocketStatusMsg] = useState<string | null>(null);
+  const [dialogStepMsg, setDialogStepMsg] = useState<string | null>(null);
+  const actionRef = useRef(false);
+  const anyActionBusy = Boolean(pocketBusy) || Boolean(busyId) || isAuthorizing;
 
   const selectPlatform = (p: ChatPlatform) => {
     setSelectedPlatform(p.id);
@@ -275,11 +278,13 @@ export const AgentsPage: React.FC = () => {
 
   const handleFundPocket = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (actionRef.current || anyActionBusy) return;
     const amt = pocketAmount.trim();
     if (!amt || Number(amt) <= 0) {
       setError('Enter a positive amount to load into your Agent Allowance.');
       return;
     }
+    actionRef.current = true;
     setPocketBusy('fund');
     setPocketStatusMsg('Preparing passkey signature…');
     setError(null);
@@ -293,17 +298,24 @@ export const AgentsPage: React.FC = () => {
     } catch (err: any) {
       setError(err.message || 'Failed to load Agent Allowance');
     } finally {
+      actionRef.current = false;
       setPocketBusy(null);
       setPocketStatusMsg(null);
     }
   };
 
   const handleReclaimPocket = async () => {
+    if (actionRef.current || anyActionBusy) return;
+    actionRef.current = true;
     setPocketBusy('reclaim');
     setPocketStatusMsg('Confirm with passkey to return funds…');
     setError(null);
     try {
-      const assertion = await authorizeWithPasskey('Return Agent Allowance funds to main vault');
+      const assertion = await authorizeWithPasskey(
+        'Return Agent Allowance funds to main vault',
+        (_stage, msg) => setPocketStatusMsg(msg)
+      );
+      setPocketStatusMsg('Returning funds to your main UPRAIL vault…');
       const res = await api.reclaimAgentPocket(assertion);
       if (res.reclaimed) {
         toast('Returned Agent Allowance funds to your main UPRAIL vault');
@@ -314,54 +326,73 @@ export const AgentsPage: React.FC = () => {
     } catch (err: any) {
       setError(err.message || 'Failed to return Agent Allowance');
     } finally {
+      actionRef.current = false;
       setPocketBusy(null);
       setPocketStatusMsg(null);
     }
   };
 
   const handleRevoke = (k: AgentKey) => {
+    if (anyActionBusy) return;
     setRevokeTarget(k);
   };
 
   const performRevoke = async () => {
-    if (!revokeTarget) return;
+    if (!revokeTarget || actionRef.current) return;
     const k = revokeTarget;
-    setRevokeTarget(null);
+    actionRef.current = true;
     setBusyId(k.id);
+    setDialogStepMsg('Waiting for passkey confirmation…');
     setError(null);
     try {
       const action = k.authMethod === 'oauth' ? 'Disconnect' : 'Revoke';
-      const assertion = await authorizeWithPasskey(`${action} “${k.name}”`);
+      const assertion = await authorizeWithPasskey(`${action} “${k.name}”`, (_stage, msg) =>
+        setDialogStepMsg(msg)
+      );
+      setDialogStepMsg(k.authMethod === 'oauth' ? 'Disconnecting AI app…' : 'Revoking key…');
       const res = await api.revokeAgentKey(k.id, assertion);
+      setRevokeTarget(null);
       const baseMsg = k.authMethod === 'oauth' ? `“${k.name}” disconnected` : `“${k.name}” revoked`;
       toast(res?.pocketReclaimed ? `${baseMsg} — Agent Allowance returned to main vault` : baseMsg);
       await refresh();
     } catch (err: any) {
+      setRevokeTarget(null);
       setError(err.message || 'Failed to revoke key');
     } finally {
+      actionRef.current = false;
       setBusyId(null);
+      setDialogStepMsg(null);
     }
   };
 
   const handleDelete = (k: AgentKey) => {
+    if (anyActionBusy) return;
     setDeleteTarget(k);
   };
 
   const performDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || actionRef.current) return;
     const k = deleteTarget;
-    setDeleteTarget(null);
+    actionRef.current = true;
     setBusyId(k.id);
+    setDialogStepMsg('Waiting for passkey confirmation…');
     setError(null);
     try {
-      const assertion = await authorizeWithPasskey(`Delete connection “${k.name}”`);
+      const assertion = await authorizeWithPasskey(`Delete connection “${k.name}”`, (_stage, msg) =>
+        setDialogStepMsg(msg)
+      );
+      setDialogStepMsg('Deleting connection…');
       await api.deleteAgentKey(k.id, assertion);
+      setDeleteTarget(null);
       toast(`“${k.name}” deleted`);
       await refresh();
     } catch (err: any) {
+      setDeleteTarget(null);
       setError(err.message || 'Failed to delete key');
     } finally {
+      actionRef.current = false;
       setBusyId(null);
+      setDialogStepMsg(null);
     }
   };
 
@@ -452,7 +483,11 @@ export const AgentsPage: React.FC = () => {
           )}
 
           {pocketStatusMsg && (
-            <div className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-700">
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center space-x-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200 text-xs font-mono text-stone-700"
+            >
               <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin text-stone-600 flex-shrink-0" />
               <span>{pocketStatusMsg}</span>
             </div>
@@ -463,8 +498,8 @@ export const AgentsPage: React.FC = () => {
               <select
                 value={pocketAsset}
                 onChange={(e) => setPocketAsset(e.target.value as 'USDC' | 'USDT' | 'NEAR')}
-                disabled={Boolean(pocketBusy)}
-                className="px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono font-bold text-stone-900 focus:outline-none focus:border-stone-900"
+                disabled={anyActionBusy}
+                className="px-3 py-2 rounded-xl border border-stone-200 bg-white text-xs font-mono font-bold text-stone-900 focus:outline-none focus:border-stone-900 disabled:opacity-50"
               >
                 <option value="USDC">USDC</option>
                 <option value="USDT">USDT</option>
@@ -477,21 +512,21 @@ export const AgentsPage: React.FC = () => {
                 required
                 value={pocketAmount}
                 onChange={(e) => setPocketAmount(e.target.value)}
-                disabled={Boolean(pocketBusy)}
+                disabled={anyActionBusy}
                 placeholder="10"
-                className="w-24 px-3 py-2 rounded-xl border border-stone-200 text-xs font-mono font-bold text-stone-900 focus:outline-none focus:border-stone-900"
+                className="w-24 px-3 py-2 rounded-xl border border-stone-200 text-xs font-mono font-bold text-stone-900 focus:outline-none focus:border-stone-900 disabled:opacity-50"
               />
               <button
                 type="submit"
-                disabled={Boolean(pocketBusy) || isAuthorizing}
-                className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+                disabled={anyActionBusy}
+                className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-black hover:bg-stone-800 text-white text-xs font-display font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {pocketBusy === 'fund' ? (
                   <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <Plus weight="bold" className="w-3.5 h-3.5" />
                 )}
-                <span>Load Allowance</span>
+                <span>{pocketBusy === 'fund' ? 'Loading…' : 'Load Allowance'}</span>
               </button>
             </form>
 
@@ -499,15 +534,15 @@ export const AgentsPage: React.FC = () => {
               <button
                 type="button"
                 onClick={handleReclaimPocket}
-                disabled={Boolean(pocketBusy) || isAuthorizing}
-                className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 self-start sm:self-auto"
+                disabled={anyActionBusy}
+                className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-white border border-stone-200 hover:border-stone-400 text-stone-800 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed self-start sm:self-auto"
               >
                 {pocketBusy === 'reclaim' ? (
                   <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                 ) : (
                   <ArrowsClockwise weight="bold" className="w-3.5 h-3.5" />
                 )}
-                <span>Return to Main Vault</span>
+                <span>{pocketBusy === 'reclaim' ? 'Returning…' : 'Return to Main Vault'}</span>
               </button>
             )}
           </div>
@@ -811,28 +846,36 @@ export const AgentsPage: React.FC = () => {
                     {!dead ? (
                       <button
                         onClick={() => handleRevoke(k)}
-                        disabled={busyId === k.id || isAuthorizing}
-                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-stone-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50/50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
+                        disabled={anyActionBusy}
+                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-stone-200 text-stone-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50/50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
                       >
                         {busyId === k.id ? (
                           <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                         ) : (
                           <Prohibit weight="fill" className="w-3.5 h-3.5" />
                         )}
-                        <span>{isOAuth ? 'Disconnect' : 'Revoke'}</span>
+                        <span>
+                          {busyId === k.id
+                            ? isOAuth
+                              ? 'Disconnecting…'
+                              : 'Revoking…'
+                            : isOAuth
+                            ? 'Disconnect'
+                            : 'Revoke'}
+                        </span>
                       </button>
                     ) : (
                       <button
                         onClick={() => handleDelete(k)}
-                        disabled={busyId === k.id || isAuthorizing}
-                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
+                        disabled={anyActionBusy}
+                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
                       >
                         {busyId === k.id ? (
                           <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />
                         ) : (
                           <Trash weight="fill" className="w-3.5 h-3.5" />
                         )}
-                        <span>Delete</span>
+                        <span>{busyId === k.id ? 'Deleting…' : 'Delete'}</span>
                       </button>
                     )}
                   </div>
@@ -914,8 +957,12 @@ export const AgentsPage: React.FC = () => {
 
       <ConfirmDialog
         isOpen={Boolean(deleteTarget)}
-        onCancel={() => setDeleteTarget(null)}
+        onCancel={() => {
+          if (!busyId && !isAuthorizing) setDeleteTarget(null);
+        }}
         onConfirm={() => void performDelete()}
+        isLoading={Boolean(busyId) || isAuthorizing}
+        loadingLabel={dialogStepMsg}
         tone="danger"
         title="Delete connection"
         description={
@@ -939,8 +986,12 @@ export const AgentsPage: React.FC = () => {
 
       <ConfirmDialog
         isOpen={Boolean(revokeTarget)}
-        onCancel={() => setRevokeTarget(null)}
+        onCancel={() => {
+          if (!busyId && !isAuthorizing) setRevokeTarget(null);
+        }}
         onConfirm={() => void performRevoke()}
+        isLoading={Boolean(busyId) || isAuthorizing}
+        loadingLabel={dialogStepMsg}
         tone="danger"
         title={revokeTarget?.authMethod === 'oauth' ? 'Disconnect AI app' : 'Revoke AI chat key'}
         description={

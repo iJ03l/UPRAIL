@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   MagnifyingGlass,
   ArrowsClockwise,
@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   XCircle,
   CircleNotch,
+  Gift,
 } from '@phosphor-icons/react';
 import { Link } from '../lib/router';
 import { getTransactionBalanceEffect, formatBalanceAmount, BalanceEffect } from '../lib/transactions';
@@ -26,7 +27,7 @@ import { ShareModal } from '../components/ShareModal';
 import { BackBar } from '../components/BackBar';
 import { SkeletonList } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
-import { CoffeeSettingsResponse, PaymentIntent, PaymentRequest } from '../types';
+import { AuthenticatedGiftView, CoffeeSettingsResponse, PaymentIntent, PaymentRequest } from '../types';
 import { activityStatusMeta, cancellationReason } from '../lib/statusLabels';
 
 export const HistoryPage: React.FC = () => {
@@ -46,7 +47,10 @@ export const HistoryPage: React.FC = () => {
   const [selectedSharePayment, setSelectedSharePayment] = useState<PaymentIntent | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelStepMsg, setCancelStepMsg] = useState<string | null>(null);
+  const cancellingRef = useRef(false);
   const [requests, setRequests] = useState<PaymentRequest[]>([]);
+  const [gifts, setGifts] = useState<AuthenticatedGiftView[]>([]);
 
   const loadRequests = async () => {
     try {
@@ -74,11 +78,27 @@ export const HistoryPage: React.FC = () => {
     } catch {}
   };
 
+  const loadGifts = async () => {
+    try {
+      const { sent, received } = await api.listGifts();
+      const combined = [...(received || []), ...(sent || [])];
+      const seen = new Set<string>();
+      setGifts(
+        combined.filter((g) => {
+          if (seen.has(g.id)) return false;
+          seen.add(g.id);
+          return true;
+        })
+      );
+    } catch {}
+  };
+
   useEffect(() => {
     loadHistory();
     loadOnchainHistory();
     loadRequests();
     loadCoffee();
+    loadGifts();
   }, [loadHistory, loadOnchainHistory]);
 
   const handleRefresh = () => {
@@ -86,6 +106,7 @@ export const HistoryPage: React.FC = () => {
     loadOnchainHistory();
     loadRequests();
     loadCoffee();
+    loadGifts();
   };
 
   const handleCopy = (value: string, id: string) => {
@@ -98,7 +119,7 @@ export const HistoryPage: React.FC = () => {
   const unifiedHistory = useMemo(() => {
     type UnifiedHistoryItem = {
       id: string;
-      type: 'payment' | 'deposit' | 'withdrawal' | 'request';
+      type: 'payment' | 'deposit' | 'withdrawal' | 'request' | 'gift';
       isSent: boolean;
       title: string;
       subtitle: string;
@@ -113,6 +134,8 @@ export const HistoryPage: React.FC = () => {
       timestamp: number;
       balanceEffect: BalanceEffect;
       payment?: PaymentIntent;
+      giftId?: string;
+      verifyUrl?: string;
       copyValue?: string;
       explorerUrl?: string;
     };
@@ -283,13 +306,69 @@ export const HistoryPage: React.FC = () => {
       });
     }
 
-    const deduped = coffeeTxHashes.size
-      ? list.filter((item) => coffeeIds.has(item.id) || !coffeeTxHashes.has(item.id))
-      : list;
+    // 5. Claimed / Reclaimed Timelocked Gifts (compact ledger rows, not cards)
+    const giftClaimTxHashes = new Set<string>();
+    const giftRowIds = new Set<string>();
+    for (const g of gifts) {
+      if (g.status !== 'CLAIMED' && g.status !== 'RECLAIMED') continue;
+      const myHandle = (user?.handle || '').toLowerCase();
+      const isReceived =
+        g.role === 'RECIPIENT' ||
+        (Boolean(myHandle) && g.recipientHandle.toLowerCase() === myHandle);
+      const isSent = !isReceived;
+      const statusLower = g.status.toLowerCase();
+      const ts = g.claimedAt || g.timelockUntil || g.createdAt;
+      const rowId = `gift_${g.id}`;
+      giftRowIds.add(rowId);
+      if (g.claimTxHash) giftClaimTxHashes.add(g.claimTxHash);
+      const yieldSuffix =
+        g.yieldUsdCents > 0 ? ` • +${formatUsd(g.yieldUsdCents / 100)} yield` : '';
+      list.push({
+        id: rowId,
+        type: 'gift',
+        isSent,
+        title:
+          g.status === 'RECLAIMED'
+            ? `Reclaimed gift to @${g.recipientHandle}`
+            : isSent
+            ? `Gift to @${g.recipientHandle}`
+            : `Gift from @${g.senderHandle}`,
+        subtitle: `${g.occasionLabel} • ${g.vaultSymbol} Timelocked Vault${yieldSuffix}`,
+        senderHandle: g.senderHandle,
+        recipientHandle: g.recipientHandle,
+        amount: g.sharesFormatted || '0',
+        amountUsd: g.currentValueUsdCents > 0 ? g.currentValueUsdCents / 100 : null,
+        symbol: g.vaultSymbol,
+        status: statusLower,
+        date: ts ? new Date(ts).toLocaleDateString() : '',
+        timestamp: ts || 0,
+        balanceEffect: getTransactionBalanceEffect({
+          type: 'gift',
+          isSent,
+          status: statusLower,
+        }),
+        giftId: g.id,
+        copyValue: g.claimTxHash || g.shareUrl || undefined,
+        verifyUrl:
+          g.contractMode === 'contract'
+            ? `/verify?kind=gift&id=${encodeURIComponent(g.onchainGiftId || g.id)}`
+            : undefined,
+      });
+    }
+
+    const deduped = list.filter((item) => {
+      if (coffeeTxHashes.size && !coffeeIds.has(item.id) && coffeeTxHashes.has(item.id)) {
+        return false;
+      }
+      if (giftClaimTxHashes.size && !giftRowIds.has(item.id) && giftClaimTxHashes.has(item.id)) {
+        return false;
+      }
+      return true;
+    });
 
     deduped.sort((a, b) => b.timestamp - a.timestamp);
     return deduped;
-  }, [history, requests, transactions, user?.handle, tokens, balances, coffeeDonations]);
+  }, [history, requests, transactions, user?.handle, tokens, balances, coffeeDonations, gifts]);
 
   const filteredHistory = useMemo(() => {
     return unifiedHistory.filter((item) => {
@@ -308,6 +387,8 @@ export const HistoryPage: React.FC = () => {
         matchesFilter = true;
       } else if (statusFilter === 'requests') {
         matchesFilter = item.type === 'request' || item.subtitle?.includes('Payment Request') || item.title?.includes('Request');
+      } else if (statusFilter === 'gifts') {
+        matchesFilter = item.type === 'gift';
       } else if (statusFilter === 'deposits') {
         matchesFilter = item.type === 'deposit';
       } else if (statusFilter === 'withdrawals') {
@@ -331,14 +412,26 @@ export const HistoryPage: React.FC = () => {
       <div className="flex items-center justify-end">
         <button
           onClick={handleRefresh}
-          disabled={isLoading}
-          className="p-2.5 rounded-xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer text-xs flex items-center space-x-1"
+          disabled={isLoading || Boolean(cancellingId)}
+          className="p-2.5 rounded-xl border border-stone-200 hover:border-black text-stone-600 hover:text-black bg-stone-50 transition-colors cursor-pointer text-xs flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed"
           title="Refresh"
         >
           <ArrowsClockwise weight="bold" className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline font-mono">Refresh</span>
         </button>
       </div>
+
+      {/* Live Refund Progress Banner */}
+      {cancellingId && cancelStepMsg && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-mono flex items-center gap-2.5"
+        >
+          <CircleNotch weight="bold" className="w-4 h-4 animate-spin flex-shrink-0" />
+          <span>{cancelStepMsg}</span>
+        </div>
+      )}
 
       {/* Search & Status Filters */}
       <div className="space-y-3">
@@ -358,6 +451,7 @@ export const HistoryPage: React.FC = () => {
         <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory scroll-px-1 pb-1.5 text-xs font-mono">
           {[
             { id: 'all', label: 'All' },
+            { id: 'gifts', label: 'Gifts' },
             { id: 'requests', label: 'Requests' },
             { id: 'deposits', label: 'Deposits' },
             { id: 'withdrawals', label: 'Withdrawals' },
@@ -395,6 +489,7 @@ export const HistoryPage: React.FC = () => {
         ) : (
           <div className="divide-y divide-stone-100">
             {filteredHistory.map((tx) => {
+              const isCancellingThis = cancellingId === tx.id;
               return (
                 <div
                   key={tx.id}
@@ -411,7 +506,16 @@ export const HistoryPage: React.FC = () => {
                           : 'bg-stone-100 text-stone-700 border border-stone-200 dark:bg-stone-800 dark:border-stone-700'
                       }`}
                     >
-                      {tx.balanceEffect === 'debit' ? (
+                      {tx.type === 'gift' ? (
+                        <Gift
+                          weight="fill"
+                          className={`w-4 h-4 ${
+                            tx.balanceEffect === 'debit'
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-emerald-600 dark:text-emerald-400'
+                          }`}
+                        />
+                      ) : tx.balanceEffect === 'debit' ? (
                         <ArrowUpRight weight="bold" className="w-4 h-4 text-red-600 dark:text-red-400" />
                       ) : tx.balanceEffect === 'incoming' ? (
                         <ArrowDownLeft weight="bold" className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -511,27 +615,34 @@ export const HistoryPage: React.FC = () => {
                         ['ready', 'escrowed', 'ESCROWED'].includes(tx.status) && (
                           <button
                             type="button"
-                            disabled={cancellingId === tx.id}
+                            disabled={Boolean(cancellingId)}
                             onClick={async () => {
+                              if (cancellingRef.current) return;
+                              cancellingRef.current = true;
                               setCancellingId(tx.id);
+                              setCancelStepMsg('Preparing escrow refund…');
                               try {
-                                await cancelPayment(tx.id);
+                                await cancelPayment(tx.id, (_stage, msg) => {
+                                  if (msg) setCancelStepMsg(msg);
+                                });
                                 toast('Payment cancelled & refunded to your balance');
                               } catch (err: any) {
                                 toast(err?.message || 'Failed to cancel & refund payment', 'error');
                               } finally {
+                                cancellingRef.current = false;
                                 setCancellingId(null);
+                                setCancelStepMsg(null);
                               }
                             }}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-amber-700 hover:text-amber-900 hover:bg-amber-50 border border-amber-200/80 transition-colors cursor-pointer disabled:opacity-50"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-amber-700 hover:text-amber-900 hover:bg-amber-50 border border-amber-200/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Cancel unclaimed send & refund"
                           >
-                            {cancellingId === tx.id ? (
+                            {isCancellingThis ? (
                               <CircleNotch weight="bold" className="w-3 h-3 animate-spin" />
                             ) : (
                               <XCircle weight="fill" className="w-3 h-3" />
                             )}
-                            <span>Cancel & Refund</span>
+                            <span>{isCancellingThis ? 'Refunding…' : 'Cancel & Refund'}</span>
                           </button>
                         )}
 
@@ -547,6 +658,26 @@ export const HistoryPage: React.FC = () => {
                             <ShieldCheck weight="fill" className="w-3.5 h-3.5" />
                           </Link>
                         )}
+
+                      {tx.verifyUrl && (
+                        <Link
+                          to={tx.verifyUrl}
+                          className="p-1.5 rounded-lg text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 transition-colors"
+                          title="Verify on-chain gift vault"
+                        >
+                          <ShieldCheck weight="fill" className="w-3.5 h-3.5" />
+                        </Link>
+                      )}
+
+                      {tx.giftId && (
+                        <Link
+                          to={`/gift/${tx.giftId}`}
+                          className="p-1.5 rounded-lg text-stone-400 hover:text-black hover:bg-stone-100 transition-colors"
+                          title="View gift details"
+                        >
+                          <ArrowSquareOut weight="fill" className="w-3.5 h-3.5" />
+                        </Link>
+                      )}
 
                       {tx.explorerUrl && (
                         <a

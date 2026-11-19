@@ -7,6 +7,7 @@ import { useXAuth } from '../hooks/useXAuth';
 import { SettingsSidebar } from './SettingsSidebar';
 import { QuantusInteractiveCanvas } from './QuantusInteractiveCanvas';
 import { InviteGateModal } from './InviteGateModal';
+import { SelfCustodyUpgradeModal } from './SelfCustodyUpgradeModal';
 import { GlitchLogo } from './GlitchLogo';
 import { SituationReportBanner } from './SituationReportBanner';
 
@@ -162,6 +163,16 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           isOpen={true}
           onActivated={refreshSession}
           userHandle={user.handle}
+        />
+      )}
+
+      {/* Mandatory Self-Custody migration gate for legacy server-custody accounts */}
+      {user && user.isActivated !== false && user.custodyMode !== 'self' && (
+        <SelfCustodyUpgradeModal
+          isOpen={true}
+          required={true}
+          onClose={() => {}}
+          onUpgraded={refreshSession}
         />
       )}
     </div>

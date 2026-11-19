@@ -173,6 +173,8 @@ export interface PublicGiftCardView {
   vaultName: string;
   vaultProtocol: string;
   vaultChainName: string;
+  vaultPrincipalType?: 'usd_stable' | 'volatile_crypto';
+  vaultRiskTier?: 'core' | 'moderate' | 'elevated';
   estimatedApyPct: number;
   timelockUntil: number;
   isUnlocked: boolean;
@@ -181,6 +183,8 @@ export interface PublicGiftCardView {
   principalUsdCents?: number;
   currentValueUsdCents?: number;
   yieldUsdCents?: number;
+  netChangeUsdCents?: number;
+  netChangePct?: number;
   sharesFormatted?: string;
   shareUrl: string;
   ogImageUrl: string;
@@ -198,6 +202,8 @@ export interface AuthenticatedGiftView extends PublicGiftCardView {
   currentValueUsdCents: number;
   yieldUsdCents: number;
   yieldPct: number;
+  netChangeUsdCents?: number;
+  netChangePct?: number;
   sharesAtomic: string;
   sharesFormatted: string;
   custodyAccount: string;
@@ -1129,7 +1135,9 @@ export async function getPublicGiftCardView(
     vaultName: vault?.name || row.vault_symbol,
     vaultProtocol: vault?.protocol || 'NEAR Intents Earn',
     vaultChainName: vault?.chainName || 'Multichain',
-    estimatedApyPct: vault?.estimatedApyPct ?? 6.5,
+    vaultPrincipalType: vault?.principalType,
+    vaultRiskTier: vault?.riskTier,
+    estimatedApyPct: vault?.estimatedApyPct ?? 4.5,
     timelockUntil,
     isUnlocked,
     status: row.status,
@@ -1151,6 +1159,8 @@ export async function getPublicGiftCardView(
     baseView.principalUsdCents = valuation.principalUsdCents;
     baseView.currentValueUsdCents = valuation.currentValueUsdCents;
     baseView.yieldUsdCents = valuation.yieldUsdCents;
+    baseView.netChangeUsdCents = valuation.netChangeUsdCents;
+    baseView.netChangePct = valuation.netChangePct;
     baseView.sharesFormatted = valuation.sharesFormatted;
   }
 
@@ -1196,13 +1206,17 @@ async function formatAuthenticatedGiftView(
     vaultName: vault?.name || row.vault_symbol,
     vaultProtocol: vault?.protocol || 'NEAR Intents Earn',
     vaultChainName: vault?.chainName || 'Multichain',
-    estimatedApyPct: vault?.estimatedApyPct ?? 6.5,
+    vaultPrincipalType: vault?.principalType,
+    vaultRiskTier: vault?.riskTier,
+    estimatedApyPct: vault?.estimatedApyPct ?? 4.5,
     sourceSymbol: row.source_symbol,
     grossAmount: formatAtomic(String(row.gross_atomic || '0'), Number(row.source_decimals || 6)),
     principalUsdCents: valuation.principalUsdCents,
     currentValueUsdCents: valuation.currentValueUsdCents,
     yieldUsdCents: valuation.yieldUsdCents,
     yieldPct: valuation.yieldPct,
+    netChangeUsdCents: valuation.netChangeUsdCents,
+    netChangePct: valuation.netChangePct,
     sharesAtomic: valuation.sharesAtomic,
     sharesFormatted: valuation.sharesFormatted,
     custodyAccount: row.custody_account,

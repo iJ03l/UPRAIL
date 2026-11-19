@@ -427,11 +427,23 @@ export interface EarnVaultDescriptor {
   assetId: string;
   decimals: number;
   estimatedApyPct: number;
+  apyType?: 'variable';
   minDepositUsd: number;
-  riskTier: 'LOW' | 'MODERATE';
-  description: string;
+  principalType?: 'usd_stable' | 'volatile_crypto';
+  riskTier?: 'core' | 'moderate' | 'elevated';
+  riskTierLabel?: 'Core' | 'Moderate' | 'Elevated';
+  requiresRiskAck?: boolean;
+  bridgeType?: 'native_near' | 'omni_bridge';
+  tvlBand?: string;
+  strategySummary?: string;
+  riskHighlights?: string[];
+  exitSummary?: string;
+  auditSummary?: string;
+  contractExplorerUrl?: string;
+  description?: string;
   priceUsd: number;
-  liveAvailable: boolean;
+  available?: boolean;
+  liveAvailable?: boolean;
 }
 
 export type GiftOccasion =
@@ -480,6 +492,8 @@ export interface PublicGiftCardView {
   vaultName: string;
   vaultProtocol: string;
   vaultChainName: string;
+  vaultPrincipalType?: 'usd_stable' | 'volatile_crypto';
+  vaultRiskTier?: 'core' | 'moderate' | 'elevated';
   estimatedApyPct: number;
   timelockUntil: number;
   isUnlocked: boolean;
@@ -488,6 +502,8 @@ export interface PublicGiftCardView {
   principalUsdCents?: number;
   currentValueUsdCents?: number;
   yieldUsdCents?: number;
+  netChangeUsdCents?: number;
+  netChangePct?: number;
   sharesFormatted?: string;
   shareUrl: string;
   ogImageUrl: string;
@@ -508,6 +524,8 @@ export interface AuthenticatedGiftView {
   vaultName: string;
   vaultProtocol: string;
   vaultChainName: string;
+  vaultPrincipalType?: 'usd_stable' | 'volatile_crypto';
+  vaultRiskTier?: 'core' | 'moderate' | 'elevated';
   estimatedApyPct: number;
   sourceSymbol: string;
   grossAmount: string;
@@ -515,6 +533,8 @@ export interface AuthenticatedGiftView {
   currentValueUsdCents: number;
   yieldUsdCents: number;
   yieldPct: number;
+  netChangeUsdCents?: number;
+  netChangePct?: number;
   sharesAtomic: string;
   sharesFormatted: string;
   custodyAccount: string;
@@ -574,6 +594,7 @@ export interface CircleMemberView {
   sharesFormatted: string;
   currentValueUsdCents: number;
   yieldUsdCents: number;
+  netChangeUsdCents?: number;
   isCurrentUser?: boolean;
   refundedAt: number | null;
   refundTxHash: string | null;
@@ -615,6 +636,8 @@ export interface CircleView {
   currentValueUsdCents: number;
   yieldUsdCents: number;
   yieldPct: number;
+  netChangeUsdCents?: number;
+  netChangePct?: number;
   progressPct: number;
   completionPct?: number;
   allQuotasMet: boolean;
@@ -624,6 +647,8 @@ export interface CircleView {
   vaultChainName: string;
   vaultAssetId: string;
   vaultDecimals: number;
+  vaultPrincipalType?: 'usd_stable' | 'volatile_crypto';
+  vaultRiskTier?: 'core' | 'moderate' | 'elevated';
   estimatedApyPct: number;
   totalSharesAtomic: string;
   totalSharesFormatted: string;

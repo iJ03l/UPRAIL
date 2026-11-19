@@ -140,10 +140,17 @@ export async function getAllAgentReadableBalances(
 }> {
   const nearAccount = await nearRpc.resolveUserNearAccount(env, session);
   const confEnabled = isConfidentialRailEnabled(env);
+  const custody = await nearRpc.getUserCustodyRecord(env, session.x_id).catch(() => null);
+  const canSignL1 =
+    !custody ||
+    custody.custodyMode !== 'self' ||
+    (await nearRpc.canServerSignAccountL1(env, session.x_id, nearAccount));
 
   const [intentBals, plainBals, pocketRes, confBals, virtualDeltas, tokens] = await Promise.all([
     nearRpc.getIntentBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[]),
-    nearRpc.getPlainBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[]),
+    canSignL1
+      ? nearRpc.getPlainBalances(env, nearAccount).catch(() => [] as nearRpc.IntentAccountBalance[])
+      : Promise.resolve([] as nearRpc.IntentAccountBalance[]),
     getAgentPocketBalances(env, nearAccount).catch(() => ({
       pocketAccount: null,
       balances: [] as any[],

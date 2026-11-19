@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Fingerprint,
   ArrowRight,
   CheckCircle,
   WarningCircle,
   Lock,
+  CircleNotch,
 } from '@phosphor-icons/react';
 import { ModalSheet } from './ModalSheet';
 import { Badge } from './Badge';
@@ -23,16 +24,24 @@ interface AuthModalProps {
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess, onSelectHandle }) => {
   const { login: loginWithX } = useXAuth();
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
+  const [authStepMsg, setAuthStepMsg] = useState<string | null>(null);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
   const [passkeySuccess, setPasskeySuccess] = useState(false);
+  const inFlightRef = useRef(false);
+
+  const isBusy = isPasskeyLoading || passkeySuccess;
 
   const handlePasskeyLogin = async () => {
+    if (inFlightRef.current || isBusy) return;
+    inFlightRef.current = true;
     try {
       setIsPasskeyLoading(true);
+      setAuthStepMsg('Waiting for passkey confirmation…');
       setPasskeyError(null);
 
       const credential = await webauthn.authenticatePasskey('passkey_holder');
       if (credential) {
+        setAuthStepMsg('Device confirmed. Unlocking account…');
         setPasskeySuccess(true);
         setTimeout(() => {
           onClose();
@@ -44,18 +53,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       console.error('Passkey authentication error:', err);
       setPasskeyError(describePasskeyError(err));
     } finally {
+      inFlightRef.current = false;
       setIsPasskeyLoading(false);
+      setAuthStepMsg(null);
     }
   };
 
   return (
     <ModalSheet
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => {
+        if (!isBusy) onClose();
+      }}
+      canClose={!isBusy}
       zIndexClass="z-50"
       maxWidthClass="sm:max-w-md"
       panelClassName="px-6 sm:p-8 pt-2 sm:pt-7 pb-6"
-      showCloseButton
+      showCloseButton={!isBusy}
       closeLabel="Close connect dialog"
       ariaLabel="Connect to UPRAIL"
     >
@@ -93,12 +107,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         <button
           type="button"
           onClick={handlePasskeyLogin}
-          disabled={isPasskeyLoading || passkeySuccess}
-          className="w-full text-left p-4 rounded-2xl bg-stone-50 border border-stone-200 hover:border-black hover:bg-stone-100/70 transition-all group relative overflow-hidden shadow-sm cursor-pointer"
+          disabled={isBusy}
+          className="w-full text-left p-4 rounded-2xl bg-stone-50 border border-stone-200 hover:border-black hover:bg-stone-100/70 transition-all group relative overflow-hidden shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
         >
           <div className="flex items-start space-x-4">
             <div className="w-11 h-11 rounded-xl bg-black text-white flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-105 transition-transform">
-              <Fingerprint weight="bold" className="w-5 h-5" />
+              {isPasskeyLoading ? (
+                <CircleNotch weight="bold" className="w-5 h-5 animate-spin" />
+              ) : (
+                <Fingerprint weight="bold" className="w-5 h-5" />
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center flex-wrap gap-2">
@@ -111,8 +129,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
             </div>
           </div>
           <div className="mt-3 pt-2.5 border-t border-stone-200 flex items-center justify-between text-xs text-stone-900 font-mono font-bold">
-            <span>{isPasskeyLoading ? 'Waiting for your passkey...' : 'Continue with passkey'}</span>
-            <ArrowRight weight="bold" className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            <span>
+              {isPasskeyLoading
+                ? authStepMsg || 'Waiting for your passkey…'
+                : passkeySuccess
+                ? 'Unlocked! Redirecting…'
+                : 'Continue with passkey'}
+            </span>
+            {isPasskeyLoading ? (
+              <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />
+            ) : (
+              <ArrowRight weight="bold" className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            )}
           </div>
         </button>
 
@@ -120,10 +148,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         <button
           type="button"
           onClick={() => {
+            if (isBusy) return;
             loginWithX();
             onClose();
           }}
-          className="w-full text-left p-4 rounded-2xl bg-stone-50 border border-stone-200 hover:border-black hover:bg-stone-100/70 transition-all group shadow-sm cursor-pointer"
+          disabled={isBusy}
+          className="w-full text-left p-4 rounded-2xl bg-stone-50 border border-stone-200 hover:border-black hover:bg-stone-100/70 transition-all group shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <div className="flex items-start space-x-4">
             <div className="w-11 h-11 rounded-xl bg-black text-white flex items-center justify-center flex-shrink-0 font-display font-black text-xl group-hover:scale-105 transition-transform">

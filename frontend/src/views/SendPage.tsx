@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Lightning,
   CheckCircle,
@@ -41,6 +41,7 @@ export const SendPage: React.FC = () => {
     quote,
     isSubmitting,
     txStage,
+    txStepMsg,
     error,
     sendPayment,
     sendToWallet,
@@ -49,6 +50,8 @@ export const SendPage: React.FC = () => {
     balancesError,
     refreshBalances,
   } = usePayments();
+
+  const submittingRef = useRef(false);
 
   const [sendMode, setSendMode] = useState<'handle' | 'wallet'>(
     requestedMode === 'wallet' ? 'wallet' : 'handle'
@@ -186,20 +189,21 @@ export const SendPage: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isFormValid) return;
+    if (!isFormValid || submittingRef.current) return;
     clearError();
     setSuccessToast(null);
     setShowConfirm(true);
   };
 
   const submitPayment = async () => {
-    setShowConfirm(false);
-    clearError();
-    setSuccessToast(null);
-
+    if (submittingRef.current || isSubmitting) return;
     const target = sendMode === 'handle' ? recipient : walletAddress;
     if (!target.trim()) return;
     if (!amount || parseFloat(amount) <= 0) return;
+
+    submittingRef.current = true;
+    clearError();
+    setSuccessToast(null);
 
     try {
       if (sendMode === 'wallet') {
@@ -211,6 +215,7 @@ export const SendPage: React.FC = () => {
           selectedToken.id,
           showChainSelector ? destinationChain : undefined
         );
+        setShowConfirm(false);
         setCreatedPayment(null);
         // Wallet sends now produce a public receipt link too, so the sender can
         // share proof of payment the same way an X-handle send works.
@@ -237,6 +242,7 @@ export const SendPage: React.FC = () => {
       }
 
       const payment = await sendPayment(target, amount, memo);
+      setShowConfirm(false);
       setCreatedPayment(payment);
       // Every X-handle send produces a shareable link now — a claim link for
       // new recipients, a receipt link for already-registered ones — so the
@@ -256,7 +262,10 @@ export const SendPage: React.FC = () => {
       setAmount('');
       setMemo('');
     } catch {
-      // Error is tracked in hook
+      // Close dialog so the user immediately sees the error banner
+      setShowConfirm(false);
+    } finally {
+      submittingRef.current = false;
     }
   };
 
@@ -272,6 +281,12 @@ export const SendPage: React.FC = () => {
     sendMode === 'handle'
       ? `@${recipient.replace(/^@/, '').trim()}`
       : walletAddress.trim();
+
+  const liveProgressText =
+    txStepMsg ||
+    (txStage === 'authorizing'
+      ? 'Waiting for your passkey…'
+      : 'Broadcasting confidential payment…');
 
   return (
     <div className="w-full space-y-6">
@@ -313,8 +328,9 @@ export const SendPage: React.FC = () => {
         <div className="flex gap-1.5 p-1.5 rounded-2xl bg-stone-200/75 dark:bg-stone-900 border border-stone-300/80 dark:border-stone-700 text-xs font-mono font-bold">
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={() => setSendMode('handle')}
-            className={`flex-1 py-2.5 px-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer border ${
+            className={`flex-1 py-2.5 px-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer border disabled:opacity-50 disabled:cursor-not-allowed ${
               sendMode === 'handle'
                 ? 'bg-stone-950 dark:bg-white text-white dark:text-stone-950 border-stone-950 dark:border-white shadow-sm'
                 : 'bg-white/85 dark:bg-stone-800/70 hover:bg-white dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white border-stone-300/90 dark:border-stone-700 shadow-2xs'
@@ -326,8 +342,9 @@ export const SendPage: React.FC = () => {
           </button>
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={() => setSendMode('wallet')}
-            className={`flex-1 py-2.5 px-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer border ${
+            className={`flex-1 py-2.5 px-2.5 rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer border disabled:opacity-50 disabled:cursor-not-allowed ${
               sendMode === 'wallet'
                 ? 'bg-stone-950 dark:bg-white text-white dark:text-stone-950 border-stone-950 dark:border-white shadow-sm'
                 : 'bg-white/85 dark:bg-stone-800/70 hover:bg-white dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 hover:text-stone-950 dark:hover:text-white border-stone-300/90 dark:border-stone-700 shadow-2xs'
@@ -347,6 +364,7 @@ export const SendPage: React.FC = () => {
             <div className="space-y-4">
               <PeopleYouPay
                 onSelectRecipient={(handle, asset, prefAmount) => {
+                  if (isSubmitting) return;
                   setRecipient(handle.replace(/^@+/, ''));
                   if (prefAmount) setAmount(prefAmount);
                   if (asset) {
@@ -359,6 +377,7 @@ export const SendPage: React.FC = () => {
                   }
                 }}
                 onRequestMoney={(handle, asset) => {
+                  if (isSubmitting) return;
                   const q = new URLSearchParams();
                   q.set('handle', handle.replace(/^@+/, ''));
                   if (asset) q.set('asset', asset);
@@ -560,12 +579,8 @@ export const SendPage: React.FC = () => {
             >
               {isSubmitting ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                  <span>
-                    {txStage === 'authorizing'
-                      ? 'Waiting for your passkey...'
-                      : 'Broadcasting confidential payment...'}
-                  </span>
+                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <span className="truncate">{liveProgressText}</span>
                 </>
               ) : isFormValid ? (
                 <>
@@ -591,8 +606,12 @@ export const SendPage: React.FC = () => {
 
       <ConfirmDialog
         isOpen={showConfirm}
-        onCancel={() => setShowConfirm(false)}
+        onCancel={() => {
+          if (!isSubmitting) setShowConfirm(false);
+        }}
         onConfirm={() => void submitPayment()}
+        isLoading={isSubmitting}
+        loadingLabel={liveProgressText}
         tone="financial"
         title={sendMode === 'handle' ? 'Confirm payment' : 'Confirm withdrawal'}
         description={

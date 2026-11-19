@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -22,12 +22,12 @@ import {
 } from '@phosphor-icons/react';
 import { api, formatTokenAmount, formatUsd, tokenUsdPrice, cleanAssetSymbol } from '../lib/api';
 import { useXAuth } from '../hooks/useXAuth';
-import { usePasskeyTxAuth } from '../hooks/usePasskeyTxAuth';
 import { useOnchainData } from '../hooks/useOnchainData';
 import { useToast } from '../components/Toast';
 import { QRCodeDisplay } from '../components/QRCodeDisplay';
 import { ModalSheet } from '../components/ModalSheet';
 import { Badge } from '../components/Badge';
+import { SelfCustodyUpgradeModal } from '../components/SelfCustodyUpgradeModal';
 import {
   fetchDepositAddress,
   fetchDepositStatus,
@@ -43,8 +43,7 @@ interface PublicRequestViewProps {
 }
 
 export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId: propId }) => {
-  const { user } = useXAuth();
-  const { authorizeWithPasskey } = usePasskeyTxAuth();
+  const { user, refreshSession } = useXAuth();
   const { balances, tokens, nearAccount, refreshBalances } = useOnchainData();
   const { toast } = useToast();
 
@@ -54,6 +53,9 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
   const [error, setError] = useState<string | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [actionStepMsg, setActionStepMsg] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const actionRef = useRef(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showDeclineModal, setShowDeclineModal] = useState(false);
   const [declineReason, setDeclineReason] = useState('');
@@ -237,33 +239,31 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
   }, [showDepositModal, depositAddress, targetToken.nearContractId, targetToken.symbol, refreshBalances, toast, request?.amount]);
 
   const handleAcceptAndPay = async () => {
-    if (!request || !isRequestedRecipient) return;
+    if (!request || !isRequestedRecipient || actionRef.current) return;
+    if (user && user.custodyMode !== 'self') {
+      setActionError('Please complete Passkey Self-Custody migration first.');
+      return;
+    }
+    actionRef.current = true;
     try {
       setIsProcessing(true);
+      setActionStepMsg('Preparing self-custody payment…');
       setActionError(null);
 
-      // 1. Authorize movement of funds with passkey
-      let assertion: unknown = undefined;
-      try {
-        assertion = await authorizeWithPasskey(
-          `Pay request of ${request.amount} ${targetToken.symbol} to @${request.requester_handle}`
-        );
-      } catch (authErr: any) {
-        throw new Error(authErr?.message || 'Passkey authorization cancelled');
-      }
+      const payment = await api.sendPaymentSelfCustody(
+        {
+          recipientHandle: request.requester_handle,
+          tokenId: request.asset,
+          amount: request.amount,
+          memo: request.memo || undefined,
+          requestId: request.id,
+          token: targetToken as Token,
+        },
+        (_stage, msg) => {
+          if (msg) setActionStepMsg(msg);
+        }
+      );
 
-      // 2. Execute payment intent linked to requestId
-      const payment = await api.createPayment({
-        recipientHandle: request.requester_handle,
-        tokenId: request.asset,
-        amount: request.amount,
-        memo: request.memo || undefined,
-        passkeyAssertion: assertion,
-        requestId: request.id,
-        token: targetToken,
-      });
-
-      // 3. Update status locally
       setRequest((prev) => (prev ? { ...prev, status: 'COMPLETED', payment_id: payment.id } : null));
       setSuccessPaymentId(payment.id);
       toast('Payment request successfully paid!');
@@ -271,14 +271,18 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
     } catch (err: any) {
       setActionError(err?.message || 'Failed to complete payment');
     } finally {
+      actionRef.current = false;
       setIsProcessing(false);
+      setActionStepMsg(null);
     }
   };
 
   const handleDecline = async () => {
-    if (!request || !isRequestedRecipient) return;
+    if (!request || !isRequestedRecipient || actionRef.current) return;
+    actionRef.current = true;
     try {
       setIsProcessing(true);
+      setActionStepMsg('Declining request…');
       setActionError(null);
       await api.declinePaymentRequest(request.id, declineReason.trim() || undefined);
       setRequest((prev) => (prev ? { ...prev, status: 'DECLINED', decline_reason: declineReason } : null));
@@ -287,14 +291,18 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
     } catch (err: any) {
       setActionError(err?.message || 'Failed to decline request');
     } finally {
+      actionRef.current = false;
       setIsProcessing(false);
+      setActionStepMsg(null);
     }
   };
 
   const handleCancel = async () => {
-    if (!request || !isRequester) return;
+    if (!request || !isRequester || actionRef.current) return;
+    actionRef.current = true;
     try {
       setIsProcessing(true);
+      setActionStepMsg('Cancelling request…');
       setActionError(null);
       await api.cancelPaymentRequest(request.id);
       setRequest((prev) => (prev ? { ...prev, status: 'CANCELLED' } : null));
@@ -302,20 +310,33 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
     } catch (err: any) {
       setActionError(err?.message || 'Failed to cancel request');
     } finally {
+      actionRef.current = false;
       setIsProcessing(false);
+      setActionStepMsg(null);
     }
   };
 
   const handleBlockRequester = async () => {
-    if (!request) return;
+    if (!request || actionRef.current) return;
     if (confirm(`Block @${request.requester_handle} from sending you payment requests?`)) {
+      actionRef.current = true;
+      setIsProcessing(true);
       try {
         await api.blockUser(request.requester_handle);
         toast(`@${request.requester_handle} blocked`);
       } catch (err: any) {
         toast(err?.message || 'Could not block user');
+      } finally {
+        actionRef.current = false;
+        setIsProcessing(false);
       }
     }
+  };
+
+  const handleLoginRedirect = () => {
+    if (isSigningIn) return;
+    setIsSigningIn(true);
+    api.loginWithX();
   };
 
   const handleCopyShareLink = () => {
@@ -495,10 +516,12 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
               </div>
               <button
                 type="button"
-                onClick={() => api.loginWithX()}
-                className="w-full py-4 rounded-2xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 font-display font-bold uppercase tracking-wider text-xs transition-all shadow-xs flex items-center justify-center space-x-2 cursor-pointer"
+                disabled={isSigningIn}
+                onClick={handleLoginRedirect}
+                className="w-full py-4 rounded-2xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 font-display font-bold uppercase tracking-wider text-xs transition-all shadow-xs flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span>Sign in with 𝕏 to Respond</span>
+                {isSigningIn && <CircleNotch weight="bold" className="w-4 h-4 animate-spin" />}
+                <span>{isSigningIn ? 'Redirecting to 𝕏…' : 'Sign in with 𝕏 to Respond'}</span>
               </button>
             </div>
           )}
@@ -512,10 +535,12 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
               </div>
               <button
                 type="button"
-                onClick={() => api.loginWithX()}
-                className="w-full py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white font-mono font-bold text-xs hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors"
+                disabled={isSigningIn}
+                onClick={handleLoginRedirect}
+                className="w-full py-3 rounded-2xl border border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white font-mono font-bold text-xs hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Switch 𝕏 Account
+                {isSigningIn && <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSigningIn ? 'Redirecting to 𝕏…' : 'Switch 𝕏 Account'}</span>
               </button>
             </div>
           )}
@@ -531,9 +556,10 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
                   type="button"
                   onClick={handleCancel}
                   disabled={isProcessing}
-                  className="w-full py-3.5 rounded-2xl border border-stone-300 dark:border-stone-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 font-mono font-bold text-xs transition-colors cursor-pointer"
+                  className="w-full py-3.5 rounded-2xl border border-stone-300 dark:border-stone-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 font-mono font-bold text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isProcessing ? 'Cancelling...' : 'Cancel Request'}
+                  {isProcessing && <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isProcessing ? 'Cancelling…' : 'Cancel Request'}</span>
                 </button>
               )}
             </div>
@@ -596,25 +622,45 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
                         type="button"
                         onClick={handleAcceptAndPay}
                         disabled={isProcessing}
-                        className="w-full py-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50"
+                        className="w-full py-4 px-4 rounded-2xl bg-orange-600 hover:bg-orange-700 text-white font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <ArrowUpRight weight="bold" className="w-4 h-4" />
-                        <span>{isProcessing ? 'Confirming...' : `Accept & Send ${cleanAmountFormatted}`}</span>
+                        {isProcessing ? (
+                          <CircleNotch weight="bold" className="w-4 h-4 animate-spin flex-shrink-0" />
+                        ) : (
+                          <ArrowUpRight weight="bold" className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        <span className="truncate">
+                          {isProcessing
+                            ? actionStepMsg || 'Confirming with Passkey…'
+                            : `Accept & Send ${cleanAmountFormatted}`}
+                        </span>
                       </button>
+
+                      {isProcessing && actionStepMsg && (
+                        <div
+                          role="status"
+                          aria-live="polite"
+                          className="px-3 py-2 rounded-xl bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-800 text-[11px] font-mono text-stone-700 dark:text-stone-300 flex items-center gap-2"
+                        >
+                          <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin flex-shrink-0 text-orange-600" />
+                          <span>{actionStepMsg}</span>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
                           onClick={() => setShowDeclineModal(true)}
                           disabled={isProcessing}
-                          className="py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-mono font-bold transition-all"
+                          className="py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-mono font-bold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Decline
                         </button>
                         <button
                           type="button"
                           onClick={handleBlockRequester}
-                          className="py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-red-500 text-xs font-mono font-bold transition-all flex items-center justify-center space-x-1"
+                          disabled={isProcessing}
+                          className="py-2.5 px-3 rounded-xl border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-400 hover:text-red-500 text-xs font-mono font-bold transition-all flex items-center justify-center space-x-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Prohibit weight="fill" className="w-3 h-3" />
                           <span>Block</span>
@@ -633,11 +679,12 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
 
                       <button
                         type="button"
+                        disabled={isProcessing}
                         onClick={() => {
                           loadDeposit();
                           setShowDepositModal(true);
                         }}
-                        className="w-full py-4 rounded-2xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer"
+                        className="w-full py-4 rounded-2xl bg-stone-900 hover:bg-black dark:bg-white dark:hover:bg-stone-100 text-white dark:text-stone-900 font-display font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center space-x-2 shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <ArrowDownLeft weight="bold" className="w-4 h-4" />
                         <span>Deposit & Pay</span>
@@ -645,8 +692,9 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
 
                       <button
                         type="button"
+                        disabled={isProcessing}
                         onClick={() => setShowDeclineModal(true)}
-                        className="w-full py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-400 text-xs font-mono font-bold hover:bg-stone-100 dark:hover:bg-stone-800"
+                        className="w-full py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-400 text-xs font-mono font-bold hover:bg-stone-100 dark:hover:bg-stone-800 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Decline Request
                       </button>
@@ -682,16 +730,18 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
         <input
           type="text"
           value={declineReason}
+          disabled={isProcessing}
           onChange={(e) => setDeclineReason(e.target.value)}
           placeholder="Reason (optional)"
           maxLength={200}
-          className="w-full p-3 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 text-base sm:text-xs text-stone-900 dark:text-white font-sans outline-hidden"
+          className="w-full p-3 rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-950 text-base sm:text-xs text-stone-900 dark:text-white font-sans outline-hidden disabled:opacity-60"
         />
         <div className="flex space-x-2 pt-1">
           <button
             type="button"
+            disabled={isProcessing}
             onClick={() => setShowDeclineModal(false)}
-            className="w-1/2 py-2.5 min-h-11 rounded-xl border border-stone-200 dark:border-stone-700 text-xs font-mono font-bold text-stone-700 dark:text-stone-300 cursor-pointer"
+            className="w-1/2 py-2.5 min-h-11 rounded-xl border border-stone-200 dark:border-stone-700 text-xs font-mono font-bold text-stone-700 dark:text-stone-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Back
           </button>
@@ -699,9 +749,10 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
             type="button"
             onClick={handleDecline}
             disabled={isProcessing}
-            className="w-1/2 py-2.5 min-h-11 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-mono font-bold disabled:opacity-50 cursor-pointer"
+            className="w-1/2 py-2.5 min-h-11 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-mono font-bold flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
-            {isProcessing ? 'Declining...' : 'Confirm Decline'}
+            {isProcessing && <CircleNotch weight="bold" className="w-3.5 h-3.5 animate-spin" />}
+            <span>{isProcessing ? 'Declining…' : 'Confirm Decline'}</span>
           </button>
         </div>
       </ModalSheet>
@@ -843,6 +894,15 @@ export const PublicRequestView: React.FC<PublicRequestViewProps> = ({ requestId:
           </button>
         </div>
       </ModalSheet>
+
+      {user && user.custodyMode !== 'self' && (
+        <SelfCustodyUpgradeModal
+          isOpen={true}
+          required={true}
+          onClose={() => {}}
+          onUpgraded={refreshSession}
+        />
+      )}
     </div>
   );
 };

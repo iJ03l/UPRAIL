@@ -7,7 +7,7 @@
 export type BalanceEffect = 'debit' | 'incoming' | 'none';
 
 export interface BalanceActionParams {
-  type?: 'payment' | 'deposit' | 'withdrawal' | 'request';
+  type?: 'payment' | 'deposit' | 'withdrawal' | 'request' | 'gift';
   isSent: boolean;
   status: string;
   isRequest?: boolean;
@@ -15,6 +15,17 @@ export interface BalanceActionParams {
 
 export function getTransactionBalanceEffect(params: BalanceActionParams): BalanceEffect {
   const status = (params.status || '').toLowerCase();
+
+  // 0. Timelocked Gifts
+  if (params.type === 'gift') {
+    if (status === 'reclaimed') {
+      return 'incoming';
+    }
+    if (status === 'claimed') {
+      return params.isSent ? 'debit' : 'incoming';
+    }
+    return 'none';
+  }
 
   // 1. Payment Requests
   // Only completed/settled requests have an impact on balance.
