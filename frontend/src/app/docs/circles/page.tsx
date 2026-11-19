@@ -5,7 +5,7 @@ const VAULTS = [
   {
     symbol: 'gtUSDCp',
     name: 'Gauntlet USDC Prime (Morpho · Base)',
-    apy: '~4.5% var. APY',
+    apy: '7.4% APY',
     min: '$25',
     principal: 'USD Stable',
     tier: 'Core',
@@ -13,7 +13,7 @@ const VAULTS = [
   {
     symbol: 'TLO',
     name: 'Taler USDC Vault (Ethereum)',
-    apy: '~6.5% var. APY',
+    apy: '6.2% APY',
     min: '$10',
     principal: 'USD Stable',
     tier: 'Moderate',
@@ -21,7 +21,7 @@ const VAULTS = [
   {
     symbol: 'wstETH',
     name: 'Lido Wrapped Staked ETH (Ethereum)',
-    apy: '~2.9% var. APY',
+    apy: '3.4% APY',
     min: '$15',
     principal: 'ETH Volatile',
     tier: 'Core Protocol',
@@ -29,7 +29,7 @@ const VAULTS = [
   {
     symbol: 'stNEAR',
     name: 'Meta Pool Staked NEAR (NEAR Native)',
-    apy: '~4.8% var. APY',
+    apy: '9.2% APY',
     min: '$5',
     principal: 'NEAR Volatile',
     tier: 'Moderate',
@@ -37,7 +37,7 @@ const VAULTS = [
   {
     symbol: 'cNEAR',
     name: 'Assetize Compounding NEAR (NEAR Native)',
-    apy: '~4.8% var. APY',
+    apy: '8.8% APY',
     min: '$5',
     principal: 'NEAR Volatile',
     tier: 'Elevated',
@@ -45,7 +45,7 @@ const VAULTS = [
   {
     symbol: 'kV-gtSOLb',
     name: 'Kamino Gauntlet SOL Balanced (Solana)',
-    apy: '~4.7% var. APY',
+    apy: '8.1% APY',
     min: '$10',
     principal: 'SOL Volatile',
     tier: 'Elevated',

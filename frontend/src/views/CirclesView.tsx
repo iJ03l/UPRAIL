@@ -33,7 +33,6 @@ import { Badge } from '../components/Badge';
 import { ModalSheet } from '../components/ModalSheet';
 import {
   VaultRiskBadges,
-  VaultPickerCardList,
   VaultRiskAckBox,
   getVaultRiskMeta,
   formatSignedUsdChange,
@@ -2246,16 +2245,20 @@ export const CirclesView: React.FC = () => {
             </div>
           )}
 
-          {/* Intents Earn Vault Picker (USD Stable vs Crypto Volatile + Risk & Info) */}
+          {/* Intents Earn Vault Dropdown */}
           <div>
-            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1.5">
+            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
               Intents Earn Vault
             </label>
-            <VaultPickerCardList
-              vaults={vaults}
+            <StyledSelect
+              mono
               value={circleVaultSymbol}
-              onChange={setCircleVaultSymbol}
-              disabled={isSubmittingCircle}
+              onChange={(val) => setCircleVaultSymbol(val as EarnVaultSymbol)}
+              options={vaults.map((v) => ({
+                value: v.symbol,
+                label: v.symbol,
+                badge: `${v.estimatedApyPct.toFixed(1)}% APY`,
+              }))}
             />
           </div>
 
@@ -2651,16 +2654,20 @@ export const CirclesView: React.FC = () => {
             </div>
           )}
 
-          {/* Intents Earn Vault Picker */}
+          {/* Intents Earn Vault Dropdown */}
           <div>
-            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1.5">
+            <label className="block text-xs font-mono font-semibold uppercase text-stone-600 mb-1">
               Intents Earn Vault
             </label>
-            <VaultPickerCardList
-              vaults={vaults}
+            <StyledSelect
+              mono
               value={giftVaultSymbol}
-              onChange={setGiftVaultSymbol}
-              disabled={isSubmittingGift}
+              onChange={(val) => setGiftVaultSymbol(val as EarnVaultSymbol)}
+              options={vaults.map((v) => ({
+                value: v.symbol,
+                label: v.symbol,
+                badge: `${v.estimatedApyPct.toFixed(1)}% APY`,
+              }))}
             />
           </div>
 
